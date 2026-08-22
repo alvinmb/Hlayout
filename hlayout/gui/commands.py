@@ -1,0 +1,893 @@
+"""Text command-line interpreter for the GUI's command bar.
+
+This gives the tool an AutoCAD-style command line as an alternative to
+clicking toolbar buttons — type a command and arguments, press Enter.
+Unrecognised input is treated as a line of Python and handed to the
+Session's ScriptConsole, so the command bar doubles as a quick script
+prompt (e.g. type ``PY print(s.cell.shapes)``, or just
+``s.rect(0,0,0,10,10)`` directly). Type ``HELP`` in the command bar (or
+use File > Command Reference in the GUI) for the categorized command
+list below, at any time — see ``COMMAND_REFERENCE``.
+"""
+
+import shlex
+from typing import Callable, Optional
+
+from ..core.errors import LayoutError
+from ..core.maskops import MASK_OPS
+
+# The full command-bar reference, grouped by category. This is the
+# single source of truth for command syntax — surfaced via the HELP
+# command, the File > Command Reference dialog, and this module's
+# docstring above, so all three always agree.
+COMMAND_REFERENCE = """\
+Command bar reference (case-insensitive; comma- or space-separated
+point args like `0,0` or `0 0` both work). Anywhere <layer> appears,
+pass either a layer number (0-63) or an existing layer name (set one
+via LAYER ... name=... or the Layers tab, then refer to it by name
+from then on).
+
+Cells & shapes:
+    CELL <name>                       create-or-switch current cell
+    RECT <layer> <x1,y1> <x2,y2>      add a rectangle
+    POLY <layer> <x1,y1> <x2,y2> ...  add a polygon (>=3 points)
+    PATH <layer> <width> <cap> <x1,y1> <x2,y2> ...
+                                       add a path; cap = round|square|flush
+    CIRCLE <layer> <cx,cy> <radius> [segments]
+                                       add a circle (regular polygon);
+                                       segments: 8, 16, 32, or 64 (default 32)
+    TEXT <layer> <x,y> "<string>" [height] [font]
+    SREF <cellname> <x,y> [rotation] [mag] [mirror]
+    DELETE LAST                       remove the most recently added shape/sref
+
+Layers:
+    LAYER <n|name> [color=#rrggbb] [stipple=0-8] [fill=0|1] [visible=0|1] [name=...]
+    LAYER ALL visible=0|1             turn every layer off/on at once
+    LAYER MOVE <from> <to> [cell=<name>]
+                                       move every shape on <from> to <to>, across
+                                       every cell in the library (or just cell=<name>);
+                                       from/to accept a layer number or name -- the
+                                       way to align an existing design's geometry
+                                       with a layer stack loaded from a technology file
+
+View:
+    ZOOM IN | OUT | FIT | <factor>
+    GRID ON | OFF
+
+Selection (Select tool click a shape/cell instance first -- it turns
+white so it's clear what's selected):
+    MOVE <dx,dy>                      move the current selection by dx,dy DBU
+    ROTATE <degrees>                  rotate the current selection (CCW)
+    COPY <dx,dy>                      duplicate the current selection, offsetting
+                                       the copy by dx,dy DBU, and select the copy
+    PROPS                             list the current selection's properties --
+                                       layer/width for a path, layer for a polygon/
+                                       rectangle, cell name/origin/rotation/etc for
+                                       a cell instance (also in the Properties tab)
+
+Undo/redo (covers every edit, however it was made -- command bar,
+mouse-driven select/move/rotate/edit/delete, or a script):
+    UNDO                              undo the last edit to the current design
+    REDO                              redo the last undone edit
+
+Files:
+    SAVE <path.gds> [library_name]    with no library_name: saves the design plus a
+                                       sidecar (<path>.hlaux) capturing technology
+                                       (layer stack/tech params, incl. Resistor Designer
+                                       rules) + a full copy of every attached library;
+                                       with library_name: publishes a plain, bare .gds
+                                       under that library name (no sidecar) -- for
+                                       Save As Library / reusable part libraries
+    OPEN <path.gds>                   restores the sidecar above, if one sits next to
+                                       the file (a plain .gds with none opens as usual)
+    GERBER <output_prefix> [cell=<name>]
+                                       export Gerber RS-274X -- one flattened file per
+                                       visible layer with data, named
+                                       <output_prefix>_L<NN>_<layer name>.gbr;
+                                       cell defaults to the current cell
+
+Technology file (layer stack + open-ended global parameters; usually
+loaded once at the start of a design):
+    TECH LOAD <path.json>             load a technology file, applying it to the
+                                       current library's layer stack + params
+    TECH SAVE <path.json>             save the current layer stack + params
+    TECH SET <key> <value>            set a global technology parameter
+    TECH GET <key>                    show one technology parameter
+    TECH PARAMS                       list all technology parameters
+
+Attached libraries:
+    ATTACH <path.gds>                 attach a GDSII file as a reference library (max 2)
+    LIBS                              list attached reference libraries
+    LIBLIST [current|0|1]             list the cells in a library (default: current)
+    FIND <substring>                  search cell names, current + attached libraries
+    PLACE <cellname> <x,y> [source=current|0|1] [rotation] [mag] [mirror]
+                                       find-and-place a cell as an Sref; source
+                                       disambiguates if the name exists in more
+                                       than one attached library
+    VIA <layer1> <layer2> [shape=square|round] [size=<dbu>] [index=0|1] [overwrite=0|1]
+                                       create a via cell (a square/round pad on both
+                                       layers, named VIA_Layer<n1>_to_Layer<n2>) directly
+                                       inside an attached library and save that library's
+                                       file in place; shape/size default to square/100
+
+Thick-film resistor generation (Tools > Thick-Film Resistor Designer... sizes
+a resistor; this draws it):
+    RESGEN <x,y> <body_width> <body_length> [rotation=<deg>] [ink=<rsh>]
+           [ref=<designator>] [a=<dbu>] [b=<dbu>] [c=<dbu>] [d=<dbu>]
+           [rlayer=<n|name>] [clayer=<n|name>] [glayer=<n|name>] [dlayer=<n|name>]
+                                       build a resistor -- ink body + glaze overprint +
+                                       its two end conductor pads (+ a ref-des label
+                                       if ref= is given) -- as its own new cell, and
+                                       place one instance (Sref) of it centred at x,y;
+                                       body_width/body_length usually come from a sized
+                                       Resistor's body_width/selected.body_length;
+                                       ink=<rsh> looks up the ink layer by sheet
+                                       resistance in the technology file's per-ink
+                                       layer map (Tools > Thick-Film Resistor
+                                       Designer... > Design Rules...); rlayer
+                                       overrides that lookup entirely; ref=<name>
+                                       (e.g. "R1") labels the resistor, centred on
+                                       the ink body, on the documentation layer
+                                       (dlayer, or Setup > Resistor Geometry
+                                       Rules... 's default); a/b/c/d/clayer/glayer
+                                       default to Setup > Resistor Geometry
+                                       Rules... (the technology file) when omitted
+                                       -- see that dialog for what A (overlap),
+                                       B (pad length), C (side space), and D
+                                       (glaze oversize, on all 4 sides) mean
+
+Layer-based mask operations (resize/boolean, like a GDSII CAM system's
+Size/AND/OR deck operators -- any Path on an input layer is converted
+to its stroked-outline polygon first; requires the shapely package):
+    MASKOP OVERSIZE <layer_a> result=<layer> amount=<dbu> [cell=<name>] [flatten=0|1]
+                                       [simplify=<dbu>]
+                                       grow everything on layer_a by amount DBU,
+                                       write the result to result_layer (mitred
+                                       corners, so rectilinear shapes stay square)
+    MASKOP UNDERSIZE <layer_a> result=<layer> amount=<dbu> [cell=<name>] [flatten=0|1]
+                                       [simplify=<dbu>]
+                                       same, but shrink by amount DBU
+    MASKOP AND <layer_a> <layer_b> result=<layer> [cell=<name>] [flatten=0|1] [simplify=<dbu>]
+                                       intersection of layer_a and layer_b
+    MASKOP OR <layer_a> <layer_b> result=<layer> [cell=<name>] [flatten=0|1] [simplify=<dbu>]
+                                       union of layer_a and layer_b
+    MASKOP NOT <layer_a> <layer_b> result=<layer> [cell=<name>] [flatten=0|1] [simplify=<dbu>]
+                                       layer_a minus layer_b (difference)
+    MASKOP XOR <layer_a> <layer_b> result=<layer> [cell=<name>] [flatten=0|1] [simplify=<dbu>]
+                                       symmetric difference of layer_a and layer_b
+                                       (everything on exactly one of the two)
+                                       -- all six default to the current cell;
+                                       cell=<name> runs on a different cell instead;
+                                       result= may be the same layer as layer_a or a
+                                       fresh one; flatten defaults to 1 (on), descending
+                                       into every placed cell instance (Sref) -- e.g. a
+                                       resistor placed by the Resistor Designer -- to
+                                       gather layer_a/layer_b's input geometry; pass
+                                       flatten=0 to look only at the operated-on cell's
+                                       own directly-drawn shapes; simplify=<dbu> applies
+                                       vertex-reduction (Douglas-Peucker, topology
+                                       preserved) to the result at that DBU tolerance
+                                       before it's written -- useful for staying under
+                                       the 200-point-per-polygon limit on a heavily
+                                       sized/booleaned result; also available as
+                                       Session.mask_op()
+
+Design Rule Check (DRC -- single-layer and between-layer geometric checks;
+requires the shapely package; also available as Tools > DRC...):
+    DRCRULE ADD <kind> <layer_a> [layer_b] value=<n> [name=<name>]
+                                       add and save a rule to the technology file;
+                                       kind: MIN_WIDTH/MIN_AREA/MIN_SPACE (one layer,
+                                       omit layer_b) or MIN_SPACE_BETWEEN/MIN_ENCLOSURE
+                                       (two layers, layer_b required) -- see Tools >
+                                       DRC... for what each kind checks
+    DRCRULE LIST                      list saved rules, numbered
+    DRCRULE REMOVE <index>            remove one saved rule by its LIST number
+    DRCRULE CLEAR                     remove every saved rule
+    DRC RUN [cell=<name>] [error=<layer>]
+                                       run every saved rule against the current cell
+                                       (or cell=<name>), descending into every placed
+                                       cell instance (Sref) the same way MASKOP does;
+                                       error=<layer> also draws each violation's marker
+                                       polygon onto that layer in the design; reports a
+                                       violation count broken down by rule; also
+                                       available as Session.run_drc()
+
+Scripting:
+    PY <python source>                run arbitrary Python against the session
+                                       (also the fallback for unrecognised input)
+    HELP                              show this command reference
+"""
+
+
+class CommandError(LayoutError):
+    pass
+
+
+def _parse_point(tok: str):
+    tok = tok.replace(",", " ")
+    parts = tok.split()
+    if len(parts) != 2:
+        raise CommandError(f"expected a point like x,y, got {tok!r}")
+    return (float(parts[0]), float(parts[1]))
+
+
+class CommandInterpreter:
+    def __init__(self, session, console, on_change: Optional[Callable[[], None]] = None, view=None):
+        self.session = session
+        self.console = console
+        self.on_change = on_change or (lambda: None)
+        self.view = view  # optional LayoutCanvas, for ZOOM/GRID/FIT commands
+        self.history = []
+        self._hist_index = 0
+
+    def run(self, line: str) -> str:
+        line = line.strip()
+        if not line:
+            return ""
+        self.history.append(line)
+        self._hist_index = len(self.history)
+        try:
+            tokens = shlex.split(line)
+        except ValueError as e:
+            return f"error: {e}"
+        if not tokens:
+            return ""
+        cmd, args = tokens[0].upper(), tokens[1:]
+        try:
+            handler = getattr(self, f"_cmd_{cmd.lower()}", None)
+            if handler is None:
+                # Fall through to the Python console for anything else,
+                # so raw script lines work directly in the command bar too.
+                return self.console.run(line)
+            result = handler(args)
+            self.on_change()
+            return result or "ok"
+        except CommandError as e:
+            return f"error: {e}"
+        except Exception as e:  # pragma: no cover - defensive
+            return f"error: {e}"
+
+    def prev_history(self, current: str) -> str:
+        if not self.history:
+            return current
+        self._hist_index = max(0, self._hist_index - 1)
+        return self.history[self._hist_index]
+
+    def next_history(self, current: str) -> str:
+        if self._hist_index >= len(self.history) - 1:
+            self._hist_index = len(self.history)
+            return ""
+        self._hist_index += 1
+        return self.history[self._hist_index]
+
+    # --- cells & shapes -----------------------------------------------
+    def _cmd_cell(self, args):
+        if not args:
+            raise CommandError("usage: CELL <name>")
+        name = args[0]
+        if name in self.session.library.cells:
+            self.session.use_cell(name)
+        else:
+            self.session.new_cell(name)
+        return f"current cell: {name}"
+
+    def _cmd_rect(self, args):
+        if len(args) != 3:
+            raise CommandError("usage: RECT <layer> <x1,y1> <x2,y2>  (layer: number or name)")
+        layer = args[0]
+        x1, y1 = _parse_point(args[1])
+        x2, y2 = _parse_point(args[2])
+        self.session.rect(layer, x1, y1, x2, y2)
+        return "rectangle added"
+
+    def _cmd_poly(self, args):
+        if len(args) < 4:
+            raise CommandError("usage: POLY <layer> <x1,y1> <x2,y2> <x3,y3> ...  (layer: number or name)")
+        layer = args[0]
+        points = [_parse_point(a) for a in args[1:]]
+        self.session.polygon(layer, points)
+        return f"polygon added ({len(points)} points)"
+
+    def _cmd_path(self, args):
+        if len(args) < 5:
+            raise CommandError("usage: PATH <layer> <width> <cap> <x1,y1> <x2,y2> ...  (layer: number or name)")
+        layer = args[0]
+        width = float(args[1])
+        cap = args[2].lower()
+        points = [_parse_point(a) for a in args[3:]]
+        self.session.path(layer, points, width, cap=cap)
+        return f"path added ({len(points)} points)"
+
+    def _cmd_circle(self, args):
+        if len(args) < 3:
+            raise CommandError(
+                "usage: CIRCLE <layer> <cx,cy> <radius> [segments]  "
+                "(segments: 8, 16, 32, or 64; default 32)"
+            )
+        layer = args[0]
+        center = _parse_point(args[1])
+        radius = float(args[2])
+        segments = int(args[3]) if len(args) > 3 else 32
+        self.session.circle(layer, center, radius, segments=segments)
+        return f"circle added ({segments} segments)"
+
+    def _cmd_text(self, args):
+        if len(args) < 3:
+            raise CommandError('usage: TEXT <layer> <x,y> "<string>" [height] [font]  (layer: number or name)')
+        layer = args[0]
+        origin = _parse_point(args[1])
+        text = args[2]
+        height = int(args[3]) if len(args) > 3 else 10
+        font = int(args[4]) if len(args) > 4 else 0
+        self.session.text(layer, origin, text, height=height, font=font)
+        return "text added"
+
+    def _cmd_sref(self, args):
+        if len(args) < 2:
+            raise CommandError("usage: SREF <cellname> <x,y> [rotation] [mag] [mirror]")
+        cell_name = args[0]
+        origin = _parse_point(args[1])
+        rotation = float(args[2]) if len(args) > 2 else 0.0
+        mag = float(args[3]) if len(args) > 3 else 1.0
+        mirror = args[4].lower() in ("1", "true", "yes", "mirror") if len(args) > 4 else False
+        self.session.sref(cell_name, origin, rotation=rotation, magnification=mag, x_reflection=mirror)
+        return f"sref to {cell_name} added"
+
+    def _cmd_delete(self, args):
+        if not args or args[0].upper() != "LAST":
+            raise CommandError("usage: DELETE LAST")
+        cell = self.session.cell
+        if cell.shapes:
+            cell.shapes.pop()
+            return "removed last shape"
+        if cell.srefs:
+            cell.srefs.pop()
+            return "removed last sref"
+        return "nothing to delete"
+
+    # --- layers -----------------------------------------------------------
+    def _cmd_layer(self, args):
+        if not args:
+            raise CommandError(
+                "usage: LAYER <n|name> [color=#rrggbb] [stipple=0-8] [fill=0|1] "
+                "[visible=0|1] [name=...]\n"
+                "       LAYER ALL visible=0|1   turn every layer off/on at once"
+            )
+        if args[0].upper() == "ALL":
+            if len(args) != 2 or not args[1].startswith("visible="):
+                raise CommandError("usage: LAYER ALL visible=0|1")
+            visible = args[1].split("=", 1)[1] not in ("0", "false", "no")
+            for n in range(len(self.session.library.layers)):
+                self.session.set_layer_style(n, visible=visible)
+            return f"all layers {'shown' if visible else 'hidden'}"
+        if args[0].upper() == "MOVE":
+            rest = args[1:]
+            cell_name = None
+            positional = []
+            for a in rest:
+                if a.lower().startswith("cell="):
+                    cell_name = a.split("=", 1)[1]
+                else:
+                    positional.append(a)
+            if len(positional) != 2:
+                raise CommandError("usage: LAYER MOVE <from> <to> [cell=<name>]")
+            counts = self.session.remap_layers(
+                {positional[0]: positional[1]},
+                cell_names=[cell_name] if cell_name else None,
+            )
+            moved = sum(counts.values())
+            scope = f"cell {cell_name!r}" if cell_name else "the whole library"
+            if moved == 0:
+                return f"nothing on layer {positional[0]} in {scope}"
+            return f"moved {moved} shape(s) from layer {positional[0]} to {positional[1]} in {scope}"
+        n = self.session.library.layers.resolve(args[0])
+        kwargs = {}
+        for a in args[1:]:
+            if "=" not in a:
+                raise CommandError(f"bad option {a!r}, expected key=value")
+            k, v = a.split("=", 1)
+            if k == "color":
+                kwargs["color"] = v
+            elif k == "stipple":
+                kwargs["stipple"] = int(v)
+            elif k == "fill":
+                kwargs["fill"] = v not in ("0", "false", "no")
+            elif k == "visible":
+                kwargs["visible"] = v not in ("0", "false", "no")
+            elif k == "name":
+                kwargs["name"] = v
+            else:
+                raise CommandError(f"unknown layer option {k!r}")
+        self.session.set_layer_style(n, **kwargs)
+        return f"layer {n} updated"
+
+    # --- view ---------------------------------------------------------
+    def _cmd_zoom(self, args):
+        if self.view is None:
+            raise CommandError("ZOOM requires an attached view")
+        if not args:
+            raise CommandError("usage: ZOOM IN|OUT|FIT|<factor>")
+        arg = args[0].upper()
+        if arg == "IN":
+            self.view.zoom_in()
+        elif arg == "OUT":
+            self.view.zoom_out()
+        elif arg == "FIT":
+            self.view.fit_view()
+        else:
+            self.view.zoom(float(args[0]))
+        return f"zoom {arg.lower()}"
+
+    def _cmd_grid(self, args):
+        if self.view is None:
+            raise CommandError("GRID requires an attached view")
+        if not args:
+            raise CommandError("usage: GRID ON|OFF")
+        want_on = args[0].upper() == "ON"
+        if want_on != self.view.show_grid:
+            self.view.toggle_grid()
+        return f"grid {'on' if want_on else 'off'}"
+
+    # --- selection edits ------------------------------------------------
+    def _cmd_move(self, args):
+        if self.view is None:
+            raise CommandError("MOVE requires an attached view")
+        if len(args) != 1:
+            raise CommandError("usage: MOVE <dx,dy>")
+        dx, dy = _parse_point(args[0])
+        if not self.view.move_selected(dx, dy):
+            raise CommandError("nothing selected to move")
+        return f"moved by {dx:g},{dy:g}"
+
+    def _cmd_rotate(self, args):
+        if self.view is None:
+            raise CommandError("ROTATE requires an attached view")
+        if len(args) != 1:
+            raise CommandError("usage: ROTATE <degrees>")
+        try:
+            angle = float(args[0])
+        except ValueError:
+            raise CommandError(f"expected a number of degrees, got {args[0]!r}")
+        if not self.view.rotate_selected(angle):
+            raise CommandError("nothing selected to rotate")
+        return f"rotated by {angle:g} degrees"
+
+    def _cmd_copy(self, args):
+        if self.view is None:
+            raise CommandError("COPY requires an attached view")
+        if len(args) != 1:
+            raise CommandError("usage: COPY <dx,dy>")
+        dx, dy = _parse_point(args[0])
+        if not self.view.copy_selected(dx, dy):
+            raise CommandError("nothing selected to copy")
+        return f"copied, offset by {dx:g},{dy:g}"
+
+    def _cmd_props(self, args):
+        if self.view is None:
+            raise CommandError("PROPS requires an attached view")
+        from .canvas import describe_selection
+        return describe_selection(self.view)
+
+    # --- undo/redo --------------------------------------------------------
+    def _cmd_undo(self, args):
+        if not self.session.undo():
+            return "nothing to undo"
+        if self.view is not None:
+            self.view.selected = None
+            self.view.set_cell(self.session.current_cell_name)
+        return "undo"
+
+    def _cmd_redo(self, args):
+        if not self.session.redo():
+            return "nothing to redo"
+        if self.view is not None:
+            self.view.selected = None
+            self.view.set_cell(self.session.current_cell_name)
+        return "redo"
+
+    # --- files ----------------------------------------------------------
+    def _cmd_save(self, args):
+        if not args:
+            raise CommandError("usage: SAVE <path.gds> [library_name]")
+        name = args[1] if len(args) > 1 else None
+        if name:
+            self.session.save(args[0], library_name=name)
+            return f"saved to {args[0]} as library {name!r}"
+        # No library_name given: this is a plain "save the design"
+        # (matches File > Save GDS...), so also write the sidecar --
+        # technology + attached libraries -- see hlayout.io.sidecar.
+        self.session.save_design(args[0])
+        return f"saved to {args[0]} (+ technology/attached-libraries sidecar)"
+
+    def _cmd_open(self, args):
+        if not args:
+            raise CommandError("usage: OPEN <path.gds>")
+        from ..io.sidecar import load_design
+        loaded = load_design(args[0])
+        self.session.library = loaded.library
+        self.session.attached_libraries = loaded.attached_libraries
+        self.session._attached_paths = loaded.attached_paths
+        self.session.attach_errors = loaded.attach_errors
+        self.session.had_sidecar = loaded.had_sidecar
+        self.session.current_cell_name = self.session.library.top_cell_name
+        # A different document was just loaded -- nothing to undo into it.
+        self.session.clear_undo_history()
+        msg = f"opened {args[0]}"
+        if loaded.had_sidecar:
+            msg += f" (restored technology + {len(loaded.attached_libraries)} attached library/ies)"
+        if loaded.attach_errors:
+            msg += f" -- {len(loaded.attach_errors)} attached library/ies failed to restore"
+        return msg
+
+    def _cmd_gerber(self, args):
+        if not args:
+            raise CommandError("usage: GERBER <output_prefix> [cell=<name>]")
+        cell_name = None
+        prefix = None
+        for a in args:
+            if a.lower().startswith("cell="):
+                cell_name = a.split("=", 1)[1]
+            elif prefix is None:
+                prefix = a
+            else:
+                raise CommandError("usage: GERBER <output_prefix> [cell=<name>]")
+        if prefix is None:
+            raise CommandError("usage: GERBER <output_prefix> [cell=<name>]")
+        written, skipped_text = self.session.export_gerber(prefix, cell_name=cell_name)
+        if not written:
+            return "no visible layers had data to export"
+        msg = f"wrote {len(written)} Gerber file(s): " + ", ".join(f"L{n}" for n, _ in written)
+        if skipped_text:
+            msg += f" ({skipped_text} text shape(s) skipped -- Gerber has no text primitive)"
+        return msg
+
+    # --- technology file --------------------------------------------------
+    def _cmd_tech(self, args):
+        usage = ("usage: TECH LOAD <path.json> | TECH SAVE <path.json> | "
+                 "TECH SET <key> <value> | TECH GET <key> | TECH PARAMS")
+        if not args:
+            raise CommandError(usage)
+        sub = args[0].upper()
+        if sub == "LOAD":
+            if len(args) != 2:
+                raise CommandError("usage: TECH LOAD <path.json>")
+            data = self.session.load_technology(args[1])
+            return f"loaded technology from {args[1]} ({len(data.get('layers', []))} layers, {len(data.get('params', {}))} params)"
+        if sub == "SAVE":
+            if len(args) != 2:
+                raise CommandError("usage: TECH SAVE <path.json>")
+            self.session.save_technology(args[1])
+            return f"saved technology to {args[1]}"
+        if sub == "SET":
+            if len(args) != 3:
+                raise CommandError("usage: TECH SET <key> <value>")
+            self.session.library.tech_params[args[1]] = args[2]
+            return f"tech param {args[1]!r} = {args[2]!r}"
+        if sub == "GET":
+            if len(args) != 2:
+                raise CommandError("usage: TECH GET <key>")
+            if args[1] not in self.session.library.tech_params:
+                raise CommandError(f"no tech param named {args[1]!r}")
+            return f"{args[1]} = {self.session.library.tech_params[args[1]]}"
+        if sub == "PARAMS":
+            params = self.session.library.tech_params
+            if not params:
+                return "(no tech params set)"
+            return "\n".join(f"{k} = {v}" for k, v in params.items())
+        raise CommandError(usage)
+
+    # --- attached libraries ---------------------------------------------
+    def _cmd_attach(self, args):
+        if not args:
+            raise CommandError("usage: ATTACH <path.gds>")
+        lib = self.session.attach_library(args[0])
+        idx = len(self.session.attached_libraries) - 1
+        return f"attached library {idx}: {lib.name!r} ({len(lib.cells)} cells)"
+
+    def _cmd_libs(self, args):
+        libs = self.session.list_attached_libraries()
+        if not libs:
+            return "no attached libraries"
+        return "\n".join(f"[{l['index']}] {l['name']} ({l['cells']} cells) - {l['path']}" for l in libs)
+
+    def _cmd_liblist(self, args):
+        source = args[0] if args else "current"
+        if source.lower() != "current":
+            source = int(source)
+        else:
+            source = "current"
+        cells = self.session.list_library(source)
+        if not cells:
+            return "(no cells)"
+        return "\n".join(f"{c['name']}: {c['shapes']} shapes, {c['srefs']} srefs" for c in cells)
+
+    def _cmd_find(self, args):
+        if not args:
+            raise CommandError("usage: FIND <substring>")
+        query = " ".join(args)
+        matches = self.session.find_cells(query)
+        if not matches:
+            return f"no cells matching {query!r}"
+        return "\n".join(f"{m['name']} (source: {m['source']})" for m in matches)
+
+    def _cmd_place(self, args):
+        if len(args) < 2:
+            raise CommandError(
+                "usage: PLACE <cellname> <x,y> [source=current|0|1] [rotation] [mag] [mirror]"
+            )
+        cell_name = args[0]
+        origin = _parse_point(args[1])
+        source = None
+        positional = []
+        for a in args[2:]:
+            if a.lower().startswith("source="):
+                val = a.split("=", 1)[1]
+                source = "current" if val.lower() == "current" else int(val)
+            else:
+                positional.append(a)
+        rotation = float(positional[0]) if len(positional) > 0 else 0.0
+        mag = float(positional[1]) if len(positional) > 1 else 1.0
+        mirror = positional[2].lower() in ("1", "true", "yes", "mirror") if len(positional) > 2 else False
+        self.session.place_cell(cell_name, origin, source=source, rotation=rotation,
+                                 magnification=mag, x_reflection=mirror)
+        if self.view is not None:
+            # Make sure the newly placed cell's contents are actually
+            # visible right away rather than possibly landing outside
+            # the current view.
+            self.view.fit_view()
+        return f"placed {cell_name}"
+
+    def _cmd_resgen(self, args):
+        usage = ("usage: RESGEN <x,y> <body_width> <body_length> [rotation=<deg>] "
+                 "[ink=<rsh>] [ref=<designator>] [a=<dbu>] [b=<dbu>] [c=<dbu>] "
+                 "[d=<dbu>] [rlayer=<n|name>] [clayer=<n|name>] [glayer=<n|name>] "
+                 "[dlayer=<n|name>]")
+        if len(args) < 3:
+            raise CommandError(usage)
+        origin = _parse_point(args[0])
+        try:
+            body_width = float(args[1])
+            body_length = float(args[2])
+        except ValueError:
+            raise CommandError(usage)
+        kwargs = {}
+        rotation = 0.0
+        for a in args[3:]:
+            if "=" not in a:
+                raise CommandError(usage)
+            k, v = a.split("=", 1)
+            k = k.lower()
+            if k == "rotation":
+                rotation = float(v)
+            elif k == "ink":
+                kwargs["ink_rsh"] = float(v)
+            elif k == "ref":
+                kwargs["ref_des"] = v
+            elif k == "a":
+                kwargs["overlap_a"] = float(v)
+            elif k == "b":
+                kwargs["pad_b"] = float(v)
+            elif k == "c":
+                kwargs["space_c"] = float(v)
+            elif k == "d":
+                kwargs["glaze_oversize"] = float(v)
+            elif k == "rlayer":
+                kwargs["resistor_layer"] = self.session.library.layers.resolve(v)
+            elif k == "clayer":
+                kwargs["conductor_layer"] = self.session.library.layers.resolve(v)
+            elif k == "glayer":
+                kwargs["glaze_layer"] = self.session.library.layers.resolve(v)
+            elif k == "dlayer":
+                kwargs["doc_layer"] = self.session.library.layers.resolve(v)
+            else:
+                raise CommandError(f"unknown RESGEN option {k!r}")
+        device_name = self.session.generate_resistor(
+            origin[0], origin[1], body_width, body_length, rotation=rotation, **kwargs)
+        return (f"generated resistor cell {device_name!r}, placed at {origin} "
+                f"(W={body_width}, L={body_length})")
+
+    # --- mask ops ---------------------------------------------------------
+    def _cmd_maskop(self, args):
+        usage = ("usage: MASKOP OVERSIZE|UNDERSIZE <layer_a> result=<layer> amount=<dbu> "
+                 "[cell=<name>] [flatten=0|1] [simplify=<dbu>]\n"
+                 "       MASKOP AND|OR|NOT|XOR <layer_a> <layer_b> result=<layer> "
+                 "[cell=<name>] [flatten=0|1] [simplify=<dbu>]")
+        if len(args) < 2:
+            raise CommandError(usage)
+        op = args[0].upper()
+        if op not in MASK_OPS:
+            raise CommandError(f"{usage}\n(op must be one of {', '.join(MASK_OPS)})")
+        positional = []
+        kwargs = {}
+        for a in args[1:]:
+            if "=" in a:
+                k, v = a.split("=", 1)
+                k = k.lower()
+                if k == "result":
+                    kwargs["result_layer"] = v
+                elif k == "amount":
+                    kwargs["amount"] = float(v)
+                elif k == "cell":
+                    kwargs["cell_names"] = [v]
+                elif k == "flatten":
+                    kwargs["flatten"] = v not in ("0", "false", "no")
+                elif k == "simplify":
+                    kwargs["simplify"] = float(v)
+                else:
+                    raise CommandError(f"unknown MASKOP option {k!r}")
+            else:
+                positional.append(a)
+        if "result_layer" not in kwargs:
+            raise CommandError(f"{usage}\n(result=<layer> is required)")
+        result_layer = kwargs.pop("result_layer")
+        if op in ("OVERSIZE", "UNDERSIZE"):
+            if len(positional) != 1:
+                raise CommandError(usage)
+            layer_a = positional[0]
+            if "amount" not in kwargs:
+                raise CommandError(f"{usage}\n(amount=<dbu> is required for {op})")
+            written = self.session.mask_op(op, layer_a, result_layer, **kwargs)
+        else:
+            if len(positional) != 2:
+                raise CommandError(usage)
+            layer_a, layer_b = positional
+            written = self.session.mask_op(op, layer_a, result_layer, layer_b=layer_b, **kwargs)
+        total = sum(written.values())
+        if total == 0:
+            return f"{op} produced no output on layer {result_layer}"
+        # A mask op run from the Command Bar/Script Console is watched on
+        # the canvas the same way the Mask Operations dialog is, so real
+        # output written to a layer whose visibility happens to be off
+        # would otherwise look identical to writing nothing at all. Turn
+        # it on rather than leaving a correct result silently hidden.
+        resolved_layer = self.session.library.layers.resolve(result_layer)
+        layer_obj = self.session.library.layers[resolved_layer]
+        made_visible = False
+        if not layer_obj.visible:
+            layer_obj.visible = True
+            made_visible = True
+        suffix = " (layer visibility turned on)" if made_visible else ""
+        return f"{op} wrote {total} polygon(s) to layer {result_layer}{suffix}"
+
+    # --- DRC (Design Rule Check) -------------------------------------------
+    def _cmd_drcrule(self, args):
+        from ..core.drc import DRC_RULE_KINDS, TWO_LAYER_KINDS, DrcRule
+        from ..io.techfile import load_drc_rules, save_drc_rules
+
+        usage = (
+            "usage: DRCRULE ADD <kind> <layer_a> [layer_b] value=<n> [name=<name>]\n"
+            "       DRCRULE LIST\n"
+            "       DRCRULE REMOVE <index>\n"
+            "       DRCRULE CLEAR\n"
+            f"(kind: {', '.join(DRC_RULE_KINDS)}; layer_b is required for "
+            f"{', '.join(TWO_LAYER_KINDS)})"
+        )
+        if not args:
+            raise CommandError(usage)
+        sub = args[0].upper()
+        rules = load_drc_rules(self.session.library)
+
+        if sub == "LIST":
+            if not rules:
+                return "no DRC rules saved"
+            lines = [f"{i + 1}. {DrcRule.from_dict(r).label}" for i, r in enumerate(rules)]
+            return "\n".join(lines)
+
+        if sub == "CLEAR":
+            save_drc_rules(self.session.library, [])
+            return f"cleared {len(rules)} DRC rule(s)"
+
+        if sub == "REMOVE":
+            if len(args) != 2:
+                raise CommandError("usage: DRCRULE REMOVE <index>")
+            try:
+                idx = int(args[1]) - 1
+            except ValueError:
+                raise CommandError("usage: DRCRULE REMOVE <index>")
+            if not (0 <= idx < len(rules)):
+                raise CommandError(f"no rule #{args[1]} (have {len(rules)})")
+            removed = rules.pop(idx)
+            save_drc_rules(self.session.library, rules)
+            return f"removed rule: {DrcRule.from_dict(removed).label}"
+
+        if sub == "ADD":
+            resolve = self.session.library.layers.resolve
+            positional = []
+            kwargs = {}
+            for a in args[1:]:
+                if "=" in a:
+                    k, v = a.split("=", 1)
+                    k = k.lower()
+                    if k == "value":
+                        kwargs["value"] = float(v)
+                    elif k == "name":
+                        kwargs["name"] = v
+                    else:
+                        raise CommandError(f"unknown DRCRULE option {k!r}")
+                else:
+                    positional.append(a)
+            if len(positional) < 2:
+                raise CommandError(usage)
+            kind = positional[0].upper()
+            if kind not in DRC_RULE_KINDS:
+                raise CommandError(f"{usage}\n(unknown kind {positional[0]!r})")
+            layer_a = resolve(positional[1])
+            layer_b = None
+            if kind in TWO_LAYER_KINDS:
+                if len(positional) != 3:
+                    raise CommandError(f"{usage}\n({kind} requires layer_b)")
+                layer_b = resolve(positional[2])
+            elif len(positional) != 2:
+                raise CommandError(usage)
+            if "value" not in kwargs:
+                raise CommandError(f"{usage}\n(value=<n> is required)")
+            rule = DrcRule(kind=kind, layer_a=layer_a, layer_b=layer_b, **kwargs)
+            rules.append(rule.to_dict())
+            save_drc_rules(self.session.library, rules)
+            return f"added rule #{len(rules)}: {rule.label}"
+
+        raise CommandError(usage)
+
+    def _cmd_drc(self, args):
+        usage = "usage: DRC RUN [cell=<name>] [error=<layer>]"
+        if not args or args[0].upper() != "RUN":
+            raise CommandError(usage)
+        kwargs = {}
+        for a in args[1:]:
+            if "=" not in a:
+                raise CommandError(usage)
+            k, v = a.split("=", 1)
+            k = k.lower()
+            if k == "cell":
+                kwargs["cell_names"] = [v]
+            elif k == "error":
+                kwargs["error_layer"] = v
+            else:
+                raise CommandError(f"unknown DRC option {k!r}")
+        violations = self.session.run_drc(**kwargs)
+        if not violations:
+            return "DRC: no violations found"
+        by_rule = {}
+        for v in violations:
+            by_rule.setdefault(v.rule.label, 0)
+            by_rule[v.rule.label] += 1
+        lines = [f"DRC: {len(violations)} violation(s) found"]
+        for label, count in by_rule.items():
+            lines.append(f"  {count} x {label}")
+        return "\n".join(lines)
+
+    def _cmd_via(self, args):
+        usage = ("usage: VIA <layer1> <layer2> [shape=square|round] [size=<dbu>] "
+                 "[index=0|1] [overwrite=0|1]")
+        if len(args) < 2:
+            raise CommandError(usage)
+        positional = []
+        kwargs = {}
+        for a in args:
+            if "=" in a:
+                k, v = a.split("=", 1)
+                k = k.lower()
+                if k == "shape":
+                    kwargs["shape"] = v
+                elif k == "size":
+                    kwargs["size"] = float(v)
+                elif k == "index":
+                    kwargs["index"] = int(v)
+                elif k == "overwrite":
+                    kwargs["overwrite"] = v not in ("0", "false", "no")
+                else:
+                    raise CommandError(f"unknown VIA option {k!r}")
+            else:
+                positional.append(a)
+        if len(positional) != 2:
+            raise CommandError(usage)
+        name, path = self.session.create_via_cell(positional[0], positional[1], **kwargs)
+        return f"created via cell {name!r}, saved to {path}"
+
+    # --- scripting / help -------------------------------------------------
+    def _cmd_py(self, args):
+        code_str = " ".join(args)
+        return self.console.run(code_str)
+
+    def _cmd_help(self, args):
+        return COMMAND_REFERENCE

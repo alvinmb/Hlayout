@@ -1,0 +1,4 @@
+gdstk>=0.9
+shapely>=2.0
+# GUI uses Tkinter, which ships with the standard Python installer on
+# Windows/macOS. On Debian/Ubuntu Linux you may need: sudo apt install python3-tk

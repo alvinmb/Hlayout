@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+_to_delete/
+hlayout_proj/
+hlayout_project.zip

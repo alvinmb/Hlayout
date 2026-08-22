@@ -1,0 +1,160 @@
+"""GDSII import/export — the default on-disk database format.
+
+1 hlayout database unit (DBU) = 1 micron (0.001 mm) — matching the
+database unit most external GDSII libraries use — so the gdstk library
+is created with unit=1e-6 (metres) which makes gdstk "user units"
+identical to our integer DBU coordinates.
+
+Format conventions used by this module (documented since GDSII itself
+does not natively distinguish these hlayout concepts):
+  * Rectangle vs. Polygon: any 4-point boundary is read back as a
+    Rectangle; boundaries with any other point count are read back as
+    a Polygon. This tool always writes Rectangles as 4-point boundaries,
+    so round-tripping files produced by hlayout is exact.
+  * Path caps: PathCap.ROUND <-> GDS/gdstk "round", PathCap.SQUARE <->
+    "extended" (half-width projecting cap), PathCap.FLUSH <-> "flush".
+    Paths are written with simple_path=True so they stay true GDSII
+    PATH elements (not decomposed into boundaries) on disk.
+  * Text: GDSII has no explicit font-size field. Height is encoded as
+    ``magnification * TEXT_BASE_HEIGHT`` and font (0-3) is encoded in
+    the GDS texttype field, matching GDSII's native 4-font model.
+"""
+
+import math
+import os
+from typing import Optional
+
+import gdstk
+
+from ..core.cell import Cell
+from ..core.errors import LayoutError
+from ..core.library import Library
+from ..core.shapes import Path, PathCap, Polygon, Rectangle, SRef, Text
+from ..core.units import DBU_MM
+
+UNIT = DBU_MM * 1e-3  # metres per DBU (DBU_MM is in mm; 1 mm = 1e-3 m)
+PRECISION = 1e-9  # metres (1 nm internal precision)
+TEXT_BASE_HEIGHT = 10  # DBU; magnification 1.0 <=> this text height
+
+_CAP_TO_GDSTK = {
+    PathCap.ROUND: "round",
+    PathCap.SQUARE: "extended",
+    PathCap.FLUSH: "flush",
+}
+_GDSTK_TO_CAP = {v: k for k, v in _CAP_TO_GDSTK.items()}
+
+
+def save_gds(library: Library, path: str) -> None:
+    """Write a Library to a GDSII file."""
+    library.check_no_cycles()
+
+    glib = gdstk.Library(name=library.name, unit=UNIT, precision=PRECISION)
+    gcells = {name: gdstk.Cell(name) for name in library.cells}
+
+    for name, cell in library.cells.items():
+        gcell = gcells[name]
+        for shape in cell.shapes:
+            if isinstance(shape, (Polygon, Rectangle)):
+                gcell.add(gdstk.Polygon(shape.points, layer=shape.layer, datatype=shape.datatype))
+            elif isinstance(shape, Path):
+                gcell.add(gdstk.FlexPath(
+                    shape.points,
+                    width=shape.width,
+                    ends=_CAP_TO_GDSTK[shape.cap],
+                    layer=shape.layer,
+                    datatype=shape.datatype,
+                    simple_path=True,
+                ))
+            elif isinstance(shape, Text):
+                gcell.add(gdstk.Label(
+                    shape.text,
+                    shape.origin,
+                    rotation=math.radians(shape.rotation),
+                    magnification=shape.height / TEXT_BASE_HEIGHT,
+                    layer=shape.layer,
+                    texttype=shape.font,
+                ))
+            else:
+                raise LayoutError(f"unsupported shape type: {type(shape)!r}")
+
+        for ref in cell.srefs:
+            if ref.cell_name not in gcells:
+                raise LayoutError(f"sref in {name!r} references unknown cell {ref.cell_name!r}")
+            gcell.add(gdstk.Reference(
+                gcells[ref.cell_name],
+                origin=ref.origin,
+                rotation=math.radians(ref.rotation),
+                magnification=ref.magnification,
+                x_reflection=ref.x_reflection,
+            ))
+
+    glib.add(*gcells.values())
+    glib.write_gds(str(path))
+
+
+def load_gds(path: str, library_name: Optional[str] = None) -> Library:
+    """Read a GDSII file into a new Library."""
+    # Check existence ourselves rather than letting gdstk fail: gdstk's
+    # own error for a missing/unreadable file is a native-code stderr
+    # print ("[GDSTK] Unable to open GDSII file for input.") followed by
+    # a bare OSError with no path in the message, which is confusing
+    # from the CLI (hlayout_app.py mydesign.gds) or the OPEN/ATTACH
+    # commands. Fail with a clear, actionable LayoutError instead.
+    if not os.path.isfile(path):
+        raise LayoutError(f"GDSII file not found: {path}")
+    gdslib = gdstk.read_gds(str(path), unit=UNIT)
+    library = Library(name=library_name or gdslib.name or "HLIB")
+
+    # Pass 1: create cells (empty) so srefs can resolve by name.
+    for gcell in gdslib.cells:
+        library.add_cell(Cell(name=gcell.name))
+
+    # Pass 2: populate shapes and references.
+    for gcell in gdslib.cells:
+        cell = library.get_cell(gcell.name)
+
+        for poly in gcell.polygons:
+            pts = [(int(round(x)), int(round(y))) for x, y in poly.points]
+            if len(pts) == 4:
+                cell.shapes.append(Rectangle(layer=poly.layer, points=pts, datatype=poly.datatype))
+            else:
+                cell.shapes.append(Polygon(layer=poly.layer, points=pts, datatype=poly.datatype))
+
+        for fp in gcell.paths:
+            spine = [(int(round(x)), int(round(y))) for x, y in fp.spine()]
+            widths = list(fp.widths())
+            width = int(round(widths[0][0])) if widths else 0
+            ends = fp.ends[0] if isinstance(fp.ends, tuple) else fp.ends
+            cap = _GDSTK_TO_CAP.get(ends, PathCap.FLUSH)
+            layer = fp.layers[0] if fp.layers else 0
+            datatype = fp.datatypes[0] if fp.datatypes else 0
+            cell.shapes.append(Path(layer=layer, points=spine, width=width, cap=cap, datatype=datatype))
+
+        for label in gcell.labels:
+            font = label.texttype if 0 <= label.texttype < 4 else 0
+            height = max(1, int(round(label.magnification * TEXT_BASE_HEIGHT)))
+            cell.shapes.append(Text(
+                layer=label.layer,
+                origin=label.origin,
+                text=label.text,
+                height=height,
+                font=font,
+                rotation=math.degrees(label.rotation),
+                datatype=label.texttype,
+            ))
+
+        for ref in gcell.references:
+            cell.srefs.append(SRef(
+                cell_name=ref.cell_name,
+                origin=ref.origin,
+                rotation=math.degrees(ref.rotation),
+                magnification=ref.magnification,
+                x_reflection=ref.x_reflection,
+            ))
+
+    top = gdslib.top_level()
+    if top:
+        library.top_cell_name = top[0].name
+
+    library.check_no_cycles()
+    return library

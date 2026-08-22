@@ -1,0 +1,2021 @@
+"""Main application window for the Thick & Thin Film Hybrid Layout CAD tool."""
+
+import os
+import tkinter as tk
+from tkinter import font as tkfont
+from tkinter import filedialog, simpledialog, ttk
+
+from . import dialogs
+
+from .. import __version__
+from ..core.errors import LayoutError
+from ..core.library import Library
+from ..core.maskops import MASK_OPS
+from ..core.shapes import CIRCLE_SEGMENT_CHOICES
+from ..core.units import dbu_to_mm, mm_to_dbu
+from ..io.sidecar import load_design
+from ..io.techfile import (
+    load_resistor_geometry_rules,
+    load_route_rules,
+    save_resistor_geometry_rules,
+    save_route_rules,
+)
+from ..scripting.api import Session
+from ..scripting.console import ScriptConsole
+from .canvas import LayoutCanvas, describe_selection
+from .commands import COMMAND_REFERENCE, CommandError, CommandInterpreter, _parse_point
+from .layer_panel import LayerPanel
+from .line_editing import bind_console_style_editing
+from .drc_window import open_drc_window
+from .resistor_designer import open_resistor_designer
+
+
+class ViewWindow(tk.Toplevel):
+    """An additional, independent view window onto the same library."""
+
+    def __init__(self, master, library, title="View", checkpoint=None):
+        super().__init__(master)
+        self.title(title)
+        self.geometry("900x650")
+        self.status = tk.StringVar(value="ready")
+        self.canvas = LayoutCanvas(self, library, on_status=self.status.set)
+        if checkpoint is not None:
+            # Selecting/dragging a shape in a secondary view window edits
+            # the same underlying library as the main window -- route it
+            # through the same undo history rather than leaving it
+            # unrecorded (see Session.checkpoint / App._undo/_redo).
+            self.canvas.checkpoint = checkpoint
+        self.canvas.pack(fill="both", expand=True)
+        bar = ttk.Frame(self)
+        bar.pack(fill="x")
+        ttk.Label(bar, textvariable=self.status).pack(side="left", padx=4)
+        self.after(50, self.canvas.fit_view)
+
+
+class App(tk.Tk):
+    # The Layers/Console panel keeps this fixed pixel width, anchored to
+    # the right edge of the window (see _build_body). The canvas gets
+    # everything else — with the window width below, that makes the
+    # drawing area roughly 2.5x wider than the original 1280-wide layout.
+    RIGHT_PANEL_WIDTH = 600
+    CANVAS_WIDTH = 1450
+
+    # Smallest window size we'll ever request, regardless of screen size —
+    # small enough to fit on a laptop display, still usable.
+    MIN_WIDTH = 900
+    MIN_HEIGHT = 600
+
+    # Every named Tk font is resized to this (see _apply_global_font_size)
+    # so every widget in the app -- menus, buttons, labels, entries, the
+    # layers table, dialogs -- renders at a consistent, readable size.
+    # Canvas-drawn design text (the Text shape primitive) is unaffected:
+    # its size is a DBU height set per-shape by the user, not app chrome.
+    UI_FONT_SIZE = 14
+
+    def __init__(self, library: Library = None, attached_libraries=None, attached_paths=None):
+        # attached_libraries/attached_paths let a caller (currently just
+        # hlayout_app.py's CLI startup, via hlayout.io.sidecar.load_design())
+        # hand in reference libraries restored from a design's sidecar
+        # alongside its initial library -- so opening a file from the
+        # command line restores attached libraries the same way File >
+        # Open GDS... does, not just the geometry.
+        super().__init__()
+        self._apply_global_font_size()
+        self.title("HLayout — Thick & Thin Film Hybrid Layout CAD")
+
+        # Clamp the requested window size to the actual screen, so on a
+        # display smaller than the "ideal" 2050x820 the window (and the
+        # canvas/right-panel split below) still fits instead of being
+        # silently shrunk by the window manager after the sash position
+        # was already computed for the larger size.
+        screen_w = self.winfo_screenwidth()
+        screen_h = self.winfo_screenheight()
+        win_w = min(self.CANVAS_WIDTH + self.RIGHT_PANEL_WIDTH, max(self.MIN_WIDTH, screen_w - 80))
+        win_h = min(820, max(self.MIN_HEIGHT, screen_h - 80))
+        self.minsize(self.MIN_WIDTH, self.MIN_HEIGHT)
+        self.geometry(f"{win_w}x{win_h}")
+        self._win_w = win_w
+
+        self.session = Session(library or self._default_library())
+        if attached_libraries:
+            self.session.attached_libraries = list(attached_libraries)
+            self.session._attached_paths = list(attached_paths or [""] * len(attached_libraries))
+        self.console = ScriptConsole(self.session)
+        self.current_path = None
+        self.status = tk.StringVar(value="ready")
+
+        self._build_body()
+        self._build_bottom_toolbar()
+        self._build_command_bar()
+        # Menu bar is built last: several of its items (Create/Edit
+        # draw-mode entries, Setup > Snap to Grid, Tools > Script
+        # Console/Command Bar) reference widgets/variables created by the
+        # calls above.
+        self._build_menu()
+        self._build_statusbar()
+
+        self.canvas.on_commit = self._on_canvas_commit
+        self.canvas.on_edit = self.refresh_all
+        self.canvas.on_mode_status = self.status.set
+        self.canvas.on_list_cells = self._placeable_cell_names
+        self.canvas.checkpoint = self.session.checkpoint
+        self.canvas.on_select = self._update_properties_panel
+        self._update_properties_panel()
+        self.canvas.on_route_via = self._on_route_via
+        self._on_route_opts_change()
+
+        self.interp = CommandInterpreter(
+            self.session, self.console, on_change=self.refresh_all, view=self.canvas
+        )
+        self.session.on_change(self.refresh_all)
+        self.session.on_change(self._update_undo_redo_menu_state)
+        self._update_undo_redo_menu_state()
+
+        # Force the initial sash position explicitly — the Layers table's
+        # many columns otherwise drive the panel wider than intended
+        # before ttk finishes laying out the panes. Use the actual
+        # (possibly screen-clamped) window width computed above, not the
+        # "ideal" CANVAS_WIDTH, so the right panel stays fully visible
+        # (and the canvas doesn't collapse to nothing) on smaller screens.
+        self._anchor_sash()
+        self.after(50, self._anchor_sash)
+        self.after(100, self.canvas.fit_view)
+        self.body_pane.bind("<Configure>", self._on_body_configure)
+        self.protocol("WM_DELETE_WINDOW", self._on_quit)
+
+    def _anchor_sash(self):
+        try:
+            width = self.body_pane.winfo_width()
+            if width <= 1:
+                width = self._win_w
+            sash = max(self.MIN_WIDTH - self.RIGHT_PANEL_WIDTH, width - self.RIGHT_PANEL_WIDTH)
+            self.body_pane.sashpos(0, sash)
+        except tk.TclError:
+            pass
+
+    def _on_body_configure(self, event):
+        # Keep the right panel pinned to a fixed width as the window is
+        # resized (dragged, maximized, etc.) instead of drifting.
+        target = max(self.MIN_WIDTH - self.RIGHT_PANEL_WIDTH, event.width - self.RIGHT_PANEL_WIDTH)
+        try:
+            if abs(self.body_pane.sashpos(0) - target) > 2:
+                self.body_pane.sashpos(0, target)
+        except tk.TclError:
+            pass
+
+    # --- setup helpers -------------------------------------------------
+    def _apply_global_font_size(self):
+        """Resize every named Tk font to UI_FONT_SIZE, before any widget
+        is built. Tk/ttk widgets that don't get an explicit font=...
+        default to one of these named fonts (TkDefaultFont, TkTextFont,
+        TkMenuFont, TkHeadingFont, TkFixedFont, TkCaptionFont,
+        TkSmallCaptionFont, TkIconFont, TkTooltipFont, ...), so resizing
+        the named fonts themselves cascades to menus, buttons, labels,
+        entries, the layers table, and stock dialogs (simpledialog,
+        filedialog's own widgets aside) alike, without having to touch
+        each widget.
+
+        Two places this isn't reliable, both because the OS -- not Tk
+        -- draws the widget and ignores Tk's font entirely, no matter
+        how the named fonts here are resized:
+
+        - The top-level menu BAR (File, Setup, View, ...): a tk.Menu
+          installed as the window's native system menu
+          (self.config(menu=...)) is drawn by the OS itself. Because of
+          that, _build_menu() doesn't use a native menu bar at all: it
+          builds an ordinary row of ttk.Menubutton widgets whose
+          dropdowns are plain Tk-drawn popup menus, which DO respect
+          -font on every platform. self._menu_font is computed here
+          and passed explicitly to those Menubuttons and their
+          dropdown tk.Menus.
+        - tkinter.messagebox (showinfo/showerror/showwarning/askyesno):
+          on Windows this calls the native Win32 MessageBox() dialog,
+          confirmed still rendering at a small system font size even
+          with every named font here resized. hlayout.gui.dialogs
+          provides Tk-drawn replacements (show_info/show_error/
+          show_warning/ask_yes_no) used everywhere in this app instead
+          -- ordinary ttk widgets, so they pick up TkDefaultFont (and
+          therefore UI_FONT_SIZE) the normal way."""
+        for name in tkfont.names(self):
+            f = tkfont.nametofont(name, self)
+            f.configure(size=self.UI_FONT_SIZE)
+        default_family = tkfont.nametofont("TkDefaultFont", self).cget("family")
+        self._menu_font = (default_family, self.UI_FONT_SIZE)
+
+    def _default_library(self) -> Library:
+        lib = Library("UNTITLED")
+        lib.new_cell("TOP")
+        return lib
+
+    def _build_menu(self):
+        """Top-level menu bar: File, Setup, View, Create, Edit,
+        Tools, Help, About. Every command elsewhere in the app (draw
+        toolbar buttons, command bar, etc.) has a home under one of
+        these — this is the canonical, discoverable command structure.
+
+        This is deliberately NOT a native tk.Menu installed via
+        self.config(menu=...). On Windows, a tk.Menu used as a
+        window's system menu bar is drawn by the OS itself, and the
+        OS ignores Tk's -font option for that bar entirely -- an
+        explicit font=self._menu_font (added in an earlier round) does
+        nothing there, only on the dropdown submenus. So instead this
+        builds an ordinary row of ttk.Menubutton widgets (packed in a
+        plain Frame, placed above everything else via before=), each
+        opening a normal tearoff=0 tk.Menu as its dropdown. A dropdown
+        posted from a Menubutton is Tk-drawn on every platform
+        (including Windows), so -font on it actually takes effect --
+        this is what makes the whole bar, not just the dropdowns,
+        respect UI_FONT_SIZE reliably cross-platform.
+        """
+        bar = ttk.Frame(self)
+        bar.pack(side="top", fill="x", before=self._menu_bar_anchor)
+        self._menu_bar_frame = bar
+        # Ordered (label, submenu-or-None) pairs, submenu is None for
+        # "About" (a direct button, not a dropdown) -- kept around so
+        # tests/other code can introspect the menu structure without
+        # needing a native tk.Menu / app["menu"] to walk.
+        self._top_menus = []
+        self._menu_buttons = {}
+
+        # ttk widgets (Menubutton, Button, ...) have no -font resource
+        # of their own -- unlike a plain tk widget, font is only
+        # settable through a named ttk style. This style is what
+        # UI_FONT_SIZE actually reaches the menu bar buttons through
+        # (self._menu_font on the dropdown tk.Menus below is the
+        # equivalent for those, which DO have a real -font option).
+        self._menu_button_style = "HLayoutMenuBar.TMenubutton"
+        self._menu_about_style = "HLayoutMenuBar.TButton"
+        style = ttk.Style(self)
+        style.configure(self._menu_button_style, font=self._menu_font)
+        style.configure(self._menu_about_style, font=self._menu_font)
+
+        def add_menu(label):
+            mb = ttk.Menubutton(bar, text=label, style=self._menu_button_style)
+            mb.pack(side="left")
+            m = tk.Menu(mb, tearoff=0, font=self._menu_font)
+            mb.configure(menu=m)
+            self._top_menus.append((label, m))
+            self._menu_buttons[label] = mb
+            return m
+
+        # --- File: opening/saving the design itself -----------------------
+        filem = add_menu("File")
+        filem.add_command(label="New", command=self.new_library, accelerator="Ctrl+N")
+        filem.add_command(label="Open GDS...", command=self.open_gds, accelerator="Ctrl+O")
+        filem.add_command(label="Save GDS...", command=self.save_gds, accelerator="Ctrl+S")
+        filem.add_command(label="Save As Library...", command=self.save_as_library)
+        filem.add_separator()
+        filem.add_command(label="Export Gerber...", command=self.export_gerber)
+        filem.add_separator()
+        filem.add_command(label="Exit", command=self._on_quit)
+
+        # --- Setup: configuring the environment before/while you draw ----
+        setupm = add_menu("Setup")
+        setupm.add_command(label="Attach Library...", command=self.attach_library)
+        setupm.add_command(label="Attached Libraries...", command=self.show_attached_libraries)
+        setupm.add_separator()
+        setupm.add_command(label="Layers...", command=self._show_layers_tab)
+        setupm.add_checkbutton(label="Snap to Grid", variable=self.snap_var,
+                                command=self._on_snap_change)
+        setupm.add_separator()
+        setupm.add_command(label="Path Style...", command=self.show_path_style_dialog)
+        setupm.add_command(label="Circle Segments...", command=self.show_circle_segments_dialog)
+        setupm.add_command(label="Route Layers...", command=self.show_route_layers_dialog)
+        setupm.add_command(label="Resistor Geometry Rules...", command=self.show_resistor_geometry_dialog)
+        setupm.add_separator()
+        setupm.add_command(label="Remap Layers...", command=self.show_remap_layers_dialog)
+        setupm.add_separator()
+        setupm.add_command(label="Load Technology File...", command=self.load_technology_file)
+        setupm.add_command(label="Save Technology File...", command=self.save_technology_file)
+
+        # --- View: how the design is displayed ----------------------------
+        viewm = add_menu("View")
+        viewm.add_command(label="Fit", command=lambda: self.canvas.fit_view(), accelerator="F")
+        viewm.add_command(label="Zoom In", command=lambda: self.canvas.zoom_in(), accelerator="+")
+        viewm.add_command(label="Zoom Out", command=lambda: self.canvas.zoom_out(), accelerator="-")
+        viewm.add_command(label="Toggle Grid", command=lambda: self.canvas.toggle_grid(), accelerator="G")
+        viewm.add_separator()
+        viewm.add_command(label="New View Window", command=self.new_view_window)
+
+        # --- Create: adding new geometry/instances to the design ---------
+        createm = add_menu("Create")
+        for label, mode in [
+            ("Rectangle", "rect"), ("Polygon", "poly"), ("Path", "path"),
+            ("Circle", "circle"), ("Text", "text"), ("Cell Instance", "sref"),
+        ]:
+            createm.add_radiobutton(label=label, value=mode, variable=self.mode_var,
+                                     command=self._on_mode_change)
+        createm.add_separator()
+        createm.add_radiobutton(label="Route (2-Layer)", value="route", variable=self.mode_var,
+                                 command=self._on_mode_change)
+        createm.add_separator()
+        createm.add_command(label="Find && Place Cell...", command=self.find_and_place_cell)
+
+        # --- Edit: selecting/editing/removing existing geometry -----------
+        editm = add_menu("Edit")
+        editm.add_command(label="Undo", command=self._undo, accelerator="Ctrl+Z")
+        editm.add_command(label="Redo", command=self._redo, accelerator="Ctrl+Y")
+        self._editm = editm
+        editm.add_separator()
+        editm.add_radiobutton(label="Select", value="select", variable=self.mode_var,
+                               command=self._on_mode_change)
+        editm.add_separator()
+        editm.add_command(label="Edit Selected...", command=self._edit_selected)
+        editm.add_command(label="Delete Selected", command=self._delete_selected)
+        editm.add_separator()
+        editm.add_command(label="Rotate...", command=self._rotate_selected)
+        editm.add_command(label="Copy...", command=self._copy_selected)
+        editm.add_separator()
+        editm.add_command(label="Properties", command=self._show_properties_tab)
+
+        # --- Tools: scripting utilities -----------------------------------
+        toolsm = add_menu("Tools")
+        toolsm.add_command(label="Script Console", command=self._show_console_tab)
+        toolsm.add_command(label="Run Script File...", command=self.run_script_file)
+        toolsm.add_separator()
+        toolsm.add_command(label="Command Bar", command=lambda: self.cmd_entry.focus_set())
+        toolsm.add_separator()
+        toolsm.add_command(
+            label="Thick-Film Resistor Designer...",
+            command=lambda: open_resistor_designer(self),
+        )
+        toolsm.add_command(label="Via Wizard...", command=self.show_via_wizard)
+        toolsm.add_command(label="Mask Operations...", command=self.show_mask_op_dialog)
+        toolsm.add_command(label="DRC...", command=lambda: open_drc_window(self))
+        toolsm.add_separator()
+        toolsm.add_command(label="Export Gerber...", command=self.export_gerber)
+
+        # --- Help ----------------------------------------------------------
+        helpm = add_menu("Help")
+        helpm.add_command(label="Command Reference", command=self.show_command_reference, accelerator="F1")
+
+        # --- About: a single direct button, not a dropdown -----------------
+        about_btn = ttk.Button(bar, text="About", command=self.show_about,
+                                style=self._menu_about_style)
+        about_btn.pack(side="left", padx=(8, 0))
+        self._top_menus.append(("About", None))
+        self._menu_buttons["About"] = about_btn
+
+        self.bind("<Control-n>", lambda e: self.new_library())
+        self.bind("<Control-o>", lambda e: self.open_gds())
+        self.bind("<Control-s>", lambda e: self.save_gds())
+        self.bind("<Control-z>", lambda e: self._undo())
+        self.bind("<Control-y>", lambda e: self._redo())
+        self.bind("<Control-Shift-Z>", lambda e: self._redo())
+        self.bind("f", lambda e: self.canvas.fit_view())
+        self.bind("g", lambda e: self.canvas.toggle_grid())
+        self.bind("<F1>", lambda e: self.show_command_reference())
+
+    def _show_layers_tab(self):
+        self.right_notebook.select(self.layer_panel)
+
+    def _show_console_tab(self):
+        self.right_notebook.select(self.console_frame)
+
+    def _show_properties_tab(self):
+        self.right_notebook.select(self.props_frame)
+
+    # --- undo/redo ---------------------------------------------------------
+    def _undo(self):
+        if not self.session.undo():
+            self.status.set("nothing to undo")
+            return
+        self.canvas.selected = None
+        self.canvas.set_cell(self.session.current_cell_name)
+        self.refresh_all()
+        self.status.set("undo")
+
+    def _redo(self):
+        if not self.session.redo():
+            self.status.set("nothing to redo")
+            return
+        self.canvas.selected = None
+        self.canvas.set_cell(self.session.current_cell_name)
+        self.refresh_all()
+        self.status.set("redo")
+
+    def _update_undo_redo_menu_state(self):
+        # Wired as a Session on_change callback (in addition to being
+        # called directly after undo()/redo() themselves) so the Edit
+        # menu's Undo/Redo items stay accurate after *any* edit, not
+        # just ones made through this method.
+        if not hasattr(self, "_editm"):
+            return
+        self._editm.entryconfigure(0, state="normal" if self.session.can_undo() else "disabled")
+        self._editm.entryconfigure(1, state="normal" if self.session.can_redo() else "disabled")
+
+    def _edit_selected(self):
+        if not self.canvas.edit_selected():
+            if len(self.canvas.selected_multi) > 1:
+                dialogs.show_info("Edit Selected", "More than one object is window-selected -- "
+                                   "edit properties one object at a time (click just that one).",
+                                   parent=self)
+            else:
+                dialogs.show_info("Edit Selected", "Nothing is selected. Switch to Select mode and click a shape first.",
+                                   parent=self)
+
+    def _rotate_selected(self):
+        if self.canvas.selected is None and not self.canvas.selected_multi:
+            dialogs.show_info("Rotate", "Nothing is selected. Switch to Select mode, click the "
+                               "shape or cell instance to rotate (it turns white), or drag a "
+                               "box over empty space to window-select several, then try again.",
+                               parent=self)
+            return
+        text = simpledialog.askstring("Rotate", "Rotate by degrees (counter-clockwise):", parent=self)
+        if not text:
+            return
+        try:
+            angle = float(text)
+        except ValueError:
+            dialogs.show_error("Rotate", f"expected a number of degrees, got {text!r}", parent=self)
+            return
+        if not self.canvas.rotate_selected(angle):
+            dialogs.show_info("Rotate", "That selection can't be rotated directly -- "
+                               "select a whole shape or cell instance (not a single vertex/edge).",
+                               parent=self)
+
+    def _copy_selected(self):
+        if self.canvas.selected is None and not self.canvas.selected_multi:
+            dialogs.show_info("Copy", "Nothing is selected. Switch to Select mode, click the "
+                               "shape or cell instance to copy (it turns white), or drag a box "
+                               "over empty space to window-select several, then try again.",
+                               parent=self)
+            return
+        text = simpledialog.askstring(
+            "Copy", "Offset the copy by dx,dy (design units):", parent=self, initialvalue="0,0"
+        )
+        if not text:
+            return
+        try:
+            dx, dy = _parse_point(text)
+        except CommandError as e:
+            dialogs.show_error("Copy", str(e), parent=self)
+            return
+        if not self.canvas.copy_selected(dx, dy):
+            dialogs.show_info("Copy", "That selection can't be copied directly -- "
+                               "select a whole shape or cell instance (not a single vertex/edge).",
+                               parent=self)
+
+    def run_script_file(self):
+        path = filedialog.askopenfilename(filetypes=[("Python scripts", "*.py"), ("All files", "*.*")])
+        if not path:
+            return
+        out = self.console.run_file(path)
+        self._show_console_tab()
+        if out:
+            self._append_console_output(out)
+        self.refresh_all()
+        self.status.set(f"ran {path}")
+
+    def show_about(self):
+        dialogs.show_info(
+            "About HLayout",
+            "HLayout\n"
+            "Thick & Thin Film Hybrid Layout CAD Tool\n\n"
+            "A layout editor for thick-and-thin-film hybrid microelectronics: "
+            "64 layers, GDSII I/O, mouse and command-bar driven drawing/editing, "
+            "attached reference libraries, and a full Python scripting API.\n\n"
+            f"Version {__version__}",
+            parent=self,
+        )
+
+    def _build_body(self):
+        body = ttk.Panedwindow(self, orient="horizontal")
+        body.pack(fill="both", expand=True)
+        self.body_pane = body
+        # _build_menu() (called later, once the widgets/vars it
+        # references exist) packs the menu bar with before=self so it
+        # still ends up visually above the canvas despite being built
+        # after it -- body is the first thing packed below the menu
+        # bar now that the old top toolbar was merged into the bottom
+        # one (see _build_bottom_toolbar).
+        self._menu_bar_anchor = body
+
+        self.canvas = LayoutCanvas(body, self.session.library, on_status=self.status.set)
+        # weight=1 on the canvas, weight=0 on the right panel: when the
+        # window is resized, all the extra/lost space goes to the canvas
+        # and the Layers/Console panel stays anchored at a fixed width on
+        # the right edge instead of stretching with it.
+        body.add(self.canvas, weight=1)
+
+        right = ttk.Notebook(body, width=self.RIGHT_PANEL_WIDTH)
+        body.add(right, weight=0)
+        self.right_notebook = right  # so menu items (Setup > Layers..., Tools > Script Console) can switch tabs
+
+        self.layer_panel = LayerPanel(right, self.session.library, on_change=self.refresh_all)
+        right.add(self.layer_panel, text="Layers")
+
+        props_frame = ttk.Frame(right)
+        self.props_frame = props_frame  # so Edit > Properties can select this tab
+        right.add(props_frame, text="Properties")
+        ttk.Label(
+            props_frame,
+            text="Select a shape or cell instance (Select tool) to see "
+                 "its properties here.",
+            foreground="#666",
+            font=("TkSmallCaptionFont",),
+            wraplength=self.RIGHT_PANEL_WIDTH - 16,
+        ).pack(fill="x", padx=4, pady=(4, 2))
+        self.props_text = tk.Text(props_frame, height=20, bg="#111", fg="#ddd",
+                                   state="disabled", wrap="word")
+        self.props_text.pack(fill="both", expand=True, padx=2, pady=(0, 2))
+
+        console_frame = ttk.Frame(right)
+        self.console_frame = console_frame  # so Tools > Script Console can select this tab
+        right.add(console_frame, text="Script Console")
+        hint = ttk.Frame(console_frame)
+        hint.pack(fill="x")
+        ttk.Label(
+            hint,
+            text="Python or a command (RECT, CELL, ...) — same as Command Bar. "
+                 "F1 for full list.",
+            foreground="#666",
+            font=("TkSmallCaptionFont",),
+        ).pack(side="left", fill="x", padx=4, pady=(2, 0))
+        self.console_output = tk.Text(console_frame, height=20, bg="#111", fg="#ddd",
+                                       insertbackground="#ddd", state="disabled", wrap="word")
+        self.console_output.pack(fill="both", expand=True)
+        entry_row = ttk.Frame(console_frame)
+        entry_row.pack(fill="x")
+        self.console_entry = ttk.Entry(entry_row)
+        self.console_entry.pack(side="left", fill="x", expand=True)
+        self.console_entry.bind("<Return>", self._on_console_enter)
+        # self.interp (CommandInterpreter) is built later in __init__, after
+        # all the _build_* calls, so these are deferred lookups (only
+        # called once the user actually presses Up/Down) rather than
+        # direct references — self.interp doesn't exist yet at this point.
+        bind_console_style_editing(
+            self.console_entry,
+            prev_history=lambda current: self.interp.prev_history(current),
+            next_history=lambda current: self.interp.next_history(current),
+        )
+        ttk.Button(entry_row, text="Run", command=self._on_console_enter).pack(side="left")
+
+    def _build_bottom_toolbar(self):
+        """The toolbar row at the bottom of the window (above the status
+        bar and Command bar). Used to be split across two rows: a view/
+        navigation toolbar (Fit, Zoom In/Out, Grid, New View, the Cell
+        selector) right under the menu bar, and a separate draw-mode
+        toolbar (Select/Rect/Polygon/.../Cell Instance radio buttons,
+        Layer, Snap to grid, Delete Selected) further down. The
+        draw-mode buttons were dropped -- they just duplicated the
+        Create menu (and Edit > Select), which is the only place to
+        pick a draw tool now -- and everything else was merged into
+        this single row and moved down here, leaving the canvas
+        starting right below the menu bar."""
+        bar = ttk.Frame(self)
+        bar.pack(side="top", fill="x")
+
+        for label, cmd in [
+            ("Fit", lambda: self.canvas.fit_view()),
+            ("Zoom In", lambda: self.canvas.zoom_in()),
+            ("Zoom Out", lambda: self.canvas.zoom_out()),
+            ("Grid", lambda: self.canvas.toggle_grid()),
+            ("New View", self.new_view_window),
+        ]:
+            ttk.Button(bar, text=label, command=cmd).pack(side="left", padx=2, pady=2)
+
+        ttk.Label(bar, text="Cell:").pack(side="left", padx=(12, 2))
+        self.cell_var = tk.StringVar(value=self.session.current_cell_name or "")
+        self.cell_combo = ttk.Combobox(bar, textvariable=self.cell_var, width=18, state="readonly")
+        self.cell_combo.pack(side="left")
+        self.cell_combo.bind("<<ComboboxSelected>>", self._on_cell_selected)
+        self._refresh_cell_list()
+
+        # mode_var still exists and still drives the canvas's current
+        # draw tool -- it's just set from the Create/Edit menu radio
+        # buttons now instead of a duplicate set of buttons here.
+        self.mode_var = tk.StringVar(value="select")
+
+        ttk.Label(bar, text="Layer:").pack(side="left", padx=(12, 2))
+        self.layer_var = tk.StringVar(value=self._layer_label(0))
+        self.layer_combo = ttk.Combobox(bar, textvariable=self.layer_var, width=22,
+                                         values=self._layer_choices())
+        self.layer_combo.pack(side="left")
+        self.layer_combo.bind("<<ComboboxSelected>>", lambda e: self._on_layer_change())
+        self.layer_combo.bind("<Return>", lambda e: self._on_layer_change())
+        self.layer_combo.bind("<FocusOut>", lambda e: self._on_layer_change())
+
+        # Path Width/Cap moved to Setup > Path Style... (see _show_path_style_dialog);
+        # width_var/cap_var still back the canvas's path drawing options, just
+        # no longer edited from a toolbar field.
+        self.width_var = tk.IntVar(value=2)
+        self.cap_var = tk.StringVar(value="round")
+
+        # Circle Segments moved to Setup > Circle Segments... (see
+        # show_circle_segments_dialog) -- it only applies to the Circle
+        # draw tool, so it doesn't belong on the always-visible toolbar
+        # alongside options (Layer, Snap to grid) that apply to every
+        # tool. segments_var still backs the canvas's circle drawing
+        # option, just no longer edited from a toolbar field.
+        self.segments_var = tk.StringVar(value="32")
+
+        # Route (2-Layer) tool options -- Setup > Route Layers... (see
+        # show_route_layers_dialog); these back canvas.route_layer_a/b/
+        # route_via_size/route_via_shape/route_dielectric_layer/
+        # route_dielectric_window, same pattern as width_var/cap_var
+        # above. Seeded from the technology file (hlayout.io.techfile's
+        # load_route_rules()) rather than hardcoded, so a route setup
+        # configured once survives a save/reopen instead of needing to
+        # be re-entered -- see _reload_route_settings_from_library().
+        self.route_layer_a_var = tk.StringVar()
+        self.route_layer_b_var = tk.StringVar()
+        self.route_via_size_var = tk.IntVar()
+        self.route_via_shape_var = tk.StringVar()
+        self.route_dielectric_layer_var = tk.StringVar()
+        self.route_dielectric_window_var = tk.DoubleVar()
+        self._reload_route_settings_from_library()
+
+        self.snap_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(bar, text="Snap to grid", variable=self.snap_var,
+                         command=self._on_snap_change).pack(side="left", padx=(12, 2))
+
+        ttk.Button(bar, text="Delete Selected", command=self._delete_selected).pack(
+            side="left", padx=(12, 2))
+
+        self.mode_hint_var = tk.StringVar(value="")
+        ttk.Label(bar, textvariable=self.mode_hint_var, foreground="#0066cc").pack(
+            side="left", padx=(12, 2))
+
+    def _on_mode_change(self):
+        self.canvas.set_mode(self.mode_var.get())
+        self.mode_hint_var.set(self.canvas._mode_hint())
+
+    def _layer_label(self, number):
+        return f"{number}: {self.session.library.layers[number].name}"
+
+    def _layer_choices(self):
+        return [self._layer_label(n) for n in range(64)]
+
+    def _refresh_layer_choices(self):
+        if not hasattr(self, "layer_combo"):
+            return
+        self.layer_combo["values"] = self._layer_choices()
+        self.layer_var.set(self._layer_label(self.canvas.current_layer))
+        # The Route toolbar's layer fields are displayed as cached "N:
+        # Name" text (see _reload_route_settings_from_library()/
+        # _on_route_opts_change()), so a layer rename (Layers tab,
+        # Load Technology File..., etc.) has to explicitly re-resolve
+        # them here too, or Setup > Route Layers... would keep showing
+        # whatever name was current the last time those fields were
+        # set -- the same "dialogs should always show the technology
+        # file's current layer names" requirement as everywhere else.
+        if hasattr(self, "route_layer_a_var"):
+            self.route_layer_a_var.set(self._layer_label(self.canvas.route_layer_a))
+            self.route_layer_b_var.set(self._layer_label(self.canvas.route_layer_b))
+            self.route_dielectric_layer_var.set(
+                self._layer_label(self.canvas.route_dielectric_layer)
+                if self.canvas.route_dielectric_layer is not None else "(none)"
+            )
+
+    def _on_layer_change(self):
+        text = self.layer_var.get().strip()
+        if ":" in text:
+            text = text.split(":", 1)[0].strip()
+        try:
+            number = self.session.library.layers.resolve(text)
+        except LayoutError as e:
+            self.status.set(str(e))
+            return
+        self.canvas.current_layer = number
+        self.layer_var.set(self._layer_label(number))
+
+    def _on_path_opts_change(self):
+        try:
+            self.canvas.path_width = int(self.width_var.get())
+        except (tk.TclError, ValueError):
+            pass
+        self.canvas.path_cap = self.cap_var.get()
+
+    def show_path_style_dialog(self):
+        """Setup > Path Style...: set the width and end-cap style used
+        when drawing new paths. Replaces the Width/Cap fields that used
+        to live directly on the draw toolbar."""
+        win = tk.Toplevel(self)
+        win.title("Path Style")
+        win.transient(self)
+        win.grab_set()
+        win.resizable(False, False)
+
+        form = ttk.Frame(win)
+        form.pack(padx=12, pady=12)
+
+        ttk.Label(form, text="Width (mm):").grid(row=0, column=0, sticky="e", padx=4, pady=4)
+        width_var = tk.DoubleVar(value=dbu_to_mm(self.width_var.get()))
+        width_spin = ttk.Spinbox(form, from_=0, to=100.0, increment=0.001, width=8, textvariable=width_var)
+        width_spin.grid(row=0, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="End cap:").grid(row=1, column=0, sticky="e", padx=4, pady=4)
+        cap_var = tk.StringVar(value=self.cap_var.get())
+        cap_combo = ttk.Combobox(form, textvariable=cap_var, width=10, state="readonly",
+                                  values=["round", "square", "flush"])
+        cap_combo.grid(row=1, column=1, sticky="w", padx=4, pady=4)
+
+        error_var = tk.StringVar(value="")
+        ttk.Label(form, textvariable=error_var, foreground="red").grid(
+            row=2, column=0, columnspan=2, sticky="w", padx=4
+        )
+
+        def apply_and_close():
+            try:
+                width = mm_to_dbu(float(width_var.get()))
+            except (tk.TclError, ValueError):
+                error_var.set("Width must be a number.")
+                return
+            if width < 0:
+                error_var.set("Width must not be negative.")
+                return
+            self.width_var.set(width)
+            self.cap_var.set(cap_var.get())
+            self._on_path_opts_change()
+            self.status.set(f"path style: width={dbu_to_mm(width):g} mm cap={cap_var.get()}")
+            win.destroy()
+
+        btn_row = ttk.Frame(win)
+        btn_row.pack(pady=(0, 12))
+        ttk.Button(btn_row, text="OK", command=apply_and_close).pack(side="left", padx=6)
+        ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=6)
+
+        width_spin.focus_set()
+        win.bind("<Return>", lambda e: apply_and_close())
+        win.bind("<Escape>", lambda e: win.destroy())
+
+    def _on_circle_opts_change(self):
+        try:
+            self.canvas.circle_segments = int(self.segments_var.get())
+        except (tk.TclError, ValueError):
+            pass
+
+    def show_circle_segments_dialog(self):
+        """Setup > Circle Segments...: choose how many segments the
+        Circle draw tool uses to approximate a circle. Moved here from
+        the draw toolbar since it's the one draw-tool option that only
+        applies to a single tool (Circle), unlike Layer or Snap to
+        grid which apply no matter what's being drawn."""
+        win = tk.Toplevel(self)
+        win.title("Circle Segments")
+        win.transient(self)
+        win.grab_set()
+        win.resizable(False, False)
+
+        form = ttk.Frame(win)
+        form.pack(padx=12, pady=12)
+
+        ttk.Label(form, text="Segments:").grid(row=0, column=0, sticky="e", padx=4, pady=4)
+        segments_var = tk.StringVar(value=self.segments_var.get())
+        segments_combo = ttk.Combobox(form, textvariable=segments_var, width=6, state="readonly",
+                                       values=[str(n) for n in CIRCLE_SEGMENT_CHOICES])
+        segments_combo.grid(row=0, column=1, sticky="w", padx=4, pady=4)
+
+        def apply_and_close():
+            self.segments_var.set(segments_var.get())
+            self._on_circle_opts_change()
+            self.status.set(f"circle segments: {segments_var.get()}")
+            win.destroy()
+
+        btn_row = ttk.Frame(win)
+        btn_row.pack(pady=(0, 12))
+        ttk.Button(btn_row, text="OK", command=apply_and_close).pack(side="left", padx=6)
+        ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=6)
+
+        segments_combo.focus_set()
+        win.bind("<Return>", lambda e: apply_and_close())
+        win.bind("<Escape>", lambda e: win.destroy())
+
+    def _resolve_layer_field(self, text):
+        """Turn a "N: name" combobox value (or a bare number/name) into a
+        layer number, raising LayoutError via the library's own resolve()
+        for a bad entry -- shared by show_route_layers_dialog()."""
+        text = text.strip()
+        if ":" in text:
+            text = text.split(":", 1)[0].strip()
+        return self.session.library.layers.resolve(text)
+
+    def _reload_route_settings_from_library(self):
+        """Seed the Route (2-Layer) toolbar options from the current
+        library's technology file (hlayout.io.techfile.load_route_rules())
+        instead of a hardcoded default -- called once at startup and
+        again whenever the library itself is swapped out (New, Open
+        GDS..., Load Technology File...) so a route setup saved with a
+        design (or a technology file) is picked up automatically rather
+        than needing to be re-entered every session."""
+        rules = load_route_rules(self.session.library)
+        a, b = rules["layer_a"], rules["layer_b"]
+        self.route_layer_a_var.set(self._layer_label(a))
+        self.route_layer_b_var.set(self._layer_label(b))
+        self.route_via_size_var.set(rules["via_size"])
+        self.route_via_shape_var.set(rules["via_shape"])
+        # A real via always has a dielectric window (see
+        # Session.drop_via()) -- so even a technology file saved before
+        # this field existed (dielectric_layer/window == None) gets a
+        # real fallback here rather than leaving the tool without one:
+        # the first layer that isn't already Layer A/B, and a window at
+        # least as large as the via size.
+        dielectric_layer = rules["dielectric_layer"]
+        if dielectric_layer is None or dielectric_layer in (a, b):
+            dielectric_layer = next(
+                (n for n in range(len(self.session.library.layers)) if n not in (a, b)), a)
+        dielectric_window = rules["dielectric_window"] or 0.0
+        if dielectric_window < rules["via_size"]:
+            dielectric_window = rules["via_size"] + 40
+        self.route_dielectric_layer_var.set(self._layer_label(dielectric_layer))
+        self.route_dielectric_window_var.set(dielectric_window)
+        self._on_route_opts_change()
+
+    def _on_route_opts_change(self):
+        try:
+            self.canvas.route_layer_a = self._resolve_layer_field(self.route_layer_a_var.get())
+            self.canvas.route_layer_b = self._resolve_layer_field(self.route_layer_b_var.get())
+        except LayoutError:
+            pass  # dialog's own apply_and_close() already validated and reported this
+        try:
+            self.canvas.route_via_size = int(self.route_via_size_var.get())
+        except (tk.TclError, ValueError):
+            pass
+        self.canvas.route_via_shape = self.route_via_shape_var.get()
+        # A real via always has a dielectric window -- Setup > Route
+        # Layers... no longer offers "(none)" -- but this stays tolerant
+        # of a still-blank field (e.g. a technology file saved before
+        # this feature existed) rather than raising.
+        dielectric_text = self.route_dielectric_layer_var.get().strip()
+        if dielectric_text and dielectric_text != "(none)":
+            try:
+                self.canvas.route_dielectric_layer = self._resolve_layer_field(dielectric_text)
+            except LayoutError:
+                pass
+        else:
+            self.canvas.route_dielectric_layer = None
+        try:
+            window = float(self.route_dielectric_window_var.get())
+            self.canvas.route_dielectric_window = window if window > 0 else None
+        except (tk.TclError, ValueError):
+            self.canvas.route_dielectric_window = None
+        if self.canvas.draw_mode == "route":
+            self.canvas._route_active_layer = self.canvas.route_layer_a
+
+    def show_route_layers_dialog(self):
+        """Setup > Route Layers...: configure the two conductor layers
+        and via style the Create > Route (2-Layer) tool uses. Route
+        starts on Layer A; each Space press during a route drops a via
+        connecting Layer A/B at the current point and switches which of
+        the two you're routing on -- see LayoutCanvas._route_drop_via().
+
+        Also configures the dielectric via window: a same-centred
+        opening cut in the dielectric layer between A and B,
+        representing the actual electrical contact area (see
+        Session.drop_via()). A real via always has this window, so a
+        dielectric layer and window size are always required here --
+        normally the window is sized AT OR ABOVE the via pad size (the
+        pad lands within/over the opening).
+
+        Everything here is saved into the technology file
+        (hlayout.io.techfile.save_route_rules()) on OK, the same
+        tech_params-blob pattern as the Resistor Designer's and DRC's
+        own saved rules, so it travels with Setup > Save Technology
+        File... / TECH SAVE and the per-design .hlaux sidecar -- a route
+        setup configured once doesn't need to be re-entered next
+        session."""
+        win = tk.Toplevel(self)
+        win.title("Route Layers")
+        win.transient(self)
+        win.grab_set()
+        win.resizable(False, False)
+
+        form = ttk.Frame(win)
+        form.pack(padx=12, pady=12)
+
+        ttk.Label(form, text="Layer A (route starts here):").grid(
+            row=0, column=0, sticky="e", padx=4, pady=4)
+        layer_a_var = tk.StringVar(value=self.route_layer_a_var.get())
+        ttk.Combobox(form, textvariable=layer_a_var, width=22,
+                     values=self._layer_choices()).grid(row=0, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="Layer B (Space switches to/from):").grid(
+            row=1, column=0, sticky="e", padx=4, pady=4)
+        layer_b_var = tk.StringVar(value=self.route_layer_b_var.get())
+        ttk.Combobox(form, textvariable=layer_b_var, width=22,
+                     values=self._layer_choices()).grid(row=1, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="Via size (mm):").grid(row=2, column=0, sticky="e", padx=4, pady=4)
+        via_size_var = tk.DoubleVar(value=dbu_to_mm(self.route_via_size_var.get()))
+        ttk.Spinbox(form, from_=0.001, to=100.0, increment=0.001, width=8, textvariable=via_size_var).grid(
+            row=2, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="Via shape:").grid(row=3, column=0, sticky="e", padx=4, pady=4)
+        via_shape_var = tk.StringVar(value=self.route_via_shape_var.get())
+        ttk.Combobox(form, textvariable=via_shape_var, width=10, state="readonly",
+                     values=["square", "round"]).grid(row=3, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="Dielectric layer (via window):").grid(
+            row=4, column=0, sticky="e", padx=4, pady=4)
+        _initial_dielectric = self.route_dielectric_layer_var.get()
+        if _initial_dielectric == "(none)" or not _initial_dielectric:
+            _initial_dielectric = self._layer_choices()[0]
+        dielectric_layer_var = tk.StringVar(value=_initial_dielectric)
+        ttk.Combobox(form, textvariable=dielectric_layer_var, width=22, state="readonly",
+                     values=self._layer_choices()).grid(
+            row=4, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="Dielectric window size (mm):").grid(
+            row=5, column=0, sticky="e", padx=4, pady=4)
+        _initial_window = self.route_dielectric_window_var.get() or self.route_via_size_var.get()
+        dielectric_window_var = tk.DoubleVar(value=dbu_to_mm(_initial_window))
+        ttk.Spinbox(form, from_=0.001, to=100.0, increment=0.001, width=8, textvariable=dielectric_window_var).grid(
+            row=5, column=1, sticky="w", padx=4, pady=4)
+        ttk.Label(
+            form,
+            text="Opening cut in the dielectric between A and B -- a real\n"
+                 "via always has one. Normally sized AT OR ABOVE the via\n"
+                 "size, so the pad lands within/over the opening.",
+            foreground="#555", justify="left",
+        ).grid(row=6, column=0, columnspan=2, sticky="w", padx=4)
+
+        error_var = tk.StringVar(value="")
+        ttk.Label(form, textvariable=error_var, foreground="red").grid(
+            row=7, column=0, columnspan=2, sticky="w", padx=4
+        )
+
+        def apply_and_close():
+            try:
+                a = self._resolve_layer_field(layer_a_var.get())
+                b = self._resolve_layer_field(layer_b_var.get())
+            except LayoutError as e:
+                error_var.set(str(e))
+                return
+            if a == b:
+                error_var.set("Layer A and Layer B must be different.")
+                return
+            try:
+                size = mm_to_dbu(float(via_size_var.get()))
+            except (tk.TclError, ValueError):
+                error_var.set("Via size must be a number.")
+                return
+            if size <= 0:
+                error_var.set("Via size must be positive.")
+                return
+            try:
+                dielectric_layer = self._resolve_layer_field(dielectric_layer_var.get())
+            except LayoutError as e:
+                error_var.set(str(e))
+                return
+            if dielectric_layer in (a, b):
+                error_var.set("Dielectric layer must be different from Layer A and Layer B.")
+                return
+            try:
+                dielectric_window = mm_to_dbu(float(dielectric_window_var.get()))
+            except tk.TclError:
+                error_var.set("Dielectric window size must be a number.")
+                return
+            if dielectric_window <= 0:
+                error_var.set("Dielectric window size must be positive -- a real via always has a window.")
+                return
+            if dielectric_window < size:
+                error_var.set(
+                    "Dielectric window size must be at least as large as the via size "
+                    "(the window, not the pad, defines the contact area)."
+                )
+                return
+
+            self.route_layer_a_var.set(self._layer_label(a))
+            self.route_layer_b_var.set(self._layer_label(b))
+            self.route_via_size_var.set(size)
+            self.route_via_shape_var.set(via_shape_var.get())
+            self.route_dielectric_layer_var.set(self._layer_label(dielectric_layer))
+            self.route_dielectric_window_var.set(dielectric_window)
+            self._on_route_opts_change()
+            save_route_rules(self.session.library, {
+                "layer_a": a, "layer_b": b, "via_size": size, "via_shape": via_shape_var.get(),
+                "dielectric_layer": dielectric_layer,
+                "dielectric_window": dielectric_window,
+            })
+            self.status.set(
+                f"route layers: A={self._layer_label(a)}  B={self._layer_label(b)}  "
+                f"via={dbu_to_mm(size):g} mm {via_shape_var.get()}  "
+                f"dielectric={self._layer_label(dielectric_layer)} "
+                f"window={dbu_to_mm(dielectric_window):g} mm"
+            )
+            win.destroy()
+
+        btn_row = ttk.Frame(win)
+        btn_row.pack(pady=(0, 12))
+        ttk.Button(btn_row, text="OK", command=apply_and_close).pack(side="left", padx=6)
+        ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=6)
+
+        win.bind("<Return>", lambda e: apply_and_close())
+        win.bind("<Escape>", lambda e: win.destroy())
+
+    def _on_route_via(self, x, y, layer_a, layer_b, size, shape, segment=None,
+                       dielectric_layer=None, dielectric_window=None):
+        """Wired as canvas.on_route_via -- fired when Space drops a via
+        mid-route (see LayoutCanvas._route_drop_via()). `segment`, if
+        given, is (layer, points, width, cap) for the path drawn so far
+        on the layer being left -- committed in the same Session.batch()
+        as the via so the whole space-press is one undo step.
+        `dielectric_layer`/`dielectric_window` (from Setup > Route
+        Layers...) also cut a via window in the dielectric, if set --
+        see Session.drop_via()."""
+        try:
+            with self.session.batch():
+                if segment is not None:
+                    seg_layer, points, width, cap = segment
+                    self.session.path(seg_layer, points, width, cap=cap)
+                self.session.drop_via(x, y, layer_a, layer_b, size=size, shape=shape,
+                                       dielectric_layer=dielectric_layer,
+                                       dielectric_window=dielectric_window)
+        except LayoutError as e:
+            dialogs.show_error("Route", f"Could not place via: {e}", parent=self)
+
+    def show_resistor_geometry_dialog(self):
+        """Setup > Resistor Geometry Rules...: configure the A/B/C/D
+        dimensions and the layers used when a resistor is actually
+        drawn into the layout -- Session.generate_resistor() (the RESGEN
+        command bar command, and Tools > Thick-Film Resistor
+        Designer.../"Place in Layout..."). Saved into this design's
+        technology file (Library.tech_params) via
+        hlayout.io.techfile.save_resistor_geometry_rules(), same pattern
+        as the Resistor Designer's own sizing "Design Rules...".
+
+        A = overlap: resistor ink extends this far beyond the electrical
+            body_length at BOTH ends, so it overlaps (contacts) the
+            conductor pad.
+        B = pad length: how far each conductor pad extends beyond that
+            overlap, at each end. Each pad's own footprint is A+B long.
+        C = side space: how far each pad extends beyond the resistor
+            ink's width on either side (pad width = body_width + 2*C).
+        D = glaze oversize: the glaze overprint is the resistor ink
+            body's own shape, grown by D on ALL FOUR sides (not just
+            matching the ink's footprint).
+
+        The resistor ink layer set here is only the *fallback* used when
+        a resistor's ink has no per-Rsh entry in Tools > Thick-Film
+        Resistor Designer... > Design Rules... 's ink layer map (each
+        available ink sheet resistance is normally matched to its own
+        layer there -- see hlayout.io.techfile.resistor_ink_layer()).
+        Conductor pad layer, glaze layer, and documentation layer (for
+        the reference-designator label -- see "Place in Layout...") are
+        single, process-wide layers (the conductor layer can still be
+        overridden per placement from "Place in Layout...").
+        """
+        rules = load_resistor_geometry_rules(self.session.library)
+        win = tk.Toplevel(self)
+        win.title("Resistor Geometry Rules")
+        win.transient(self)
+        win.grab_set()
+        win.resizable(False, False)
+
+        ttk.Label(
+            win,
+            text="A = resistor-to-conductor overlap (added to body_length at\n"
+                 "     both ends)\n"
+                 "B = minimum conductor pad length beyond the overlap\n"
+                 "     (each pad's footprint is A+B long)\n"
+                 "C = minimum conductor space on the side (pad width =\n"
+                 "     body_width + 2×C)\n"
+                 "D = glaze oversize -- the glaze overprint is the resistor's\n"
+                 "     own shape, grown by D on all 4 sides (not just matching\n"
+                 "     the ink body), for post-trim protection.",
+            justify="left", foreground="#555",
+        ).pack(anchor="w", padx=12, pady=(12, 8))
+
+        form = ttk.Frame(win)
+        form.pack(padx=12, fill="x")
+
+        ttk.Label(form, text="A - Overlap (mm):").grid(row=0, column=0, sticky="e", padx=4, pady=4)
+        a_var = tk.DoubleVar(value=dbu_to_mm(rules["overlap_a"]))
+        ttk.Spinbox(form, from_=0, to=1000.0, increment=0.001, width=10, textvariable=a_var).grid(
+            row=0, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="B - Pad length (mm):").grid(row=1, column=0, sticky="e", padx=4, pady=4)
+        b_var = tk.DoubleVar(value=dbu_to_mm(rules["pad_b"]))
+        ttk.Spinbox(form, from_=0, to=1000.0, increment=0.001, width=10, textvariable=b_var).grid(
+            row=1, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="C - Side space (mm):").grid(row=2, column=0, sticky="e", padx=4, pady=4)
+        c_var = tk.DoubleVar(value=dbu_to_mm(rules["space_c"]))
+        ttk.Spinbox(form, from_=0, to=1000.0, increment=0.001, width=10, textvariable=c_var).grid(
+            row=2, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="D - Glaze oversize (mm):").grid(row=3, column=0, sticky="e", padx=4, pady=4)
+        d_var = tk.DoubleVar(value=dbu_to_mm(rules["glaze_oversize"]))
+        ttk.Spinbox(form, from_=0, to=1000.0, increment=0.001, width=10, textvariable=d_var).grid(
+            row=3, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="Resistor ink layer (fallback):").grid(
+            row=4, column=0, sticky="e", padx=4, pady=4)
+        r_layer_var = tk.StringVar(value=self._layer_label(rules["resistor_layer"]))
+        ttk.Combobox(form, textvariable=r_layer_var, width=22,
+                     values=self._layer_choices()).grid(row=4, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="Conductor pad layer:").grid(row=5, column=0, sticky="e", padx=4, pady=4)
+        c_layer_var = tk.StringVar(value=self._layer_label(rules["conductor_layer"]))
+        ttk.Combobox(form, textvariable=c_layer_var, width=22,
+                     values=self._layer_choices()).grid(row=5, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="Glaze overprint layer:").grid(row=6, column=0, sticky="e", padx=4, pady=4)
+        g_layer_var = tk.StringVar(value=self._layer_label(rules["glaze_layer"]))
+        ttk.Combobox(form, textvariable=g_layer_var, width=22,
+                     values=self._layer_choices()).grid(row=6, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="Documentation (ref-des) layer:").grid(
+            row=7, column=0, sticky="e", padx=4, pady=4)
+        doc_layer_var = tk.StringVar(value=self._layer_label(rules["doc_layer"]))
+        ttk.Combobox(form, textvariable=doc_layer_var, width=22,
+                     values=self._layer_choices()).grid(row=7, column=1, sticky="w", padx=4, pady=4)
+
+        error_var = tk.StringVar(value="")
+        ttk.Label(form, textvariable=error_var, foreground="red").grid(
+            row=8, column=0, columnspan=2, sticky="w", padx=4
+        )
+
+        def apply_and_close():
+            try:
+                a, b, c, d = (mm_to_dbu(a_var.get()), mm_to_dbu(b_var.get()),
+                              mm_to_dbu(c_var.get()), mm_to_dbu(d_var.get()))
+            except tk.TclError:
+                error_var.set("A, B, C, and D must be numbers.")
+                return
+            if a < 0 or b < 0 or c < 0 or d < 0:
+                error_var.set("A, B, C, and D must not be negative.")
+                return
+            try:
+                r_layer = self._resolve_layer_field(r_layer_var.get())
+                c_layer = self._resolve_layer_field(c_layer_var.get())
+                g_layer = self._resolve_layer_field(g_layer_var.get())
+                doc_layer = self._resolve_layer_field(doc_layer_var.get())
+            except LayoutError as e:
+                error_var.set(str(e))
+                return
+            if len({r_layer, c_layer, g_layer, doc_layer}) != 4:
+                error_var.set(
+                    "Resistor ink, conductor pad, glaze, and documentation layers "
+                    "must all be different.")
+                return
+            save_resistor_geometry_rules(self.session.library, {
+                "overlap_a": a, "pad_b": b, "space_c": c, "glaze_oversize": d,
+                "resistor_layer": r_layer, "conductor_layer": c_layer,
+                "glaze_layer": g_layer, "doc_layer": doc_layer,
+                "ink_layers": rules["ink_layers"],
+            })
+            self.status.set(
+                f"resistor geometry rules saved: A={dbu_to_mm(a):g} B={dbu_to_mm(b):g} "
+                f"C={dbu_to_mm(c):g} D={dbu_to_mm(d):g} mm  "
+                f"ink={self._layer_label(r_layer)}  pad={self._layer_label(c_layer)}  "
+                f"glaze={self._layer_label(g_layer)}  doc={self._layer_label(doc_layer)}")
+            win.destroy()
+
+        btn_row = ttk.Frame(win)
+        btn_row.pack(pady=(8, 12))
+        ttk.Button(btn_row, text="OK", command=apply_and_close).pack(side="left", padx=6)
+        ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=6)
+
+        win.bind("<Return>", lambda e: apply_and_close())
+        win.bind("<Escape>", lambda e: win.destroy())
+
+    def _on_snap_change(self):
+        self.canvas.snap_enabled = self.snap_var.get()
+
+    def _delete_selected(self):
+        self.canvas.delete_selected()
+
+    # --- turning mouse-drawn shapes into real database edits -------------
+    def _on_canvas_commit(self, mode, layer, points, extra):
+        try:
+            if mode == "rect":
+                (x1, y1), (x2, y2) = points
+                self.session.rect(layer, x1, y1, x2, y2)
+            elif mode == "poly":
+                self.session.polygon(layer, points)
+            elif mode == "path":
+                self.session.path(layer, points, extra["width"], cap=extra["cap"])
+            elif mode == "circle":
+                self.session.circle(layer, points[0], extra["radius"], segments=extra["segments"])
+            elif mode == "text":
+                self.session.text(layer, points[0], extra["text"], height=extra["height"],
+                                   font=extra["font"])
+            elif mode == "sref":
+                # place_cell() (not the lower-level session.sref()) so
+                # picking a cell that only lives in an attached library
+                # -- offered by the picker via _placeable_cell_names()
+                # below -- imports its dependency closure first instead
+                # of creating a dangling reference to a cell that isn't
+                # actually defined in this design.
+                self.session.place_cell(
+                    extra["cell_name"], points[0], rotation=extra["rotation"],
+                    magnification=extra["magnification"], x_reflection=extra["x_reflection"],
+                )
+        except LayoutError as e:
+            dialogs.show_error("Could not add shape", str(e), parent=self)
+
+    def _placeable_cell_names(self):
+        """Cell names offered by the Create > Cell Instance draw tool's
+        picker: the current design's own cells plus every cell in every
+        attached library (see Setup > Attach Library...). Mirrors what
+        Create > Find && Place Cell... already searches, so both ways of
+        placing a cell instance see the same set of cells."""
+        return [m["name"] for m in self.session.find_cells("")]
+
+    def _build_command_bar(self):
+        frame = ttk.Frame(self)
+        frame.pack(side="bottom", fill="x")
+        ttk.Label(frame, text="Command:").pack(side="left", padx=(4, 2))
+        self.cmd_var = tk.StringVar()
+        self.cmd_entry = ttk.Entry(frame, textvariable=self.cmd_var)
+        self.cmd_entry.pack(side="left", fill="x", expand=True, padx=2, pady=2)
+        self.cmd_entry.bind("<Return>", self._on_command_enter)
+        self.cmd_entry.bind("<Up>", self._on_command_up)
+        self.cmd_entry.bind("<Down>", self._on_command_down)
+        bind_console_style_editing(self.cmd_entry)  # Up/Down already bound above
+        self.cmd_entry.focus_set()
+        ttk.Button(frame, text="Run", command=self._on_command_enter).pack(side="left", padx=2)
+
+    def _build_statusbar(self):
+        bar = ttk.Frame(self)
+        bar.pack(side="bottom", fill="x")
+        ttk.Label(bar, textvariable=self.status, anchor="w").pack(fill="x", padx=4)
+
+    # --- command bar / console handlers ---------------------------------
+    def _on_command_enter(self, event=None):
+        line = self.cmd_var.get()
+        if not line.strip():
+            return
+        result = self.interp.run(line)
+        self.status.set(result if result else "ok")
+        self.cmd_var.set("")
+        self._refresh_cell_list()
+
+    def _on_command_up(self, event):
+        self.cmd_var.set(self.interp.prev_history(self.cmd_var.get()))
+        self.cmd_entry.icursor("end")
+
+    def _on_command_down(self, event):
+        self.cmd_var.set(self.interp.next_history(self.cmd_var.get()))
+        self.cmd_entry.icursor("end")
+
+    def _on_console_enter(self, event=None):
+        src = self.console_entry.get()
+        if not src.strip():
+            return
+        # Route through the same CommandInterpreter as the Command Bar, so
+        # the Script Console accepts both short commands (RECT, CELL,
+        # LAYER, HELP, ...) and raw Python, exactly like the bottom
+        # Command Bar — no need to switch widgets to use one or the other.
+        out = self.interp.run(src)
+        self.console_output.configure(state="normal")
+        self.console_output.insert("end", f">>> {src}\n")
+        if out:
+            self.console_output.insert("end", out if out.endswith("\n") else out + "\n")
+        self.console_output.see("end")
+        self.console_output.configure(state="disabled")
+        self.console_entry.delete(0, "end")
+        self._refresh_cell_list()
+        self.refresh_all()
+
+    def _append_console_output(self, text):
+        self.console_output.configure(state="normal")
+        self.console_output.insert("end", text if text.endswith("\n") else text + "\n")
+        self.console_output.see("end")
+        self.console_output.configure(state="disabled")
+
+    # --- cell selector ----------------------------------------------------
+    def _refresh_cell_list(self):
+        names = sorted(self.session.library.cells.keys())
+        self.cell_combo["values"] = names
+        if self.session.current_cell_name:
+            self.cell_var.set(self.session.current_cell_name)
+
+    def _on_cell_selected(self, event):
+        name = self.cell_var.get()
+        self.session.use_cell(name)
+        self.canvas.set_cell(name)
+        # Show the whole of the newly selected cell, not whatever
+        # region the view happened to be scrolled/zoomed to before.
+        self.canvas.fit_view()
+
+    # --- file operations --------------------------------------------------
+    def new_library(self):
+        self.session.library = self._default_library()
+        self.session.current_cell_name = self.session.library.top_cell_name
+        # A brand new document -- any libraries attached to the design
+        # being replaced don't carry over, same as a document opened
+        # fresh from disk with no sidecar.
+        self.session.attached_libraries = []
+        self.session._attached_paths = []
+        self.session.attach_errors = []
+        self.session.had_sidecar = False
+        # A brand new document, not an edit -- nothing to undo into it.
+        self.session.clear_undo_history()
+        self._update_undo_redo_menu_state()
+        self.current_path = None
+        self.canvas.library = self.session.library
+        self.canvas.set_cell(self.session.current_cell_name)
+        self.layer_panel.set_library(self.session.library)
+        self._refresh_cell_list()
+        self._refresh_layer_choices()
+        self._reload_route_settings_from_library()
+
+    def open_gds(self):
+        path = filedialog.askopenfilename(filetypes=[("GDSII", "*.gds"), ("All files", "*.*")])
+        if not path:
+            return
+        try:
+            loaded = load_design(path)
+        except Exception as e:
+            dialogs.show_error("Open failed", str(e), parent=self)
+            return
+        lib = loaded.library
+        self.session.library = lib
+        self.session.attached_libraries = loaded.attached_libraries
+        self.session._attached_paths = loaded.attached_paths
+        self.session.attach_errors = loaded.attach_errors
+        self.session.had_sidecar = loaded.had_sidecar
+        self.session.current_cell_name = lib.top_cell_name
+        # A different document was just loaded -- nothing to undo into it.
+        self.session.clear_undo_history()
+        self._update_undo_redo_menu_state()
+        self.current_path = path
+        self.canvas.library = lib
+        self.canvas.set_cell(lib.top_cell_name)
+        self.layer_panel.set_library(lib)
+        self._refresh_cell_list()
+        self._refresh_layer_choices()
+        self._reload_route_settings_from_library()
+        self.canvas.fit_view()
+        if loaded.attach_errors:
+            dialogs.show_warning(
+                "Open GDS",
+                "Opened, but some attached libraries in the sidecar didn't restore:\n"
+                + "\n".join(loaded.attach_errors),
+                parent=self,
+            )
+        if loaded.had_sidecar:
+            self.status.set(
+                f"opened {path} (restored technology + "
+                f"{len(loaded.attached_libraries)} attached library/ies)"
+            )
+        else:
+            self.status.set(f"opened {path}")
+
+    def save_gds(self):
+        """Save the current design as a .gds file plus its sidecar (see
+        hlayout.io.sidecar) -- the technology (layer stack/tech params,
+        including any saved Resistor Designer rules) and a full embedded
+        copy of every attached library, so File > Open GDS... later
+        restores all of it, not just the geometry."""
+        path = self.current_path or filedialog.asksaveasfilename(
+            defaultextension=".gds", filetypes=[("GDSII", "*.gds")])
+        if not path:
+            return
+        try:
+            self.session.save_design(path)
+        except LayoutError as e:
+            dialogs.show_error("Save failed", str(e), parent=self)
+            return
+        self.current_path = path
+        self.status.set(f"saved {path} (+ technology/attached-libraries sidecar)")
+
+    def new_view_window(self):
+        ViewWindow(self, self.session.library, title=f"View - {self.session.current_cell_name}",
+                   checkpoint=self.session.checkpoint)
+
+    def save_as_library(self):
+        """Save the current design to a GDSII file under a chosen library
+        name — the way to publish it as a reusable reference library
+        that can later be picked up with Attach Library."""
+        name = simpledialog.askstring(
+            "Save As Library", "Library name:", initialvalue=self.session.library.name, parent=self
+        )
+        if not name:
+            return
+        path = filedialog.asksaveasfilename(defaultextension=".gds", filetypes=[("GDSII", "*.gds")])
+        if not path:
+            return
+        try:
+            self.session.save(path, library_name=name)
+        except LayoutError as e:
+            dialogs.show_error("Save As Library failed", str(e), parent=self)
+            return
+        self.status.set(f"saved library {name!r} to {path}")
+
+    def export_gerber(self):
+        """Export the current cell as Gerber RS-274X -- one flattened
+        file per visible layer that has data, named
+        <prefix>_L<NN>_<layer name>.gbr. Prompts for a base filename
+        (the prefix); the layer files are written alongside it."""
+        path = filedialog.asksaveasfilename(
+            title="Export Gerber", defaultextension="",
+            filetypes=[("All files", "*.*")],
+            initialfile=self.session.library.name,
+        )
+        if not path:
+            return
+        try:
+            written, skipped_text = self.session.export_gerber(path)
+        except LayoutError as e:
+            dialogs.show_error("Export Gerber failed", str(e), parent=self)
+            return
+        if not written:
+            dialogs.show_info("Export Gerber", "No visible layers had any data to export.", parent=self)
+            return
+        names = "\n".join(f"  L{n}: {os.path.basename(p)}" for n, p in written)
+        note = (f"\n\n{skipped_text} text shape(s) were skipped -- "
+                f"Gerber has no text primitive." if skipped_text else "")
+        dialogs.show_info("Export Gerber", f"Wrote {len(written)} file(s):\n{names}{note}", parent=self)
+        self.status.set(f"exported {len(written)} Gerber file(s) to {os.path.dirname(path) or '.'}")
+
+    def attach_library(self):
+        path = filedialog.askopenfilename(filetypes=[("GDSII", "*.gds"), ("All files", "*.*")])
+        if not path:
+            return
+        try:
+            lib = self.session.attach_library(path)
+        except LayoutError as e:
+            dialogs.show_error("Attach Library failed", str(e), parent=self)
+            return
+        idx = len(self.session.attached_libraries) - 1
+        self.status.set(f"attached library {idx}: {lib.name!r} ({len(lib.cells)} cells)")
+
+    def load_technology_file(self):
+        """Load a technology file (layer stack + global parameters,
+        see hlayout/io/techfile.py) and apply it to the current
+        design's layer stack, in place. Meant to be done once at the
+        start of a design, but can be re-run any time -- e.g. to pick
+        up an updated process technology mid-design."""
+        path = filedialog.askopenfilename(
+            filetypes=[("Technology files", "*.json"), ("All files", "*.*")])
+        if not path:
+            return
+        try:
+            data = self.session.load_technology(path)
+        except LayoutError as e:
+            dialogs.show_error("Load Technology File failed", str(e), parent=self)
+            return
+        self.refresh_all()
+        self._reload_route_settings_from_library()
+        n_layers = len(data.get("layers", []))
+        n_params = len(data.get("params", {}))
+        self.status.set(f"loaded technology from {path} ({n_layers} layers, {n_params} params)")
+
+    def save_technology_file(self):
+        """Save the current design's layer stack + global parameters
+        out as a technology file, independent of saving the design
+        itself -- e.g. to capture layer edits made in this design as
+        the starting point for the next one."""
+        path = filedialog.asksaveasfilename(
+            defaultextension=".json", filetypes=[("Technology files", "*.json")])
+        if not path:
+            return
+        try:
+            self.session.save_technology(path)
+        except LayoutError as e:
+            dialogs.show_error("Save Technology File failed", str(e), parent=self)
+            return
+        self.status.set(f"saved technology to {path}")
+
+    def show_remap_layers_dialog(self):
+        """Setup > Remap Layers...: bulk-reassign shapes from one layer
+        to another, across every cell in the library by default. The
+        usual reason to do this is bringing an existing design's
+        geometry into alignment with a layer stack just loaded from a
+        technology file (Setup > Load Technology File...) -- e.g. this
+        design's old layer 3 should really be layer 7 in the target
+        process. Backed by Session.remap_layers(); same operation as
+        the LAYER MOVE <from> <to> command."""
+        win = tk.Toplevel(self)
+        win.title("Remap Layers")
+        win.transient(self)
+        win.grab_set()
+        win.resizable(False, False)
+
+        ttk.Label(
+            win,
+            text="Move every shape on one layer to another, across the whole "
+                 "library. Add one row per layer you want to reassign, then "
+                 "click Apply.",
+            wraplength=420, justify="left",
+        ).pack(anchor="w", padx=12, pady=(12, 6))
+
+        rows_frame = ttk.Frame(win)
+        rows_frame.pack(padx=12, fill="x")
+
+        header = ttk.Frame(rows_frame)
+        header.pack(fill="x")
+        ttk.Label(header, text="From layer", width=18).pack(side="left")
+        ttk.Label(header, text="To layer", width=18).pack(side="left")
+
+        rows = []
+
+        def layer_choices():
+            return [f"{n} ({self.session.library.layers[n].name})"
+                    for n in range(len(self.session.library.layers))]
+
+        def add_row(from_default="", to_default=""):
+            row = ttk.Frame(rows_frame)
+            row.pack(fill="x", pady=2)
+            from_var = tk.StringVar(value=from_default)
+            to_var = tk.StringVar(value=to_default)
+            choices = layer_choices()
+            from_combo = ttk.Combobox(row, textvariable=from_var, width=18,
+                                       state="readonly", values=choices)
+            from_combo.pack(side="left", padx=(0, 4))
+            to_combo = ttk.Combobox(row, textvariable=to_var, width=18,
+                                     state="readonly", values=choices)
+            to_combo.pack(side="left", padx=(0, 4))
+
+            def remove_row():
+                row.destroy()
+                rows.remove(entry)
+
+            remove_btn = ttk.Button(row, text="Remove", command=remove_row)
+            remove_btn.pack(side="left")
+            entry = (from_var, to_var)
+            rows.append(entry)
+
+        add_row()
+
+        ttk.Button(win, text="+ Add Row", command=lambda: add_row()).pack(
+            anchor="w", padx=12, pady=(4, 8))
+
+        scope_row = ttk.Frame(win)
+        scope_row.pack(fill="x", padx=12)
+        ttk.Label(scope_row, text="Apply to:").pack(side="left")
+        scope_var = tk.StringVar(value="Whole library (every cell)")
+        cell_names = list(self.session.library.cells.keys())
+        scope_combo = ttk.Combobox(
+            scope_row, textvariable=scope_var, state="readonly", width=28,
+            values=["Whole library (every cell)"] + cell_names,
+        )
+        scope_combo.pack(side="left", padx=6)
+
+        error_var = tk.StringVar(value="")
+        ttk.Label(win, textvariable=error_var, foreground="red", wraplength=420,
+                  justify="left").pack(anchor="w", padx=12)
+
+        def apply_and_close():
+            mapping = {}
+            for from_var, to_var in rows:
+                fv, tv = from_var.get().strip(), to_var.get().strip()
+                if not fv or not tv:
+                    continue
+                from_num = int(fv.split(" ", 1)[0])
+                to_num = int(tv.split(" ", 1)[0])
+                mapping[from_num] = to_num
+            if not mapping:
+                error_var.set("Add at least one From/To layer pair.")
+                return
+            scope = scope_var.get()
+            cell_names_arg = None if scope.startswith("Whole library") else [scope]
+            try:
+                counts = self.session.remap_layers(mapping, cell_names=cell_names_arg)
+            except LayoutError as e:
+                error_var.set(str(e))
+                return
+            self.refresh_all()
+            moved = sum(counts.values())
+            self.status.set(f"remap layers: moved {moved} shape(s)")
+            win.destroy()
+
+        btn_row = ttk.Frame(win)
+        btn_row.pack(pady=(6, 12))
+        ttk.Button(btn_row, text="Apply", command=apply_and_close).pack(side="left", padx=6)
+        ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=6)
+
+        win.bind("<Escape>", lambda e: win.destroy())
+
+    def show_mask_op_dialog(self):
+        """Tools > Mask Operations...: layer-based OVERSIZE/UNDERSIZE/
+        AND/OR/NOT/XOR -- similar to a GDSII CAM system's resize/boolean
+        deck operators. Grows or shrinks a layer by a fixed amount, or
+        combines two layers with a boolean intersection/union/
+        difference/symmetric-difference, writing the result as new
+        polygons on a target layer (which may be the same layer or a
+        fresh one). Any Path on an input layer is converted to its
+        stroked-outline polygon first. Backed by Session.mask_op(); same
+        operation as the MASKOP command-bar command. Requires the
+        shapely package -- Session.mask_op() raises a clear error if it
+        isn't installed."""
+        win = tk.Toplevel(self)
+        win.title("Mask Operations")
+        win.transient(self)
+        win.grab_set()
+        win.resizable(False, False)
+
+        ttk.Label(
+            win,
+            text="Grow/shrink a layer (OVERSIZE/UNDERSIZE), or combine two "
+                 "layers (AND=intersection, OR=union, NOT=A minus B, "
+                 "XOR=symmetric difference), writing the result as new "
+                 "polygons on a target layer. Paths on the input layer(s) "
+                 "are converted to their stroked outline first.",
+            wraplength=420, justify="left",
+        ).pack(anchor="w", padx=12, pady=(12, 6))
+
+        def layer_choices():
+            return [f"{n} ({self.session.library.layers[n].name})"
+                    for n in range(len(self.session.library.layers))]
+
+        form = ttk.Frame(win)
+        form.pack(padx=12, fill="x")
+
+        ttk.Label(form, text="Operation:").grid(row=0, column=0, sticky="e", padx=4, pady=4)
+        op_var = tk.StringVar(value=MASK_OPS[0])
+        op_combo = ttk.Combobox(form, textvariable=op_var, width=16, state="readonly",
+                                 values=list(MASK_OPS))
+        op_combo.grid(row=0, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="Layer A:").grid(row=1, column=0, sticky="e", padx=4, pady=4)
+        a_var = tk.StringVar(value="")
+        a_combo = ttk.Combobox(form, textvariable=a_var, width=22, state="readonly",
+                                values=layer_choices())
+        a_combo.grid(row=1, column=1, sticky="w", padx=4, pady=4)
+
+        b_label = ttk.Label(form, text="Layer B:")
+        b_label.grid(row=2, column=0, sticky="e", padx=4, pady=4)
+        b_var = tk.StringVar(value="")
+        b_combo = ttk.Combobox(form, textvariable=b_var, width=22, state="readonly",
+                                values=layer_choices())
+        b_combo.grid(row=2, column=1, sticky="w", padx=4, pady=4)
+
+        amount_label = ttk.Label(form, text="Amount (mm):")
+        amount_label.grid(row=3, column=0, sticky="e", padx=4, pady=4)
+        amount_var = tk.DoubleVar(value=0.0)
+        amount_spin = ttk.Spinbox(form, from_=0.0, to=1e6, increment=0.001, textvariable=amount_var, width=14)
+        amount_spin.grid(row=3, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="Result layer:").grid(row=4, column=0, sticky="e", padx=4, pady=4)
+        result_var = tk.StringVar(value="")
+        result_combo = ttk.Combobox(form, textvariable=result_var, width=22, state="readonly",
+                                     values=layer_choices())
+        result_combo.grid(row=4, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="Apply to:").grid(row=5, column=0, sticky="e", padx=4, pady=4)
+        scope_var = tk.StringVar(value="Current cell")
+        cell_names = list(self.session.library.cells.keys())
+        scope_combo = ttk.Combobox(form, textvariable=scope_var, state="readonly", width=22,
+                                    values=["Current cell"] + cell_names)
+        scope_combo.grid(row=5, column=1, sticky="w", padx=4, pady=4)
+
+        # On by default -- most real content in a design ends up placed
+        # via Sref rather than drawn straight into the cell being
+        # operated on (every resistor the Resistor Designer places is
+        # its own device cell + a single Sref), so a mask op that only
+        # looked at the operated-on cell's own shapes would silently
+        # find nothing to work with for a design built that way.
+        flatten_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            form, text="Include placed cells (Sref) when gathering input geometry",
+            variable=flatten_var,
+        ).grid(row=6, column=0, columnspan=2, sticky="w", padx=4, pady=(0, 4))
+
+        ttk.Label(form, text="Simplify (mm, 0=off):").grid(
+            row=7, column=0, sticky="e", padx=4, pady=4)
+        simplify_var = tk.DoubleVar(value=0.0)
+        ttk.Spinbox(form, from_=0.0, to=1e6, increment=0.001, textvariable=simplify_var, width=14).grid(
+            row=7, column=1, sticky="w", padx=4, pady=4)
+
+        BOOLEAN_OPS = ("AND", "OR", "NOT", "XOR")
+
+        def sync_fields(event=None):
+            op = op_var.get()
+            is_boolean = op in BOOLEAN_OPS
+            b_combo.configure(state="readonly" if is_boolean else "disabled")
+            amount_spin.configure(state="disabled" if is_boolean else "normal")
+
+        op_combo.bind("<<ComboboxSelected>>", sync_fields)
+        sync_fields()
+
+        error_var = tk.StringVar(value="")
+        ttk.Label(win, textvariable=error_var, foreground="red", wraplength=420,
+                  justify="left").pack(anchor="w", padx=12)
+
+        def layer_num(text):
+            return int(text.split(" ", 1)[0]) if text.strip() else None
+
+        def apply_and_close():
+            op = op_var.get()
+            a_layer = layer_num(a_var.get())
+            result_layer = layer_num(result_var.get())
+            if a_layer is None or result_layer is None:
+                error_var.set("Pick Layer A and a Result layer.")
+                return
+            kwargs = {"flatten": flatten_var.get()}
+            scope = scope_var.get()
+            if scope != "Current cell":
+                kwargs["cell_names"] = [scope]
+            try:
+                simplify = mm_to_dbu(simplify_var.get())
+            except tk.TclError:
+                simplify = 0
+            if simplify > 0:
+                kwargs["simplify"] = simplify
+            if op in BOOLEAN_OPS:
+                b_layer = layer_num(b_var.get())
+                if b_layer is None:
+                    error_var.set(f"Pick Layer B for {op}.")
+                    return
+                kwargs["layer_b"] = b_layer
+            else:
+                try:
+                    amount = mm_to_dbu(amount_var.get())
+                except tk.TclError:
+                    error_var.set("Amount must be a number.")
+                    return
+                if amount <= 0:
+                    error_var.set("Amount must be greater than zero.")
+                    return
+                kwargs["amount"] = amount
+            try:
+                written = self.session.mask_op(op, a_layer, result_layer, **kwargs)
+            except LayoutError as e:
+                error_var.set(str(e))
+                return
+            total = sum(written.values())
+            made_visible = False
+            if total > 0:
+                # A mask op writing real output straight to a layer whose
+                # visibility happens to be off is otherwise
+                # indistinguishable from writing nothing at all -- the
+                # canvas looks identical either way. Since the whole point
+                # of running the operation was to see the result, turn the
+                # result layer on rather than leaving it silently hidden.
+                result_layer_obj = self.session.library.layers[result_layer]
+                if not result_layer_obj.visible:
+                    result_layer_obj.visible = True
+                    made_visible = True
+            self.refresh_all()
+            if total == 0:
+                self.status.set(
+                    f"{op}: no output -- layer {a_layer} had nothing on it"
+                    f"{'' if flatten_var.get() else ' (try Include placed cells)'}"
+                )
+            else:
+                msg = f"{op}: wrote {total} polygon(s) to layer {result_layer}"
+                if made_visible:
+                    msg += " (layer visibility turned on)"
+                self.status.set(msg)
+            win.destroy()
+
+        btn_row = ttk.Frame(win)
+        btn_row.pack(pady=(6, 12))
+        ttk.Button(btn_row, text="Apply", command=apply_and_close).pack(side="left", padx=6)
+        ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=6)
+
+        win.bind("<Escape>", lambda e: win.destroy())
+
+    def show_via_wizard(self):
+        """Tools > Via Wizard...: create a via cell -- a square or round
+        pad drawn on two layers, representing the contact area where a
+        via connects them -- and save it directly into an attached
+        reference library's own file, so it becomes a reusable part
+        (rather than something that only lives in this design). Backed
+        by Session.create_via_cell(); same operation as the command bar's
+        VIA <layer1> <layer2> ... command."""
+        if not self.session.attached_libraries:
+            dialogs.show_info(
+                "Via Wizard",
+                "No library is attached yet. Use Setup > Attach Library... to "
+                "attach the GDSII file the via should be saved into, then try "
+                "the Via Wizard again.",
+                parent=self,
+            )
+            return
+
+        win = tk.Toplevel(self)
+        win.title("Via Wizard")
+        win.transient(self)
+        win.grab_set()
+        win.resizable(False, False)
+
+        ttk.Label(
+            win,
+            text="Create a via cell -- a square or round pad drawn on both "
+                 "layers -- and save it into an attached library.",
+            wraplength=380, justify="left",
+        ).pack(anchor="w", padx=12, pady=(12, 8))
+
+        form = ttk.Frame(win)
+        form.pack(padx=12, fill="x")
+
+        def layer_choices():
+            return [f"{n} ({self.session.library.layers[n].name})"
+                    for n in range(len(self.session.library.layers))]
+
+        row = 0
+        ttk.Label(form, text="Shape:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        shape_var = tk.StringVar(value="square")
+        shape_row = ttk.Frame(form)
+        shape_row.grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        ttk.Radiobutton(shape_row, text="Square", value="square", variable=shape_var).pack(side="left")
+        ttk.Radiobutton(shape_row, text="Round", value="round", variable=shape_var).pack(side="left", padx=(8, 0))
+        row += 1
+
+        ttk.Label(form, text="Size (mm):").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        size_var = tk.DoubleVar(value=dbu_to_mm(100))
+        ttk.Spinbox(form, from_=0.001, to=100.0, increment=0.001, width=10, textvariable=size_var).grid(
+            row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+
+        choices = layer_choices()
+        ttk.Label(form, text="Layer 1:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        layer1_var = tk.StringVar(value=choices[0])
+        ttk.Combobox(form, textvariable=layer1_var, width=20, state="readonly",
+                     values=choices).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+
+        ttk.Label(form, text="Layer 2:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        layer2_var = tk.StringVar(value=choices[1] if len(choices) > 1 else choices[0])
+        ttk.Combobox(form, textvariable=layer2_var, width=20, state="readonly",
+                     values=choices).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+
+        lib_choices = [f"[{l['index']}] {l['name']} ({l['path']})"
+                       for l in self.session.list_attached_libraries()]
+        ttk.Label(form, text="Save to library:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        lib_var = tk.StringVar(value=lib_choices[0])
+        lib_combo = ttk.Combobox(form, textvariable=lib_var, width=28, state="readonly",
+                                  values=lib_choices)
+        lib_combo.grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        if len(lib_choices) == 1:
+            lib_combo.configure(state="disabled")
+        row += 1
+
+        error_var = tk.StringVar(value="")
+        ttk.Label(win, textvariable=error_var, foreground="red", wraplength=380,
+                  justify="left").pack(anchor="w", padx=12)
+
+        def create_and_close():
+            n1 = int(layer1_var.get().split(" ", 1)[0])
+            n2 = int(layer2_var.get().split(" ", 1)[0])
+            index = int(lib_var.get().split("]", 1)[0].lstrip("["))
+            try:
+                size = mm_to_dbu(float(size_var.get()))
+            except (tk.TclError, ValueError):
+                error_var.set("Size must be a number.")
+                return
+            if size <= 0:
+                error_var.set("Size must be a positive number.")
+                return
+
+            def do_create(overwrite):
+                return self.session.create_via_cell(
+                    n1, n2, shape=shape_var.get(), size=size, index=index, overwrite=overwrite
+                )
+
+            try:
+                name, path = do_create(overwrite=False)
+            except LayoutError as e:
+                if "already exists" in str(e):
+                    if dialogs.ask_yes_no(
+                        "Via Wizard",
+                        f"A via cell named {f'VIA_Layer{n1}_to_Layer{n2}'!r} already "
+                        "exists in that library. Replace it?",
+                        parent=self,
+                    ):
+                        try:
+                            name, path = do_create(overwrite=True)
+                        except LayoutError as e2:
+                            error_var.set(str(e2))
+                            return
+                    else:
+                        return
+                else:
+                    error_var.set(str(e))
+                    return
+            self.refresh_all()
+            self.status.set(f"created via cell {name!r}, saved to {path}")
+            win.destroy()
+
+        btn_row = ttk.Frame(win)
+        btn_row.pack(pady=(6, 12))
+        ttk.Button(btn_row, text="Create", command=create_and_close).pack(side="left", padx=6)
+        ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=6)
+
+        win.bind("<Escape>", lambda e: win.destroy())
+
+    def show_attached_libraries(self):
+        libs = self.session.list_attached_libraries()
+        if not libs:
+            dialogs.show_info("Attached Libraries", "No libraries attached (up to 2 allowed).", parent=self)
+            return
+        text = "\n\n".join(
+            f"[{l['index']}] {l['name']}  ({l['cells']} cells)\n{l['path']}" for l in libs
+        )
+        dialogs.show_info("Attached Libraries", text, parent=self)
+
+    def find_and_place_cell(self):
+        win = tk.Toplevel(self)
+        win.title("Find & Place Cell")
+        win.geometry("420x440")
+
+        ttk.Label(win, text="Search cell/Sref name:").pack(anchor="w", padx=8, pady=(8, 0))
+        query_var = tk.StringVar()
+        entry = ttk.Entry(win, textvariable=query_var)
+        entry.pack(fill="x", padx=8)
+
+        listbox = tk.Listbox(win)
+        listbox.pack(fill="both", expand=True, padx=8, pady=8)
+        matches = []
+
+        def do_search(event=None):
+            matches[:] = self.session.find_cells(query_var.get())
+            listbox.delete(0, tk.END)
+            for m in matches:
+                src = "current" if m["source"] == "current" else f"lib {m['source']}"
+                listbox.insert(tk.END, f"{m['name']}  ({src})")
+
+        entry.bind("<Return>", do_search)
+        entry.bind("<KeyRelease>", do_search)
+        entry.focus_set()
+        do_search()
+
+        coord_row = ttk.Frame(win)
+        coord_row.pack(fill="x", padx=8, pady=(0, 8))
+        ttk.Label(coord_row, text="Place at x,y:").pack(side="left")
+        coord_var = tk.StringVar(value="0,0")
+        ttk.Entry(coord_row, textvariable=coord_var, width=16).pack(side="left", padx=4)
+
+        def do_place(event=None):
+            sel = listbox.curselection()
+            if not sel:
+                dialogs.show_error("Find & Place Cell", "Select a cell from the list first.", parent=self)
+                return
+            m = matches[sel[0]]
+            try:
+                origin = _parse_point(coord_var.get())
+            except CommandError as e:
+                dialogs.show_error("Find & Place Cell", str(e), parent=self)
+                return
+            try:
+                self.session.place_cell(m["name"], origin, source=m["source"])
+            except LayoutError as e:
+                dialogs.show_error("Find & Place Cell", str(e), parent=self)
+                return
+            # Placing a cell should make everything in it visible right
+            # away, not leave it off-screen until the user separately
+            # hits Fit — so refresh the panels, then fit the view to
+            # include the newly placed geometry.
+            self.refresh_all()
+            self.canvas.fit_view()
+            win.destroy()
+
+        # Selecting a match and confirming with double-click or Enter
+        # places it directly, without needing to also click the button.
+        listbox.bind("<Double-Button-1>", do_place)
+        listbox.bind("<Return>", do_place)
+
+        ttk.Button(win, text="Place", command=do_place).pack(padx=8, pady=(0, 8))
+
+    def show_command_reference(self):
+        """The same categorized command list the command bar's HELP
+        command prints, shown as a scrollable, read-only dialog — so the
+        whole command structure is discoverable from the GUI itself."""
+        win = tk.Toplevel(self)
+        win.title("Command Reference")
+        win.geometry("760x520")
+
+        text_frame = ttk.Frame(win)
+        text_frame.pack(fill="both", expand=True, padx=8, pady=8)
+        hbar = ttk.Scrollbar(text_frame, orient="horizontal")
+        text = tk.Text(text_frame, wrap="none", bg="#111", fg="#ddd", insertbackground="#ddd",
+                        font=("TkFixedFont",), xscrollcommand=hbar.set)
+        hbar.config(command=text.xview)
+        hbar.pack(side="bottom", fill="x")
+        text.pack(fill="both", expand=True)
+        text.insert("1.0", COMMAND_REFERENCE)
+        text.configure(state="disabled")
+
+        ttk.Button(win, text="Close", command=win.destroy).pack(pady=(0, 8))
+
+    def refresh_all(self):
+        self.canvas.redraw()
+        self._refresh_cell_list()
+        self._refresh_layer_choices()
+        if hasattr(self, "layer_panel"):
+            self.layer_panel.sync()
+        self._update_properties_panel()
+
+    def _update_properties_panel(self):
+        """Refresh the Properties tab with a description of whatever is
+        currently selected on the canvas -- wired as canvas.on_select
+        (fires on every click/deselect/window-select) and called from
+        refresh_all() so it also stays current after undo/redo, opening
+        a file, switching cells, etc. See canvas.describe_selection()
+        for the actual formatting, shared with the PROPS command."""
+        if not hasattr(self, "props_text"):
+            return
+        text = describe_selection(self.canvas)
+        self.props_text.config(state="normal")
+        self.props_text.delete("1.0", "end")
+        self.props_text.insert("1.0", text)
+        self.props_text.config(state="disabled")
+
+    def _on_quit(self):
+        self.destroy()
+
+
+def main():
+    app = App()
+    app.mainloop()
+
+
+if __name__ == "__main__":
+    main()

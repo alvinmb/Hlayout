@@ -1,0 +1,213 @@
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from hlayout.core.units import mm_to_dbu
+from hlayout.gui.commands import CommandInterpreter
+from hlayout.io.sidecar import load_design, sidecar_path
+from hlayout.io.techfile import load_resistor_design_rules, save_resistor_design_rules
+from hlayout.scripting import Session
+from hlayout.scripting.console import ScriptConsole
+
+
+def _make_part_library(path, cell_name="PAD"):
+    s = Session.new("PARTLIB")
+    s.new_cell(cell_name)
+    s.rect(0, 0, 0, 10, 10)
+    s.save(str(path))
+    return str(path)
+
+
+def test_save_design_writes_a_sidecar_next_to_the_gds(tmp_path):
+    s = Session.new("DEMO")
+    s.new_cell("TOP")
+    s.rect(0, 0, 0, 10, 10)
+    path = str(tmp_path / "design.gds")
+
+    s.save_design(path)
+
+    assert os.path.exists(path)
+    assert os.path.exists(sidecar_path(path))
+
+
+def test_open_design_restores_technology_layer_stack(tmp_path):
+    s = Session.new("DEMO")
+    s.new_cell("TOP")
+    s.library.layers.set_style(5, name="VIA1", color="#00ff00", visible=False)
+    path = str(tmp_path / "design.gds")
+    s.save_design(path)
+
+    s2 = Session.open_design(path)
+
+    assert s2.library.layers[5].name == "VIA1"
+    assert s2.library.layers[5].color == "#00ff00"
+    assert s2.library.layers[5].visible is False
+
+
+def test_open_design_restores_resistor_rules_end_to_end(tmp_path):
+    s = Session.new("DEMO")
+    s.new_cell("TOP")
+    save_resistor_design_rules(s.library, {
+        "aim_pct": 60.0, "ar_min": 0.5, "ar_max": 2.0,
+        "available_inks": [10, 100, 1000],
+    })
+    path = str(tmp_path / "design.gds")
+    s.save_design(path)
+
+    s2 = Session.open_design(path)
+    rules = load_resistor_design_rules(s2.library)
+    assert rules["aim_pct"] == 60.0
+    assert rules["available_inks"] == [10, 100, 1000]
+
+
+def test_open_design_restores_attached_libraries_even_if_source_moved(tmp_path):
+    part_path = _make_part_library(tmp_path / "part.gds")
+    s = Session.new("DEMO")
+    s.new_cell("TOP")
+    s.attach_library(part_path)
+    design_path = str(tmp_path / "design.gds")
+    s.save_design(design_path)
+
+    # Simulate the original attached library no longer being reachable --
+    # the sidecar embeds a full copy, so this must not matter.
+    os.remove(part_path)
+
+    s2 = Session.open_design(design_path)
+
+    assert not s2.attach_errors
+    assert len(s2.attached_libraries) == 1
+    assert "PAD" in s2.attached_libraries[0].cells
+
+
+def test_open_design_with_no_sidecar_behaves_like_plain_open(tmp_path):
+    s = Session.new("DEMO")
+    s.new_cell("TOP")
+    s.rect(0, 0, 0, 10, 10)
+    path = str(tmp_path / "bare.gds")
+    s.save(path)  # plain save() -- no sidecar written
+
+    s2 = Session.open_design(path)
+
+    assert s2.had_sidecar is False
+    assert s2.attached_libraries == []
+    assert len(s2.library.cells["TOP"].shapes) == 1
+
+
+def test_gerber_style_gerber_untouched_by_sidecar_addition(tmp_path):
+    # Sanity check that adding sidecar support didn't disturb the
+    # separate Gerber export path.
+    from hlayout.io import write_gerber_layers
+    s = Session.new("DEMO")
+    s.new_cell("TOP")
+    s.rect(0, 0, 0, mm_to_dbu(1), mm_to_dbu(1))
+    written, _ = write_gerber_layers(s.library, "TOP", str(tmp_path / "gb"))
+    assert len(written) == 1
+
+
+def test_save_command_writes_sidecar_when_no_library_name_given(tmp_path):
+    s = Session.new("DEMO")
+    s.new_cell("TOP")
+    s.library.layers.set_style(2, name="METAL2")
+    interp = CommandInterpreter(s, ScriptConsole(s))
+    path = str(tmp_path / "cmd_design.gds")
+
+    out = interp.run(f"SAVE {path}")
+
+    assert "sidecar" in out
+    assert os.path.exists(sidecar_path(path))
+
+
+def test_save_command_with_library_name_does_not_write_sidecar(tmp_path):
+    s = Session.new("DEMO")
+    s.new_cell("TOP")
+    interp = CommandInterpreter(s, ScriptConsole(s))
+    path = str(tmp_path / "cmd_lib.gds")
+
+    out = interp.run(f"SAVE {path} PARTLIB")
+
+    assert "as library" in out
+    assert not os.path.exists(sidecar_path(path))
+
+
+def test_open_command_restores_technology_and_attached_libraries(tmp_path):
+    part_path = _make_part_library(tmp_path / "part2.gds")
+    s = Session.new("DEMO")
+    s.new_cell("TOP")
+    s.attach_library(part_path)
+    s.library.layers.set_style(3, name="OXIDE")
+    design_path = str(tmp_path / "cmd_open_design.gds")
+    s.save_design(design_path)
+
+    s2 = Session.new("OTHER")
+    s2.new_cell("TOP")
+    interp = CommandInterpreter(s2, ScriptConsole(s2))
+    out = interp.run(f"OPEN {design_path}")
+
+    assert "restored technology" in out
+    assert s2.library.layers[3].name == "OXIDE"
+    assert len(s2.attached_libraries) == 1
+
+
+def test_load_design_missing_file_raises_clean_error():
+    import pytest
+    from hlayout.core.errors import LayoutError
+    with pytest.raises(LayoutError):
+        load_design("/nonexistent/path/does_not_exist.gds")
+
+
+def _make_app():
+    import pytest as _pytest
+    import tkinter as _tk
+    _pytest.importorskip("tkinter")
+    from hlayout.core.library import Library
+    from hlayout.gui.app import App
+    lib = Library("APPTEST")
+    lib.new_cell("TOP")
+    try:
+        app = App(lib)
+    except _tk.TclError as e:
+        _pytest.skip(f"no display available: {e}")
+    app.update()
+    return app
+
+
+def test_app_save_gds_then_open_gds_round_trips_technology_and_attachments(tmp_path, monkeypatch):
+    part_path = _make_part_library(tmp_path / "apppart.gds")
+    app = _make_app()
+    try:
+        app.session.rect(0, 0, 0, 10, 10)
+        app.session.attach_library(part_path)
+        app.session.library.layers.set_style(7, name="PASSIVATION", color="#123456")
+        design_path = str(tmp_path / "app_design.gds")
+
+        from hlayout.gui import app as app_module
+        monkeypatch.setattr(app_module.filedialog, "asksaveasfilename", lambda **kw: design_path)
+        app.save_gds()
+        assert os.path.exists(sidecar_path(design_path))
+
+        # Open a blank document, then reopen the saved design and confirm
+        # everything comes back -- technology, attached library, geometry.
+        app.new_library()
+        assert app.session.attached_libraries == []
+        monkeypatch.setattr(app_module.filedialog, "askopenfilename", lambda **kw: design_path)
+        app.open_gds()
+
+        assert app.session.library.layers[7].name == "PASSIVATION"
+        assert len(app.session.attached_libraries) == 1
+        assert "PAD" in app.session.attached_libraries[0].cells
+    finally:
+        app.destroy()
+
+
+def test_app_new_library_clears_attached_libraries(tmp_path):
+    part_path = _make_part_library(tmp_path / "clearpart.gds")
+    app = _make_app()
+    try:
+        app.session.attach_library(part_path)
+        assert len(app.session.attached_libraries) == 1
+        app.new_library()
+        assert app.session.attached_libraries == []
+        assert app.session._attached_paths == []
+    finally:
+        app.destroy()
