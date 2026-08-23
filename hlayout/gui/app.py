@@ -266,6 +266,7 @@ class App(tk.Tk):
         filem.add_command(label="Save As Library...", command=self.save_as_library)
         filem.add_separator()
         filem.add_command(label="Export Gerber...", command=self.export_gerber)
+        filem.add_command(label="Export DXF...", command=self.export_dxf)
         filem.add_separator()
         filem.add_command(label="Exit", command=self._on_quit)
 
@@ -344,6 +345,7 @@ class App(tk.Tk):
         toolsm.add_command(label="DRC...", command=lambda: open_drc_window(self))
         toolsm.add_separator()
         toolsm.add_command(label="Export Gerber...", command=self.export_gerber)
+        toolsm.add_command(label="Export DXF...", command=self.export_dxf)
 
         # --- Help ----------------------------------------------------------
         helpm = add_menu("Help")
@@ -1421,6 +1423,34 @@ class App(tk.Tk):
                 f"Gerber has no text primitive." if skipped_text else "")
         dialogs.show_info("Export Gerber", f"Wrote {len(written)} file(s):\n{names}{note}", parent=self)
         self.status.set(f"exported {len(written)} Gerber file(s) to {os.path.dirname(path) or '.'}")
+
+    def export_dxf(self):
+        """Export the current cell as a single DXF (AutoCAD R2000) file,
+        with one DXF layer per hlayout layer that's visible and has
+        data. Unlike Export Gerber, Text shapes are included -- DXF has
+        a native text entity."""
+        path = filedialog.asksaveasfilename(
+            title="Export DXF", defaultextension=".dxf",
+            filetypes=[("DXF", "*.dxf"), ("All files", "*.*")],
+            initialfile=self.session.library.name,
+        )
+        if not path:
+            return
+        try:
+            written, entity_count = self.session.export_dxf(path)
+        except LayoutError as e:
+            dialogs.show_error("Export DXF failed", str(e), parent=self)
+            return
+        if not written:
+            dialogs.show_info("Export DXF", "No visible layers had any data to export.", parent=self)
+            return
+        names = ", ".join(f"L{n}" for n in written)
+        dialogs.show_info(
+            "Export DXF",
+            f"Wrote {entity_count} entity(ies) across {len(written)} layer(s) ({names})\nto {os.path.basename(path)}",
+            parent=self,
+        )
+        self.status.set(f"exported DXF ({entity_count} entities, {len(written)} layers) to {path}")
 
     def attach_library(self):
         path = filedialog.askopenfilename(filetypes=[("GDSII", "*.gds"), ("All files", "*.*")])

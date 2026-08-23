@@ -35,6 +35,7 @@ from ..core.maskops import (
     shapely_to_polygons,
     size_geometry,
 )
+from ..io.dxfio import write_dxf
 from ..io.gdsio import load_gds, save_gds
 from ..io.gerberio import write_gerber_layers
 from ..io.sidecar import load_design, save_design
@@ -142,6 +143,23 @@ class Session:
         if name is None:
             raise LibraryError("no current cell to export")
         return write_gerber_layers(self.library, name, out_prefix, layers=layers)
+
+    def export_dxf(self, path: str, cell_name: Optional[str] = None,
+                    layers: Optional[List[int]] = None):
+        """Export the design (default: the current cell) as a single DXF
+        (AutoCAD R2000) file at ``path``, with one DXF layer per hlayout
+        layer that's visible and has data. Like export_gerber(), every
+        Sref is flattened rather than round-tripped -- but unlike Gerber,
+        DXF has a native TEXT entity, so Text shapes are included, not
+        skipped.
+
+        `layers`, if given, restricts export to that subset of layer
+        numbers. Returns (written_layers, entity_count) -- see
+        hlayout.io.dxfio.write_dxf for details."""
+        name = cell_name or self.current_cell_name
+        if name is None:
+            raise LibraryError("no current cell to export")
+        return write_dxf(self.library, name, path, layers=layers)
 
     # --- technology file ---------------------------------------------------
     def load_technology(self, path: str) -> dict:

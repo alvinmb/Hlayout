@@ -12,6 +12,7 @@ import sys
 
 from hlayout.core.errors import LayoutError
 from hlayout.gui.app import App
+from hlayout.gui.splash import show_splash
 from hlayout.io.sidecar import load_design
 
 
@@ -65,6 +66,7 @@ def _set_windows_dpi_awareness():
 
 def main():
     _set_windows_dpi_awareness()
+    show_splash()  # ~5s branded splash, shown once before the main window
     library = None
     attached_libraries = None
     attached_paths = None
