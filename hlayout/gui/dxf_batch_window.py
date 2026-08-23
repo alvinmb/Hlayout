@@ -17,11 +17,12 @@ window (and unlike the mask-op batch window), job order doesn't matter
 -- a DXF export never modifies the design, only writes a file, so
 there's no Move Up/Move Down here.
 
-This is a second, saved-set-oriented entry point alongside the existing
-single-shot File/Tools > Export DXF... command (App.export_dxf) -- that
-one-off dialog is still the quickest way to export once by hand; this
-window is for a repeatable set of exports you want to save and re-run
-together.
+There's no separate single-shot File/Tools > Export DXF... command any
+more -- "Quick Export (All Layers)..." on this window's toolbar covers
+that same one-off case (prompts for an output file, exports every
+visible layer with data, no saved job needed) so this one window
+covers both the quick one-off export and a repeatable saved set you can
+re-run together with Run All Jobs.
 """
 
 import os
@@ -157,7 +158,9 @@ class DxfBatchWindow(tk.Toplevel):
         ttk.Button(toolbar, text="Edit Job...", command=self._edit_job).pack(side="left", padx=2)
         ttk.Button(toolbar, text="Delete Job", command=self._delete_job).pack(side="left", padx=2)
         ttk.Separator(toolbar, orient="vertical").pack(side="left", fill="y", padx=8)
-        ttk.Button(toolbar, text="Export All", command=self._run_batch).pack(side="left", padx=2)
+        ttk.Button(toolbar, text="Run All Jobs", command=self._run_batch).pack(side="left", padx=2)
+        ttk.Button(toolbar, text="Quick Export (All Layers)...",
+                   command=self._quick_export).pack(side="left", padx=2)
 
         ttk.Label(toolbar, text="Apply to:").pack(side="left", padx=(16, 2))
         self.scope_var = tk.StringVar(value="Current cell")
@@ -253,18 +256,18 @@ class DxfBatchWindow(tk.Toplevel):
     # -- run -----------------------------------------------------------------
     def _run_batch(self):
         if self.app is None:
-            dialogs.show_info("Export All", "This window isn't attached to a layout window.",
+            dialogs.show_info("Run All Jobs", "This window isn't attached to a layout window.",
                                parent=self)
             return
         if not self.jobs:
-            dialogs.show_info("Export All", "Add at least one job first.", parent=self)
+            dialogs.show_info("Run All Jobs", "Add at least one job first.", parent=self)
             return
         scope = self.scope_var.get()
         cell_name = None if scope == "Current cell" else scope
         try:
             results = self.app.session.run_dxf_export_batch(self.jobs, cell_name=cell_name)
         except LayoutError as e:
-            dialogs.show_error("Export All", str(e), parent=self)
+            dialogs.show_error("Run All Jobs", str(e), parent=self)
             return
         self.result_table.delete(*self.result_table.get_children())
         total_files = 0
@@ -281,8 +284,45 @@ class DxfBatchWindow(tk.Toplevel):
             total_entities += entity_count
         self.app.refresh_all() if hasattr(self.app, "refresh_all") else None
         self.status_var.set(
-            f"Export All: {len(results)} job(s) run, {total_files} file(s) written, "
+            f"Run All Jobs: {len(results)} job(s) run, {total_files} file(s) written, "
             f"{total_entities} entities total")
+
+    def _quick_export(self):
+        """One-off export of every visible layer with data, prompting
+        for just an output file -- no saved job needed. Covers the
+        same case the old single-shot File/Tools > Export DXF...
+        dialog did, without leaving anything behind in the JOBS table
+        (unless you separately choose Add Job...)."""
+        if self.app is None:
+            dialogs.show_info("Quick Export", "This window isn't attached to a layout window.",
+                               parent=self)
+            return
+        path = filedialog.asksaveasfilename(
+            title="Export DXF", defaultextension=".dxf",
+            filetypes=[("DXF", "*.dxf"), ("All files", "*.*")],
+            initialfile=self.library.name, parent=self,
+        )
+        if not path:
+            return
+        scope = self.scope_var.get()
+        cell_name = None if scope == "Current cell" else scope
+        try:
+            written_layers, entity_count = self.app.session.export_dxf(path, cell_name=cell_name)
+        except LayoutError as e:
+            dialogs.show_error("Quick Export failed", str(e), parent=self)
+            return
+        if not written_layers:
+            dialogs.show_info("Quick Export", "No visible layers had any data to export.", parent=self)
+            return
+        names = ", ".join(f"L{n}" for n in written_layers)
+        dialogs.show_info(
+            "Quick Export",
+            f"Wrote {entity_count} entity(ies) across {len(written_layers)} layer(s) ({names})\n"
+            f"to {os.path.basename(path)}",
+            parent=self,
+        )
+        self.status_var.set(
+            f"Quick Export: {entity_count} entities, {len(written_layers)} layers -> {path}")
 
     def _about(self):
         dialogs.show_info(

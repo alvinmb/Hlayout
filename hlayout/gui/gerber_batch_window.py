@@ -14,11 +14,12 @@ job's output can never depend on another's the way a mask-op step's
 result_layer can feed a later step. There's accordingly no Move Up/
 Move Down here, unlike hlayout.gui.maskop_window.
 
-This is a second, saved-set-oriented entry point alongside the existing
-single-shot File/Tools > Export Gerber... command (App.export_gerber)
--- that one-off dialog is still the quickest way to export once by
-hand; this window is for a repeatable set of exports (e.g. one per fab
-house) you want to save and re-run together.
+There's no separate single-shot File/Tools > Export Gerber... command
+any more -- "Quick Export (All Layers)..." on this window's toolbar
+covers that same one-off case (prompts for an output prefix, exports
+every visible layer with data, no saved job needed) so this one window
+covers both the quick one-off export and a repeatable saved set (e.g.
+one job per fab house) you can re-run together with Export All.
 """
 
 import os
@@ -157,7 +158,9 @@ class GerberBatchWindow(tk.Toplevel):
         ttk.Button(toolbar, text="Edit Job...", command=self._edit_job).pack(side="left", padx=2)
         ttk.Button(toolbar, text="Delete Job", command=self._delete_job).pack(side="left", padx=2)
         ttk.Separator(toolbar, orient="vertical").pack(side="left", fill="y", padx=8)
-        ttk.Button(toolbar, text="Export All", command=self._run_batch).pack(side="left", padx=2)
+        ttk.Button(toolbar, text="Run All Jobs", command=self._run_batch).pack(side="left", padx=2)
+        ttk.Button(toolbar, text="Quick Export (All Layers)...",
+                   command=self._quick_export).pack(side="left", padx=2)
 
         ttk.Label(toolbar, text="Apply to:").pack(side="left", padx=(16, 2))
         self.scope_var = tk.StringVar(value="Current cell")
@@ -283,7 +286,40 @@ class GerberBatchWindow(tk.Toplevel):
             total_skipped += skipped_text
         note = f", {total_skipped} text shape(s) skipped (Gerber has no text primitive)" if total_skipped else ""
         self.status_var.set(
-            f"Export All: {len(results)} job(s) run, {total_files} file(s) written{note}")
+            f"Run All Jobs: {len(results)} job(s) run, {total_files} file(s) written{note}")
+
+    def _quick_export(self):
+        """One-off export of every visible layer with data, prompting
+        for just an output prefix -- no saved job needed. Covers the
+        same case the old single-shot File/Tools > Export Gerber...
+        dialog did, without leaving anything behind in the JOBS table
+        (unless you separately choose Add Job...)."""
+        if self.app is None:
+            dialogs.show_info("Quick Export", "This window isn't attached to a layout window.",
+                               parent=self)
+            return
+        path = filedialog.asksaveasfilename(
+            title="Export Gerber", defaultextension="",
+            filetypes=[("All files", "*.*")],
+            initialfile=self.library.name, parent=self,
+        )
+        if not path:
+            return
+        scope = self.scope_var.get()
+        cell_name = None if scope == "Current cell" else scope
+        try:
+            written, skipped_text = self.app.session.export_gerber(path, cell_name=cell_name)
+        except LayoutError as e:
+            dialogs.show_error("Quick Export failed", str(e), parent=self)
+            return
+        if not written:
+            dialogs.show_info("Quick Export", "No visible layers had any data to export.", parent=self)
+            return
+        names = "\n".join(f"  L{n}: {os.path.basename(p)}" for n, p in written)
+        note = (f"\n\n{skipped_text} text shape(s) were skipped -- "
+                f"Gerber has no text primitive." if skipped_text else "")
+        dialogs.show_info("Quick Export", f"Wrote {len(written)} file(s):\n{names}{note}", parent=self)
+        self.status_var.set(f"Quick Export: wrote {len(written)} file(s) to {os.path.dirname(path) or '.'}")
 
     def _about(self):
         dialogs.show_info(
