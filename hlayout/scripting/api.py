@@ -362,6 +362,110 @@ class Session:
         self._notify()
         return name, path
 
+    def create_pad_cell(self, name: str, conductor_layer, paste_layer,
+                         length: float, width: float, margin: float, *,
+                         rows: int = 1, cols: int = 1,
+                         pitch_x: Optional[float] = None, pitch_y: Optional[float] = None,
+                         index: Optional[int] = None, overwrite: bool = False):
+        """Create a pad cell -- a rectangular conductor pad with a
+        smaller solder paste rectangle centred on it (the paste layer
+        undersized from the conductor by `margin` DBU on every side) --
+        directly inside an attached reference library, and save that
+        library back to its own file on disk in place. Same idea as
+        create_via_cell(), but for a single- or multi-pad footprint
+        (e.g. a connector) sized by length/width rather than a fixed
+        square/round via.
+
+        conductor_layer/paste_layer accept a layer number or an
+        existing layer name, resolved against the *current* library's
+        layer table. length is the pad's size along X, width along Y,
+        both in DBU (1 DBU = 1 micron); margin is how much smaller the
+        paste rectangle is than the conductor rectangle on each side,
+        so margin must be less than half of both length and width.
+
+        rows x cols lays out a grid of identical pads (rows along Y,
+        cols along X), spaced pitch_y/pitch_x apart (pad-centre to
+        pad-centre, in DBU) and centred as a whole on the cell origin
+        -- e.g. for a 2-pin connector footprint. pitch_x is required
+        when cols > 1, pitch_y when rows > 1; both are ignored for a
+        single pad (rows == cols == 1).
+
+        index picks which attached library (0 or 1, see
+        list_attached_libraries()); if exactly one is attached it's
+        used automatically. Raises if `name` already exists in the
+        target library, unless overwrite=True (which replaces it).
+
+        Returns (cell_name, path, pad_count) for the pad cell just
+        written. The attached library object in memory is updated in
+        place too, so Create > Cell Instance / Find & Place Cell... see
+        the new pad immediately without needing to re-attach.
+        """
+        if not self.attached_libraries:
+            raise LibraryError(
+                "no attached library -- attach one first (Setup > Attach Library...)"
+            )
+        if index is None:
+            if len(self.attached_libraries) > 1:
+                raise LibraryError(
+                    "more than one attached library; pass index=0 or index=1 to pick one"
+                )
+            index = 0
+        if index < 0 or index >= len(self.attached_libraries):
+            raise LibraryError(f"no attached library at index {index}")
+
+        name = (name or "").strip()
+        if not name:
+            raise LibraryError("a cell name is required")
+        if length <= 0 or width <= 0:
+            raise LibraryError("length and width must be positive numbers")
+        if margin < 0:
+            raise LibraryError("margin must not be negative")
+        if margin * 2 >= length or margin * 2 >= width:
+            raise LibraryError(
+                "margin is too large -- the solder paste rectangle would have "
+                "zero or negative size; margin must be less than half of both "
+                "length and width"
+            )
+        rows = int(rows)
+        cols = int(cols)
+        if rows < 1 or cols < 1:
+            raise LibraryError("rows and cols must be at least 1")
+        if cols > 1:
+            if not pitch_x or pitch_x <= 0:
+                raise LibraryError("pitch_x must be a positive number when cols > 1")
+        if rows > 1:
+            if not pitch_y or pitch_y <= 0:
+                raise LibraryError("pitch_y must be a positive number when rows > 1")
+
+        n_cond = self.library.layers.resolve(conductor_layer)
+        n_paste = self.library.layers.resolve(paste_layer)
+
+        lib = self.attached_libraries[index]
+        if name in lib.cells:
+            if not overwrite:
+                raise LibraryError(
+                    f"{name!r} already exists in the attached library; pass overwrite=True to replace it"
+                )
+            lib.delete_cell(name)
+
+        cell = lib.new_cell(name)
+        half_l, half_w = length / 2.0, width / 2.0
+        paste_half_l, paste_half_w = half_l - margin, half_w - margin
+        pad_count = 0
+        for r in range(rows):
+            cy = (r - (rows - 1) / 2.0) * (pitch_y or 0)
+            for c in range(cols):
+                cx = (c - (cols - 1) / 2.0) * (pitch_x or 0)
+                cell.add_rectangle(n_cond, cx - half_l, cy - half_w, cx + half_l, cy + half_w)
+                cell.add_rectangle(n_paste, cx - paste_half_l, cy - paste_half_w,
+                                    cx + paste_half_l, cy + paste_half_w)
+                pad_count += 1
+
+        path = self._attached_paths[index]
+        save_gds(lib, path)
+        self._notify()
+        return name, path, pad_count
+
     def _resolve_source(self, source: Union[str, int, None]) -> Library:
         if source in ("current", None):
             return self.library

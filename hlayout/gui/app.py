@@ -344,6 +344,7 @@ class App(tk.Tk):
             command=lambda: open_resistor_designer(self),
         )
         toolsm.add_command(label="Via Wizard...", command=self.show_via_wizard)
+        toolsm.add_command(label="Pad Wizard...", command=self.show_pad_wizard)
         toolsm.add_command(label="Mask Operations...", command=self.show_mask_op_dialog)
         toolsm.add_command(label="Mask Operation Batch...", command=lambda: open_maskop_batch_window(self))
         toolsm.add_command(label="DRC...", command=lambda: open_drc_window(self))
@@ -1862,6 +1863,184 @@ class App(tk.Tk):
                     return
             self.refresh_all()
             self.status.set(f"created via cell {name!r}, saved to {path}")
+            win.destroy()
+
+        btn_row = ttk.Frame(win)
+        btn_row.pack(pady=(6, 12))
+        ttk.Button(btn_row, text="Create", command=create_and_close).pack(side="left", padx=6)
+        ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=6)
+
+        win.bind("<Escape>", lambda e: win.destroy())
+
+    def show_pad_wizard(self):
+        """Tools > Pad Wizard...: create a rectangular pad cell -- a
+        conductor rectangle sized by length x width, plus a solder
+        paste rectangle centred on it and undersized by a margin on
+        every side -- and save it directly into an attached reference
+        library's own file, so it becomes a reusable part. Optionally
+        lays out a centred rows x cols grid of identical pads (e.g. a
+        connector footprint) instead of just one. Backed by
+        Session.create_pad_cell(); same operation as the command bar's
+        PAD <name> <conductor_layer> <paste_layer> ... command."""
+        if not self.session.attached_libraries:
+            dialogs.show_info(
+                "Pad Wizard",
+                "No library is attached yet. Use Setup > Attach Library... to "
+                "attach the GDSII file the pad should be saved into, then try "
+                "the Pad Wizard again.",
+                parent=self,
+            )
+            return
+
+        win = tk.Toplevel(self)
+        win.title("Pad Wizard")
+        win.transient(self)
+        win.grab_set()
+        win.resizable(False, False)
+
+        ttk.Label(
+            win,
+            text="Create a pad cell -- a conductor rectangle with a solder "
+                 "paste rectangle undersized on every side -- and save it "
+                 "into an attached library. Set rows/cols > 1 for a grid of "
+                 "identical pads (e.g. a connector footprint).",
+            wraplength=380, justify="left",
+        ).pack(anchor="w", padx=12, pady=(12, 8))
+
+        form = ttk.Frame(win)
+        form.pack(padx=12, fill="x")
+
+        def layer_choices():
+            return [f"{n} ({self.session.library.layers[n].name})"
+                    for n in range(len(self.session.library.layers))]
+
+        row = 0
+        ttk.Label(form, text="Cell name:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        name_var = tk.StringVar(value="")
+        ttk.Entry(form, textvariable=name_var, width=22).grid(
+            row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+
+        ttk.Label(form, text="Length (mm, X):").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        length_var = tk.DoubleVar(value=dbu_to_mm(mm_to_dbu(1.0)))
+        ttk.Spinbox(form, from_=0.001, to=500.0, increment=0.001, width=10, textvariable=length_var).grid(
+            row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+
+        ttk.Label(form, text="Width (mm, Y):").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        width_var = tk.DoubleVar(value=dbu_to_mm(mm_to_dbu(1.0)))
+        ttk.Spinbox(form, from_=0.001, to=500.0, increment=0.001, width=10, textvariable=width_var).grid(
+            row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+
+        ttk.Label(form, text="Paste undersize (mm/side):").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        margin_var = tk.DoubleVar(value=dbu_to_mm(mm_to_dbu(0.05)))
+        ttk.Spinbox(form, from_=0.0, to=250.0, increment=0.001, width=10, textvariable=margin_var).grid(
+            row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+
+        choices = layer_choices()
+        ttk.Label(form, text="Conductor layer:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        conductor_var = tk.StringVar(value=choices[0])
+        ttk.Combobox(form, textvariable=conductor_var, width=20, state="readonly",
+                     values=choices).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+
+        ttk.Label(form, text="Solder paste layer:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        paste_var = tk.StringVar(value=choices[1] if len(choices) > 1 else choices[0])
+        ttk.Combobox(form, textvariable=paste_var, width=20, state="readonly",
+                     values=choices).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+
+        ttk.Label(form, text="Rows x Cols:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        grid_row = ttk.Frame(form)
+        grid_row.grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        rows_var = tk.IntVar(value=1)
+        cols_var = tk.IntVar(value=1)
+        ttk.Spinbox(grid_row, from_=1, to=100, width=5, textvariable=rows_var).pack(side="left")
+        ttk.Label(grid_row, text=" x ").pack(side="left")
+        ttk.Spinbox(grid_row, from_=1, to=100, width=5, textvariable=cols_var).pack(side="left")
+        row += 1
+
+        ttk.Label(form, text="Pitch Y / X (mm):").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        pitch_row = ttk.Frame(form)
+        pitch_row.grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        pitch_y_var = tk.DoubleVar(value=0.0)
+        pitch_x_var = tk.DoubleVar(value=0.0)
+        ttk.Spinbox(pitch_row, from_=0.0, to=500.0, increment=0.001, width=8, textvariable=pitch_y_var).pack(side="left")
+        ttk.Label(pitch_row, text=" x ").pack(side="left")
+        ttk.Spinbox(pitch_row, from_=0.0, to=500.0, increment=0.001, width=8, textvariable=pitch_x_var).pack(side="left")
+        row += 1
+        ttk.Label(
+            form, text="(pitch only needed when rows/cols > 1)",
+            foreground="gray",
+        ).grid(row=row, column=1, sticky="w", padx=4)
+        row += 1
+
+        lib_choices = [f"[{l['index']}] {l['name']} ({l['path']})"
+                       for l in self.session.list_attached_libraries()]
+        ttk.Label(form, text="Save to library:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        lib_var = tk.StringVar(value=lib_choices[0])
+        lib_combo = ttk.Combobox(form, textvariable=lib_var, width=28, state="readonly",
+                                  values=lib_choices)
+        lib_combo.grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        if len(lib_choices) == 1:
+            lib_combo.configure(state="disabled")
+        row += 1
+
+        error_var = tk.StringVar(value="")
+        ttk.Label(win, textvariable=error_var, foreground="red", wraplength=380,
+                  justify="left").pack(anchor="w", padx=12)
+
+        def create_and_close():
+            pad_name = name_var.get().strip()
+            if not pad_name:
+                error_var.set("Cell name is required.")
+                return
+            n_cond = int(conductor_var.get().split(" ", 1)[0])
+            n_paste = int(paste_var.get().split(" ", 1)[0])
+            index = int(lib_var.get().split("]", 1)[0].lstrip("["))
+            try:
+                length = mm_to_dbu(float(length_var.get()))
+                width = mm_to_dbu(float(width_var.get()))
+                margin = mm_to_dbu(float(margin_var.get()))
+            except (tk.TclError, ValueError):
+                error_var.set("Length, width, and paste undersize must be numbers.")
+                return
+            rows = rows_var.get()
+            cols = cols_var.get()
+            pitch_y = mm_to_dbu(float(pitch_y_var.get())) if pitch_y_var.get() else None
+            pitch_x = mm_to_dbu(float(pitch_x_var.get())) if pitch_x_var.get() else None
+
+            def do_create(overwrite):
+                return self.session.create_pad_cell(
+                    pad_name, n_cond, n_paste, length, width, margin,
+                    rows=rows, cols=cols, pitch_x=pitch_x, pitch_y=pitch_y,
+                    index=index, overwrite=overwrite,
+                )
+
+            try:
+                name, path, pad_count = do_create(overwrite=False)
+            except LayoutError as e:
+                if "already exists" in str(e):
+                    if dialogs.ask_yes_no(
+                        "Pad Wizard",
+                        f"A cell named {pad_name!r} already exists in that "
+                        "library. Replace it?",
+                        parent=self,
+                    ):
+                        try:
+                            name, path, pad_count = do_create(overwrite=True)
+                        except LayoutError as e2:
+                            error_var.set(str(e2))
+                            return
+                    else:
+                        return
+                else:
+                    error_var.set(str(e))
+                    return
+            self.refresh_all()
+            self.status.set(f"created pad cell {name!r} ({pad_count} pad(s)), saved to {path}")
             win.destroy()
 
         btn_row = ttk.Frame(win)

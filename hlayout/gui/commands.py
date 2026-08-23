@@ -15,6 +15,7 @@ from typing import Callable, Optional
 
 from ..core.errors import LayoutError
 from ..core.maskops import MASK_OPS
+from ..core.units import mm_to_dbu
 
 # The full command-bar reference, grouped by category. This is the
 # single source of truth for command syntax — surfaced via the HELP
@@ -109,6 +110,14 @@ Attached libraries:
                                        layers, named VIA_Layer<n1>_to_Layer<n2>) directly
                                        inside an attached library and save that library's
                                        file in place; shape/size default to square/100
+    PAD <name> <conductor_layer> <paste_layer> <length_mm> <width_mm> <margin_mm>
+           [rows=1] [cols=1] [pitch_x=<mm>] [pitch_y=<mm>] [index=0|1] [overwrite=0|1]
+                                       create a rectangular pad cell -- a conductor
+                                       rectangle plus a solder paste rectangle undersized
+                                       by margin_mm on every side -- directly inside an
+                                       attached library and save that library's file in
+                                       place; rows/cols lay out a centred grid of pads
+                                       (pitch_x/pitch_y required when cols/rows > 1)
 
 Thick-film resistor generation (Tools > Thick-Film Resistor Designer... sizes
 a resistor; this draws it):
@@ -883,6 +892,44 @@ class CommandInterpreter:
             raise CommandError(usage)
         name, path = self.session.create_via_cell(positional[0], positional[1], **kwargs)
         return f"created via cell {name!r}, saved to {path}"
+
+    def _cmd_pad(self, args):
+        usage = ("usage: PAD <name> <conductor_layer> <paste_layer> <length_mm> <width_mm> "
+                 "<margin_mm> [rows=1] [cols=1] [pitch_x=<mm>] [pitch_y=<mm>] "
+                 "[index=0|1] [overwrite=0|1]")
+        if len(args) < 6:
+            raise CommandError(usage)
+        positional = []
+        kwargs = {}
+        for a in args:
+            if "=" in a:
+                k, v = a.split("=", 1)
+                k = k.lower()
+                if k == "rows":
+                    kwargs["rows"] = int(v)
+                elif k == "cols":
+                    kwargs["cols"] = int(v)
+                elif k == "pitch_x":
+                    kwargs["pitch_x"] = mm_to_dbu(float(v))
+                elif k == "pitch_y":
+                    kwargs["pitch_y"] = mm_to_dbu(float(v))
+                elif k == "index":
+                    kwargs["index"] = int(v)
+                elif k == "overwrite":
+                    kwargs["overwrite"] = v not in ("0", "false", "no")
+                else:
+                    raise CommandError(f"unknown PAD option {k!r}")
+            else:
+                positional.append(a)
+        if len(positional) != 6:
+            raise CommandError(usage)
+        pad_name, conductor_layer, paste_layer, length_mm, width_mm, margin_mm = positional
+        name, path, pad_count = self.session.create_pad_cell(
+            pad_name, conductor_layer, paste_layer,
+            mm_to_dbu(float(length_mm)), mm_to_dbu(float(width_mm)), mm_to_dbu(float(margin_mm)),
+            **kwargs,
+        )
+        return f"created pad cell {name!r} ({pad_count} pad(s)), saved to {path}"
 
     # --- scripting / help -------------------------------------------------
     def _cmd_py(self, args):
