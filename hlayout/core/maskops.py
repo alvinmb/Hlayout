@@ -39,12 +39,18 @@ operate on for a design built that way.
 """
 
 import math
-from typing import Callable, List, Tuple
+from dataclasses import dataclass
+from typing import Callable, List, Optional, Tuple
 
 from .errors import GeometryError
 from .shapes import MAX_POLY_POINTS, Path, PathCap, Polygon, Rectangle
 
 MASK_OPS = ("OVERSIZE", "UNDERSIZE", "AND", "OR", "NOT", "XOR")
+
+#: Which mask ops take a second layer (layer_b) instead of an amount --
+#: the same OVERSIZE/UNDERSIZE-vs-boolean split Tools > Mask
+#: Operations... and MaskOpStep both key off of.
+BOOLEAN_MASK_OPS = ("AND", "OR", "NOT", "XOR")
 
 try:
     from shapely.geometry import LineString
@@ -314,3 +320,63 @@ def shapely_to_polygons(geom, layer: int, datatype: int = 0) -> List[Polygon]:
             )
         polygons.append(Polygon(layer=layer, points=points, datatype=datatype))
     return polygons
+
+@dataclass
+class MaskOpStep:
+    """One step in a mask-op batch/recipe -- a saved, ordered series of
+    mask operations that can be run together in one action, the same
+    way hlayout.core.drc.DrcRule is one saved rule in a DRC rule set.
+    See hlayout.scripting.api.Session.run_mask_op_batch(), which runs a
+    list of these in order, feeding one step's result_layer into a
+    later step's layer_a/layer_b exactly as if each had been run by
+    hand through Tools > Mask Operations... in sequence.
+
+    Mirrors the arguments of Session.mask_op() (see that method for
+    what each field means) rather than introducing new semantics of its
+    own -- a MaskOpStep is just a saved, named mask_op() call."""
+
+    kind: str
+    layer_a: int
+    result_layer: int
+    layer_b: Optional[int] = None
+    amount: float = 0.0  # DBU; OVERSIZE/UNDERSIZE only
+    name: str = ""
+    flatten: bool = True
+    simplify: float = 0.0  # DBU; 0 = off
+
+    def __post_init__(self):
+        if self.kind not in MASK_OPS:
+            raise GeometryError(
+                f"unknown mask op {self.kind!r}; expected one of {', '.join(MASK_OPS)}"
+            )
+        if self.kind in BOOLEAN_MASK_OPS and self.layer_b is None:
+            raise GeometryError(f"mask op step {self.kind} requires layer_b")
+        if self.kind in ("OVERSIZE", "UNDERSIZE") and self.amount < 0:
+            raise GeometryError(
+                "amount must be non-negative -- OVERSIZE grows, UNDERSIZE "
+                "shrinks by amount"
+            )
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": self.kind, "layer_a": self.layer_a, "result_layer": self.result_layer,
+            "layer_b": self.layer_b, "amount": self.amount, "name": self.name,
+            "flatten": self.flatten, "simplify": self.simplify,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "MaskOpStep":
+        return cls(
+            kind=data["kind"], layer_a=data["layer_a"], result_layer=data["result_layer"],
+            layer_b=data.get("layer_b"), amount=data.get("amount", 0.0),
+            name=data.get("name", ""), flatten=data.get("flatten", True),
+            simplify=data.get("simplify", 0.0),
+        )
+
+    @property
+    def label(self) -> str:
+        if self.kind in BOOLEAN_MASK_OPS:
+            base = f"{self.kind}(layer {self.layer_a}, layer {self.layer_b}) -> layer {self.result_layer}"
+        else:
+            base = f"{self.kind}(layer {self.layer_a}, {self.amount}) -> layer {self.result_layer}"
+        return f"{self.name}: {base}" if self.name else base

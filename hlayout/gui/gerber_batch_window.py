@@ -1,0 +1,326 @@
+"""Gerber Export Sets tool -- Tools > Gerber Export Sets...
+
+A job table (name, layers, output prefix) persisted into the current
+design's technology file (hlayout.io.techfile.load_gerber_export_jobs()/
+save_gerber_export_jobs(), the same tech_params-blob pattern DRC rules
+and mask-op batch steps use -- see hlayout.gui.drc_window/
+hlayout.gui.maskop_window), plus an Export All button that runs every
+job against the current cell via Session.run_gerber_export_batch() and
+lists the files each job wrote.
+
+Unlike the mask-op batch window, job ORDER doesn't matter here -- a
+Gerber export never modifies the design, it only writes files, so one
+job's output can never depend on another's the way a mask-op step's
+result_layer can feed a later step. There's accordingly no Move Up/
+Move Down here, unlike hlayout.gui.maskop_window.
+
+This is a second, saved-set-oriented entry point alongside the existing
+single-shot File/Tools > Export Gerber... command (App.export_gerber)
+-- that one-off dialog is still the quickest way to export once by
+hand; this window is for a repeatable set of exports (e.g. one per fab
+house) you want to save and re-run together.
+"""
+
+import os
+import tkinter as tk
+from tkinter import filedialog, ttk
+
+from . import dialogs
+from .fonts import section_header_font
+from ..core.errors import LayoutError
+from ..io.gerberio import GerberExportJob
+
+
+def _layer_label(library, number):
+    return f"{number} ({library.layers[number].name})"
+
+
+class JobDialog(tk.Toplevel):
+    """Modal Add/Edit form for one Gerber export job."""
+
+    def __init__(self, parent, library, job: GerberExportJob = None):
+        super().__init__(parent)
+        self.title("Add Gerber Export Job" if job is None else "Edit Gerber Export Job")
+        self.transient(parent)
+        self.grab_set()
+        self.resizable(False, False)
+        self.library = library
+        self.result = None
+        self._build(job)
+        self.bind("<Escape>", lambda e: self.destroy())
+
+    def _build(self, job):
+        form = ttk.Frame(self, padding=16)
+        form.pack(fill="both", expand=True)
+
+        ttk.Label(form, text="Name:").grid(row=0, column=0, sticky="e", padx=4, pady=4)
+        self.name_var = tk.StringVar(value=job.name if job else "")
+        ttk.Entry(form, textvariable=self.name_var, width=28).grid(
+            row=0, column=1, columnspan=2, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="Output prefix:").grid(row=1, column=0, sticky="e", padx=4, pady=4)
+        self.prefix_var = tk.StringVar(value=job.out_prefix if job else "")
+        ttk.Entry(form, textvariable=self.prefix_var, width=28).grid(
+            row=1, column=1, sticky="w", padx=4, pady=4)
+        ttk.Button(form, text="Browse...", command=self._browse).grid(
+            row=1, column=2, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="(files are written as <prefix>_L<NN>_<layer name>.gbr)",
+                  foreground="#888888").grid(row=2, column=0, columnspan=3, sticky="w", padx=4)
+
+        self.all_layers_var = tk.BooleanVar(value=job is None or not job.layers)
+        ttk.Checkbutton(
+            form, text="All visible layers with data", variable=self.all_layers_var,
+            command=self._sync,
+        ).grid(row=3, column=0, columnspan=3, sticky="w", padx=4, pady=(10, 0))
+
+        ttk.Label(form, text="Layers:").grid(row=4, column=0, sticky="ne", padx=4, pady=4)
+        list_frame = ttk.Frame(form)
+        list_frame.grid(row=4, column=1, columnspan=2, sticky="w", padx=4, pady=4)
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical")
+        self.layer_list = tk.Listbox(
+            list_frame, selectmode="multiple", height=10, width=28,
+            exportselection=False, yscrollcommand=scrollbar.set,
+        )
+        scrollbar.config(command=self.layer_list.yview)
+        self.layer_list.pack(side="left", fill="y")
+        scrollbar.pack(side="left", fill="y")
+        selected_layers = set(job.layers) if job and job.layers else set()
+        for n in range(len(self.library.layers)):
+            self.layer_list.insert("end", _layer_label(self.library, n))
+            if n in selected_layers:
+                self.layer_list.selection_set(n)
+
+        self.error_var = tk.StringVar(value="")
+        ttk.Label(form, textvariable=self.error_var, foreground="red", wraplength=340,
+                  justify="left").grid(row=5, column=0, columnspan=3, sticky="w", padx=4, pady=(6, 0))
+
+        btn_row = ttk.Frame(self)
+        btn_row.pack(pady=(0, 12))
+        ttk.Button(btn_row, text="OK", command=self._accept).pack(side="left", padx=6)
+        ttk.Button(btn_row, text="Cancel", command=self.destroy).pack(side="left", padx=6)
+
+        self._sync()
+
+    def _sync(self):
+        self.layer_list.configure(state="disabled" if self.all_layers_var.get() else "normal")
+
+    def _browse(self):
+        path = filedialog.asksaveasfilename(
+            title="Gerber Output Prefix", defaultextension="",
+            filetypes=[("All files", "*.*")], parent=self,
+        )
+        if path:
+            self.prefix_var.set(path)
+
+    def _accept(self):
+        name = self.name_var.get().strip()
+        prefix = self.prefix_var.get().strip()
+        if not prefix:
+            self.error_var.set("Pick an output prefix.")
+            return
+        layers = None
+        if not self.all_layers_var.get():
+            layers = [int(i) for i in self.layer_list.curselection()]
+            if not layers:
+                self.error_var.set("Pick at least one layer, or check 'All visible layers with data'.")
+                return
+        try:
+            job = GerberExportJob(name=name, out_prefix=prefix, layers=layers)
+        except LayoutError as e:
+            self.error_var.set(str(e))
+            return
+        self.result = job
+        self.destroy()
+
+
+class GerberBatchWindow(tk.Toplevel):
+    """Tools > Gerber Export Sets... . `library` is the current
+    design's Library; jobs are loaded from it on open and persisted
+    back into it immediately on every add/edit/delete. `app` is the
+    main App (used to run the batch against the live session)."""
+
+    def __init__(self, master, library, app=None):
+        super().__init__(master)
+        self.title("Gerber Export Sets")
+        self.geometry("1000x700")
+        self.library = library
+        self.app = app
+        self.jobs = [GerberExportJob.from_dict(j) for j in _load_jobs(library)]
+        self._build()
+        self._refresh_jobs()
+
+    def _build(self):
+        toolbar = ttk.Frame(self, padding=6)
+        toolbar.pack(fill="x")
+        ttk.Button(toolbar, text="Add Job...", command=self._add_job).pack(side="left", padx=2)
+        ttk.Button(toolbar, text="Edit Job...", command=self._edit_job).pack(side="left", padx=2)
+        ttk.Button(toolbar, text="Delete Job", command=self._delete_job).pack(side="left", padx=2)
+        ttk.Separator(toolbar, orient="vertical").pack(side="left", fill="y", padx=8)
+        ttk.Button(toolbar, text="Export All", command=self._run_batch).pack(side="left", padx=2)
+
+        ttk.Label(toolbar, text="Apply to:").pack(side="left", padx=(16, 2))
+        self.scope_var = tk.StringVar(value="Current cell")
+        cell_names = list(self.library.cells.keys())
+        ttk.Combobox(toolbar, textvariable=self.scope_var, state="readonly", width=18,
+                     values=["Current cell"] + cell_names).pack(side="left", padx=2)
+
+        ttk.Button(toolbar, text="About", command=self._about).pack(side="right", padx=2)
+
+        body = ttk.Panedwindow(self, orient="vertical")
+        body.pack(fill="both", expand=True, padx=4, pady=4)
+
+        section_font = section_header_font(self)
+
+        top = ttk.Frame(body)
+        ttk.Label(top, text="JOBS", foreground="#3fb950",
+                  font=section_font).pack(anchor="w", padx=4, pady=(4, 0))
+        job_cols = ("name", "layers", "prefix")
+        self.job_table = ttk.Treeview(top, columns=job_cols, show="headings", height=8)
+        for col, heading, width in [
+            ("name", "Name", 140), ("layers", "Layers", 260), ("prefix", "Output prefix", 400),
+        ]:
+            self.job_table.heading(col, text=heading)
+            self.job_table.column(col, width=width, anchor="w")
+        self.job_table.pack(fill="both", expand=True, padx=4, pady=4)
+        body.add(top, weight=1)
+
+        bottom = ttk.Frame(body)
+        ttk.Label(bottom, text="FILES WRITTEN", foreground="#f78166",
+                  font=section_font).pack(anchor="w", padx=4, pady=(4, 0))
+        result_cols = ("job", "layer", "file")
+        self.result_table = ttk.Treeview(bottom, columns=result_cols, show="headings", height=12)
+        for col, heading, width in [
+            ("job", "Job", 140), ("layer", "Layer", 100), ("file", "File", 460),
+        ]:
+            self.result_table.heading(col, text=heading)
+            self.result_table.column(col, width=width, anchor="w")
+        self.result_table.pack(fill="both", expand=True, padx=4, pady=4)
+        body.add(bottom, weight=2)
+
+        status = ttk.Frame(self, padding=(6, 3))
+        status.pack(fill="x")
+        self.status_var = tk.StringVar(value="")
+        ttk.Label(status, textvariable=self.status_var, foreground="#8b949e").pack(side="left")
+
+    # -- jobs --------------------------------------------------------------
+    def _refresh_jobs(self):
+        self.job_table.delete(*self.job_table.get_children())
+        for i, job in enumerate(self.jobs):
+            layer_desc = ("all visible layers" if not job.layers
+                          else ", ".join(str(n) for n in job.layers))
+            self.job_table.insert("", "end", iid=str(i), values=(
+                job.name, layer_desc, job.out_prefix))
+        self.status_var.set(f"{len(self.jobs)} job(s) saved to the technology file")
+
+    def _persist(self):
+        _save_jobs(self.library, self.jobs)
+
+    def _current_job_row(self):
+        sel = self.job_table.selection()
+        return int(sel[0]) if sel else -1
+
+    def _add_job(self):
+        dlg = JobDialog(self, self.library)
+        self.wait_window(dlg)
+        if dlg.result is not None:
+            self.jobs.append(dlg.result)
+            self._persist()
+            self._refresh_jobs()
+
+    def _edit_job(self):
+        row = self._current_job_row()
+        if row < 0:
+            dialogs.show_info("Edit Job", "Select a job first.", parent=self)
+            return
+        dlg = JobDialog(self, self.library, job=self.jobs[row])
+        self.wait_window(dlg)
+        if dlg.result is not None:
+            self.jobs[row] = dlg.result
+            self._persist()
+            self._refresh_jobs()
+
+    def _delete_job(self):
+        row = self._current_job_row()
+        if row < 0:
+            dialogs.show_info("Delete Job", "Select a job first.", parent=self)
+            return
+        del self.jobs[row]
+        self._persist()
+        self._refresh_jobs()
+
+    # -- run -----------------------------------------------------------------
+    def _run_batch(self):
+        if self.app is None:
+            dialogs.show_info("Export All", "This window isn't attached to a layout window.",
+                               parent=self)
+            return
+        if not self.jobs:
+            dialogs.show_info("Export All", "Add at least one job first.", parent=self)
+            return
+        scope = self.scope_var.get()
+        cell_name = None if scope == "Current cell" else scope
+        try:
+            results = self.app.session.run_gerber_export_batch(self.jobs, cell_name=cell_name)
+        except LayoutError as e:
+            dialogs.show_error("Export All", str(e), parent=self)
+            return
+        self.result_table.delete(*self.result_table.get_children())
+        total_files = 0
+        total_skipped = 0
+        row = 0
+        for job, written, skipped_text in results:
+            label = job.name or job.out_prefix
+            if not written:
+                self.result_table.insert("", "end", iid=str(row), values=(label, "", "(no output)"))
+                row += 1
+                continue
+            for layer_n, path in written:
+                self.result_table.insert("", "end", iid=str(row), values=(
+                    label, layer_n, os.path.basename(path)))
+                total_files += 1
+                row += 1
+            total_skipped += skipped_text
+        note = f", {total_skipped} text shape(s) skipped (Gerber has no text primitive)" if total_skipped else ""
+        self.status_var.set(
+            f"Export All: {len(results)} job(s) run, {total_files} file(s) written{note}")
+
+    def _about(self):
+        dialogs.show_info(
+            "About",
+            "Gerber Export Sets\n\n"
+            "A saved set of Gerber export jobs -- each with its own "
+            "layer subset and output prefix -- run together as one "
+            "action, e.g. one job per fab house or board revision.\n\n"
+            "Unlike Tools > Mask Operation Batch..., job order doesn't "
+            "matter: a Gerber export never modifies the design, it "
+            "only writes files, so one job never depends on another's "
+            "output.\n\n"
+            "Jobs are saved into this design's technology file "
+            "(Setup > Save Technology File...).",
+            parent=self,
+        )
+
+
+def _load_jobs(library):
+    from ..io.techfile import load_gerber_export_jobs
+    return load_gerber_export_jobs(library)
+
+
+def _save_jobs(library, jobs):
+    from ..io.techfile import save_gerber_export_jobs
+    save_gerber_export_jobs(library, jobs)
+
+
+def open_gerber_batch_window(app):
+    """Tools > Gerber Export Sets... . Reuses a single window per App
+    instance -- calling this again while one is already open just
+    brings it to the front, instead of stacking up duplicates."""
+    win = getattr(app, "_gerber_batch_window", None)
+    if win is not None and win.winfo_exists():
+        win.lift()
+        win.focus_set()
+        return win
+    win = GerberBatchWindow(app, app.session.library, app=app)
+    app._gerber_batch_window = win
+    return win

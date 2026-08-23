@@ -43,8 +43,10 @@ Format conventions:
 import math
 import os
 import re
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
+from ..core.errors import GeometryError
 from ..core.library import Library
 from ..core.shapes import Path, Polygon, Rectangle, SRef, Text
 from ..core.units import DBU_MM
@@ -280,3 +282,46 @@ def write_dxf(library: Library, cell_name: str, path: str,
         f.write("\n".join(lines) + "\n")
 
     return written_layers, entity_count
+
+
+@dataclass
+class DxfExportJob:
+    """One job in a DXF export batch/set -- a saved, named write_dxf()
+    call. See hlayout.scripting.api.Session.run_dxf_export_batch(),
+    which runs a list of these together in one action instead of using
+    File > Export DXF... once per job by hand (e.g. one job per
+    downstream tool/consumer, each with its own layer subset and output
+    file).
+
+    Like hlayout.io.gerberio.GerberExportJob (and unlike
+    hlayout.core.maskops.MaskOpStep), job order doesn't matter -- each
+    job's output is entirely independent of every other job's (a DXF
+    export never modifies the design, only writes a file) -- so, like
+    the Gerber batch window, the DXF batch window has no Move Up/Move
+    Down."""
+
+    name: str
+    path: str
+    layers: Optional[List[int]] = None  # None = every visible layer with data
+
+    def __post_init__(self):
+        if not self.path:
+            raise GeometryError("DXF export job requires an output file path")
+
+    def to_dict(self) -> dict:
+        return {"name": self.name, "path": self.path, "layers": self.layers}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "DxfExportJob":
+        return cls(
+            name=data.get("name", ""),
+            path=data["path"],
+            layers=data.get("layers"),
+        )
+
+    @property
+    def label(self) -> str:
+        layer_desc = ("all visible layers" if not self.layers
+                       else f"layers {', '.join(map(str, self.layers))}")
+        base = f"{layer_desc} -> {self.path}"
+        return f"{self.name}: {base}" if self.name else base

@@ -27,6 +27,9 @@ from .commands import COMMAND_REFERENCE, CommandError, CommandInterpreter, _pars
 from .layer_panel import LayerPanel
 from .line_editing import bind_console_style_editing
 from .drc_window import open_drc_window
+from .dxf_batch_window import open_dxf_batch_window
+from .gerber_batch_window import open_gerber_batch_window
+from .maskop_window import open_maskop_batch_window
 from .resistor_designer import open_resistor_designer
 
 
@@ -266,7 +269,9 @@ class App(tk.Tk):
         filem.add_command(label="Save As Library...", command=self.save_as_library)
         filem.add_separator()
         filem.add_command(label="Export Gerber...", command=self.export_gerber)
+        filem.add_command(label="Gerber Export Sets...", command=lambda: open_gerber_batch_window(self))
         filem.add_command(label="Export DXF...", command=self.export_dxf)
+        filem.add_command(label="DXF Export Sets...", command=lambda: open_dxf_batch_window(self))
         filem.add_separator()
         filem.add_command(label="Exit", command=self._on_quit)
 
@@ -342,10 +347,13 @@ class App(tk.Tk):
         )
         toolsm.add_command(label="Via Wizard...", command=self.show_via_wizard)
         toolsm.add_command(label="Mask Operations...", command=self.show_mask_op_dialog)
+        toolsm.add_command(label="Mask Operation Batch...", command=lambda: open_maskop_batch_window(self))
         toolsm.add_command(label="DRC...", command=lambda: open_drc_window(self))
         toolsm.add_separator()
         toolsm.add_command(label="Export Gerber...", command=self.export_gerber)
+        toolsm.add_command(label="Gerber Export Sets...", command=lambda: open_gerber_batch_window(self))
         toolsm.add_command(label="Export DXF...", command=self.export_dxf)
+        toolsm.add_command(label="DXF Export Sets...", command=lambda: open_dxf_batch_window(self))
 
         # --- Help ----------------------------------------------------------
         helpm = add_menu("Help")

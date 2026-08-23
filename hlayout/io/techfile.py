@@ -424,3 +424,180 @@ def save_drc_rules(library: Library, rules) -> None:
             "name": d.get("name", ""),
         })
     library.tech_params[DRC_RULES_KEY] = json.dumps(payload)
+
+
+# --- mask op batch (Tools > Mask Operation Batch...) ----------------------
+# A saved, ORDERED list of MaskOpStep dicts -- order matters here (unlike
+# DRC rules, which are independent of each other): a later step's
+# layer_a/layer_b can be an earlier step's own result_layer, so running
+# the batch replays the steps as a multi-step derived-layer recipe, not
+# just a bag of independent operations. Same tech_params-blob persistence
+# pattern as everything else in this module. See hlayout.core.maskops for
+# what each step field means and hlayout.scripting.api.Session.
+# run_mask_op_batch() for how the list is actually run.
+
+MASK_OP_STEPS_KEY = "mask_op_steps"
+
+
+def load_mask_op_steps(library: Library) -> list:
+    """Read the saved, ordered list of mask-op step dicts from
+    library.tech_params. Always returns a list (empty if none saved, or
+    if the stored data is malformed) -- never raises, so callers don't
+    need to guard against a technology file saved before this feature
+    existed."""
+    raw = library.tech_params.get(MASK_OP_STEPS_KEY)
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(data, list):
+        return []
+    steps = []
+    for item in data:
+        if (not isinstance(item, dict) or "kind" not in item
+                or "layer_a" not in item or "result_layer" not in item):
+            continue
+        steps.append({
+            "kind": item["kind"],
+            "layer_a": item["layer_a"],
+            "result_layer": item["result_layer"],
+            "layer_b": item.get("layer_b"),
+            "amount": item.get("amount", 0.0),
+            "name": item.get("name", ""),
+            "flatten": item.get("flatten", True),
+            "simplify": item.get("simplify", 0.0),
+        })
+    return steps
+
+
+def save_mask_op_steps(library: Library, steps) -> None:
+    """Write an ordered list of mask-op step dicts (or
+    hlayout.core.maskops.MaskOpStep instances -- either is accepted)
+    into library.tech_params so Setup > Save Technology File... / TECH
+    SAVE captures them alongside the layer stack. Order is preserved --
+    it's what makes a batch a *recipe* rather than an unordered set."""
+    payload = []
+    for s in steps:
+        d = s.to_dict() if hasattr(s, "to_dict") else s
+        payload.append({
+            "kind": d["kind"],
+            "layer_a": d["layer_a"],
+            "result_layer": d["result_layer"],
+            "layer_b": d.get("layer_b"),
+            "amount": d.get("amount", 0.0),
+            "name": d.get("name", ""),
+            "flatten": d.get("flatten", True),
+            "simplify": d.get("simplify", 0.0),
+        })
+    library.tech_params[MASK_OP_STEPS_KEY] = json.dumps(payload)
+
+
+# --- Gerber export sets (Tools > Gerber Export Sets...) -------------------
+# A saved list of GerberExportJob dicts -- unlike mask op steps, order
+# doesn't matter here (each job's output is independent -- Gerber export
+# never modifies the design, only writes files), so this is a plain list,
+# not a recipe. Same tech_params-blob persistence pattern as everything
+# else in this module. See hlayout.io.gerberio for what each job field
+# means and hlayout.scripting.api.Session.run_gerber_export_batch() for
+# how the list is actually run.
+
+GERBER_JOBS_KEY = "gerber_export_jobs"
+
+
+def load_gerber_export_jobs(library: Library) -> list:
+    """Read the saved list of Gerber export job dicts from
+    library.tech_params. Always returns a list (empty if none saved, or
+    if the stored data is malformed) -- never raises, so callers don't
+    need to guard against a technology file saved before this feature
+    existed."""
+    raw = library.tech_params.get(GERBER_JOBS_KEY)
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(data, list):
+        return []
+    jobs = []
+    for item in data:
+        if not isinstance(item, dict) or "out_prefix" not in item:
+            continue
+        jobs.append({
+            "name": item.get("name", ""),
+            "out_prefix": item["out_prefix"],
+            "layers": item.get("layers"),
+        })
+    return jobs
+
+
+def save_gerber_export_jobs(library: Library, jobs) -> None:
+    """Write a list of Gerber export job dicts (or
+    hlayout.io.gerberio.GerberExportJob instances -- either is
+    accepted) into library.tech_params so Setup > Save Technology
+    File... / TECH SAVE captures them alongside the layer stack."""
+    payload = []
+    for j in jobs:
+        d = j.to_dict() if hasattr(j, "to_dict") else j
+        payload.append({
+            "name": d.get("name", ""),
+            "out_prefix": d["out_prefix"],
+            "layers": d.get("layers"),
+        })
+    library.tech_params[GERBER_JOBS_KEY] = json.dumps(payload)
+
+
+# --- DXF export sets (Tools > DXF Export Sets...) --------------------------
+# A saved list of DxfExportJob dicts -- same shape/rationale as Gerber
+# export jobs above: order doesn't matter (a DXF export never modifies
+# the design, only writes a file), so this is a plain list, not a
+# recipe. See hlayout.io.dxfio for what each job field means and
+# hlayout.scripting.api.Session.run_dxf_export_batch() for how the list
+# is actually run.
+
+DXF_JOBS_KEY = "dxf_export_jobs"
+
+
+def load_dxf_export_jobs(library: Library) -> list:
+    """Read the saved list of DXF export job dicts from
+    library.tech_params. Always returns a list (empty if none saved, or
+    if the stored data is malformed) -- never raises, so callers don't
+    need to guard against a technology file saved before this feature
+    existed."""
+    raw = library.tech_params.get(DXF_JOBS_KEY)
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(data, list):
+        return []
+    jobs = []
+    for item in data:
+        if not isinstance(item, dict) or "path" not in item:
+            continue
+        jobs.append({
+            "name": item.get("name", ""),
+            "path": item["path"],
+            "layers": item.get("layers"),
+        })
+    return jobs
+
+
+def save_dxf_export_jobs(library: Library, jobs) -> None:
+    """Write a list of DXF export job dicts (or
+    hlayout.io.dxfio.DxfExportJob instances -- either is accepted) into
+    library.tech_params so Setup > Save Technology File... / TECH SAVE
+    captures them alongside the layer stack."""
+    payload = []
+    for j in jobs:
+        d = j.to_dict() if hasattr(j, "to_dict") else j
+        payload.append({
+            "name": d.get("name", ""),
+            "path": d["path"],
+            "layers": d.get("layers"),
+        })
+    library.tech_params[DXF_JOBS_KEY] = json.dumps(payload)

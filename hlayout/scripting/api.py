@@ -144,6 +144,46 @@ class Session:
             raise LibraryError("no current cell to export")
         return write_gerber_layers(self.library, name, out_prefix, layers=layers)
 
+    def run_gerber_export_batch(self, jobs=None, cell_name: Optional[str] = None):
+        """Run a saved series of Gerber export jobs -- e.g. one job per
+        fab house or board revision, each with its own layer subset and
+        output prefix -- in one action, instead of using File > Export
+        Gerber... once per job by hand.
+
+        `jobs` is a list of hlayout.io.gerberio.GerberExportJob
+        instances or plain dicts (each with at least out_prefix, e.g.
+        {"name": "FabHouseA", "out_prefix": "out/fabA/board",
+        "layers": [10, 20, 30]}); defaults to whatever's saved in the
+        technology file (Tools > Gerber Export Sets...) via
+        load_gerber_export_jobs(). Unlike run_mask_op_batch(), job
+        order doesn't matter -- each job's output is independent of
+        every other job's.
+
+        `cell_name` defaults to the current cell (same convention as
+        export_gerber() itself) and is used for every job.
+
+        Gerber export never modifies the design (it only writes files
+        to disk), so unlike run_mask_op_batch() this needs no undo
+        checkpoint.
+
+        Returns [(job, written, skipped_text), ...] in the order run --
+        see export_gerber()/hlayout.io.gerberio.write_gerber_layers for
+        what `written`/`skipped_text` mean."""
+        from ..io.gerberio import GerberExportJob
+        from ..io.techfile import load_gerber_export_jobs
+
+        if jobs is None:
+            jobs = load_gerber_export_jobs(self.library)
+        resolved = [j if isinstance(j, GerberExportJob) else GerberExportJob.from_dict(j) for j in jobs]
+
+        results = []
+        for job in resolved:
+            written, skipped_text = self.export_gerber(
+                job.out_prefix, cell_name=cell_name, layers=job.layers,
+            )
+            results.append((job, written, skipped_text))
+        return results
+
     def export_dxf(self, path: str, cell_name: Optional[str] = None,
                     layers: Optional[List[int]] = None):
         """Export the design (default: the current cell) as a single DXF
@@ -160,6 +200,45 @@ class Session:
         if name is None:
             raise LibraryError("no current cell to export")
         return write_dxf(self.library, name, path, layers=layers)
+
+    def run_dxf_export_batch(self, jobs=None, cell_name: Optional[str] = None):
+        """Run a saved series of DXF export jobs -- e.g. one job per
+        downstream tool/consumer, each with its own layer subset and
+        output file -- in one action, instead of using File > Export
+        DXF... once per job by hand.
+
+        `jobs` is a list of hlayout.io.dxfio.DxfExportJob instances or
+        plain dicts (each with at least path, e.g. {"name": "Fab",
+        "path": "out/board.dxf", "layers": [10, 20, 30]}); defaults to
+        whatever's saved in the technology file (Tools > DXF Export
+        Sets...) via load_dxf_export_jobs(). Like
+        run_gerber_export_batch(), job order doesn't matter -- each
+        job's output is independent of every other job's.
+
+        `cell_name` defaults to the current cell (same convention as
+        export_dxf() itself) and is used for every job.
+
+        DXF export never modifies the design (it only writes a file to
+        disk), so unlike run_mask_op_batch() this needs no undo
+        checkpoint.
+
+        Returns [(job, written_layers, entity_count), ...] in the order
+        run -- see export_dxf()/hlayout.io.dxfio.write_dxf for what
+        `written_layers`/`entity_count` mean."""
+        from ..io.dxfio import DxfExportJob
+        from ..io.techfile import load_dxf_export_jobs
+
+        if jobs is None:
+            jobs = load_dxf_export_jobs(self.library)
+        resolved = [j if isinstance(j, DxfExportJob) else DxfExportJob.from_dict(j) for j in jobs]
+
+        results = []
+        for job in resolved:
+            written_layers, entity_count = self.export_dxf(
+                job.path, cell_name=cell_name, layers=job.layers,
+            )
+            results.append((job, written_layers, entity_count))
+        return results
 
     # --- technology file ---------------------------------------------------
     def load_technology(self, path: str) -> dict:
@@ -795,6 +874,56 @@ class Session:
                 written[cell.name] = len(new_polys)
         self._notify()
         return written
+
+    def run_mask_op_batch(self, steps=None, cell_names: Optional[List[str]] = None):
+        """Run a saved, ORDERED series of mask operations (a "mask op
+        batch"/recipe) -- e.g. OVERSIZE layer 10 by 5um into layer 20,
+        then AND layer 20 with layer 30 into layer 40 -- as one action,
+        instead of driving Tools > Mask Operations... once per step by
+        hand. Steps run in the order given via mask_op(), so a LATER
+        step can read a layer an EARLIER step just wrote (e.g. step 2's
+        layer_a is step 1's result_layer) -- that's the whole point of a
+        multi-step recipe, and why order is preserved end to end (see
+        hlayout.io.techfile.save_mask_op_steps).
+
+        `steps` is a list of hlayout.core.maskops.MaskOpStep instances
+        or plain dicts (each with at least kind/layer_a/result_layer,
+        e.g. {"kind": "OVERSIZE", "layer_a": 10, "result_layer": 20,
+        "amount": 5000}); defaults to whatever's saved in the technology
+        file (Tools > Mask Operation Batch...) via load_mask_op_steps().
+
+        `cell_names` is forwarded to every step's mask_op() call
+        (defaults to the current cell, same convention as mask_op()
+        itself -- and, like mask_op(), each named cell's geometry is
+        combined only with itself, never across cells).
+
+        The whole batch runs as ONE undo step (see Session._batch()),
+        even though it's implemented as several mask_op() calls under
+        the hood -- Ctrl+Z undoes the entire recipe at once, not one
+        step of it.
+
+        Returns [(step, written), ...] in the order run, where
+        `written` is that step's own mask_op() return value
+        ({cell_name: polygons_written}) -- so a caller (the GUI batch
+        window) can report what each step actually did."""
+        from ..core.maskops import MaskOpStep
+        from ..io.techfile import load_mask_op_steps
+
+        if steps is None:
+            steps = load_mask_op_steps(self.library)
+        resolved = [s if isinstance(s, MaskOpStep) else MaskOpStep.from_dict(s) for s in steps]
+
+        results = []
+        with self._batch():
+            for step in resolved:
+                written = self.mask_op(
+                    step.kind, step.layer_a, step.result_layer,
+                    layer_b=step.layer_b, amount=step.amount,
+                    cell_names=cell_names, flatten=step.flatten,
+                    simplify=step.simplify or None,
+                )
+                results.append((step, written))
+        return results
 
     def run_drc(self, rules=None, cell_names: Optional[List[str]] = None,
                 error_layer=None) -> List["DrcViolation"]:
