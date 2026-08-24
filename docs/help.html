@@ -1,0 +1,743 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HLayout Reference</title>
+<meta name="description" content="Command bar and Python scripting API reference for HLayout, the thick &amp; thin film hybrid layout CAD tool.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #f2f4f6;
+    --bg-dot: #d7dee4;
+    --surface: #ffffff;
+    --surface-2: #eaeef1;
+    --ink: #1b232c;
+    --ink-muted: #5c6773;
+    --ink-faint: #8a94a0;
+    --line: #d8dfe4;
+    --line-strong: #bcc6cd;
+    --accent: #b56a2c;
+    --accent-ink: #ffffff;
+    --accent-soft: #f3e2d1;
+    --py: #1f7a8c;
+    --py-soft: #d9edf0;
+    --code-bg: #eef2f5;
+    --code-ink: #26313b;
+    --shadow: 0 1px 2px rgba(20,30,40,.06), 0 8px 24px rgba(20,30,40,.05);
+    --radius: 3px;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg: #16191c;
+      --bg-dot: #24282c;
+      --surface: #1d2124;
+      --surface-2: #24292d;
+      --ink: #e9e6df;
+      --ink-muted: #a2aab1;
+      --ink-faint: #6d757c;
+      --line: #33383d;
+      --line-strong: #454b51;
+      --accent: #dd9a56;
+      --accent-ink: #1b120a;
+      --accent-soft: #3a2c1c;
+      --py: #5bb6c4;
+      --py-soft: #16333a;
+      --code-bg: #16191b;
+      --code-ink: #dde3e8;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg: #16191c;
+    --bg-dot: #24282c;
+    --surface: #1d2124;
+    --surface-2: #24292d;
+    --ink: #e9e6df;
+    --ink-muted: #a2aab1;
+    --ink-faint: #6d757c;
+    --line: #33383d;
+    --line-strong: #454b51;
+    --accent: #dd9a56;
+    --accent-ink: #1b120a;
+    --accent-soft: #3a2c1c;
+    --py: #5bb6c4;
+    --py-soft: #16333a;
+    --code-bg: #16191b;
+    --code-ink: #dde3e8;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+    color-scheme: dark;
+  }
+
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:
+      radial-gradient(var(--bg-dot) 1px, transparent 1px) 0 0/22px 22px,
+      var(--bg);
+    color:var(--ink);
+    font-family:"IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    font-size:15px;
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  code, .mono, .syntax, pre{
+    font-family:"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  a{color:var(--accent);}
+  h1,h2,h3,h4{font-family:"Big Shoulders", "IBM Plex Sans", sans-serif; text-transform:uppercase; letter-spacing:.02em; text-wrap:balance; font-weight:600; color:var(--ink); margin:0;}
+
+  /* ---------- shell layout ---------- */
+  .shell{display:grid; grid-template-columns: 300px 1fr; min-height:100vh;}
+  @media (max-width: 860px){ .shell{grid-template-columns: 1fr;} .sidebar{position:static; height:auto;} }
+
+  .sidebar{
+    position:sticky; top:0; align-self:start; height:100vh; overflow-y:auto;
+    background:var(--surface); border-right:1px solid var(--line);
+    padding:22px 16px 40px;
+  }
+  .brand{display:flex; align-items:baseline; gap:8px; padding:2px 4px 4px; margin-bottom:4px;}
+  .brand .mark{font-family:"Big Shoulders",sans-serif; font-weight:700; font-size:22px; letter-spacing:.01em; color:var(--ink);}
+  .brand .sub{font-size:11px; color:var(--ink-faint); letter-spacing:.06em; text-transform:uppercase;}
+  .tagline{font-size:12.5px; color:var(--ink-muted); padding:0 4px 16px; border-bottom:1px solid var(--line); margin-bottom:14px;}
+
+  .searchwrap{position:relative; margin:0 2px 16px;}
+  #search{
+    width:100%; padding:9px 30px 9px 11px; border-radius:var(--radius);
+    border:1px solid var(--line-strong); background:var(--surface-2); color:var(--ink);
+    font-family:"IBM Plex Sans",sans-serif; font-size:13px; outline:none;
+  }
+  #search:focus{border-color:var(--accent);}
+  .searchwrap::after{
+    content:"/"; position:absolute; right:9px; top:50%; transform:translateY(-50%);
+    font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--ink-faint);
+    border:1px solid var(--line); border-radius:2px; padding:1px 5px;
+  }
+  #resultcount{font-size:11px; color:var(--ink-faint); padding:0 4px 10px; display:none;}
+
+  nav .group-title{
+    font-family:"Big Shoulders",sans-serif; font-size:13px; font-weight:600;
+    letter-spacing:.05em; text-transform:uppercase; color:var(--ink-faint);
+    padding:14px 4px 6px; display:flex; align-items:center; gap:7px;
+  }
+  nav .group-title .dot{width:7px;height:7px;border-radius:50%;}
+  nav .cat{margin:2px 0 2px;}
+  nav .cat-title{
+    font-size:11px; letter-spacing:.05em; text-transform:uppercase; color:var(--ink-faint);
+    padding:9px 4px 3px;
+  }
+  nav .navitem{
+    display:block; padding:4px 8px 4px 10px; border-radius:var(--radius);
+    color:var(--ink-muted); text-decoration:none; font-size:13.5px;
+    font-family:"IBM Plex Mono",monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    border-left:2px solid transparent;
+  }
+  nav .navitem:hover{color:var(--ink); background:var(--surface-2);}
+  nav .navitem.active{color:var(--ink); background:var(--surface-2); border-left-color:var(--accent); font-weight:500;}
+  nav .navitem[data-group="python"].active{border-left-color:var(--py);}
+  nav .navitem.hide{display:none;}
+  nav .cat.hide{display:none;}
+
+  /* ---------- content ---------- */
+  main{padding:44px 48px 120px; max-width:920px;}
+  @media (max-width: 640px){ main{padding:28px 18px 90px;} }
+
+  .hero{margin-bottom:40px; padding-bottom:26px; border-bottom:1px solid var(--line);}
+  .hero h1{font-size:44px; line-height:1.05;}
+  .hero p.lede{max-width:62ch; color:var(--ink-muted); font-size:15.5px; margin-top:12px;}
+  .stats{display:flex; gap:22px; margin-top:20px; flex-wrap:wrap;}
+  .stat{font-family:"IBM Plex Mono",monospace;}
+  .stat b{font-size:20px; color:var(--ink); font-weight:600;}
+  .stat span{display:block; font-size:11px; color:var(--ink-faint); text-transform:uppercase; letter-spacing:.05em;}
+  .quickstart{
+    margin-top:24px; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    padding:16px 18px;
+  }
+  .quickstart h3{font-size:13px; letter-spacing:.04em; color:var(--ink-muted); margin-bottom:9px; font-family:"IBM Plex Sans",sans-serif; text-transform:uppercase; font-weight:600;}
+  .quickstart pre{margin:0; font-size:13px;}
+
+  section.group-section{margin-bottom:8px;}
+  .group-banner{
+    display:flex; align-items:center; gap:10px; margin:52px 0 6px; padding-bottom:10px; border-bottom:2px solid var(--line);
+  }
+  .group-banner h2{font-size:26px;}
+  .group-banner .chip{font-size:10.5px; padding:2px 8px; border-radius:20px; font-family:"IBM Plex Mono",monospace; letter-spacing:.03em;}
+  .chip.cmd{background:var(--accent-soft); color:var(--accent);}
+  .chip.py{background:var(--py-soft); color:var(--py);}
+  .group-desc{color:var(--ink-muted); font-size:13.5px; max-width:64ch; margin-bottom:6px;}
+
+  .category{margin-top:34px;}
+  .category h3{font-size:12px; color:var(--ink-faint); letter-spacing:.08em; padding-bottom:6px; margin-bottom:14px; border-bottom:1px solid var(--line);}
+
+  .entry{
+    background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    padding:16px 18px 17px; margin-bottom:12px; scroll-margin-top:18px;
+    box-shadow:var(--shadow);
+  }
+  .entry.hide{display:none;}
+  .entry-head{display:flex; align-items:baseline; justify-content:space-between; gap:10px; flex-wrap:wrap;}
+  .entry-name{font-family:"IBM Plex Mono",monospace; font-weight:600; font-size:14.5px; color:var(--ink);}
+  .entry .badge{font-size:9.5px; padding:1px 6px; border-radius:20px; font-family:"IBM Plex Mono",monospace; letter-spacing:.03em; text-transform:uppercase;}
+  .entry .badge.cmd{background:var(--accent-soft); color:var(--accent);}
+  .entry .badge.py{background:var(--py-soft); color:var(--py);}
+  .syntax{
+    display:block; margin:10px 0 10px; padding:9px 12px; background:var(--code-bg); color:var(--code-ink);
+    border-radius:var(--radius); font-size:13px; overflow-x:auto; white-space:pre;
+    border-left:3px solid var(--line-strong);
+  }
+  .entry[data-group="command"] .syntax{border-left-color:var(--accent);}
+  .entry[data-group="python"] .syntax{border-left-color:var(--py);}
+  .desc{font-size:13.8px; color:var(--ink-muted); margin-bottom:2px;}
+  .desc code{background:var(--code-bg); color:var(--code-ink); padding:0 4px; border-radius:2px; font-size:.92em;}
+  .example{margin-top:12px;}
+  .example .label{font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-faint); margin-bottom:5px; display:block;}
+  pre.code{
+    margin:0; background:var(--code-bg); color:var(--code-ink); border-radius:var(--radius);
+    padding:11px 13px; font-size:12.8px; overflow-x:auto; line-height:1.55;
+    border:1px solid var(--line);
+  }
+  pre.code .c{color:var(--ink-faint); font-style:italic;}
+
+  .empty-state{display:none; padding:60px 10px; text-align:center; color:var(--ink-faint); font-size:14px;}
+  .empty-state.show{display:block;}
+
+  footer{margin-top:70px; padding-top:20px; border-top:1px solid var(--line); color:var(--ink-faint); font-size:12px;}
+
+  ::selection{background:var(--accent-soft); color:var(--ink);}
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand"><span class="mark">HLayout</span><span class="sub">Reference</span></div>
+    <div class="tagline">Command bar &amp; Python API for the thick &amp; thin film hybrid layout CAD tool.</div>
+    <div class="searchwrap">
+      <input id="search" type="text" placeholder="Search commands, methods, arguments&hellip;" autocomplete="off" spellcheck="false">
+    </div>
+    <div id="resultcount"></div>
+    <nav id="nav"></nav>
+  </aside>
+
+  <main>
+    <div class="hero">
+      <h1>HLayout Reference</h1>
+      <p class="lede">Everything the command bar understands, and everything the <code>Session</code> object exposes to Python scripts — one source, two ways to drive the same layout database.</p>
+      <div class="stats">
+        <div class="stat"><b id="cmdCount">0</b><span>Command bar commands</span></div>
+        <div class="stat"><b id="pyCount">0</b><span>Python API methods</span></div>
+        <div class="stat"><b>1 DBU</b><span>= 1 micron</span></div>
+      </div>
+      <div class="quickstart">
+        <h3>Two ways in</h3>
+        <pre class="code"><span class="c"># 1. The command bar (bottom of the GUI) -- type a line, press Enter</span>
+RECT 0 0,0 100,50
+SREF VIA_Layer1_to_Layer3 200,0
+
+<span class="c"># 2. Python, headless or via the built-in Script Console (name: hl)</span>
+from hlayout.scripting.api import Session
+s = Session.new("MYLIB")
+s.new_cell("TOP")
+s.rect(layer=0, x1=0, y1=0, x2=100, y2=50)
+s.save("out.gds")</pre>
+      </div>
+    </div>
+
+    <div id="content"></div>
+    <div class="empty-state" id="emptyState">No commands or methods match &ldquo;<span id="emptyQuery"></span>&rdquo;.</div>
+
+    <footer>HLayout &middot; generated reference &middot; layer arguments accept a layer number (0&ndash;63) or an assigned layer name everywhere they appear &middot; all coordinates are in DBU (1 DBU = 1 micron) unless a command says mm</footer>
+  </main>
+</div>
+
+<script>
+/* ============================================================
+   DATA -- one entry per command / API method. `syntax` uses the
+   command bar's own grammar; python entries show the method
+   signature. `example` is a short, runnable snippet.
+   ============================================================ */
+const DATA = [
+
+{group:"command", groupLabel:"Command Bar", cat:"Cells & Shapes", items:[
+  {name:"CELL", syntax:"CELL <name>",
+   desc:"Create the cell if it doesn't exist yet, then switch the current cell to it. Every RECT/POLY/SREF/&hellip; below acts on whichever cell is current.",
+   example:"CELL TOP"},
+  {name:"RECT", syntax:"RECT <layer> <x1,y1> <x2,y2>",
+   desc:"Add a rectangle from corner to corner on <code>&lt;layer&gt;</code>.",
+   example:"RECT 0 0,0 100,50"},
+  {name:"POLY", syntax:"POLY <layer> <x1,y1> <x2,y2> ...",
+   desc:"Add a closed polygon (3&ndash;200 points).",
+   example:"POLY 1 0,0 50,0 25,40"},
+  {name:"PATH", syntax:"PATH <layer> <width> <cap> <x1,y1> <x2,y2> ...",
+   desc:"Add a routed path. <code>cap</code> is <code>round</code>, <code>square</code>, or <code>flush</code>.",
+   example:"PATH 2 5 round 0,0 50,0 50,50"},
+  {name:"CIRCLE", syntax:"CIRCLE <layer> <cx,cy> <radius> [segments]",
+   desc:"Add a circle, stored as a regular polygon. <code>segments</code> is 8, 16, 32 (default), or 64.",
+   example:"CIRCLE 0 0,0 25 32"},
+  {name:"TEXT", syntax:"TEXT <layer> <x,y> \"<string>\" [height] [font]",
+   desc:"Add a text label &mdash; quote the string if it contains spaces.",
+   example:"TEXT 3 0,0 \"R1\" 10 0"},
+  {name:"SREF", syntax:"SREF <cellname> <x,y> [rotation] [mag] [mirror]",
+   desc:"Place one instance of another cell (GDSII SREF) &mdash; the way reusable parts (vias, pads, resistors) get placed.",
+   example:"SREF VIA_Layer1_to_Layer3 200,0 0 1 no"},
+  {name:"AREF", syntax:"AREF <cellname> <x,y> <columns> <rows> <col_spacing> <row_spacing> [rotation] [mag] [mirror]",
+   desc:"Place a whole grid of instances at once (GDSII AREF) &mdash; spacing is applied <em>before</em> rotation/mirror. Use <code>SMASH</code> to explode one back into plain SREFs.",
+   example:"AREF PAD_0402 0,0 8 4 650 1200"},
+  {name:"DELETE LAST", syntax:"DELETE LAST",
+   desc:"Remove the most recently added shape, SREF, or AREF from the current cell.",
+   example:"DELETE LAST"},
+]},
+
+{group:"command", groupLabel:"Command Bar", cat:"Layers", items:[
+  {name:"LAYER", syntax:"LAYER <n|name> [color=#rrggbb] [stipple=0-8] [fill=0|1] [visible=0|1] [name=...]",
+   desc:"Edit one layer's style. Any layer argument anywhere accepts a number or an assigned name.",
+   example:'LAYER 1 name="Conductor 1" color=#3cb44b fill=1'},
+  {name:"LAYER ALL", syntax:"LAYER ALL visible=0|1",
+   desc:"Turn every layer on or off at once.",
+   example:"LAYER ALL visible=0"},
+  {name:"LAYER MOVE", syntax:"LAYER MOVE <from> <to> [cell=<name>]",
+   desc:"Move every shape on one layer to another, across the whole library (or just one cell) &mdash; the way to align an existing design with a newly loaded technology file.",
+   example:"LAYER MOVE 3 7"},
+]},
+
+{group:"command", groupLabel:"Command Bar", cat:"View", items:[
+  {name:"ZOOM", syntax:"ZOOM IN | OUT | FIT | <factor>",
+   desc:"Zoom the active view.",
+   example:"ZOOM FIT"},
+  {name:"GRID", syntax:"GRID",
+   desc:"With no arguments, report whether the grid is on/off and its current spacing.",
+   example:"GRID\n<span class=\"c\">&raquo; grid on, spacing 1 mm</span>"},
+  {name:"GRID ON/OFF", syntax:"GRID ON | OFF",
+   desc:"Show or hide the drawing grid.",
+   example:"GRID OFF"},
+  {name:"GRID spacing", syntax:"GRID <spacing_mm>",
+   desc:"Change the grid spacing &mdash; also updates snap-to-grid to match, since they're the same setting.",
+   example:"GRID 0.5"},
+]},
+
+{group:"command", groupLabel:"Command Bar", cat:"Selection", items:[
+  {name:"MOVE", syntax:"MOVE <dx,dy>",
+   desc:"Move the current selection by dx,dy DBU. Select something first (Select tool click &mdash; it turns white).",
+   example:"MOVE 100,0"},
+  {name:"ROTATE", syntax:"ROTATE <degrees>",
+   desc:"Rotate the current selection counter-clockwise about its own origin.",
+   example:"ROTATE 90"},
+  {name:"COPY", syntax:"COPY <dx,dy>",
+   desc:"Duplicate the current selection, offsetting the copy by dx,dy DBU, and select the copy.",
+   example:"COPY 500,0"},
+  {name:"PROPS", syntax:"PROPS",
+   desc:"List the current selection's properties (layer/width, cell name, origin, rotation, &hellip;) &mdash; also shown live in the Properties tab.",
+   example:"PROPS"},
+  {name:"SMASH", syntax:"SMASH",
+   desc:"Explode the selected array instance (AREF) back into individual SREFs, one per array position, and select the new SREFs.",
+   example:"SMASH"},
+]},
+
+{group:"command", groupLabel:"Command Bar", cat:"Undo / Redo", items:[
+  {name:"UNDO", syntax:"UNDO", desc:"Undo the last edit &mdash; command bar, mouse, or script, they all share one history.", example:"UNDO"},
+  {name:"REDO", syntax:"REDO", desc:"Redo the last undone edit.", example:"REDO"},
+]},
+
+{group:"command", groupLabel:"Command Bar", cat:"Files", items:[
+  {name:"SAVE", syntax:"SAVE <path.gds> [library_name]",
+   desc:"With no <code>library_name</code>: save the design plus a sidecar (<code>&lt;path&gt;.hlaux</code>) capturing technology + attached libraries. With one: publish a bare, sidecar-free .gds under that name &mdash; for Save As Library / reusable part libraries.",
+   example:"SAVE mydesign.gds\n<span class=\"c\">&hellip;or, to publish a parts library:</span>\nSAVE parts.gds MYPARTS"},
+  {name:"OPEN", syntax:"OPEN <path.gds>",
+   desc:"Open a design, restoring its sidecar (technology + attached libraries) automatically if one sits next to the file.",
+   example:"OPEN mydesign.gds"},
+  {name:"GERBER", syntax:"GERBER <output_prefix> [cell=<name>]",
+   desc:"Export Gerber RS-274X &mdash; one flattened file per visible layer with data, named <code>&lt;prefix&gt;_L&lt;NN&gt;_&lt;layer&gt;.gbr</code>.",
+   example:"GERBER out/board"},
+]},
+
+{group:"command", groupLabel:"Command Bar", cat:"Technology File", items:[
+  {name:"TECH LOAD", syntax:"TECH LOAD <path.json>", desc:"Load a technology file and apply its layer stack + parameters to the current library.", example:"TECH LOAD process_v3.json"},
+  {name:"TECH SAVE", syntax:"TECH SAVE <path.json>", desc:"Save the current layer stack + parameters as a technology file.", example:"TECH SAVE process_v3.json"},
+  {name:"TECH SET", syntax:"TECH SET <key> <value>", desc:"Set one global technology parameter.", example:"TECH SET substrate_thickness_mm 0.635"},
+  {name:"TECH GET", syntax:"TECH GET <key>", desc:"Show one technology parameter.", example:"TECH GET substrate_thickness_mm"},
+  {name:"TECH PARAMS", syntax:"TECH PARAMS", desc:"List every saved technology parameter.", example:"TECH PARAMS"},
+]},
+
+{group:"command", groupLabel:"Command Bar", cat:"Attached Libraries", items:[
+  {name:"ATTACH", syntax:"ATTACH <path.gds>", desc:"Attach a GDSII file as a reference library to search/place cells from (max 2 at once).", example:"ATTACH parts/vias.gds"},
+  {name:"LIBS", syntax:"LIBS", desc:"List the currently attached reference libraries.", example:"LIBS"},
+  {name:"LIBLIST", syntax:"LIBLIST [current|0|1]", desc:"List the cells inside a library &mdash; defaults to the current design.", example:"LIBLIST 0"},
+  {name:"FIND", syntax:"FIND <substring>", desc:"Case-insensitive cell-name search across the current design and every attached library.", example:"FIND via"},
+  {name:"PLACE", syntax:"PLACE <cellname> <x,y> [source=current|0|1] [rotation] [mag] [mirror]",
+   desc:"Find-and-place a cell as an SREF; <code>source</code> disambiguates a name that exists in more than one attached library.",
+   example:"PLACE VIA_Layer1_to_Layer3 200,0 source=0"},
+  {name:"VIA", syntax:"VIA <layer1> <layer2> [shape=square|round] [size=<dbu>] [index=0|1] [overwrite=0|1]",
+   desc:"Create a via cell &mdash; a same-size pad on both layers &mdash; directly inside an attached library, and save that library in place.",
+   example:"VIA 1 3 shape=round size=150"},
+  {name:"PAD", syntax:"PAD <name> <conductor_layer> <paste_layer> <length_mm> <width_mm> <margin_mm> [rows=1] [cols=1] [pitch_x=<mm>] [pitch_y=<mm>] [index=0|1] [overwrite=0|1]",
+   desc:"Create a rectangular pad cell &mdash; conductor + solder-paste rectangle undersized by <code>margin_mm</code> &mdash; inside an attached library. <code>rows</code>/<code>cols</code> lay out a centred grid.",
+   example:"PAD SOT23_PAD 1 5 1.2 0.6 0.05"},
+]},
+
+{group:"command", groupLabel:"Command Bar", cat:"Thick-Film Resistors", items:[
+  {name:"RESGEN", syntax:"RESGEN <x,y> <body_width> <body_length> [rotation=<deg>] [ink=<rsh>] [ref=<designator>] [a=] [b=] [c=] [d=] [rlayer=] [clayer=] [glayer=] [dlayer=]",
+   desc:"Build a resistor &mdash; ink body, glaze overprint, two end conductor pads, optional ref-des label &mdash; as its own new cell, and place one instance at x,y. <code>body_width</code>/<code>body_length</code> normally come from Tools &gt; Thick-Film Resistor Designer&hellip;; <code>ink=&lt;rsh&gt;</code> looks the ink layer up by sheet resistance; anything else defaults to Setup &gt; Resistor Geometry Rules&hellip;.",
+   example:"RESGEN 0,0 500 2000 ink=100 ref=R1"},
+]},
+
+{group:"command", groupLabel:"Command Bar", cat:"Mask Operations", items:[
+  {name:"MASKOP OVERSIZE", syntax:"MASKOP OVERSIZE <layer_a> result=<layer> amount=<dbu> [cell=] [flatten=] [simplify=]",
+   desc:"Grow everything on layer_a by amount DBU into result. Requires the <code>shapely</code> package.",
+   example:"MASKOP OVERSIZE 10 result=20 amount=5000"},
+  {name:"MASKOP UNDERSIZE", syntax:"MASKOP UNDERSIZE <layer_a> result=<layer> amount=<dbu> [cell=] [flatten=] [simplify=]",
+   desc:"Same as OVERSIZE, but shrink by amount DBU.",
+   example:"MASKOP UNDERSIZE 10 result=21 amount=3000"},
+  {name:"MASKOP AND", syntax:"MASKOP AND <layer_a> <layer_b> result=<layer> [cell=] [flatten=] [simplify=]",
+   desc:"Intersection of layer_a and layer_b.", example:"MASKOP AND 20 30 result=40"},
+  {name:"MASKOP OR", syntax:"MASKOP OR <layer_a> <layer_b> result=<layer> [cell=] [flatten=] [simplify=]",
+   desc:"Union of layer_a and layer_b.", example:"MASKOP OR 20 30 result=40"},
+  {name:"MASKOP NOT", syntax:"MASKOP NOT <layer_a> <layer_b> result=<layer> [cell=] [flatten=] [simplify=]",
+   desc:"layer_a minus layer_b.", example:"MASKOP NOT 20 30 result=40"},
+  {name:"MASKOP XOR", syntax:"MASKOP XOR <layer_a> <layer_b> result=<layer> [cell=] [flatten=] [simplify=]",
+   desc:"Symmetric difference &mdash; everything on exactly one of the two; a quick &ldquo;did these change&rdquo; diff.",
+   example:"MASKOP XOR 20 20_old result=40"},
+]},
+
+{group:"command", groupLabel:"Command Bar", cat:"Design Rule Check", items:[
+  {name:"DRCRULE ADD", syntax:"DRCRULE ADD <kind> <layer_a> [layer_b] value=<n> [name=<name>]",
+   desc:"Add and save a rule to the technology file. <code>kind</code>: MIN_WIDTH / MIN_AREA / MIN_SPACE (one layer), or MIN_SPACE_BETWEEN / MIN_ENCLOSURE (two layers).",
+   example:"DRCRULE ADD MIN_WIDTH 20 value=200 name=M1.W.1"},
+  {name:"DRCRULE LIST", syntax:"DRCRULE LIST", desc:"List saved rules, numbered.", example:"DRCRULE LIST"},
+  {name:"DRCRULE REMOVE", syntax:"DRCRULE REMOVE <index>", desc:"Remove one saved rule by its LIST number.", example:"DRCRULE REMOVE 2"},
+  {name:"DRCRULE CLEAR", syntax:"DRCRULE CLEAR", desc:"Remove every saved rule.", example:"DRCRULE CLEAR"},
+  {name:"DRC RUN", syntax:"DRC RUN [cell=<name>] [error=<layer>]",
+   desc:"Run every saved rule against the current cell, descending into placed instances. <code>error=&lt;layer&gt;</code> also draws each violation's marker.",
+   example:"DRC RUN error=99"},
+]},
+
+{group:"command", groupLabel:"Command Bar", cat:"Scripting", items:[
+  {name:"PY", syntax:"PY <python source>",
+   desc:"Run arbitrary Python against the session &mdash; also the fallback for any line that isn't a recognised command, so <code>s.rect(0,0,0,10,10)</code> works directly in the command bar too.",
+   example:"PY s.rect(0, 0, 0, 100, 50)"},
+  {name:"HELP", syntax:"HELP", desc:"Show the full command reference in the console.", example:"HELP"},
+]},
+
+/* ================= PYTHON API ================= */
+
+{group:"python", groupLabel:"Python API", cat:"Construction & I/O", items:[
+  {name:"Session.new()", syntax:"Session.new(name: str = \"HLIB\") -> Session",
+   desc:"Classmethod. Start a brand new, empty library.",
+   example:"from hlayout.scripting.api import Session\ns = Session.new(\"MYLIB\")"},
+  {name:"Session.open()", syntax:"Session.open(path: str) -> Session",
+   desc:"Classmethod. Open a bare .gds file with no sidecar handling.",
+   example:'s = Session.open("mydesign.gds")'},
+  {name:"Session.open_design()", syntax:"Session.open_design(path: str) -> Session",
+   desc:"Classmethod. Open a .gds file plus its <code>.hlaux</code> sidecar, if present &mdash; restores technology and every attached library. Check <code>s.attach_errors</code> afterwards.",
+   example:'s = Session.open_design("mydesign.gds")\nprint(s.had_sidecar, s.attach_errors)'},
+  {name:"save()", syntax:"s.save(path: str, library_name: str | None = None) -> None",
+   desc:"Write the current design as a plain .gds. Pass <code>library_name</code> to rename the library first &mdash; the way to publish a reusable parts library.",
+   example:'s.save("out.gds")\ns.save("parts.gds", library_name="MYPARTS")'},
+  {name:"save_design()", syntax:"s.save_design(path: str) -> str",
+   desc:"Write the .gds <em>plus</em> a sidecar capturing technology + every attached library. Returns the sidecar's path.",
+   example:'s.save_design("mydesign.gds")'},
+  {name:"export_gerber()", syntax:"s.export_gerber(out_prefix: str, cell_name: str | None = None, layers: list[int] | None = None)",
+   desc:"Export the current (or named) cell as Gerber RS-274X, one file per visible layer with data. Returns <code>(written, skipped_text)</code>.",
+   example:'written, skipped = s.export_gerber("out/board")'},
+  {name:"run_gerber_export_batch()", syntax:"s.run_gerber_export_batch(jobs=None, cell_name=None)",
+   desc:"Run a saved series of Gerber export jobs (Tools &gt; Gerber Export Sets&hellip;) in one call &mdash; one job per fab house/board revision.",
+   example:"results = s.run_gerber_export_batch()"},
+  {name:"export_dxf()", syntax:"s.export_dxf(path: str, cell_name: str | None = None, layers: list[int] | None = None)",
+   desc:"Export as a single DXF file, one DXF layer per visible hlayout layer with data (text included, unlike Gerber). Returns <code>(written_layers, entity_count)</code>.",
+   example:'s.export_dxf("out/board.dxf")'},
+  {name:"run_dxf_export_batch()", syntax:"s.run_dxf_export_batch(jobs=None, cell_name=None)",
+   desc:"Run a saved series of DXF export jobs (Tools &gt; DXF Export Sets&hellip;) in one call.",
+   example:"results = s.run_dxf_export_batch()"},
+]},
+
+{group:"python", groupLabel:"Python API", cat:"Technology File", items:[
+  {name:"load_technology()", syntax:"s.load_technology(path: str) -> dict",
+   desc:"Load a technology JSON file and apply its layer stack + parameters onto the current library.",
+   example:'s.load_technology("process_v3.json")'},
+  {name:"save_technology()", syntax:"s.save_technology(path: str) -> None",
+   desc:"Write the current layer stack + parameters out as a technology file.",
+   example:'s.save_technology("process_v3.json")'},
+]},
+
+{group:"python", groupLabel:"Python API", cat:"Attached Libraries & Reusable Parts", items:[
+  {name:"attach_library()", syntax:"s.attach_library(path: str) -> Library",
+   desc:"Attach a GDSII file as a reference library alongside the current design (max 2).",
+   example:'s.attach_library("parts/vias.gds")'},
+  {name:"detach_library()", syntax:"s.detach_library(index: int) -> None",
+   desc:"Detach an attached library by index.", example:"s.detach_library(0)"},
+  {name:"list_attached_libraries()", syntax:"s.list_attached_libraries() -> list[dict]",
+   desc:"<code>[{'index','name','path','cells'}, &hellip;]</code> for each attached library.",
+   example:"for lib in s.list_attached_libraries():\n    print(lib[\"name\"], lib[\"cells\"])"},
+  {name:"create_via_cell()", syntax:"s.create_via_cell(layer1, layer2, shape=\"square\", size=100, index=None, overwrite=False)",
+   desc:"Create a via cell (a same-size pad on both layers) directly inside an attached library and save it back to disk. Returns <code>(cell_name, path)</code>.",
+   example:'name, path = s.create_via_cell(1, 3, shape="round", size=150)'},
+  {name:"create_pad_cell()", syntax:"s.create_pad_cell(name, conductor_layer, paste_layer, length, width, margin, *, rows=1, cols=1, pitch_x=None, pitch_y=None, index=None, overwrite=False)",
+   desc:"Create a rectangular pad cell (conductor + undersized solder-paste rectangle) inside an attached library; <code>rows</code>&times;<code>cols</code> lays out a centred grid. Returns <code>(cell_name, path, pad_count)</code>.",
+   example:'name, path, n = s.create_pad_cell(\n    "SOT23_PAD", conductor_layer=1, paste_layer=5,\n    length=1200, width=600, margin=50,\n)'},
+]},
+
+{group:"python", groupLabel:"Python API", cat:"Library & Cell Queries", items:[
+  {name:"list_library()", syntax:"s.list_library(source: str | int = \"current\") -> list[dict]",
+   desc:"List a library's cells &mdash; <code>source</code> is <code>\"current\"</code> or an attached library's 0-based index.",
+   example:'for c in s.list_library():\n    print(c["name"], c["shapes"], c["bbox"])'},
+  {name:"find_cells()", syntax:"s.find_cells(query: str) -> list[dict]",
+   desc:"Case-insensitive substring search across the current library and every attached library. Returns <code>[{'source','name'}, &hellip;]</code>.",
+   example:'matches = s.find_cells("via")'},
+]},
+
+{group:"python", groupLabel:"Python API", cat:"Change Notification", items:[
+  {name:"on_change()", syntax:"s.on_change(callback: Callable[[], None]) -> None",
+   desc:"Register a callback fired after every mutating call &mdash; how the GUI repaints after a script edits the data.",
+   example:"s.on_change(lambda: print(\"design changed\"))"},
+]},
+
+{group:"python", groupLabel:"Python API", cat:"Undo / Redo", items:[
+  {name:"checkpoint()", syntax:"s.checkpoint() -> None",
+   desc:"Push an undo snapshot before a mutation you're about to make directly (bypassing this API's own methods).",
+   example:"s.checkpoint()\ns.cell.shapes[0].layer = 5"},
+  {name:"batch()", syntax:"with s.batch(): ...",
+   desc:"Context manager &mdash; group several mutating calls behind a single undo step.",
+   example:"with s.batch():\n    s.rect(0, 0, 0, 10, 10)\n    s.rect(0, 20, 0, 30, 10)\n<span class=\"c\"># one Ctrl+Z undoes both rectangles</span>"},
+  {name:"clear_undo_history()", syntax:"s.clear_undo_history() -> None",
+   desc:"Clear undo/redo &mdash; used when the whole design is replaced (New, Open), not edited.",
+   example:"s.clear_undo_history()"},
+  {name:"can_undo() / can_redo()", syntax:"s.can_undo() -> bool\ns.can_redo() -> bool",
+   desc:"Whether there's anything to undo/redo right now.", example:"if s.can_undo():\n    s.undo()"},
+  {name:"undo() / redo()", syntax:"s.undo() -> bool\ns.redo() -> bool",
+   desc:"Step the design back/forward one edit. Returns whether it did anything.",
+   example:"s.undo()"},
+]},
+
+{group:"python", groupLabel:"Python API", cat:"Cell & Layer Context", items:[
+  {name:"new_cell()", syntax:"s.new_cell(name: str) -> Cell",
+   desc:"Create a cell and switch to it.", example:'s.new_cell("TOP")'},
+  {name:"use_cell()", syntax:"s.use_cell(name: str) -> Cell",
+   desc:"Switch the current cell to an existing one.", example:'s.use_cell("TOP")'},
+  {name:"cell", syntax:"s.cell -> Cell",
+   desc:"Property. The current cell object &mdash; raises if none is set.",
+   example:"print(len(s.cell.shapes))"},
+  {name:"set_layer_style()", syntax:"s.set_layer_style(layer, **kwargs)",
+   desc:"Edit a layer's name/color/stipple/fill/visibility. <code>layer</code> accepts a number or an existing name.",
+   example:'s.set_layer_style(1, name="Conductor 1", color="#3cb44b", fill=True)'},
+]},
+
+{group:"python", groupLabel:"Python API", cat:"Shapes", items:[
+  {name:"rect()", syntax:"s.rect(layer, x1, y1, x2, y2, datatype=0)",
+   desc:"Add a rectangle to the current cell.", example:"s.rect(layer=0, x1=0, y1=0, x2=100, y2=50)"},
+  {name:"polygon()", syntax:"s.polygon(layer, points, datatype=0)",
+   desc:"Add a closed polygon (3&ndash;200 points).", example:"s.polygon(layer=1, points=[(0,0), (10,0), (5,10)])"},
+  {name:"circle()", syntax:"s.circle(layer, center, radius, segments=32, datatype=0)",
+   desc:"Add a circle, stored as a regular polygon. <code>segments</code>: 8, 16, 32, or 64.",
+   example:"s.circle(layer=0, center=(0,0), radius=250, segments=32)"},
+  {name:"path()", syntax:"s.path(layer, points, width, cap=\"flush\", datatype=0)",
+   desc:"Add a routed path.", example:"s.path(layer=2, points=[(0,0), (50,50)], width=5, cap=\"round\")"},
+  {name:"text()", syntax:"s.text(layer, origin, text, height=10, font=0, rotation=0.0, datatype=0)",
+   desc:"Add a text label.", example:'s.text(layer=3, origin=(0,0), text="R1")'},
+]},
+
+{group:"python", groupLabel:"Python API", cat:"Cell Instances (SRef / ARef)", items:[
+  {name:"sref()", syntax:"s.sref(cell_name, origin, rotation=0.0, magnification=1.0, x_reflection=False)",
+   desc:"Place one instance of a cell that already exists in the current library. Raises on a cyclic reference.",
+   example:'s.sref("VIA_Layer1_to_Layer3", (200, 0))'},
+  {name:"place_cell()", syntax:"s.place_cell(cell_name, origin, source=None, rotation=0.0, magnification=1.0, x_reflection=False)",
+   desc:"Like <code>sref()</code>, but searches the current library and every attached library too &mdash; importing the cell's whole dependency closure first if it's found in an attached one. This is what the GUI's Create &gt; Cell Instance actually calls.",
+   example:'s.place_cell("VIA_Layer1_to_Layer3", (200, 0))'},
+  {name:"aref()", syntax:"s.aref(cell_name, origin, columns=1, rows=1, col_spacing=0.0, row_spacing=0.0, rotation=0.0, magnification=1.0, x_reflection=False)",
+   desc:"Place a whole grid of instances at once (GDSII AREF), same lookup rules as <code>sref()</code>. Spacing is defined before rotation/mirror is applied to the array.",
+   example:'s.aref("PAD_0402", (0, 0), columns=8, rows=4,\n      col_spacing=650, row_spacing=1200)'},
+  {name:"place_cell_array()", syntax:"s.place_cell_array(cell_name, origin, columns=1, rows=1, col_spacing=0.0, row_spacing=0.0, source=None, rotation=0.0, magnification=1.0, x_reflection=False)",
+   desc:"Like <code>aref()</code>, but with <code>place_cell()</code>'s attached-library search/import &mdash; what Create &gt; Array Instance calls.",
+   example:'s.place_cell_array("PAD_0402", (0, 0), columns=8, rows=4,\n                   col_spacing=650, row_spacing=1200)'},
+  {name:"smash_aref()", syntax:"s.smash_aref(ref: ARef) -> list[SRef]",
+   desc:"Explode a placed ARef back into individual SREFs, one per array position, in the same cell.",
+   example:"ref = s.aref(\"PAD_0402\", (0,0), columns=4, rows=1, col_spacing=650)\nsrefs = s.smash_aref(ref)"},
+  {name:"remove()", syntax:"s.remove(shape) -> None",
+   desc:"Remove any shape, SREF, or ARef object from the cell that owns it.",
+   example:"s.remove(s.cell.shapes[-1])"},
+]},
+
+{group:"python", groupLabel:"Python API", cat:"Vias & Resistors", items:[
+  {name:"drop_via()", syntax:"s.drop_via(x, y, layer_a, layer_b, size=100, shape=\"square\", dielectric_layer=None, dielectric_window=None)",
+   desc:"Draw a same-size via pad straight into the current cell on both layers &mdash; the inline equivalent of a via cell, no SREF indirection. Both pads (+ dielectric window, if given) are one undo step.",
+   example:"s.drop_via(0, 0, layer_a=1, layer_b=3, size=150,\n           dielectric_layer=2, dielectric_window=180)"},
+  {name:"generate_resistor()", syntax:"s.generate_resistor(x, y, body_width, body_length, rotation=0.0, ink_rsh=None, ref_des=None, ...)",
+   desc:"Build a complete thick-film resistor (ink body, glaze overprint, two end pads, optional ref-des label) as a new cell, then place one instance at (x, y). Returns the new cell's name.",
+   example:'name = s.generate_resistor(0, 0, body_width=500, body_length=2000,\n                           ink_rsh=100, ref_des="R1")'},
+]},
+
+{group:"python", groupLabel:"Python API", cat:"Mask Operations & DRC", items:[
+  {name:"mask_op()", syntax:"s.mask_op(op, layer_a, result_layer, layer_b=None, amount=0.0, cell_names=None, datatype=0, flatten=True, simplify=None) -> dict",
+   desc:"OVERSIZE / UNDERSIZE / AND / OR / NOT / XOR &mdash; a GDSII CAM-style layer operation. <code>flatten=True</code> (default) descends into placed SREFs. Returns <code>{cell_name: polygons_written}</code>. Requires <code>shapely</code>.",
+   example:'s.mask_op("OVERSIZE", layer_a=10, result_layer=20, amount=5000)\ns.mask_op("AND", layer_a=20, layer_b=30, result_layer=40)'},
+  {name:"run_mask_op_batch()", syntax:"s.run_mask_op_batch(steps=None, cell_names=None)",
+   desc:"Run a saved, ordered recipe of mask operations (Tools &gt; Mask Operation Batch&hellip;) as one undo step &mdash; a later step can read an earlier step's result layer.",
+   example:"results = s.run_mask_op_batch()"},
+  {name:"run_drc()", syntax:"s.run_drc(rules=None, cell_names=None, error_layer=None) -> list[DrcViolation]",
+   desc:"Run saved DRC rules (MIN_WIDTH, MIN_AREA, MIN_SPACE, MIN_SPACE_BETWEEN, MIN_ENCLOSURE), descending into placed instances. <code>error_layer</code> also draws each violation's marker. Requires <code>shapely</code>.",
+   example:"violations = s.run_drc(error_layer=99)\nfor v in violations:\n    print(v.rule.name, v.message)"},
+]},
+
+{group:"python", groupLabel:"Python API", cat:"Layer Remap & Geometry Queries", items:[
+  {name:"remap_layers()", syntax:"s.remap_layers(mapping: dict, cell_names=None) -> dict",
+   desc:"Bulk-reassign shapes from one layer to another across the library (every cell, by default). Returns <code>{old_layer: shapes_moved}</code>.",
+   example:"moved = s.remap_layers({3: 7, 4: 8})"},
+  {name:"shapes_on_layer()", syntax:"s.shapes_on_layer(layer) -> list",
+   desc:"Every shape on a layer in the current cell.", example:"pads = s.shapes_on_layer(5)"},
+  {name:"bbox()", syntax:"s.bbox(cell_name=None) -> tuple | None",
+   desc:"The bounding box <code>(x1, y1, x2, y2)</code> of a cell (current, by default), including everything placed inside it.",
+   example:"x1, y1, x2, y2 = s.bbox()"},
+]},
+
+];
+
+/* ============================================================
+   RENDER
+   ============================================================ */
+function slug(group, cat, name){
+  return (group+"-"+cat+"-"+name).toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"");
+}
+
+// `syntax` strings are plain text containing literal `<name>` placeholders
+// (e.g. "RECT <layer> <x1,y1> <x2,y2>") -- escape them before inserting as
+// HTML, or the browser parses "<layer>" etc as unknown tags and silently
+// drops that whole placeholder from the rendered syntax line.
+function escapeHtml(str){
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+const content = document.getElementById("content");
+const navEl = document.getElementById("nav");
+let cmdTotal = 0, pyTotal = 0;
+let navHTML = "";
+let contentHTML = "";
+let currentGroup = null;
+
+DATA.forEach(section => {
+  if (section.group !== currentGroup){
+    currentGroup = section.group;
+    const dotColor = section.group === "command" ? "var(--accent)" : "var(--py)";
+    navHTML += `<div class="group-title"><span class="dot" style="background:${dotColor}"></span>${section.groupLabel}</div>`;
+    contentHTML += `<section class="group-section" data-group="${section.group}">
+      <div class="group-banner">
+        <h2>${section.groupLabel}</h2>
+        <span class="chip ${section.group === 'command' ? 'cmd' : 'py'}">${section.group === 'command' ? 'command bar' : 'python'}</span>
+      </div>
+      <p class="group-desc">${section.group === 'command'
+        ? 'Type these into the command bar at the bottom of the GUI window, or send them via the same interpreter used there.'
+        : 'Methods on the <code>Session</code> object &mdash; the same object the built-in Script Console exposes as <code>hl</code>.'}</p>
+    </section>`;
+  }
+
+  navHTML += `<div class="cat" data-cat="${section.cat}" data-group="${section.group}">
+    <div class="cat-title">${section.cat}</div>`;
+  contentHTML += `<div class="category" data-cat="${section.cat}" data-group="${section.group}"><h3>${section.cat}</h3>`;
+
+  section.items.forEach(item => {
+    const id = slug(section.group, section.cat, item.name);
+    if (section.group === "command") cmdTotal++; else pyTotal++;
+
+    navHTML += `<a class="navitem" data-group="${section.group}" data-search="${(item.name+' '+item.syntax).toLowerCase().replace(/"/g,'&quot;')}" href="#${id}">${item.name}</a>`;
+
+    contentHTML += `
+      <div class="entry" id="${id}" data-group="${section.group}" data-search="${(item.name+' '+item.syntax+' '+item.desc.replace(/<[^>]+>/g,' ')).toLowerCase().replace(/"/g,'&quot;')}">
+        <div class="entry-head">
+          <span class="entry-name">${item.name}</span>
+          <span class="badge ${section.group === 'command' ? 'cmd' : 'py'}">${section.group === 'command' ? 'command' : 'python'}</span>
+        </div>
+        <code class="syntax">${escapeHtml(item.syntax)}</code>
+        <p class="desc">${item.desc}</p>
+        <div class="example">
+          <span class="label">Example</span>
+          <pre class="code">${item.example}</pre>
+        </div>
+      </div>`;
+  });
+
+  navHTML += `</div>`;
+  contentHTML += `</div>`;
+});
+
+navEl.innerHTML = navHTML;
+content.innerHTML = contentHTML;
+document.getElementById("cmdCount").textContent = cmdTotal;
+document.getElementById("pyCount").textContent = pyTotal;
+
+/* ---------- search / filter ---------- */
+const searchInput = document.getElementById("search");
+const resultCount = document.getElementById("resultcount");
+const emptyState = document.getElementById("emptyState");
+const emptyQuery = document.getElementById("emptyQuery");
+const allEntries = Array.from(document.querySelectorAll(".entry"));
+const allNavItems = Array.from(document.querySelectorAll(".navitem"));
+const allCats = Array.from(document.querySelectorAll(".category"));
+const allNavCats = Array.from(document.querySelectorAll("nav .cat"));
+const allGroupSections = Array.from(document.querySelectorAll(".group-section"));
+
+function applyFilter(){
+  const q = searchInput.value.trim().toLowerCase();
+  if (!q){
+    allEntries.forEach(e => e.classList.remove("hide"));
+    allNavItems.forEach(e => e.classList.remove("hide"));
+    allCats.forEach(e => e.style.display = "");
+    allNavCats.forEach(e => e.classList.remove("hide"));
+    allGroupSections.forEach(e => e.style.display = "");
+    resultCount.style.display = "none";
+    emptyState.classList.remove("show");
+    return;
+  }
+  let visible = 0;
+  allEntries.forEach(e => {
+    const match = e.dataset.search.includes(q);
+    e.classList.toggle("hide", !match);
+    if (match) visible++;
+  });
+  allNavItems.forEach(e => e.classList.toggle("hide", !e.dataset.search.includes(q)));
+
+  allCats.forEach(cat => {
+    const anyVisible = cat.querySelector(".entry:not(.hide)");
+    cat.style.display = anyVisible ? "" : "none";
+  });
+  allNavCats.forEach(cat => {
+    const anyVisible = cat.querySelector(".navitem:not(.hide)");
+    cat.classList.toggle("hide", !anyVisible);
+  });
+  allGroupSections.forEach(sec => {
+    const group = sec.dataset.group;
+    const anyVisible = document.querySelector(`.category[data-group="${group}"] .entry:not(.hide)`);
+    sec.style.display = anyVisible ? "" : "none";
+  });
+
+  resultCount.style.display = "block";
+  resultCount.textContent = visible + (visible === 1 ? " match" : " matches");
+  emptyQuery.textContent = searchInput.value.trim();
+  emptyState.classList.toggle("show", visible === 0);
+}
+searchInput.addEventListener("input", applyFilter);
+
+document.addEventListener("keydown", e => {
+  if (e.key === "/" && document.activeElement !== searchInput){
+    e.preventDefault();
+    searchInput.focus();
+  }
+  if (e.key === "Escape" && document.activeElement === searchInput){
+    searchInput.value = "";
+    applyFilter();
+    searchInput.blur();
+  }
+});
+
+/* ---------- active nav highlight on scroll ---------- */
+const io = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    const link = document.querySelector(`.navitem[href="#${entry.target.id}"]`);
+    if (!link) return;
+    if (entry.isIntersecting) link.classList.add("active");
+    else link.classList.remove("active");
+  });
+}, {rootMargin: "-10% 0px -80% 0px"});
+allEntries.forEach(e => io.observe(e));
+</script>
+</body>
+</html>
