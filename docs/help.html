@@ -304,9 +304,15 @@ const DATA = [
 ]},
 
 {group:"command", groupLabel:"Command Bar", cat:"View", items:[
-  {name:"ZOOM", syntax:"ZOOM IN | OUT | FIT | <factor>",
+  {name:"ZOOM", syntax:"ZOOM IN | OUT | FIT | WINDOW <x1,y1> <x2,y2> | <factor>",
    desc:"Zoom the active view.",
    example:"ZOOM FIT"},
+  {name:"ZOOM WINDOW", syntax:"ZOOM WINDOW <x1,y1> <x2,y2>",
+   desc:"Zoom/pan so the DBU box from x1,y1 to x2,y2 fills the view. This is the command-bar equivalent of the interactive <b>Zoom Window</b> tool (View menu &rarr; Zoom Window, or press W) &mdash; drag a box on the canvas around the area you want to see, and the view zooms to fit it. Like the other Create/Edit draw tools, it's a one-shot: the mode switches back to Select automatically once you release the mouse.",
+   example:"ZOOM WINDOW -500,-500 500,500"},
+  {name:"FIT", syntax:"FIT",
+   desc:"Shorthand for <code>ZOOM FIT</code> &mdash; fit the whole current cell in the active view. Same operation as the View menu/toolbar's Fit button and the F key.",
+   example:"FIT"},
   {name:"GRID", syntax:"GRID",
    desc:"With no arguments, report whether the grid is on/off and its current spacing.",
    example:"GRID\n<span class=\"c\">&raquo; grid on, spacing 1 mm</span>"},

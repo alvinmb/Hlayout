@@ -80,7 +80,7 @@ class LayoutCanvas(tk.Canvas):
         self._font_cache = {}
 
         # --- interactive drawing state ---------------------------------
-        self.draw_mode = "select"  # select | rect | poly | path | text | sref | aref | circle | route
+        self.draw_mode = "select"  # select | rect | poly | path | text | sref | aref | circle | zoomwin | route
         self.current_layer = 0
         self.path_width = 2
         self.path_cap = "round"
@@ -120,6 +120,13 @@ class LayoutCanvas(tk.Canvas):
         self.snap_dbu = self.grid_dbu  # snap to the current grid spacing by default
         self.on_commit = None  # callback(mode, layer, points, extra_dict)
         self.on_mode_status = lambda msg: None  # optional extra status callback
+        # Optional callback(mode), fired by set_mode() every time
+        # draw_mode changes -- including when set_mode() changes it
+        # itself rather than being called from outside (e.g.
+        # _finish_zoomwin() switching back to "select" once its
+        # one-shot Zoom Window drag is done). Wired by the app to keep
+        # the View > Zoom Window radiobutton/toolbar button in sync.
+        self.on_draw_mode_changed = lambda mode: None
         # Optional callback() -> list[str]: names offered by the "Cell
         # Instance" draw tool's picker (_prompt_sref). Wired by the app to
         # include attached-library cells, not just ones already in the
@@ -166,6 +173,11 @@ class LayoutCanvas(tk.Canvas):
         # over empty canvas in Select mode.
         self._marquee_start_mouse = None
         self.MARQUEE_MIN_PX = 3
+        # Zoom Window state: set (to a pixel coordinate) while dragging
+        # a zoom-to-this-area box in "zoomwin" mode -- see _on_click/
+        # _on_drag_motion/_on_release's "zoomwin" branches and
+        # _finish_zoomwin()/zoom_to_window().
+        self._zoomwin_start = None
         # Group-drag state: set while dragging a shape/sref that is
         # already part of self.selected_multi, so the whole group moves
         # together instead of just the one clicked.
@@ -245,6 +257,26 @@ class LayoutCanvas(tk.Canvas):
             self.offset_x, self.offset_y = w / 2, h / 2
             self.redraw()
             return
+        self._fit_to_box(box, padding=padding)
+
+    def zoom_to_window(self, x1, y1, x2, y2, padding=0.04):
+        """Zoom/pan so the DBU-space rectangle (x1,y1)-(x2,y2) fills the
+        view -- the Zoom Window tool's operation (drag a box around the
+        area you want to see; see "zoomwin" mode / _finish_zoomwin()),
+        also usable directly for an exact/scripted view via the ZOOM
+        WINDOW command or Session-level code. A smaller default padding
+        than fit_view()'s: the box was drawn deliberately around the
+        area of interest, so it should fill the view closely rather
+        than leaving fit_view()'s more generous margin."""
+        self._fit_to_box((x1, y1, x2, y2), padding=padding)
+
+    def _fit_to_box(self, box, padding):
+        """Shared math behind fit_view()/zoom_to_window(): set scale/
+        offset so the DBU-space box (x1,y1,x2,y2) fills the current
+        viewport, with `padding` as the fraction of the viewport left
+        as margin on each axis."""
+        w = max(self.winfo_width(), 1)
+        h = max(self.winfo_height(), 1)
         x1, y1, x2, y2 = box
         bw, bh = max(x2 - x1, 1), max(y2 - y1, 1)
         sx = (w * (1 - padding)) / bw
@@ -277,7 +309,7 @@ class LayoutCanvas(tk.Canvas):
 
     # --- interactive drawing: mode control -------------------------------
     def set_mode(self, mode):
-        """Switch the active drawing tool: select, rect, poly, path, text, sref, aref, route."""
+        """Switch the active drawing tool: select, rect, poly, path, text, sref, aref, zoomwin, route."""
         self.cancel_draw()
         if mode != "select":
             self.selected = None
@@ -288,12 +320,19 @@ class LayoutCanvas(tk.Canvas):
         self.redraw()
         self.on_mode_status(self._mode_hint())
         self.on_select()
+        # Lets an external mode-picker (View > Zoom Window's radiobutton
+        # in the toolbar/menu) stay in sync when THIS method changes the
+        # mode on its own -- specifically _finish_zoomwin() switching
+        # back to "select" once the drawn window has been zoomed to, a
+        # one-shot tool like the marquee-select drag it's modelled on.
+        self.on_draw_mode_changed(mode)
 
     def _mode_hint(self):
         hints = {
             "select": "Select: click a shape to select it, drag to move, "
                       "double-click to edit, Delete to remove -- or drag "
                       "a box over empty space to window-select multiple",
+            "zoomwin": "Zoom Window: drag a box around the area you want to see",
             "rect": "Rectangle: click first corner, then the opposite corner",
             "poly": "Polygon: click each vertex, double-click/Enter to finish (Esc cancels, Backspace undoes a point)",
             "path": "Path: click each point, double-click/Enter to finish (Esc cancels, Backspace undoes a point)",
@@ -316,6 +355,8 @@ class LayoutCanvas(tk.Canvas):
     def cancel_draw(self):
         self._pending_points = []
         self.delete("preview")
+        self.delete("zoomwin_box")
+        self._zoomwin_start = None
         if self.draw_mode == "route":
             self._route_active_layer = self.route_layer_a
 
@@ -420,6 +461,10 @@ class LayoutCanvas(tk.Canvas):
         elif self.draw_mode == "aref":
             self._pending_points = [pt]
             self._prompt_aref()
+        elif self.draw_mode == "zoomwin":
+            # Pixel coordinates, not the snapped DBU `pt` computed above
+            # -- zooming to a view is a screen-space drag, not geometry.
+            self._zoomwin_start = (e.x, e.y)
 
     def _on_double_click(self, e):
         if self.draw_mode == "select":
@@ -555,6 +600,10 @@ class LayoutCanvas(tk.Canvas):
         self.redraw()
 
     def _on_drag_motion(self, e):
+        if self.draw_mode == "zoomwin":
+            if self._zoomwin_start is not None:
+                self._update_zoomwin_preview(e.x, e.y)
+            return
         if self.draw_mode != "select":
             return
         if self._marquee_start_mouse is not None:
@@ -607,6 +656,14 @@ class LayoutCanvas(tk.Canvas):
             return
         self.create_rectangle(sx, sy, ex, ey, outline="#00d0ff", dash=(3, 2), tags="marquee")
 
+    def _update_zoomwin_preview(self, ex, ey):
+        self.delete("zoomwin_box")
+        sx, sy = self._zoomwin_start
+        if abs(ex - sx) < self.MARQUEE_MIN_PX and abs(ey - sy) < self.MARQUEE_MIN_PX:
+            return
+        self.create_rectangle(sx, sy, ex, ey, outline="#ffcc00", dash=(4, 2), width=1.5,
+                               tags="zoomwin_box")
+
     def _drag_group_motion(self, e):
         x, y = self.to_dbu(e.x, e.y)
         dx = x - self._drag_start_mouse[0]
@@ -636,6 +693,9 @@ class LayoutCanvas(tk.Canvas):
         self.redraw()
 
     def _on_release(self, e):
+        if self.draw_mode == "zoomwin":
+            self._finish_zoomwin(e)
+            return
         if self._marquee_start_mouse is not None:
             self._finish_marquee(e)
             return
@@ -699,6 +759,26 @@ class LayoutCanvas(tk.Canvas):
         if picked:
             self.on_mode_status(f"{len(picked)} object(s) window-selected")
         self.redraw()
+
+    def _finish_zoomwin(self, e):
+        """Complete a Zoom Window drag (draw_mode == "zoomwin"): zoom/
+        pan so the dragged box fills the view, then switch back to
+        Select -- Zoom Window is a one-shot tool, same convention as
+        the marquee-select drag it's modelled on. A drag too small to
+        be deliberate (a stray click, same MARQUEE_MIN_PX threshold as
+        marquee-select) is treated as a no-op cancel instead of zooming
+        to a near-zero-size box."""
+        self.delete("zoomwin_box")
+        start = self._zoomwin_start
+        self._zoomwin_start = None
+        if start is None:
+            return
+        sx, sy = start
+        if abs(e.x - sx) >= self.MARQUEE_MIN_PX or abs(e.y - sy) >= self.MARQUEE_MIN_PX:
+            x0, y0 = self.to_dbu(sx, sy)
+            x1, y1 = self.to_dbu(e.x, e.y)
+            self.zoom_to_window(min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
+        self.set_mode("select")
 
     def _aref_bbox(self, ref):
         """Bounding box (DBU) of an ARef, unioning every array position's

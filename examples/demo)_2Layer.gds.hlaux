@@ -1,0 +1,534 @@
+{
+  "format": "hlayout-sidecar",
+  "version": 1,
+  "technology": {
+    "format": "hlayout-tech",
+    "version": 1,
+    "layers": [
+      {
+        "number": 0,
+        "name": "I/O Pad",
+        "color": "#e6194b",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 1,
+        "name": " Conductor 1",
+        "color": "#3cb44b",
+        "stipple": 4,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 2,
+        "name": "Dielectric 1",
+        "color": "#ffe119",
+        "stipple": 2,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 3,
+        "name": "Conductor 2",
+        "color": "#4363d8",
+        "stipple": 3,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 4,
+        "name": "L4",
+        "color": "#f58231",
+        "stipple": 4,
+        "fill": false,
+        "visible": true
+      },
+      {
+        "number": 5,
+        "name": "L5",
+        "color": "#911eb4",
+        "stipple": 5,
+        "fill": false,
+        "visible": true
+      },
+      {
+        "number": 6,
+        "name": "10 Ohms RES",
+        "color": "#46f0f0",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 7,
+        "name": "30 Ohms RES",
+        "color": "#f032e6",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 8,
+        "name": "100 Ohms RES",
+        "color": "#bcf60c",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 9,
+        "name": "300 Ohms RES",
+        "color": "#fabebe",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 10,
+        "name": "1K Ohms RES",
+        "color": "#008080",
+        "stipple": 1,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 11,
+        "name": "3K Ohms RES",
+        "color": "#e6beff",
+        "stipple": 2,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 12,
+        "name": "10K Ohms RES",
+        "color": "#9a6324",
+        "stipple": 3,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 13,
+        "name": "30K Ohms RES",
+        "color": "#fffac8",
+        "stipple": 4,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 14,
+        "name": "100K Ohms RES",
+        "color": "#800000",
+        "stipple": 5,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 15,
+        "name": "300K Ohms RES",
+        "color": "#aaffc3",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 16,
+        "name": "1M Ohms RES",
+        "color": "#e6194b",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 17,
+        "name": "RES Overglaze",
+        "color": "#3cb44b",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 18,
+        "name": "L18",
+        "color": "#ffe119",
+        "stipple": 0,
+        "fill": false,
+        "visible": true
+      },
+      {
+        "number": 19,
+        "name": "L19",
+        "color": "#4363d8",
+        "stipple": 1,
+        "fill": false,
+        "visible": true
+      },
+      {
+        "number": 20,
+        "name": "Solder Paste",
+        "color": "#f58231",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 21,
+        "name": "L21",
+        "color": "#911eb4",
+        "stipple": 3,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 22,
+        "name": "L22",
+        "color": "#46f0f0",
+        "stipple": 4,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 23,
+        "name": "Doc 1",
+        "color": "#ffffff",
+        "stipple": 5,
+        "fill": false,
+        "visible": true
+      },
+      {
+        "number": 24,
+        "name": "Doc 2",
+        "color": "#ffffff",
+        "stipple": 6,
+        "fill": false,
+        "visible": true
+      },
+      {
+        "number": 25,
+        "name": "L25",
+        "color": "#fabebe",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 26,
+        "name": "L26",
+        "color": "#008080",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 27,
+        "name": "L27",
+        "color": "#e6beff",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 28,
+        "name": "L28",
+        "color": "#9a6324",
+        "stipple": 1,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 29,
+        "name": "L29",
+        "color": "#fffac8",
+        "stipple": 2,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 30,
+        "name": "L30",
+        "color": "#800000",
+        "stipple": 3,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 31,
+        "name": "L31",
+        "color": "#aaffc3",
+        "stipple": 4,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 32,
+        "name": "L32",
+        "color": "#e6194b",
+        "stipple": 5,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 33,
+        "name": "L33",
+        "color": "#3cb44b",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 34,
+        "name": "L34",
+        "color": "#ffe119",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 35,
+        "name": "L35",
+        "color": "#4363d8",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 36,
+        "name": "L36",
+        "color": "#f58231",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 37,
+        "name": "L37",
+        "color": "#911eb4",
+        "stipple": 1,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 38,
+        "name": "L38",
+        "color": "#46f0f0",
+        "stipple": 2,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 39,
+        "name": "L39",
+        "color": "#f032e6",
+        "stipple": 3,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 40,
+        "name": "L40",
+        "color": "#bcf60c",
+        "stipple": 4,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 41,
+        "name": "L41",
+        "color": "#fabebe",
+        "stipple": 5,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 42,
+        "name": "L42",
+        "color": "#008080",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 43,
+        "name": "L43",
+        "color": "#e6beff",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 44,
+        "name": "L44",
+        "color": "#9a6324",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 45,
+        "name": "L45",
+        "color": "#fffac8",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 46,
+        "name": "L46",
+        "color": "#800000",
+        "stipple": 1,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 47,
+        "name": "L47",
+        "color": "#aaffc3",
+        "stipple": 2,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 48,
+        "name": "L48",
+        "color": "#e6194b",
+        "stipple": 3,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 49,
+        "name": "L49",
+        "color": "#3cb44b",
+        "stipple": 4,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 50,
+        "name": "L50",
+        "color": "#ffe119",
+        "stipple": 5,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 51,
+        "name": "L51",
+        "color": "#4363d8",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 52,
+        "name": "L52",
+        "color": "#f58231",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 53,
+        "name": "L53",
+        "color": "#911eb4",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 54,
+        "name": "L54",
+        "color": "#46f0f0",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 55,
+        "name": "L55",
+        "color": "#f032e6",
+        "stipple": 1,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 56,
+        "name": "L56",
+        "color": "#bcf60c",
+        "stipple": 2,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 57,
+        "name": "L57",
+        "color": "#fabebe",
+        "stipple": 3,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 58,
+        "name": "L58",
+        "color": "#008080",
+        "stipple": 4,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 59,
+        "name": "L59",
+        "color": "#e6beff",
+        "stipple": 5,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 60,
+        "name": "L60",
+        "color": "#9a6324",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 61,
+        "name": "L61",
+        "color": "#fffac8",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 62,
+        "name": "L62",
+        "color": "#800000",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 63,
+        "name": "L63",
+        "color": "#aaffc3",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      }
+    ],
+    "params": {
+      "route_rules": "{\"layer_a\": 1, \"layer_b\": 3, \"via_size\": 400, \"via_shape\": \"square\", \"dielectric_layer\": 2, \"dielectric_window\": 500}",
+      "resistor_geometry_rules": "{\"overlap_a\": 300, \"pad_b\": 300, \"space_c\": 300, \"glaze_oversize\": 300, \"resistor_layer\": 18, \"conductor_layer\": 1, \"glaze_layer\": 17, \"doc_layer\": 23, \"ink_layers\": {\"10\": 6, \"30\": 7, \"100\": 8, \"300\": 9, \"1000\": 10, \"3000\": 11, \"10000\": 12, \"30000\": 13, \"100000\": 14, \"300000\": 15, \"1000000\": 16}}",
+      "resistor_design_rules": "{\"aim_pct\": 75.0, \"ar_min\": 0.25, \"ar_max\": 4.0, \"available_inks\": [10, 30, 100, 300, 1000, 3000, 10000, 30000, 100000, 300000, 1000000]}"
+    }
+  },
+  "attached_libraries": [
+    {
+      "name": "2_layer_Lib",
+      "source_path": "C:/dev/HLayout/examples/2_Layer_lib.gds",
+      "gds_base64": "AAYAAgJYABwBAgB+AAgAGAAJABMABgB+AAgAGAAJABMABgAQAgYyX2xheWVyX0xpYgAAFAMFPkGJN0vGp/A5RLgvoJtaVAAcBQIAfgAIABgACQATAAYAfgAIABgACQATAAYACAYGVE9QAAAEBwAAHAUCAH4ACAAYAAkAEwAGAH4ACAAYAAkAEwAGABIGBkkvT19QYWRfMngybW0AAAQIAAAGDQIAAAAGDgIAAAAsEAP/8L3A//C9wAAPQkD/8L3AAA9CQAAPQkD/8L3AAA9CQP/wvcD/8L3AAAQRAAAECAAABg0CABQABg4CAAAALBAD//PLAP/zywAADDUA//PLAAAMNQAADDUA//PLAAAMNQD/88sA//PLAAAEEQAABAcAAAQEAA=="
+    }
+  ]
+}

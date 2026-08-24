@@ -59,6 +59,12 @@ Layers:
 
 View:
     ZOOM IN | OUT | FIT | <factor>
+    ZOOM WINDOW <x1,y1> <x2,y2>       zoom/pan so that DBU-space rectangle fills
+                                       the view -- the typed/scripted equivalent
+                                       of dragging a Zoom Window box in the GUI
+                                       (View > Zoom Window, or the toolbar button)
+    FIT                                shorthand for ZOOM FIT -- fit the whole
+                                        current cell in the active view
     GRID                              show whether the grid is on/off and its
                                         current spacing
     GRID ON | OFF                     show/hide the grid
@@ -453,7 +459,7 @@ class CommandInterpreter:
         if self.view is None:
             raise CommandError("ZOOM requires an attached view")
         if not args:
-            raise CommandError("usage: ZOOM IN|OUT|FIT|<factor>")
+            raise CommandError("usage: ZOOM IN|OUT|FIT|WINDOW <x1,y1> <x2,y2>|<factor>")
         arg = args[0].upper()
         if arg == "IN":
             self.view.zoom_in()
@@ -461,9 +467,26 @@ class CommandInterpreter:
             self.view.zoom_out()
         elif arg == "FIT":
             self.view.fit_view()
+        elif arg == "WINDOW":
+            if len(args) != 3:
+                raise CommandError("usage: ZOOM WINDOW <x1,y1> <x2,y2>")
+            x0, y0 = _parse_point(args[1])
+            x1, y1 = _parse_point(args[2])
+            self.view.zoom_to_window(min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
         else:
             self.view.zoom(float(args[0]))
         return f"zoom {arg.lower()}"
+
+    def _cmd_fit(self, args):
+        """FIT with no arguments: shorthand for ZOOM FIT -- fit the
+        whole current cell in the active view. Same operation as the
+        View menu/toolbar's Fit button and the F key accelerator."""
+        if self.view is None:
+            raise CommandError("FIT requires an attached view")
+        if args:
+            raise CommandError("usage: FIT  (takes no arguments -- see also ZOOM FIT)")
+        self.view.fit_view()
+        return "fit"
 
     def _cmd_grid(self, args):
         if self.view is None:

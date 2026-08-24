@@ -1,6 +1,7 @@
 """Main application window for the Thick & Thin Film Hybrid Layout CAD tool."""
 
 import os
+import webbrowser
 import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import filedialog, simpledialog, ttk
@@ -125,6 +126,7 @@ class App(tk.Tk):
         self.canvas.on_select = self._update_properties_panel
         self._update_properties_panel()
         self.canvas.on_route_via = self._on_route_via
+        self.canvas.on_draw_mode_changed = lambda mode: self.mode_var.set(mode)
         self._on_route_opts_change()
 
         self.interp = CommandInterpreter(
@@ -299,6 +301,9 @@ class App(tk.Tk):
         viewm.add_command(label="Zoom In", command=lambda: self.canvas.zoom_in(), accelerator="+")
         viewm.add_command(label="Zoom Out", command=lambda: self.canvas.zoom_out(), accelerator="-")
         viewm.add_command(label="Toggle Grid", command=lambda: self.canvas.toggle_grid(), accelerator="G")
+        viewm.add_separator()
+        viewm.add_radiobutton(label="Zoom Window", value="zoomwin", variable=self.mode_var,
+                               command=self._on_mode_change, accelerator="W")
         viewm.add_separator()
         viewm.add_command(label="New View Window", command=self.new_view_window)
 
@@ -2226,9 +2231,26 @@ class App(tk.Tk):
         ttk.Button(win, text="Place", command=do_place).pack(padx=8, pady=(0, 8))
 
     def show_command_reference(self):
-        """The same categorized command list the command bar's HELP
-        command prints, shown as a scrollable, read-only dialog — so the
-        whole command structure is discoverable from the GUI itself."""
+        """Open the full HTML command bar + Python API reference
+        (docs/help.html — every command and every Session method, each
+        with a runnable example, in a searchable page) in the system's
+        default web browser. Falls back to the old scrollable
+        plain-text dialog (_show_command_reference_fallback) if that
+        file can't be found -- e.g. a copy of the app distributed
+        without its docs/ folder -- so Help > Command Reference always
+        shows *something* even then."""
+        # hlayout/gui/app.py -> hlayout/gui -> hlayout -> repo root -> docs/help.html
+        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        help_path = os.path.join(repo_root, "docs", "help.html")
+        if os.path.isfile(help_path):
+            webbrowser.open(f"file://{help_path}")
+            return
+        self._show_command_reference_fallback()
+
+    def _show_command_reference_fallback(self):
+        """The old scrollable plain-text command reference dialog --
+        kept only as a fallback for show_command_reference() above when
+        docs/help.html isn't present alongside the app."""
         win = tk.Toplevel(self)
         win.title("Command Reference")
         win.geometry("760x520")
