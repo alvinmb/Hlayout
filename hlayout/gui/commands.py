@@ -13,9 +13,9 @@ list below, at any time — see ``COMMAND_REFERENCE``.
 import shlex
 from typing import Callable, Optional
 
-from ..core.errors import LayoutError
+from ..core.errors import GeometryError, LayoutError
 from ..core.maskops import MASK_OPS
-from ..core.units import mm_to_dbu
+from ..core.units import dbu_to_mm, mm_to_dbu
 
 # The full command-bar reference, grouped by category. This is the
 # single source of truth for command syntax — surfaced via the HELP
@@ -39,7 +39,13 @@ Cells & shapes:
                                        segments: 8, 16, 32, or 64 (default 32)
     TEXT <layer> <x,y> "<string>" [height] [font]
     SREF <cellname> <x,y> [rotation] [mag] [mirror]
-    DELETE LAST                       remove the most recently added shape/sref
+    AREF <cellname> <x,y> <columns> <rows> <col_spacing> <row_spacing>
+         [rotation] [mag] [mirror]
+                                       add an array of cell instances (GDSII AREF) --
+                                       columns x rows, spaced col_spacing/row_spacing
+                                       DBU apart before rotation/mirror is applied;
+                                       see SMASH to explode one back into plain SREFs
+    DELETE LAST                       remove the most recently added shape/sref/aref
 
 Layers:
     LAYER <n|name> [color=#rrggbb] [stipple=0-8] [fill=0|1] [visible=0|1] [name=...]
@@ -53,7 +59,11 @@ Layers:
 
 View:
     ZOOM IN | OUT | FIT | <factor>
-    GRID ON | OFF
+    GRID                              show whether the grid is on/off and its
+                                        current spacing
+    GRID ON | OFF                     show/hide the grid
+    GRID <spacing_mm>                 change the grid spacing (also updates
+                                        snap-to-grid to match)
 
 Selection (Select tool click a shape/cell instance first -- it turns
 white so it's clear what's selected):
@@ -65,6 +75,9 @@ white so it's clear what's selected):
                                        layer/width for a path, layer for a polygon/
                                        rectangle, cell name/origin/rotation/etc for
                                        a cell instance (also in the Properties tab)
+    SMASH                             explode the selected array instance (AREF) back
+                                       into individual cell instances (SREFs), one per
+                                       array position, and select the new SREFs
 
 Undo/redo (covers every edit, however it was made -- command bar,
 mouse-driven select/move/rotate/edit/delete, or a script):
@@ -342,6 +355,28 @@ class CommandInterpreter:
         self.session.sref(cell_name, origin, rotation=rotation, magnification=mag, x_reflection=mirror)
         return f"sref to {cell_name} added"
 
+    def _cmd_aref(self, args):
+        usage = ("usage: AREF <cellname> <x,y> <columns> <rows> <col_spacing> <row_spacing> "
+                 "[rotation] [mag] [mirror]")
+        if len(args) < 6:
+            raise CommandError(usage)
+        cell_name = args[0]
+        origin = _parse_point(args[1])
+        try:
+            columns = int(args[2])
+            rows = int(args[3])
+            col_spacing = float(args[4])
+            row_spacing = float(args[5])
+        except ValueError:
+            raise CommandError(usage)
+        rotation = float(args[6]) if len(args) > 6 else 0.0
+        mag = float(args[7]) if len(args) > 7 else 1.0
+        mirror = args[8].lower() in ("1", "true", "yes", "mirror") if len(args) > 8 else False
+        self.session.aref(cell_name, origin, columns=columns, rows=rows,
+                           col_spacing=col_spacing, row_spacing=row_spacing,
+                           rotation=rotation, magnification=mag, x_reflection=mirror)
+        return f"aref to {cell_name} added ({columns}x{rows})"
+
     def _cmd_delete(self, args):
         if not args or args[0].upper() != "LAST":
             raise CommandError("usage: DELETE LAST")
@@ -352,6 +387,9 @@ class CommandInterpreter:
         if cell.srefs:
             cell.srefs.pop()
             return "removed last sref"
+        if cell.arefs:
+            cell.arefs.pop()
+            return "removed last aref"
         return "nothing to delete"
 
     # --- layers -----------------------------------------------------------
@@ -430,12 +468,30 @@ class CommandInterpreter:
     def _cmd_grid(self, args):
         if self.view is None:
             raise CommandError("GRID requires an attached view")
+        usage = "usage: GRID  |  GRID ON|OFF  |  GRID <spacing_mm>"
         if not args:
-            raise CommandError("usage: GRID ON|OFF")
-        want_on = args[0].upper() == "ON"
-        if want_on != self.view.show_grid:
-            self.view.toggle_grid()
-        return f"grid {'on' if want_on else 'off'}"
+            # No args: report the current grid state instead of erroring,
+            # so GRID with nothing typed is a quick "what's my grid set to
+            # right now" query.
+            state = "on" if self.view.show_grid else "off"
+            return f"grid {state}, spacing {dbu_to_mm(self.view.grid_dbu):g} mm"
+        if len(args) != 1:
+            raise CommandError(usage)
+        arg = args[0].upper()
+        if arg in ("ON", "OFF"):
+            want_on = arg == "ON"
+            if want_on != self.view.show_grid:
+                self.view.toggle_grid()
+            return f"grid {'on' if want_on else 'off'}"
+        try:
+            spacing_mm = float(args[0])
+        except ValueError:
+            raise CommandError(usage)
+        try:
+            self.view.set_grid_spacing(mm_to_dbu(spacing_mm))
+        except GeometryError as e:
+            raise CommandError(str(e))
+        return f"grid spacing set to {dbu_to_mm(self.view.grid_dbu):g} mm"
 
     # --- selection edits ------------------------------------------------
     def _cmd_move(self, args):
@@ -476,6 +532,15 @@ class CommandInterpreter:
             raise CommandError("PROPS requires an attached view")
         from .canvas import describe_selection
         return describe_selection(self.view)
+
+    def _cmd_smash(self, args):
+        if self.view is None:
+            raise CommandError("SMASH requires an attached view")
+        if args:
+            raise CommandError("usage: SMASH  (smashes the selected array instance)")
+        if not self.view.smash_selected():
+            raise CommandError("nothing selected to smash -- select an array instance (AREF) first")
+        return "array instance smashed into individual cell instances"
 
     # --- undo/redo --------------------------------------------------------
     def _cmd_undo(self, args):

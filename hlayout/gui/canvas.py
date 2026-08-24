@@ -8,7 +8,9 @@ import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import simpledialog
 
-from ..core.shapes import CIRCLE_SEGMENT_CHOICES, Path, PathCap, Polygon, Rectangle, SRef, Text
+from ..core.errors import GeometryError
+from ..core.shapes import (ARef, CIRCLE_SEGMENT_CHOICES, Path, PathCap, Polygon, Rectangle, SRef,
+                           Text)
 from ..core.units import DBU_MM, dbu_to_mm, mm_to_dbu
 
 # Bitmaps used to approximate the 9 stipple/fill patterns on a Tk canvas.
@@ -64,12 +66,21 @@ class LayoutCanvas(tk.Canvas):
         self.offset_x = 0.0  # pixels
         self.offset_y = 0.0
         self.show_grid = True
+        # Current minor-grid spacing, in DBU -- an instance attribute (not
+        # just the GRID_MINOR_DBU class default) so it can be changed at
+        # runtime via set_grid_spacing() (see Setup > Grid Spacing... and
+        # the GRID command). Also doubles as the default snap-to-grid
+        # pitch (self.snap_dbu below) -- the drawn grid and the snap grid
+        # are the same grid, matching how "grid" is understood in other
+        # CAD tools, so changing one keeps the other in step unless the
+        # user separately overrides self.snap_dbu.
+        self.grid_dbu = self.GRID_MINOR_DBU
 
         self._pan_start = None
         self._font_cache = {}
 
         # --- interactive drawing state ---------------------------------
-        self.draw_mode = "select"  # select | rect | poly | path | text | sref | circle | route
+        self.draw_mode = "select"  # select | rect | poly | path | text | sref | aref | circle | route
         self.current_layer = 0
         self.path_width = 2
         self.path_cap = "round"
@@ -106,7 +117,7 @@ class LayoutCanvas(tk.Canvas):
             dielectric_layer=None, dielectric_window=None: None
         )
         self.snap_enabled = True
-        self.snap_dbu = self.GRID_MINOR_DBU  # snap to 1mm grid by default
+        self.snap_dbu = self.grid_dbu  # snap to the current grid spacing by default
         self.on_commit = None  # callback(mode, layer, points, extra_dict)
         self.on_mode_status = lambda msg: None  # optional extra status callback
         # Optional callback() -> list[str]: names offered by the "Cell
@@ -248,9 +259,25 @@ class LayoutCanvas(tk.Canvas):
         self.show_grid = not self.show_grid
         self.redraw()
 
+    def set_grid_spacing(self, dbu, sync_snap=True):
+        """Change the minor grid line spacing (in DBU) -- see Setup >
+        Grid Spacing... and the GRID <spacing> command. Raises
+        GeometryError if dbu isn't positive. By default also updates
+        snap_dbu to match (see the grid_dbu docstring in __init__ for
+        why the drawn grid and the snap grid default to being the same
+        setting); pass sync_snap=False to change only the drawn grid
+        and leave an independently-set snap spacing alone."""
+        dbu = int(round(dbu))
+        if dbu <= 0:
+            raise GeometryError("grid spacing must be positive")
+        self.grid_dbu = dbu
+        if sync_snap:
+            self.snap_dbu = dbu
+        self.redraw()
+
     # --- interactive drawing: mode control -------------------------------
     def set_mode(self, mode):
-        """Switch the active drawing tool: select, rect, poly, path, text, sref, route."""
+        """Switch the active drawing tool: select, rect, poly, path, text, sref, aref, route."""
         self.cancel_draw()
         if mode != "select":
             self.selected = None
@@ -272,6 +299,8 @@ class LayoutCanvas(tk.Canvas):
             "path": "Path: click each point, double-click/Enter to finish (Esc cancels, Backspace undoes a point)",
             "text": "Text: click the insertion point, then fill in the text",
             "sref": "Cell instance: click the placement point, then choose the cell",
+            "aref": "Array instance: click the placement point, then choose the cell "
+                    "and array parameters",
             "circle": "Circle: click the center, then click a point on the edge to set the radius",
             "route": self._route_hint(),
         }
@@ -388,6 +417,9 @@ class LayoutCanvas(tk.Canvas):
         elif self.draw_mode == "sref":
             self._pending_points = [pt]
             self._prompt_sref()
+        elif self.draw_mode == "aref":
+            self._pending_points = [pt]
+            self._prompt_aref()
 
     def _on_double_click(self, e):
         if self.draw_mode == "select":
@@ -657,12 +689,38 @@ class LayoutCanvas(tk.Canvas):
                 by1 = by2 = oy
             if bx1 >= rx1 and bx2 <= rx2 and by1 >= ry1 and by2 <= ry2:
                 picked.append(("sref", ref))
+        for aref in cell.arefs:
+            bx1, by1, bx2, by2 = self._aref_bbox(aref)
+            if bx1 >= rx1 and bx2 <= rx2 and by1 >= ry1 and by2 <= ry2:
+                picked.append(("aref", aref))
 
         self.selected = None
         self.selected_multi = picked
         if picked:
             self.on_mode_status(f"{len(picked)} object(s) window-selected")
         self.redraw()
+
+    def _aref_bbox(self, ref):
+        """Bounding box (DBU) of an ARef, unioning every array position's
+        transformed instance -- same idea as Library.cell_bbox's own
+        aref handling, but for a single ARef in isolation (used by
+        selection/window-select/highlight, which don't need the whole
+        cell's box)."""
+        box = self.library.cell_bbox(ref.cell_name)
+        if box is None:
+            ox, oy = ref.origin
+            return (ox, oy, ox, oy)
+        from ..core.library import _transform_bbox
+        boxes = []
+        for origin in ref.instance_origins():
+            instance = SRef(cell_name=ref.cell_name, origin=origin, rotation=ref.rotation,
+                             magnification=ref.magnification, x_reflection=ref.x_reflection)
+            boxes.append(_transform_bbox(box, instance))
+        x1 = min(b[0] for b in boxes)
+        y1 = min(b[1] for b in boxes)
+        x2 = max(b[2] for b in boxes)
+        y2 = max(b[3] for b in boxes)
+        return (x1, y1, x2, y2)
 
     def edit_selected(self):
         """Open the property-edit dialog for the current selection —
@@ -705,6 +763,8 @@ class LayoutCanvas(tk.Canvas):
                     cell.shapes.remove(shape)
                 elif kind == "sref" and shape in cell.srefs:
                     cell.srefs.remove(shape)
+                elif kind == "aref" and shape in cell.arefs:
+                    cell.arefs.remove(shape)
             self.selected_multi = []
             self.redraw()
             self._after_edit()
@@ -740,8 +800,36 @@ class LayoutCanvas(tk.Canvas):
                 self.checkpoint()
                 cell.srefs.remove(shape)
             self.selected = None
+        elif kind == "aref":
+            _, shape = self.selected
+            if shape in cell.arefs:
+                self.checkpoint()
+                cell.arefs.remove(shape)
+            self.selected = None
         self.redraw()
         self._after_edit()
+
+    def smash_selected(self):
+        """Explode the currently selected ARef back into individual
+        SRefs, one per array position, and select the new SRefs as a
+        window-selected group -- used by the SMASH command and Edit >
+        Smash Selected to ARef. Returns True if something was smashed,
+        False if the current selection isn't a single ARef (a
+        window-selected group, a plain SRef/shape, or nothing)."""
+        if self.draw_mode != "select":
+            return False
+        if self.selected is None or self.selected[0] != "aref":
+            return False
+        cell = self.library.cells.get(self.cell_name)
+        if cell is None:
+            return False
+        _, ref = self.selected
+        self.checkpoint()
+        new_srefs = cell.smash_aref(ref)
+        self.selected = None
+        self.selected_multi = [("sref", s) for s in new_srefs]
+        self._after_edit()
+        return True
 
     def move_selected(self, dx, dy):
         """Move the current selection by (dx, dy) DBU. Works for a whole
@@ -799,7 +887,7 @@ class LayoutCanvas(tk.Canvas):
         if self.selected_multi:
             self.checkpoint()
             for kind, shape in self.selected_multi:
-                if kind == "sref" or isinstance(shape, SRef):
+                if kind in ("sref", "aref") or isinstance(shape, (SRef, ARef)):
                     shape.rotation = (shape.rotation + angle_deg) % 360.0
                 elif isinstance(shape, Text):
                     shape.rotation = (shape.rotation + angle_deg) % 360.0
@@ -815,7 +903,7 @@ class LayoutCanvas(tk.Canvas):
             return False
         self.checkpoint()
         _, shape = self.selected
-        if kind == "sref" or isinstance(shape, SRef):
+        if kind in ("sref", "aref") or isinstance(shape, (SRef, ARef)):
             shape.rotation = (shape.rotation + angle_deg) % 360.0
         elif isinstance(shape, Text):
             shape.rotation = (shape.rotation + angle_deg) % 360.0
@@ -848,6 +936,9 @@ class LayoutCanvas(tk.Canvas):
                 if kind == "sref" or isinstance(new_shape, SRef):
                     cell.srefs.append(new_shape)
                     new_selection.append(("sref", new_shape))
+                elif kind == "aref" or isinstance(new_shape, ARef):
+                    cell.arefs.append(new_shape)
+                    new_selection.append(("aref", new_shape))
                 else:
                     cell.shapes.append(new_shape)
                     new_selection.append(("shape", new_shape))
@@ -868,6 +959,9 @@ class LayoutCanvas(tk.Canvas):
         if kind == "sref" or isinstance(new_shape, SRef):
             cell.srefs.append(new_shape)
             self.selected = ("sref", new_shape)
+        elif kind == "aref" or isinstance(new_shape, ARef):
+            cell.arefs.append(new_shape)
+            self.selected = ("aref", new_shape)
         else:
             cell.shapes.append(new_shape)
             self.selected = ("shape", new_shape)
@@ -1057,6 +1151,33 @@ class LayoutCanvas(tk.Canvas):
                             {"cell_name": cell_name, "rotation": rotation,
                              "magnification": 1.0, "x_reflection": False})
 
+    def _prompt_aref(self):
+        """Create > Array Instance: click the placement point, choose the
+        cell to repeat (same picker as Cell Instance), then fill in the
+        array's columns/rows/spacing/rotation/mirror in one dialog (see
+        _prompt_aref_params). Mirrors _prompt_sref, but places an ARef
+        (see hlayout.core.shapes.ARef) instead of a plain SRef -- use
+        SMASH (Edit > Smash Selected to SRefs, or the SMASH command) to
+        explode the placed array back into individual cell instances."""
+        pt = self._pending_points[0]
+        self._pending_points = []
+        if self.on_list_cells is not None:
+            names = sorted(set(self.on_list_cells()))
+        else:
+            names = sorted(self.library.cells.keys())
+        if not names:
+            self.on_mode_status("no cells to reference yet")
+            return
+        cell_name = _choose_from_list(self, "Add Array Instance", "Cell to place:", names)
+        if not cell_name:
+            return
+        params = _prompt_aref_params(self)
+        if params is None:
+            return
+        if self.on_commit:
+            self.on_commit("aref", self.current_layer, [pt],
+                            {"cell_name": cell_name, **params})
+
     # --- drawing --------------------------------------------------------
     def redraw(self):
         self.delete("all")
@@ -1072,7 +1193,7 @@ class LayoutCanvas(tk.Canvas):
         h = self.winfo_height()
         if w <= 1 or h <= 1:
             return
-        minor_px = self.GRID_MINOR_DBU * self.scale
+        minor_px = self.grid_dbu * self.scale
         if minor_px < 3:
             return  # too dense; skip to avoid melting the canvas
         x0, y0 = self.to_dbu(0, 0)
@@ -1084,10 +1205,10 @@ class LayoutCanvas(tk.Canvas):
         # regenerates the grid around the new position.
         pad_x = (x1 - x0) * 0.25
         pad_y = (y0 - y1) * 0.25
-        gx0 = int((x0 - pad_x) // self.GRID_MINOR_DBU) - 1
-        gx1 = int((x1 + pad_x) // self.GRID_MINOR_DBU) + 1
-        gy0 = int((y1 - pad_y) // self.GRID_MINOR_DBU) - 1
-        gy1 = int((y0 + pad_y) // self.GRID_MINOR_DBU) + 1
+        gx0 = int((x0 - pad_x) // self.grid_dbu) - 1
+        gx1 = int((x1 + pad_x) // self.grid_dbu) + 1
+        gy0 = int((y1 - pad_y) // self.grid_dbu) - 1
+        gy1 = int((y0 + pad_y) // self.grid_dbu) + 1
 
         # Adaptive stride: a (cols x rows) dot grid grows quadratically,
         # and at zoom levels just above the "too dense" cutoff above it
@@ -1103,12 +1224,12 @@ class LayoutCanvas(tk.Canvas):
             stride = max(1, int((total / self.MAX_GRID_DOTS) ** 0.5))
 
         for i in range(gx0, gx1 + 1, stride):
-            px, _ = self.to_px(i * self.GRID_MINOR_DBU, 0)
+            px, _ = self.to_px(i * self.grid_dbu, 0)
             major = (i % self.GRID_MAJOR_EVERY) == 0
             r = 1.4 if major else 0.6
             color = "#666666" if major else "#3a3a3a"
             for j in range(gy0, gy1 + 1, stride):
-                _, py = self.to_px(0, j * self.GRID_MINOR_DBU)
+                _, py = self.to_px(0, j * self.grid_dbu)
                 self.create_oval(px - r, py - r, px + r, py + r, fill=color, outline="")
 
     def _draw_cell(self, name, ox, oy, rot, mag, mirror, depth):
@@ -1123,14 +1244,18 @@ class LayoutCanvas(tk.Canvas):
         # unambiguous what MOVE/ROTATE (and dragging) would act on.
         selected_shape = None
         selected_ref = None
+        selected_aref = None
         if self.selected:
             kind = self.selected[0]
             if kind in ("shape", "vertex", "edge"):
                 selected_shape = self.selected[1]
             elif kind == "sref":
                 selected_ref = self.selected[1]
+            elif kind == "aref":
+                selected_aref = self.selected[1]
         multi_shape_ids = {id(s) for k, s in self.selected_multi if k == "shape"}
         multi_ref_ids = {id(s) for k, s in self.selected_multi if k == "sref"}
+        multi_aref_ids = {id(s) for k, s in self.selected_multi if k == "aref"}
 
         # Draw in ascending layer order (0-63) regardless of the order
         # shapes were created/loaded in, so layer stacking on screen is
@@ -1159,6 +1284,28 @@ class LayoutCanvas(tk.Canvas):
                                             outline=handle_color, fill="",
                                             width=2 if highlight else 1)
             self._item_to_shape[handle] = ("sref", ref)
+        for aref in cell.arefs:
+            highlight = (aref is selected_aref) or (id(aref) in multi_aref_ids)
+            self._draw_aref(aref, depth, highlight=highlight)
+            # One selectable handle at the array's own origin (position
+            # 0,0 of the grid) -- the whole ARef is one selection/move/
+            # rotate/delete/smash unit, not per-instance.
+            hx, hy = self.to_px(*aref.origin)
+            handle_color = self.SELECTED_COLOR if highlight else "#ff66ff"
+            handle = self.create_rectangle(hx - 5, hy - 5, hx + 5, hy + 5,
+                                            outline=handle_color, fill="",
+                                            width=2 if highlight else 1)
+            self._item_to_shape[handle] = ("aref", aref)
+
+    def _draw_aref(self, ref: "ARef", depth, highlight=False):
+        """Draw every array position by delegating to _draw_sref() with a
+        synthetic per-instance SRef -- reuses the exact same recursive
+        flatten/transform logic an ordinary cell instance uses, just
+        called once per array position."""
+        for origin in ref.instance_origins():
+            instance = SRef(cell_name=ref.cell_name, origin=origin, rotation=ref.rotation,
+                             magnification=ref.magnification, x_reflection=ref.x_reflection)
+            self._draw_sref(instance, depth, highlight=highlight)
 
     def _draw_sref(self, ref: SRef, depth, highlight=False):
         theta = math.radians(ref.rotation)
@@ -1306,6 +1453,8 @@ class LayoutCanvas(tk.Canvas):
                     self.selected = None
                 elif kind == "sref" and shape not in cell.srefs:
                     self.selected = None
+                elif kind == "aref" and shape not in cell.arefs:
+                    self.selected = None
                 else:
                     self._draw_item_highlight(kind, shape)
 
@@ -1315,6 +1464,8 @@ class LayoutCanvas(tk.Canvas):
                 if kind == "shape" and shape not in cell.shapes:
                     continue
                 if kind == "sref" and shape not in cell.srefs:
+                    continue
+                if kind == "aref" and shape not in cell.arefs:
                     continue
                 still.append((kind, shape))
                 self._draw_item_highlight(kind, shape)
@@ -1333,6 +1484,8 @@ class LayoutCanvas(tk.Canvas):
                 ox, oy = shape.origin
                 x1 = y1 = ox - 5
                 x2 = y2 = oy + 5
+        elif kind == "aref":
+            x1, y1, x2, y2 = self._aref_bbox(shape)
         else:
             x1, y1, x2, y2 = shape.bbox()
 
@@ -1360,6 +1513,14 @@ def _describe_one(kind, shape, library):
                 f"origin=({shape.origin[0]},{shape.origin[1]})  "
                 f"rotation={shape.rotation:g}°  magnification={shape.magnification:g}  "
                 f"mirror={mirror}")
+    if kind == "aref" or isinstance(shape, ARef):
+        mirror = "yes" if shape.x_reflection else "no"
+        return (f"Array Instance  cell={shape.cell_name!r}  "
+                f"origin=({shape.origin[0]},{shape.origin[1]})  "
+                f"{shape.columns}x{shape.rows}  "
+                f"col_spacing={shape.col_spacing:g}  row_spacing={shape.row_spacing:g}  "
+                f"rotation={shape.rotation:g}°  magnification={shape.magnification:g}  "
+                f"mirror={mirror}  ({shape.count} instances)")
     if isinstance(shape, Path):
         return (f"Path  layer={_layer_label(library, shape.layer)}  "
                 f"width={shape.width}  cap={shape.cap.value}  "
@@ -1454,6 +1615,95 @@ def _choose_from_list(parent, title, prompt, options):
     return result["value"]
 
 
+def _prompt_aref_params(parent):
+    """Modal form for the array's columns/rows/spacing/rotation/
+    magnification/mirror, used by LayoutCanvas._prompt_aref() (Create >
+    Array Instance) once a cell has already been picked. Spacing is
+    entered in mm (like every other on-screen length in this app) and
+    converted to DBU here; returns a kwargs dict ready to splice into
+    on_commit's extra dict, or None if cancelled."""
+    win = tk.Toplevel(parent)
+    win.title("Array Instance")
+    win.transient(parent)
+    win.grab_set()
+    win.resizable(False, False)
+
+    form = tk.Frame(win)
+    form.pack(padx=10, pady=10)
+
+    fields = [
+        ("Columns:", tk.IntVar(value=2)),
+        ("Rows:", tk.IntVar(value=1)),
+        ("Column spacing (mm):", tk.DoubleVar(value=1.0)),
+        ("Row spacing (mm):", tk.DoubleVar(value=1.0)),
+        ("Rotation (degrees):", tk.DoubleVar(value=0.0)),
+        ("Magnification:", tk.DoubleVar(value=1.0)),
+    ]
+    for row, (label, var) in enumerate(fields):
+        tk.Label(form, text=label).grid(row=row, column=0, sticky="e", padx=4, pady=3)
+        tk.Entry(form, textvariable=var, width=10).grid(row=row, column=1, sticky="w", padx=4, pady=3)
+    (columns_var, rows_var, col_spacing_var, row_spacing_var,
+     rotation_var, magnification_var) = (var for _, var in fields)
+
+    mirror_var = tk.BooleanVar(value=False)
+    tk.Checkbutton(form, text="Mirror (X reflection)", variable=mirror_var).grid(
+        row=len(fields), column=0, columnspan=2, sticky="w", padx=4, pady=3)
+
+    error_var = tk.StringVar(value="")
+    tk.Label(form, textvariable=error_var, fg="red").grid(
+        row=len(fields) + 1, column=0, columnspan=2, sticky="w", padx=4)
+
+    result = {"value": None}
+
+    def on_ok(event=None):
+        try:
+            columns = int(columns_var.get())
+            rows = int(rows_var.get())
+            col_spacing = mm_to_dbu(float(col_spacing_var.get()))
+            row_spacing = mm_to_dbu(float(row_spacing_var.get()))
+            rotation = float(rotation_var.get())
+            magnification = float(magnification_var.get())
+        except (tk.TclError, ValueError):
+            error_var.set("All fields must be numbers.")
+            return
+        if columns < 1 or rows < 1:
+            error_var.set("Columns and rows must be at least 1.")
+            return
+        if columns > 1 and col_spacing == 0:
+            error_var.set("Column spacing must be nonzero when columns > 1.")
+            return
+        if rows > 1 and row_spacing == 0:
+            error_var.set("Row spacing must be nonzero when rows > 1.")
+            return
+        if magnification <= 0:
+            error_var.set("Magnification must be positive.")
+            return
+        result["value"] = {
+            "columns": columns, "rows": rows,
+            "col_spacing": col_spacing, "row_spacing": row_spacing,
+            "rotation": rotation, "magnification": magnification,
+            "x_reflection": mirror_var.get(),
+        }
+        win.destroy()
+
+    def on_cancel(event=None):
+        win.destroy()
+
+    btns = tk.Frame(win)
+    btns.pack(pady=(0, 10))
+    tk.Button(btns, text="OK", command=on_ok).pack(side="left", padx=4)
+    tk.Button(btns, text="Cancel", command=on_cancel).pack(side="left", padx=4)
+    win.bind("<Return>", on_ok)
+    win.bind("<Escape>", on_cancel)
+
+    win.update_idletasks()
+    px = parent.winfo_rootx() + 40
+    py = parent.winfo_rooty() + 40
+    win.geometry(f"+{px}+{py}")
+    parent.wait_window(win)
+    return result["value"]
+
+
 # --- move/translate helpers (module-level, used by LayoutCanvas) ---------
 
 def _dist_point_to_segment(px, py, ax, ay, bx, by):
@@ -1469,7 +1719,7 @@ def _dist_point_to_segment(px, py, ax, ay, bx, by):
 
 def _geom_snapshot(kind, shape):
     """Capture the geometry a drag/move should be computed relative to."""
-    if kind == "sref" or isinstance(shape, Text):
+    if kind in ("sref", "aref") or isinstance(shape, (SRef, ARef, Text)):
         return ("origin", shape.origin)
     return ("points", list(shape.points))
 
@@ -1525,7 +1775,8 @@ def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
     `checkpoint`, if given, is called once -- right before the shape's
     fields are actually mutated -- so this edit can be undone."""
     win = tk.Toplevel(parent)
-    win.title("Edit " + ("Cell Instance" if kind == "sref" else type(shape).__name__))
+    win.title("Edit " + {"sref": "Cell Instance", "aref": "Array Instance"}.get(
+        kind, type(shape).__name__))
     win.transient(parent)
     win.grab_set()
 
@@ -1562,6 +1813,19 @@ def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
             add_field("Y", shape.origin[1])
             add_field("Height", shape.height)
             add_field("Font (0-3)", shape.font)
+    elif kind == "aref":
+        tk.Label(win, text="Cell").grid(row=row, column=0, sticky="e", padx=6, pady=3)
+        tk.Label(win, text=shape.cell_name).grid(row=row, column=1, sticky="w", padx=6, pady=3)
+        row += 1
+        add_field("X", shape.origin[0])
+        add_field("Y", shape.origin[1])
+        add_field("Columns", shape.columns)
+        add_field("Rows", shape.rows)
+        add_field("Column spacing (DBU)", shape.col_spacing)
+        add_field("Row spacing (DBU)", shape.row_spacing)
+        add_field("Rotation (deg)", shape.rotation)
+        add_field("Magnification", shape.magnification)
+        add_field("Mirror (0/1)", int(shape.x_reflection))
     else:  # sref
         tk.Label(win, text="Cell").grid(row=row, column=0, sticky="e", padx=6, pady=3)
         tk.Label(win, text=shape.cell_name).grid(row=row, column=1, sticky="w", padx=6, pady=3)
@@ -1612,6 +1876,29 @@ def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
                     if not (0 <= font <= 3):
                         raise ValueError("font must be 0-3")
                     shape.font = font
+            elif kind == "aref":
+                shape.origin = (int(round(float(entries["X"].get()))),
+                                 int(round(float(entries["Y"].get()))))
+                columns = int(entries["Columns"].get())
+                rows = int(entries["Rows"].get())
+                col_spacing = float(entries["Column spacing (DBU)"].get())
+                row_spacing = float(entries["Row spacing (DBU)"].get())
+                if columns < 1 or rows < 1:
+                    raise ValueError("columns/rows must be at least 1")
+                if columns > 1 and col_spacing == 0:
+                    raise ValueError("column spacing must be nonzero when columns > 1")
+                if rows > 1 and row_spacing == 0:
+                    raise ValueError("row spacing must be nonzero when rows > 1")
+                shape.columns = columns
+                shape.rows = rows
+                shape.col_spacing = col_spacing
+                shape.row_spacing = row_spacing
+                shape.rotation = float(entries["Rotation (deg)"].get())
+                mag = float(entries["Magnification"].get())
+                if mag <= 0:
+                    raise ValueError("magnification must be positive")
+                shape.magnification = mag
+                shape.x_reflection = bool(int(entries["Mirror (0/1)"].get()))
             else:
                 shape.origin = (int(round(float(entries["X"].get()))),
                                  int(round(float(entries["Y"].get()))))

@@ -198,3 +198,84 @@ class SRef:
         self.origin = (int(round(x)), int(round(y)))
         if self.magnification <= 0:
             raise GeometryError("sref magnification must be positive")
+
+
+@dataclass
+class ARef:
+    """An array ('array reference') of instances of another cell, laid
+    out as columns x rows starting at an origin with a fixed column/
+    row spacing (in DBU), sharing one rotation/magnification/mirror for
+    the whole array -- GDSII's native AREF element, same idea as SRef
+    but repeated. col_spacing/row_spacing are defined *before*
+    rotation/mirroring is applied (see instance_origins()), matching
+    real GDSII AREF semantics: the grid rotates/mirrors together with
+    the array, but magnification only scales each instance's own
+    geometry, not the spacing between instances.
+
+    Use Cell.smash_aref()/Session.smash_aref() to explode an ARef back
+    into individual SRefs, one per array position -- the command bar's
+    SMASH command, or Session.aref() to place a new one (the AREF
+    command)."""
+
+    cell_name: str
+    origin: Point
+    columns: int = 1
+    rows: int = 1
+    col_spacing: float = 0.0
+    row_spacing: float = 0.0
+    rotation: float = 0.0  # degrees, counter-clockwise
+    magnification: float = 1.0
+    x_reflection: bool = False
+
+    def __post_init__(self):
+        x, y = self.origin
+        self.origin = (int(round(x)), int(round(y)))
+        if self.magnification <= 0:
+            raise GeometryError("aref magnification must be positive")
+        self.columns = int(self.columns)
+        self.rows = int(self.rows)
+        if self.columns < 1 or self.rows < 1:
+            raise GeometryError("aref columns/rows must be at least 1")
+        if self.columns > 1 and self.col_spacing == 0:
+            raise GeometryError("aref col_spacing must be nonzero when columns > 1")
+        if self.rows > 1 and self.row_spacing == 0:
+            raise GeometryError("aref row_spacing must be nonzero when rows > 1")
+
+    @property
+    def count(self) -> int:
+        return self.columns * self.rows
+
+    def instance_origins(self) -> List[Point]:
+        """World-space origin of every array position (row-major: column
+        varies fastest). The column/row spacing vectors are rotated and
+        mirrored together with the array's own rotation/x_reflection
+        (matching GDSII AREF), but never scaled by magnification --
+        magnification only scales each instance's own geometry, exactly
+        like a plain SRef."""
+        theta = math.radians(self.rotation)
+        cos_t, sin_t = math.cos(theta), math.sin(theta)
+        ox, oy = self.origin
+        origins = []
+        for r in range(self.rows):
+            for c in range(self.columns):
+                dx = c * self.col_spacing
+                dy = r * self.row_spacing
+                if self.x_reflection:
+                    dy = -dy
+                rx = dx * cos_t - dy * sin_t
+                ry = dx * sin_t + dy * cos_t
+                origins.append((int(round(ox + rx)), int(round(oy + ry))))
+        return origins
+
+
+def expand_arefs_to_srefs(arefs: List["ARef"]) -> List[SRef]:
+    """One synthetic SRef per array position, for callers (flattening
+    exporters, hierarchy walkers, the canvas) that only need to iterate
+    'every cell instance here' without caring whether it came from a
+    plain SRef or an ARef position."""
+    out = []
+    for ref in arefs:
+        for origin in ref.instance_origins():
+            out.append(SRef(cell_name=ref.cell_name, origin=origin, rotation=ref.rotation,
+                             magnification=ref.magnification, x_reflection=ref.x_reflection))
+    return out

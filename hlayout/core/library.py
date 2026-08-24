@@ -7,7 +7,7 @@ from typing import Dict, Optional
 from .cell import Cell
 from .errors import BoundsError, CellError
 from .layers import LayerTable
-from .shapes import SRef
+from .shapes import ARef, SRef
 from .units import DBU_MM, MAX_SIZE_DBU, MAX_SIZE_MM
 
 
@@ -59,7 +59,8 @@ class Library:
         if name not in self.cells:
             raise CellError(f"no such cell: {name!r}")
         for cell in self.cells.values():
-            if any(ref.cell_name == name for ref in cell.srefs):
+            if any(ref.cell_name == name for ref in cell.srefs) or \
+                    any(ref.cell_name == name for ref in cell.arefs):
                 raise CellError(f"cannot delete {name!r}: still referenced by {cell.name!r}")
         del self.cells[name]
         if self.top_cell_name == name:
@@ -68,6 +69,7 @@ class Library:
     def top_cells(self):
         """Cells that are not referenced by any other cell (candidate roots)."""
         referenced = {ref.cell_name for c in self.cells.values() for ref in c.srefs}
+        referenced |= {ref.cell_name for c in self.cells.values() for ref in c.arefs}
         return [c for name, c in self.cells.items() if name not in referenced]
 
     # --- hierarchy validation ---------------------------------------------
@@ -84,6 +86,8 @@ class Library:
                 return
             state[name] = GRAY
             for ref in self.cells[name].srefs:
+                visit(ref.cell_name, stack + [name])
+            for ref in self.cells[name].arefs:
                 visit(ref.cell_name, stack + [name])
             state[name] = BLACK
 
@@ -114,6 +118,7 @@ class Library:
                 continue
             seen.add(name)
             stack.extend(ref.cell_name for ref in self.cells[name].srefs)
+            stack.extend(ref.cell_name for ref in self.cells[name].arefs)
         return False
 
     # --- hierarchical bbox / bounds checking -------------------------------
@@ -137,6 +142,15 @@ class Library:
             if child_box is None:
                 continue
             boxes.append(_transform_bbox(child_box, ref))
+
+        for aref in cell.arefs:
+            child_box = self.cell_bbox(aref.cell_name, _seen)
+            if child_box is None:
+                continue
+            for origin in aref.instance_origins():
+                instance = SRef(cell_name=aref.cell_name, origin=origin, rotation=aref.rotation,
+                                 magnification=aref.magnification, x_reflection=aref.x_reflection)
+                boxes.append(_transform_bbox(child_box, instance))
 
         if not boxes:
             return None
@@ -213,9 +227,18 @@ class Library:
                 new_srefs.append(SRef(cell_name=child_name, origin=ref.origin,
                                         rotation=ref.rotation, magnification=ref.magnification,
                                         x_reflection=ref.x_reflection))
+            new_arefs = []
+            for ref in src_cell.arefs:
+                child_name = visit(ref.cell_name)
+                new_arefs.append(ARef(cell_name=child_name, origin=ref.origin,
+                                        columns=ref.columns, rows=ref.rows,
+                                        col_spacing=ref.col_spacing, row_spacing=ref.row_spacing,
+                                        rotation=ref.rotation, magnification=ref.magnification,
+                                        x_reflection=ref.x_reflection))
             cell = self.cells[new_name]
             cell.shapes = new_shapes
             cell.srefs = new_srefs
+            cell.arefs = new_arefs
             return new_name
 
         return visit(root_name)

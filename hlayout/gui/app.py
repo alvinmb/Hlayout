@@ -8,7 +8,7 @@ from tkinter import filedialog, simpledialog, ttk
 from . import dialogs
 
 from .. import __version__
-from ..core.errors import LayoutError
+from ..core.errors import GeometryError, LayoutError
 from ..core.library import Library
 from ..core.maskops import MASK_OPS
 from ..core.shapes import CIRCLE_SEGMENT_CHOICES
@@ -281,6 +281,7 @@ class App(tk.Tk):
         setupm.add_command(label="Layers...", command=self._show_layers_tab)
         setupm.add_checkbutton(label="Snap to Grid", variable=self.snap_var,
                                 command=self._on_snap_change)
+        setupm.add_command(label="Grid Spacing...", command=self.show_grid_spacing_dialog)
         setupm.add_separator()
         setupm.add_command(label="Path Style...", command=self.show_path_style_dialog)
         setupm.add_command(label="Circle Segments...", command=self.show_circle_segments_dialog)
@@ -306,6 +307,7 @@ class App(tk.Tk):
         for label, mode in [
             ("Rectangle", "rect"), ("Polygon", "poly"), ("Path", "path"),
             ("Circle", "circle"), ("Text", "text"), ("Cell Instance", "sref"),
+            ("Array Instance", "aref"),
         ]:
             createm.add_radiobutton(label=label, value=mode, variable=self.mode_var,
                                      command=self._on_mode_change)
@@ -329,6 +331,7 @@ class App(tk.Tk):
         editm.add_separator()
         editm.add_command(label="Rotate...", command=self._rotate_selected)
         editm.add_command(label="Copy...", command=self._copy_selected)
+        editm.add_command(label="Smash Selected to SRefs", command=self._smash_selected)
         editm.add_separator()
         editm.add_command(label="Properties", command=self._show_properties_tab)
 
@@ -462,6 +465,25 @@ class App(tk.Tk):
             dialogs.show_info("Copy", "That selection can't be copied directly -- "
                                "select a whole shape or cell instance (not a single vertex/edge).",
                                parent=self)
+
+    def _smash_selected(self):
+        """Edit > Smash Selected to SRefs: explode the selected array
+        instance (AREF, see Tools > Command Reference's AREF command)
+        back into individual cell instances (SREFs), one per array
+        position, selecting the new SREFs as a window-selected group.
+        Backed by LayoutCanvas.smash_selected(); same operation as the
+        command bar's SMASH command."""
+        if self.canvas.selected is None or self.canvas.selected[0] != "aref":
+            dialogs.show_info(
+                "Smash Selected to SRefs",
+                "Nothing suitable is selected. Switch to Select mode and click an "
+                "array instance (AREF) first -- SMASH only applies to arrays, not "
+                "a single shape or cell instance.",
+                parent=self,
+            )
+            return
+        self.canvas.smash_selected()
+        self.status.set("array instance smashed into individual cell instances")
 
     def run_script_file(self):
         path = filedialog.askopenfilename(filetypes=[("Python scripts", "*.py"), ("All files", "*.*")])
@@ -636,6 +658,17 @@ class App(tk.Tk):
         self.snap_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(bar, text="Snap to grid", variable=self.snap_var,
                          command=self._on_snap_change).pack(side="left", padx=(12, 2))
+
+        # Always-visible current grid spacing readout + a quick way to
+        # change it, alongside Snap to grid since they're the same
+        # setting (see LayoutCanvas.set_grid_spacing()). Setup > Grid
+        # Spacing... opens the same dialog for anyone who goes looking
+        # in the menu instead.
+        self.grid_spacing_var = tk.StringVar()
+        self._refresh_grid_spacing_var()
+        ttk.Label(bar, textvariable=self.grid_spacing_var).pack(side="left", padx=(8, 2))
+        ttk.Button(bar, text="Grid...", command=self.show_grid_spacing_dialog).pack(
+            side="left", padx=(0, 2))
 
         ttk.Button(bar, text="Delete Selected", command=self._delete_selected).pack(
             side="left", padx=(12, 2))
@@ -1181,6 +1214,63 @@ class App(tk.Tk):
     def _on_snap_change(self):
         self.canvas.snap_enabled = self.snap_var.get()
 
+    def _refresh_grid_spacing_var(self):
+        """Keep the toolbar's "Grid: N mm" readout in sync with
+        self.canvas.grid_dbu -- called on startup and after Grid
+        Spacing... changes it."""
+        self.grid_spacing_var.set(f"Grid: {dbu_to_mm(self.canvas.grid_dbu):g} mm")
+
+    def show_grid_spacing_dialog(self):
+        """Setup > Grid Spacing... (also reachable via the toolbar's
+        Grid... button): change the minor grid line spacing, shown as
+        the always-visible "Grid: N mm" toolbar readout. Also updates
+        the snap-to-grid pitch to match, since the drawn grid and the
+        snap grid are the same setting -- see
+        LayoutCanvas.set_grid_spacing()."""
+        win = tk.Toplevel(self)
+        win.title("Grid Spacing")
+        win.transient(self)
+        win.grab_set()
+        win.resizable(False, False)
+
+        form = ttk.Frame(win)
+        form.pack(padx=12, pady=12)
+
+        ttk.Label(form, text="Grid spacing (mm):").grid(row=0, column=0, sticky="e", padx=4, pady=4)
+        spacing_var = tk.DoubleVar(value=dbu_to_mm(self.canvas.grid_dbu))
+        spacing_spin = ttk.Spinbox(form, from_=0.001, to=1000.0, increment=0.001, width=10,
+                                    textvariable=spacing_var)
+        spacing_spin.grid(row=0, column=1, sticky="w", padx=4, pady=4)
+
+        error_var = tk.StringVar(value="")
+        ttk.Label(form, textvariable=error_var, foreground="red").grid(
+            row=1, column=0, columnspan=2, sticky="w", padx=4
+        )
+
+        def apply_and_close():
+            try:
+                spacing_dbu = mm_to_dbu(float(spacing_var.get()))
+            except (tk.TclError, ValueError):
+                error_var.set("Grid spacing must be a number.")
+                return
+            try:
+                self.canvas.set_grid_spacing(spacing_dbu)
+            except GeometryError as e:
+                error_var.set(str(e))
+                return
+            self._refresh_grid_spacing_var()
+            self.status.set(f"grid spacing set to {dbu_to_mm(self.canvas.grid_dbu):g} mm")
+            win.destroy()
+
+        btn_row = ttk.Frame(win)
+        btn_row.pack(pady=(0, 12))
+        ttk.Button(btn_row, text="OK", command=apply_and_close).pack(side="left", padx=6)
+        ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=6)
+
+        spacing_spin.focus_set()
+        win.bind("<Return>", lambda e: apply_and_close())
+        win.bind("<Escape>", lambda e: win.destroy())
+
     def _delete_selected(self):
         self.canvas.delete_selected()
 
@@ -1209,6 +1299,18 @@ class App(tk.Tk):
                 self.session.place_cell(
                     extra["cell_name"], points[0], rotation=extra["rotation"],
                     magnification=extra["magnification"], x_reflection=extra["x_reflection"],
+                )
+            elif mode == "aref":
+                # place_cell_array() (not the lower-level session.aref())
+                # for the same reason "sref" uses place_cell() above --
+                # picking a cell that only lives in an attached library
+                # imports its dependency closure first.
+                self.session.place_cell_array(
+                    extra["cell_name"], points[0],
+                    columns=extra["columns"], rows=extra["rows"],
+                    col_spacing=extra["col_spacing"], row_spacing=extra["row_spacing"],
+                    rotation=extra["rotation"], magnification=extra["magnification"],
+                    x_reflection=extra["x_reflection"],
                 )
         except LayoutError as e:
             dialogs.show_error("Could not add shape", str(e), parent=self)

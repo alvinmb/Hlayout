@@ -29,7 +29,7 @@ import gdstk
 from ..core.cell import Cell
 from ..core.errors import LayoutError
 from ..core.library import Library
-from ..core.shapes import Path, PathCap, Polygon, Rectangle, SRef, Text
+from ..core.shapes import ARef, Path, PathCap, Polygon, Rectangle, SRef, Text
 from ..core.units import DBU_MM
 
 UNIT = DBU_MM * 1e-3  # metres per DBU (DBU_MM is in mm; 1 mm = 1e-3 m)
@@ -88,6 +88,20 @@ def save_gds(library: Library, path: str) -> None:
                 x_reflection=ref.x_reflection,
             ))
 
+        for ref in cell.arefs:
+            if ref.cell_name not in gcells:
+                raise LayoutError(f"aref in {name!r} references unknown cell {ref.cell_name!r}")
+            gcell.add(gdstk.Reference(
+                gcells[ref.cell_name],
+                origin=ref.origin,
+                rotation=math.radians(ref.rotation),
+                magnification=ref.magnification,
+                x_reflection=ref.x_reflection,
+                columns=ref.columns,
+                rows=ref.rows,
+                spacing=(ref.col_spacing, ref.row_spacing),
+            ))
+
     glib.add(*gcells.values())
     glib.write_gds(str(path))
 
@@ -144,13 +158,48 @@ def load_gds(path: str, library_name: Optional[str] = None) -> Library:
             ))
 
         for ref in gcell.references:
-            cell.srefs.append(SRef(
-                cell_name=ref.cell_name,
-                origin=ref.origin,
-                rotation=math.degrees(ref.rotation),
-                magnification=ref.magnification,
-                x_reflection=ref.x_reflection,
-            ))
+            rep = ref.repetition
+            if rep is not None and rep.size and rep.size > 1 and rep.columns and rep.rows:
+                # An AREF: gdstk exposes it as a plain Reference plus a
+                # Repetition (rectangular columns x rows grid). After a
+                # round trip through an actual GDSII file (real GDSII
+                # AREF stores the grid as 3 reference points, not a
+                # columns/rows/spacing triple), gdstk always reports
+                # rep.spacing as None and exposes the already-rotated/
+                # mirrored column/row vectors as rep.v1/rep.v2 instead --
+                # their magnitudes recover the pre-rotation spacing our
+                # own ARef.instance_origins() expects (rotation/mirror
+                # are re-applied separately via ref.rotation/
+                # ref.x_reflection below, so only the magnitude is
+                # needed here, not the vector's direction).
+                if rep.spacing is not None:
+                    col_spacing, row_spacing = rep.spacing
+                else:
+                    col_spacing = math.hypot(*rep.v1) if rep.v1 is not None else 0.0
+                    row_spacing = math.hypot(*rep.v2) if rep.v2 is not None else 0.0
+                if rep.columns <= 1:
+                    col_spacing = 0.0
+                if rep.rows <= 1:
+                    row_spacing = 0.0
+                cell.arefs.append(ARef(
+                    cell_name=ref.cell_name,
+                    origin=ref.origin,
+                    columns=rep.columns,
+                    rows=rep.rows,
+                    col_spacing=col_spacing,
+                    row_spacing=row_spacing,
+                    rotation=math.degrees(ref.rotation),
+                    magnification=ref.magnification,
+                    x_reflection=ref.x_reflection,
+                ))
+            else:
+                cell.srefs.append(SRef(
+                    cell_name=ref.cell_name,
+                    origin=ref.origin,
+                    rotation=math.degrees(ref.rotation),
+                    magnification=ref.magnification,
+                    x_reflection=ref.x_reflection,
+                ))
 
     top = gdslib.top_level()
     if top:

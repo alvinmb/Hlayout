@@ -48,7 +48,7 @@ from typing import Dict, List, Optional, Tuple
 
 from ..core.errors import GeometryError
 from ..core.library import Library
-from ..core.shapes import Path, Polygon, Rectangle, SRef, Text
+from ..core.shapes import Path, Polygon, Rectangle, SRef, Text, expand_arefs_to_srefs
 from ..core.units import DBU_MM
 
 _MAX_DEPTH = 64
@@ -103,7 +103,7 @@ def _flatten(library: Library, cell_name: str):
                 texts.setdefault(shape.layer, []).append(
                     (x, y, shape.text, shape.height * scale, rot)
                 )
-        for ref in cell.srefs:
+        for ref in cell.srefs + expand_arefs_to_srefs(cell.arefs):
             theta = math.radians(ref.rotation)
             cos_t, sin_t = math.cos(theta), math.sin(theta)
             mag = ref.magnification

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import List, Union
 
 from .errors import GeometryError
-from .shapes import Path, Polygon, Rectangle, SRef, Text, circle_points
+from .shapes import ARef, Path, Polygon, Rectangle, SRef, Text, circle_points
 
 Shape = Union[Polygon, Path, Rectangle, Text]
 
@@ -14,6 +14,7 @@ class Cell:
     name: str
     shapes: List[Shape] = field(default_factory=list)
     srefs: List[SRef] = field(default_factory=list)
+    arefs: List[ARef] = field(default_factory=list)
 
     # --- adders -----------------------------------------------------
     def add_polygon(self, layer: int, points, datatype: int = 0) -> Polygon:
@@ -52,6 +53,30 @@ class Cell:
         self.srefs.append(ref)
         return ref
 
+    def add_aref(self, cell_name: str, origin, columns: int = 1, rows: int = 1,
+                 col_spacing: float = 0.0, row_spacing: float = 0.0, rotation: float = 0.0,
+                 magnification: float = 1.0, x_reflection: bool = False) -> ARef:
+        ref = ARef(cell_name=cell_name, origin=origin, columns=columns, rows=rows,
+                   col_spacing=col_spacing, row_spacing=row_spacing, rotation=rotation,
+                   magnification=magnification, x_reflection=x_reflection)
+        self.arefs.append(ref)
+        return ref
+
+    def smash_aref(self, ref: ARef) -> List[SRef]:
+        """Explode an ARef in this cell back into individual SRefs, one
+        per array position, removing the ARef and appending the new
+        SRefs in its place. Returns the list of SRefs created."""
+        if ref not in self.arefs:
+            raise GeometryError("aref not found in this cell")
+        new_refs = []
+        for origin in ref.instance_origins():
+            new_refs.append(self.add_sref(
+                ref.cell_name, origin, rotation=ref.rotation,
+                magnification=ref.magnification, x_reflection=ref.x_reflection,
+            ))
+        self.arefs.remove(ref)
+        return new_refs
+
     # --- queries ------------------------------------------------------
     def shapes_on_layer(self, layer: int):
         return [s for s in self.shapes if s.layer == layer]
@@ -73,5 +98,7 @@ class Cell:
             self.shapes.remove(shape)
         elif shape in self.srefs:
             self.srefs.remove(shape)
+        elif shape in self.arefs:
+            self.arefs.remove(shape)
         else:
             raise GeometryError("shape not found in cell")

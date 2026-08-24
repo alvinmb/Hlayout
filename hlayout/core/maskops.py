@@ -43,7 +43,7 @@ from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
 
 from .errors import GeometryError
-from .shapes import MAX_POLY_POINTS, Path, PathCap, Polygon, Rectangle
+from .shapes import MAX_POLY_POINTS, Path, PathCap, Polygon, Rectangle, expand_arefs_to_srefs
 
 MASK_OPS = ("OVERSIZE", "UNDERSIZE", "AND", "OR", "NOT", "XOR")
 
@@ -184,7 +184,7 @@ def layer_geoms_flattened(library, cell, layer, point_transform=None, _depth=0) 
         if point_transform is not None:
             g = _transform_geom(g, point_transform)
         geoms.append(g)
-    for ref in cell.srefs:
+    for ref in cell.srefs + expand_arefs_to_srefs(cell.arefs):
         if ref.cell_name not in library.cells:
             continue
         child = library.cells[ref.cell_name]

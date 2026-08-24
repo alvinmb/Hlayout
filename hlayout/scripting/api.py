@@ -479,7 +479,8 @@ class Session:
         0-based index): [{'name', 'shapes', 'srefs', 'bbox'}, ...]."""
         lib = self._resolve_source(source)
         return [
-            {"name": name, "shapes": len(cell.shapes), "srefs": len(cell.srefs), "bbox": cell.bbox()}
+            {"name": name, "shapes": len(cell.shapes), "srefs": len(cell.srefs),
+             "arefs": len(cell.arefs), "bbox": cell.bbox()}
             for name, cell in lib.cells.items()
         ]
 
@@ -867,6 +868,88 @@ class Session:
 
             return self.sref(local_name, origin, rotation=rotation,
                               magnification=magnification, x_reflection=x_reflection)
+
+    def place_cell_array(self, cell_name: str, origin, columns: int = 1, rows: int = 1,
+                          col_spacing: float = 0.0, row_spacing: float = 0.0,
+                          source: Union[str, int, None] = None,
+                          rotation: float = 0.0, magnification: float = 1.0,
+                          x_reflection: bool = False):
+        """Same idea as place_cell(), but places an ARef (array of
+        instances) instead of a single SRef -- the normal way to place
+        an array from Create > Array Instance or a cell picked via
+        find_cells() when it should be repeated in a grid. See
+        place_cell() for the `source` search/import semantics (a cell
+        that only lives in an attached library is copied into the
+        current library first)."""
+        with self._batch():
+            if source is None:
+                if cell_name in self.library.cells:
+                    source = "current"
+                else:
+                    found = [i for i, lib in enumerate(self.attached_libraries) if cell_name in lib.cells]
+                    if not found:
+                        raise LibraryError(
+                            f"cell {cell_name!r} not found in the current library or any attached library"
+                        )
+                    if len(found) > 1:
+                        raise LibraryError(
+                            f"cell {cell_name!r} exists in more than one attached library {found}; "
+                            "pass source=<index> to disambiguate"
+                        )
+                    source = found[0]
+
+            if source == "current":
+                if cell_name not in self.library.cells:
+                    raise LibraryError(f"no such cell {cell_name!r} in the current library")
+                local_name = cell_name
+            else:
+                idx = int(source)
+                if idx < 0 or idx >= len(self.attached_libraries):
+                    raise LibraryError(f"no attached library at index {idx}")
+                local_name = self.library.import_cell_closure(self.attached_libraries[idx], cell_name)
+
+            return self.aref(local_name, origin, columns=columns, rows=rows,
+                              col_spacing=col_spacing, row_spacing=row_spacing,
+                              rotation=rotation, magnification=magnification,
+                              x_reflection=x_reflection)
+
+    def aref(self, cell_name: str, origin, columns: int = 1, rows: int = 1,
+             col_spacing: float = 0.0, row_spacing: float = 0.0,
+             rotation: float = 0.0, magnification: float = 1.0, x_reflection: bool = False):
+        """Place an array ('AREF') of instances of another cell in the
+        current cell -- columns x rows, spaced col_spacing/row_spacing
+        DBU apart, sharing one rotation/magnification/mirror for the
+        whole array -- GDSII's native array-reference element, same
+        idea as sref() but repeated. col_spacing/row_spacing are
+        defined before rotation/mirroring is applied to the array (see
+        hlayout.core.shapes.ARef.instance_origins()); magnification
+        scales each instance's own geometry, not the spacing between
+        instances. Same cyclic-reference guard as sref(). Use
+        smash_aref() to explode the result back into individual SRefs,
+        one per array position -- the SMASH command's operation."""
+        if self.library.would_create_cycle(self.current_cell_name, cell_name):
+            raise LibraryError(
+                f"cannot place {cell_name!r} inside {self.current_cell_name!r}: "
+                "this would create a cyclic cell reference (a cell can't "
+                "contain an instance of itself, directly or indirectly)"
+            )
+        self._checkpoint()
+        ref = self.cell.add_aref(cell_name, origin, columns=columns, rows=rows,
+                                  col_spacing=col_spacing, row_spacing=row_spacing,
+                                  rotation=rotation, magnification=magnification,
+                                  x_reflection=x_reflection)
+        self._notify()
+        return ref
+
+    def smash_aref(self, ref):
+        """Explode an ARef (as returned by aref(), or found in
+        self.cell.arefs) back into individual SRefs, one per array
+        position, in the same cell it's placed in -- the command bar's
+        SMASH command. Returns the list of SRefs created."""
+        self._checkpoint()
+        new_refs = self.cell.smash_aref(ref)
+        self._notify()
+        return new_refs
 
     def remove(self, shape):
         self._checkpoint()

@@ -44,7 +44,7 @@ from typing import Dict, List, Optional, Tuple
 
 from ..core.errors import GeometryError
 from ..core.library import Library
-from ..core.shapes import Path, Polygon, Rectangle, SRef, Text
+from ..core.shapes import Path, Polygon, Rectangle, SRef, Text, expand_arefs_to_srefs
 from ..core.units import DBU_MM
 
 # Gerber coordinate unit: 1e-6 mm (i.e. the FS format's 6 fractional
@@ -85,7 +85,7 @@ def _flatten_layer_data(library: Library, cell_name: str):
                 paths.setdefault(shape.layer, []).append((pts, shape.width * scale))
             elif isinstance(shape, Text):
                 skipped_text += 1
-        for ref in cell.srefs:
+        for ref in cell.srefs + expand_arefs_to_srefs(cell.arefs):
             theta = math.radians(ref.rotation)
             cos_t, sin_t = math.cos(theta), math.sin(theta)
             mag = ref.magnification
