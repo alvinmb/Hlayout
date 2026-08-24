@@ -357,6 +357,9 @@ const DATA = [
   {name:"GERBER", syntax:"GERBER <output_prefix> [cell=<name>]",
    desc:"Export Gerber RS-274X &mdash; one flattened file per visible layer with data, named <code>&lt;prefix&gt;_L&lt;NN&gt;_&lt;layer&gt;.gbr</code>.",
    example:"GERBER out/board"},
+  {name:"MERGE", syntax:"MERGE <lib1.gds> <lib2.gds> <lib3.gds> [library_name]",
+   desc:"Combine every cell from lib1 and lib2 into a new file lib3. A plain file-to-file operation &mdash; reads both files fresh and writes the result straight to lib3 without touching the design currently open in the GUI. A cell name that exists in both source files gets a numeric suffix (<code>_2</code>, <code>_3</code>, &hellip;) in lib3 so nothing collides, and any Sref/AREF inside the renamed cell's own file that pointed at the old name is updated to match. Same operation as File &rarr; Merge GDS Libraries&hellip;, and <code>Session.merge_gds()</code> in the Python API.",
+   example:"MERGE parts_a.gds parts_b.gds combined.gds\n<span class=\"c\">&raquo; merged parts_a.gds + parts_b.gds -&gt; combined.gds (14 cells); renamed on collision: PAD1 -&gt; PAD1_2</span>"},
 ]},
 
 {group:"command", groupLabel:"Command Bar", cat:"Technology File", items:[
@@ -456,6 +459,9 @@ const DATA = [
   {name:"run_dxf_export_batch()", syntax:"s.run_dxf_export_batch(jobs=None, cell_name=None)",
    desc:"Run a saved series of DXF export jobs (Tools &gt; DXF Export Sets&hellip;) in one call.",
    example:"results = s.run_dxf_export_batch()"},
+  {name:"merge_gds()", syntax:"s.merge_gds(path_a: str, path_b: str, out_path: str, library_name: str | None = None) -> dict",
+   desc:"Merge two GDSII files into a third, combining every cell from both. A plain file-to-file operation &mdash; reads path_a/path_b fresh and writes out_path directly, without touching <code>s.library</code> or <code>s.attached_libraries</code> at all. <code>library_name</code> defaults to path_a's own library name. A cell name that exists in both files is renamed in the copy from path_b (numeric suffix) to avoid a collision, and any Sref/AREF inside that file pointing at the old name is updated to match. Returns <code>{'cells': int, 'renamed': {old_name: new_name, ...}}</code>. Same operation as the command bar's MERGE and File &rarr; Merge GDS Libraries&hellip;.",
+   example:'result = s.merge_gds("parts_a.gds", "parts_b.gds", "combined.gds")\nprint(result)\n<span class="c">&raquo; {\'cells\': 14, \'renamed\': {\'PAD1\': \'PAD1_2\'}}</span>'},
 ]},
 
 {group:"python", groupLabel:"Python API", cat:"Technology File", items:[
@@ -571,6 +577,18 @@ const DATA = [
   {name:"generate_resistor()", syntax:"s.generate_resistor(x, y, body_width, body_length, rotation=0.0, ink_rsh=None, ref_des=None, ...)",
    desc:"Build a complete thick-film resistor (ink body, glaze overprint, two end pads, optional ref-des label) as a new cell, then place one instance at (x, y). Returns the new cell's name.",
    example:'name = s.generate_resistor(0, 0, body_width=500, body_length=2000,\n                           ink_rsh=100, ref_des="R1")'},
+]},
+
+{group:"python", groupLabel:"Python API", cat:"Resistor Trim Simulator", items:[
+  {name:"TrimSimulator", syntax:"from hlayout.core.trim_sim import TrimSimulator\nTrimSimulator(length_um, width_um, sheet_ohms_per_sq, nx=None, ny=None, operating_voltage=1.0)",
+   desc:"Standalone analysis tool, not tied to any GDS geometry &mdash; models a rectangular resistor body as a 2D resistive-sheet network and simulates a laser trim cut against it, tracking resistance, sensitivity (dR per unit cut advance), and the current-density/power heat map at every step. The same physics behind Tools &gt; Thick-Film Resistor Designer &gt; Trim Simulator&hellip;; length_um/width_um/sheet_ohms_per_sq normally come straight from a Resistor Designer Solution's body_length/body_width/ink_rsh. Requires numpy and scipy (see requirements.txt) &mdash; not needed for anything else in the app.",
+   example:'from hlayout.core.trim_sim import TrimSimulator\nsim = TrimSimulator(length_um=2000, width_um=1000, sheet_ohms_per_sq=100)'},
+  {name:"add_plunge()", syntax:"sim.add_plunge(entry_edge=\"bottom\", x_center_um=None, kerf_um=40.0, depth_um=None, steps=40) -> list[TrimResult]",
+   desc:"Advance a straight cut in from one edge (\"bottom\" or \"top\"), solving at each of `steps` increments. depth_um defaults to 95% of the body width. Each TrimResult carries resistance_ohm (math.inf once the body is fully severed), is_open, current_a, and sensitivity_ohm_per_um.",
+   example:"results = sim.add_plunge(kerf_um=40, depth_um=950, steps=40)\nprint(results[-1].resistance_ohm, results[-1].sensitivity_ohm_per_um)"},
+  {name:"add_l_cut()", syntax:"sim.add_l_cut(turn_length_um, direction=1, kerf_um=None, steps=20) -> list[TrimResult]",
+   desc:"Extend the current cut with a 90-degree turn from the tip of the last segment, running parallel to the entry edge &mdash; the move that keeps trim sensitivity bounded near the target instead of blowing up as a plain plunge approaches the far edge. Must follow an add_plunge() call. current_power_density_grid()/power_density_at(index) return the (ny, nx) heat-map array for the latest/a given step.",
+   example:"sim.add_l_cut(turn_length_um=300, direction=1, steps=20)\ngrid = sim.current_power_density_grid()"},
 ]},
 
 {group:"python", groupLabel:"Python API", cat:"Mask Operations & DRC", items:[

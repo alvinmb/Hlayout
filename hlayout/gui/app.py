@@ -270,6 +270,8 @@ class App(tk.Tk):
         filem.add_command(label="Save GDS...", command=self.save_gds, accelerator="Ctrl+S")
         filem.add_command(label="Save As Library...", command=self.save_as_library)
         filem.add_separator()
+        filem.add_command(label="Merge GDS Libraries...", command=self.show_merge_gds_dialog)
+        filem.add_separator()
         filem.add_command(label="Gerber Export Sets...", command=lambda: open_gerber_batch_window(self))
         filem.add_command(label="DXF Export Sets...", command=lambda: open_dxf_batch_window(self))
         filem.add_separator()
@@ -1509,6 +1511,43 @@ class App(tk.Tk):
             dialogs.show_error("Save As Library failed", str(e), parent=self)
             return
         self.status.set(f"saved library {name!r} to {path}")
+
+    def show_merge_gds_dialog(self):
+        """File > Merge GDS Libraries...: combine two GDSII files into a
+        third, cell for cell -- a plain file-to-file operation, doesn't
+        touch the currently open design. Prompts for the two source
+        files and where to write the merged result, then hands off to
+        Session.merge_gds(); same operation as the command bar's
+        MERGE <lib1.gds> <lib2.gds> <lib3.gds> command."""
+        path_a = filedialog.askopenfilename(
+            title="Merge GDS Libraries: first file",
+            filetypes=[("GDSII", "*.gds"), ("All files", "*.*")])
+        if not path_a:
+            return
+        path_b = filedialog.askopenfilename(
+            title="Merge GDS Libraries: second file",
+            filetypes=[("GDSII", "*.gds"), ("All files", "*.*")])
+        if not path_b:
+            return
+        out_path = filedialog.asksaveasfilename(
+            title="Merge GDS Libraries: save merged file as",
+            defaultextension=".gds", filetypes=[("GDSII", "*.gds")])
+        if not out_path:
+            return
+        try:
+            result = self.session.merge_gds(path_a, path_b, out_path)
+        except LayoutError as e:
+            dialogs.show_error("Merge GDS Libraries failed", str(e), parent=self)
+            return
+        except OSError as e:
+            dialogs.show_error("Merge GDS Libraries failed", str(e), parent=self)
+            return
+        msg = f"merged into {out_path} ({result['cells']} cells)"
+        if result["renamed"]:
+            n = len(result["renamed"])
+            msg += f", {n} cell name(s) renamed to avoid collisions"
+        self.status.set(msg)
+        dialogs.show_info("Merge GDS Libraries", msg, parent=self)
 
     def attach_library(self):
         path = filedialog.askopenfilename(filetypes=[("GDSII", "*.gds"), ("All files", "*.*")])

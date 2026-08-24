@@ -41,6 +41,7 @@ from tkinter import filedialog, ttk
 
 from . import dialogs
 from .fonts import section_header_font
+from .trim_sim_window import open_trim_simulator
 from ..core.errors import LayoutError
 from ..io.techfile import (
     load_resistor_design_rules,
@@ -1047,6 +1048,9 @@ class ResistorDesignerWindow(tk.Toplevel):
         ttk.Button(toolbar, text="Place All in Layout...", command=self._place_all_in_layout).pack(
             side="left", padx=2)
         ttk.Separator(toolbar, orient="vertical").pack(side="left", fill="y", padx=8)
+        ttk.Button(toolbar, text="Trim Simulator...", command=self._open_trim_simulator).pack(
+            side="left", padx=2)
+        ttk.Separator(toolbar, orient="vertical").pack(side="left", fill="y", padx=8)
         for text, cmd in [
             ("Import CSV...", self._import_csv),
             ("Export CSV...", self._export_csv),
@@ -1186,6 +1190,29 @@ class ResistorDesignerWindow(tk.Toplevel):
                 f"Design rules saved to technology file: Aim {self.rules.aim_pct:.0f}%  |  "
                 f"AR {self.rules.ar_min}-{self.rules.ar_max}  |  "
                 f"{len(self.rules.available_inks)} inks active")
+
+    # -- trim simulation --------------------------------------------------
+    def _open_trim_simulator(self):
+        """Run a plunge/L-cut laser-trim simulation (resistance,
+        sensitivity, and a current-density heat map as the cut
+        advances) against the currently selected resistor's chosen
+        Solution -- see hlayout.core.trim_sim / hlayout.gui.trim_sim_window.
+        Same selection requirement as Place in Layout...: a resistor
+        row must be selected and have a solution chosen first."""
+        row = self.res_table.current_row()
+        if row < 0 or row >= len(self.resistors):
+            dialogs.show_info("Trim Simulator", "Select a resistor first.", parent=self)
+            return
+        res = self.resistors[row]
+        sol = res.selected
+        if sol is None:
+            dialogs.show_info(
+                "Trim Simulator",
+                f"{res.ref_des} has no solution selected -- pick one on the "
+                "Solutions tab (Use This Solution) first.",
+                parent=self)
+            return
+        open_trim_simulator(self, res, sol)
 
     # -- generate into the actual layout ------------------------------------
     #

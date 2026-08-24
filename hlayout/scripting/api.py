@@ -26,7 +26,7 @@ from typing import Callable, List, Optional, Union
 
 from ..core.cell import Cell
 from ..core.errors import LayoutError, LibraryError
-from ..core.library import Library
+from ..core.library import Library, merge_libraries
 from ..core.maskops import (
     MASK_OPS,
     boolean_op,
@@ -287,6 +287,33 @@ class Session:
             {"index": i, "name": lib.name, "path": path, "cells": len(lib.cells)}
             for i, (lib, path) in enumerate(zip(self.attached_libraries, self._attached_paths))
         ]
+
+    def merge_gds(self, path_a: str, path_b: str, out_path: str,
+                  library_name: Optional[str] = None) -> dict:
+        """Merge two GDSII files into a third, combining every cell from
+        both. This is a plain file-to-file operation -- it reads
+        path_a and path_b fresh and writes the merged result straight
+        to out_path, without touching the session's current design
+        (self.library) or its attached libraries at all.
+
+        library_name defaults to path_a's own library name. Cells keep
+        their original names unless the same name exists in both
+        files, in which case path_b's copy is renamed to avoid the
+        collision -- see hlayout.core.library.merge_libraries for the
+        exact rule.
+
+        Returns {'cells': <total cell count written to out_path>,
+                 'renamed': {<original name from path_b>: <new name>, ...}}
+        -- 'renamed' lists every cell from path_b that had to be
+        renamed to avoid clashing with a same-named cell from path_a
+        (empty if there were no collisions).
+        """
+        lib_a = load_gds(path_a)
+        lib_b = load_gds(path_b)
+        merged, renamed = merge_libraries(lib_a, lib_b, name=library_name)
+        merged.check_bounds()
+        save_gds(merged, out_path)
+        return {"cells": len(merged.cells), "renamed": renamed}
 
     def create_via_cell(self, layer1, layer2, shape: str = "square",
                          size: float = 100, index: Optional[int] = None,

@@ -247,6 +247,68 @@ class Library:
         return f"Library({self.name!r}, cells={len(self.cells)})"
 
 
+def merge_libraries(lib_a: "Library", lib_b: "Library", name: Optional[str] = None):
+    """Merge two libraries into a new Library containing every cell from
+    both -- the whole cell set, not just what's reachable from a top
+    cell (unlike Library.import_cell_closure, which is meant for
+    pulling in one part and its dependencies from an attached
+    reference library). Neither lib_a nor lib_b is modified.
+
+    The merged library's layer table and tech params come from lib_a
+    (both libraries share the same fixed 1-micron DBU grid and layer
+    numbering scheme, so lib_b's shapes need no rescaling or layer
+    remapping to combine cleanly). Cells keep their original names
+    unless a name exists in both libraries, in which case lib_b's copy
+    is renamed with a numeric suffix (``_2``, ``_3``, ...) until it's
+    unique, with every Sref/ARef inside lib_b's own cells updated to
+    point at the new name so its hierarchy stays intact.
+
+    Returns (merged_library, renamed) where renamed is a
+    {original_name_in_lib_b: new_name} dict for every cell that had to
+    be renamed to avoid a collision (empty if there were none).
+    """
+    merged = Library(name=name or lib_a.name)
+    merged.layers = copy.deepcopy(lib_a.layers)
+    merged.tech_params = dict(lib_a.tech_params)
+
+    for cell_name, cell in lib_a.cells.items():
+        merged.cells[cell_name] = copy.deepcopy(cell)
+
+    used_names = set(merged.cells) | set(lib_b.cells)
+    renamed: Dict[str, str] = {}
+    for cell_name in lib_b.cells:
+        if cell_name not in merged.cells:
+            continue
+        i = 2
+        candidate = f"{cell_name}_{i}"
+        while candidate in used_names:
+            i += 1
+            candidate = f"{cell_name}_{i}"
+        renamed[cell_name] = candidate
+        used_names.add(candidate)
+
+    for cell_name, cell in lib_b.cells.items():
+        new_cell = copy.deepcopy(cell)
+        new_cell.name = renamed.get(cell_name, cell_name)
+        for ref in new_cell.srefs:
+            if ref.cell_name in renamed:
+                ref.cell_name = renamed[ref.cell_name]
+        for ref in new_cell.arefs:
+            if ref.cell_name in renamed:
+                ref.cell_name = renamed[ref.cell_name]
+        merged.cells[new_cell.name] = new_cell
+
+    if lib_a.top_cell_name:
+        merged.top_cell_name = lib_a.top_cell_name
+    elif lib_b.top_cell_name:
+        merged.top_cell_name = renamed.get(lib_b.top_cell_name, lib_b.top_cell_name)
+    else:
+        merged.top_cell_name = next(iter(merged.cells), None)
+
+    merged.check_no_cycles()
+    return merged, renamed
+
+
 def _transform_bbox(box, ref):
     """Apply an SRef's rotation/magnification/reflection/origin to a
     child bounding box, returning the transformed axis-aligned bbox."""

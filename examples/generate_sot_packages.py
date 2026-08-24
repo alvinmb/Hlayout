@@ -15,9 +15,13 @@ library and verify against the actual part's datasheet before using
 them for fabrication.
 
 Each package is built as one cell containing:
-  - copper pads on the "Pads" layer
-  - a body/courtyard outline on the "Outline" layer
-  - a reference-designator text label on the "Reference" layer
+  - copper pads on L2 ("Pads")
+  - a solder mask opening per pad on L3 ("Solder Mask"), undersized by
+    SOLDERMASK_UNDERSIZE_MM (0.1 mm) on every side relative to the
+    conductor pad it sits over
+  - a body/courtyard outline on L63 ("Outline") -- deliberately the
+    last layer in the table, out of the way of any real process layer
+  - a reference-designator text label on L4 ("Reference")
 plus one "INDEX" cell that places every package in a row, purely so
 opening the file gives an at-a-glance picture of the whole library.
 """
@@ -29,15 +33,31 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from hlayout.core.units import mm_to_dbu as mm
 from hlayout.scripting import Session
 
-LAYER_PADS = 0
-LAYER_OUTLINE = 1
-LAYER_REFERENCE = 2
+LAYER_PADS = 2
+LAYER_SOLDERMASK = 3
+LAYER_OUTLINE = 63
+LAYER_REFERENCE = 4
+
+# Solder mask opening undersize, per side, relative to the conductor
+# pad it sits over -- e.g. a 1.0 x 1.0 mm pad gets a 0.8 x 0.8 mm mask
+# opening. Same "undersize per side" convention as the Pad Wizard's
+# own paste-margin field (Tools > Pad Wizard...).
+SOLDERMASK_UNDERSIZE_MM = 0.1
 
 
 def _pad(s, cx_mm, cy_mm, w_mm, h_mm):
     x1, y1 = cx_mm - w_mm / 2, cy_mm - h_mm / 2
     x2, y2 = cx_mm + w_mm / 2, cy_mm + h_mm / 2
     s.rect(LAYER_PADS, mm(x1), mm(y1), mm(x2), mm(y2))
+    _soldermask(s, cx_mm, cy_mm, w_mm, h_mm)
+
+
+def _soldermask(s, cx_mm, cy_mm, w_mm, h_mm):
+    mw = max(w_mm - 2 * SOLDERMASK_UNDERSIZE_MM, 0.001)
+    mh = max(h_mm - 2 * SOLDERMASK_UNDERSIZE_MM, 0.001)
+    x1, y1 = cx_mm - mw / 2, cy_mm - mh / 2
+    x2, y2 = cx_mm + mw / 2, cy_mm + mh / 2
+    s.rect(LAYER_SOLDERMASK, mm(x1), mm(y1), mm(x2), mm(y2))
 
 
 def _outline(s, w_mm, h_mm):
@@ -161,6 +181,7 @@ BUILDERS = [
 def main():
     s = Session.new("SOT-PACKAGES")
     s.set_layer_style(LAYER_PADS, name="Pads", color="#f5c518")
+    s.set_layer_style(LAYER_SOLDERMASK, name="Solder Mask", color="#46f0f0", fill=False)
     s.set_layer_style(LAYER_OUTLINE, name="Outline", color="#3cb44b", fill=False)
     s.set_layer_style(LAYER_REFERENCE, name="Reference", color="#ffffff")
 

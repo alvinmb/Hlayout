@@ -105,6 +105,12 @@ Files:
                                        visible layer with data, named
                                        <output_prefix>_L<NN>_<layer name>.gbr;
                                        cell defaults to the current cell
+    MERGE <lib1.gds> <lib2.gds> <lib3.gds> [library_name]
+                                       combine every cell from lib1 and lib2 into a
+                                       new file lib3 -- a plain file-to-file operation,
+                                       doesn't touch the currently open design; a cell
+                                       name that exists in both files gets a numeric
+                                       suffix (_2, _3, ...) in lib3 so nothing collides
 
 Technology file (layer stack + open-ended global parameters; usually
 loaded once at the start of a design):
@@ -636,6 +642,18 @@ class CommandInterpreter:
         msg = f"wrote {len(written)} Gerber file(s): " + ", ".join(f"L{n}" for n, _ in written)
         if skipped_text:
             msg += f" ({skipped_text} text shape(s) skipped -- Gerber has no text primitive)"
+        return msg
+
+    def _cmd_merge(self, args):
+        usage = "usage: MERGE <lib1.gds> <lib2.gds> <lib3.gds> [library_name]"
+        if len(args) not in (3, 4):
+            raise CommandError(usage)
+        lib_name = args[3] if len(args) == 4 else None
+        result = self.session.merge_gds(args[0], args[1], args[2], library_name=lib_name)
+        msg = f"merged {args[0]} + {args[1]} -> {args[2]} ({result['cells']} cells)"
+        if result["renamed"]:
+            renames = ", ".join(f"{old} -> {new}" for old, new in result["renamed"].items())
+            msg += f"; renamed on collision: {renames}"
         return msg
 
     # --- technology file --------------------------------------------------
