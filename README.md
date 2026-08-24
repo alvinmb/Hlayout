@@ -394,16 +394,28 @@ anything but a tiny design:
   immediately on every motion event (so the data is always current),
   but coalesces the visual redraw into at most one per screen refresh
   instead of one per raw event.
-- The **dot grid** is capped at a bounded number of canvas items
-  (`LayoutCanvas.MAX_GRID_DOTS`). Previously, a zoom level just above
-  the "too dense" cutoff could ask for tens of thousands of individual
-  dot items in one redraw; past the cap the grid is thinned out
-  (an adaptive stride) instead of paying that cost.
+- The **dot grid** draws a dot at every minor-grid intersection in
+  view — no zoom-dependent thinning. Earlier versions capped the
+  number of individual canvas dot items and thinned the grid out (via
+  an adaptive stride) past that cap, which read as missing grid points
+  once you zoomed out far enough to cross the cap. Instead, the whole
+  grid is now rasterized into a single image (`LayoutCanvas.
+  _draw_grid_raster()`, one `create_image()` canvas item regardless of
+  dot count) using vectorized numpy when it's installed, with a plain
+  Tkinter `PhotoImage.put()` fallback when it isn't — so every point
+  gets a dot at any zoom level without falling back to thousands of
+  `create_oval()` items. A dot only gets the larger "major" styling at
+  a true major-grid intersection (both its column *and* row on a major
+  line, every `LayoutCanvas.GRID_MAJOR_EVERY`-th minor line); an
+  earlier version keyed that off the column alone, which made an
+  entire major column look uniformly "major" top to bottom. Dot size
+  is `LayoutCanvas.GRID_MINOR_DOT_R` / `GRID_MAJOR_DOT_R` (pixel radius
+  of the square dot blob).
 
 None of this changes what you see at rest — only how much work happens
 per interaction frame. See `tests/test_canvas_performance.py` for the
-regression coverage (grid item count, item reuse during pan, redraw
-coalescing during drag).
+regression coverage (item reuse during pan, redraw coalescing during
+drag).
 
 ### Layer draw order
 
@@ -761,6 +773,19 @@ draw each violation's marker polygon directly onto the design, so it
 shows up in the canvas (and in any exported GDSII/Gerber) right where
 the problem is.
 
+**Each rule has its own colour**, so with several rule kinds active the
+Violations table (and the rule table above it) reads at a glance by
+error type instead of every row needing the Rule column read one by
+one. A new rule gets one automatically from a small default palette;
+click the colour swatch next to Name in **Add Rule.../Edit Rule...**
+to pick a different one (the same click-a-swatch interaction as a
+layer's colour in the Layer panel). The colour is a display preference
+only — it has no effect on what a rule checks — and is saved into the
+technology file alongside the rest of the rule. It isn't settable from
+the command bar/scripting API yet (see below); a rule saved before
+this existed gets backfilled with a default colour the first time
+Tools > DRC... is opened.
+
 **Checking scope defaults to the current cell only, not every cell in
 the library** — since every check already descends into that cell's
 own placed instances, checking the current cell alone normally covers
@@ -782,7 +807,10 @@ DRC RUN [cell=<name>] [error=<layer>]
 ```
 
 or, from a script, `DrcRule(kind, layer_a, value, layer_b=None,
-name="")` and `session.run_drc(rules=None, cell_names=None,
+name="", color="")` (`color` is the GUI-only display colour described
+above — a hex string like `"#e6194b"`, or `""` for "not picked yet";
+it plays no part in the check itself) and `session.run_drc(rules=None,
+cell_names=None,
 error_layer=None)` (see `hlayout/scripting/api.py`, backed by
 `hlayout/core/drc.py`) — `rules` defaults to whatever's saved in the
 technology file, and the call returns the list of `DrcViolation`

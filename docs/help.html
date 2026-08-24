@@ -412,7 +412,7 @@ const DATA = [
 
 {group:"command", groupLabel:"Command Bar", cat:"Design Rule Check", items:[
   {name:"DRCRULE ADD", syntax:"DRCRULE ADD <kind> <layer_a> [layer_b] value=<n> [name=<name>]",
-   desc:"Add and save a rule to the technology file. <code>kind</code>: MIN_WIDTH / MIN_AREA / MIN_SPACE (one layer), or MIN_SPACE_BETWEEN / MIN_ENCLOSURE (two layers).",
+   desc:"Add and save a rule to the technology file. <code>kind</code>: MIN_WIDTH / MIN_AREA / MIN_SPACE (one layer), or MIN_SPACE_BETWEEN / MIN_ENCLOSURE (two layers). A rule's display colour (used to tell error types apart in Tools &gt; DRC...'s rule/violation tables) isn't settable from the command bar &mdash; it's assigned automatically and can be changed via the colour swatch in Tools &gt; DRC... &gt; Add/Edit Rule.",
    example:"DRCRULE ADD MIN_WIDTH 20 value=200 name=M1.W.1"},
   {name:"DRCRULE LIST", syntax:"DRCRULE LIST", desc:"List saved rules, numbered.", example:"DRCRULE LIST"},
   {name:"DRCRULE REMOVE", syntax:"DRCRULE REMOVE <index>", desc:"Remove one saved rule by its LIST number.", example:"DRCRULE REMOVE 2"},

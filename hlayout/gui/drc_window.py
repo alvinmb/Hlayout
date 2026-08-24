@@ -1,8 +1,8 @@
 """Design Rule Check (DRC) tool -- Tools > DRC...
 
-A rule table (kind, layer(s), value, name) persisted into the current
-design's technology file (hlayout.io.techfile.load_drc_rules() /
-save_drc_rules(), the same tech_params-blob pattern as every other
+A rule table (kind, layer(s), value, name, colour) persisted into the
+current design's technology file (hlayout.io.techfile.load_drc_rules()
+/ save_drc_rules(), the same tech_params-blob pattern as every other
 process rule set in this tool -- see the Thick-Film Resistor
 Designer's design/geometry rules), plus a Run DRC button that checks
 those rules against the current cell (descending into every placed
@@ -13,10 +13,19 @@ Each rule is persisted the moment it's added/edited/deleted (there's
 no separate "Save Rules" step to forget), since a DRC rule set is
 process configuration, not per-session scratch state -- the same
 reasoning Setup > Resistor Geometry Rules... uses.
+
+Each rule carries its own display colour (DrcRule.color, a "" default
+meaning "not picked yet"), settable per rule in the Add/Edit Rule
+dialog the same way a layer's colour is picked in LayerPanel -- a
+click-to-open swatch, tkinter.colorchooser.askcolor. Both the rule
+table and the violations table below it tint each row with its rule's
+colour (via a per-colour ttk Treeview tag), so with several rule kinds
+active the violation list reads at a glance by error type instead of
+needing the Rule column to be scanned for each row.
 """
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import colorchooser, ttk
 
 from . import dialogs
 from .fonts import section_header_font
@@ -24,6 +33,38 @@ from ..core.drc import DRC_RULE_KINDS, TWO_LAYER_KINDS, DrcRule
 from ..core.errors import LayoutError
 from ..io.techfile import load_drc_rules, save_drc_rules
 from ..core.units import DBU_MM, dbu_to_mm, mm_to_dbu
+
+# Default palette a new rule's colour is picked from (cycling), so
+# every rule has a visible, distinct colour from the moment it's
+# created rather than starting out uncoloured -- the user is still
+# free to override it via the swatch in the Add/Edit Rule dialog.
+# Same palette LayerTable seeds its 64 layers from (hlayout.core.
+# layers._DEFAULT_COLORS), duplicated here rather than imported since
+# it's a GUI display default, not something the layer table itself
+# should be reached into for.
+_DEFAULT_RULE_COLORS = [
+    "#e6194b", "#3cb44b", "#ffe119", "#4363d8", "#f58231",
+    "#911eb4", "#46f0f0", "#f032e6", "#bcf60c", "#fabebe",
+]
+
+
+def _next_default_color(existing_count):
+    return _DEFAULT_RULE_COLORS[existing_count % len(_DEFAULT_RULE_COLORS)]
+
+
+def _contrast_text_color(hex_color):
+    """Black or white, whichever reads better on hex_color -- so a row
+    tinted with a user-picked colour (which could be dark or light)
+    keeps its text legible either way."""
+    try:
+        r = int(hex_color[1:3], 16)
+        g = int(hex_color[3:5], 16)
+        b = int(hex_color[5:7], 16)
+    except (ValueError, IndexError):
+        return "#000000"
+    # Perceived luminance (ITU-R BT.601).
+    luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
+    return "#000000" if luminance > 0.55 else "#ffffff"
 
 
 def _value_to_display(kind, value):
@@ -62,7 +103,7 @@ def _parse_layer_choice(text):
 class RuleDialog(tk.Toplevel):
     """Modal Add/Edit form for one DRC rule."""
 
-    def __init__(self, parent, library, rule: DrcRule = None):
+    def __init__(self, parent, library, rule: DrcRule = None, existing_count=0):
         super().__init__(parent)
         self.title("Add DRC Rule" if rule is None else "Edit DRC Rule")
         self.transient(parent)
@@ -70,6 +111,12 @@ class RuleDialog(tk.Toplevel):
         self.resizable(False, False)
         self.library = library
         self.result = None
+        # The colour this rule's rows are tinted with in the rule/
+        # violation tables (see DrcWindow._row_tag). A rule loaded
+        # from an older technology file may have no colour saved yet
+        # ("") -- treat that the same as a brand-new rule and hand it
+        # the next default rather than leaving it uncoloured.
+        self.color = (rule.color if rule and rule.color else _next_default_color(existing_count))
         self._build(rule)
         self.bind("<Return>", lambda e: self._accept())
         self.bind("<Escape>", lambda e: self.destroy())
@@ -82,6 +129,14 @@ class RuleDialog(tk.Toplevel):
         self.name_var = tk.StringVar(value=rule.name if rule else "")
         ttk.Entry(form, textvariable=self.name_var, width=22).grid(
             row=0, column=1, sticky="w", padx=4, pady=4)
+
+        # Colour this rule's rows are tinted with in the rule/violation
+        # tables -- click the swatch to change it, same interaction as
+        # a layer's colour swatch in LayerPanel.
+        ttk.Label(form, text="Color:").grid(row=0, column=2, sticky="e", padx=(16, 4), pady=4)
+        self.color_swatch = tk.Label(form, bg=self.color, width=3, relief="sunken", cursor="hand2")
+        self.color_swatch.grid(row=0, column=3, sticky="w", padx=4, pady=4)
+        self.color_swatch.bind("<Button-1>", lambda e: self._pick_color())
 
         ttk.Label(form, text="Kind:").grid(row=1, column=0, sticky="e", padx=4, pady=4)
         self.kind_var = tk.StringVar(value=rule.kind if rule else DRC_RULE_KINDS[0])
@@ -157,6 +212,13 @@ class RuleDialog(tk.Toplevel):
         self._last_kind = kind
         self.value_label_var.set("Value (mm²):" if kind == "MIN_AREA" else "Value (mm):")
 
+    def _pick_color(self):
+        rgb, hexcolor = colorchooser.askcolor(color=self.color, title="Rule colour",
+                                               parent=self)
+        if hexcolor:
+            self.color = hexcolor
+            self.color_swatch.configure(bg=hexcolor)
+
     def _accept(self):
         kind = self.kind_var.get()
         layer_a = _parse_layer_choice(self.a_var.get())
@@ -176,7 +238,7 @@ class RuleDialog(tk.Toplevel):
             return
         try:
             rule = DrcRule(kind=kind, layer_a=layer_a, layer_b=layer_b, value=value,
-                            name=self.name_var.get().strip())
+                            name=self.name_var.get().strip(), color=self.color)
         except LayoutError as e:
             self.error_var.set(str(e))
             return
@@ -199,6 +261,18 @@ class DrcWindow(tk.Toplevel):
         self.app = app
         self.rules = [DrcRule.from_dict(r) for r in load_drc_rules(library)]
         self.violations = []
+        self._row_tags = {}  # Treeview -> set of colour-tag names already configured on it
+        # A rule saved before per-rule colour existed loads with
+        # color="" -- give it one now rather than leaving it
+        # uncoloured in the tables below, and persist that assignment
+        # so it's stable across reopening this window.
+        backfilled = False
+        for i, rule in enumerate(self.rules):
+            if not rule.color:
+                rule.color = _next_default_color(i)
+                backfilled = True
+        if backfilled:
+            self._persist()
         self._build()
         self._refresh_rules()
 
@@ -264,6 +338,20 @@ class DrcWindow(tk.Toplevel):
         ttk.Label(status, textvariable=self.status_var, foreground="#8b949e").pack(side="left")
 
     # -- rules ---------------------------------------------------------
+    def _row_tag(self, tree, hex_color):
+        """Return (creating if needed) a ttk Treeview tag on `tree`
+        that tints a row's background with hex_color and its text with
+        a contrasting black/white -- one tag per distinct colour, since
+        that's the unit tag_configure works in, shared across however
+        many rows happen to use that colour."""
+        if not hex_color:
+            return ()
+        tag = "rulecolor_" + hex_color.lstrip("#").lower()
+        if tag not in self._row_tags.setdefault(tree, set()):
+            tree.tag_configure(tag, background=hex_color, foreground=_contrast_text_color(hex_color))
+            self._row_tags[tree].add(tag)
+        return (tag,)
+
     def _refresh_rules(self):
         self.rule_table.delete(*self.rule_table.get_children())
         for i, rule in enumerate(self.rules):
@@ -273,7 +361,7 @@ class DrcWindow(tk.Toplevel):
                 rule.name, rule.kind, _layer_label(self.library, rule.layer_a),
                 _layer_label(self.library, rule.layer_b) if rule.layer_b is not None else "",
                 f"{display_value:g} {unit}",
-            ))
+            ), tags=self._row_tag(self.rule_table, rule.color))
         self.status_var.set(f"{len(self.rules)} rule(s) saved to the technology file")
 
     def _persist(self):
@@ -284,7 +372,7 @@ class DrcWindow(tk.Toplevel):
         return int(sel[0]) if sel else -1
 
     def _add_rule(self):
-        dlg = RuleDialog(self, self.library)
+        dlg = RuleDialog(self, self.library, existing_count=len(self.rules))
         self.wait_window(dlg)
         if dlg.result is not None:
             self.rules.append(dlg.result)
@@ -296,7 +384,7 @@ class DrcWindow(tk.Toplevel):
         if row < 0:
             dialogs.show_info("Edit Rule", "Select a rule first.", parent=self)
             return
-        dlg = RuleDialog(self, self.library, rule=self.rules[row])
+        dlg = RuleDialog(self, self.library, rule=self.rules[row], existing_count=row)
         self.wait_window(dlg)
         if dlg.result is not None:
             self.rules[row] = dlg.result
@@ -338,7 +426,8 @@ class DrcWindow(tk.Toplevel):
         self.viol_table.delete(*self.viol_table.get_children())
         for i, v in enumerate(self.violations):
             self.viol_table.insert("", "end", iid=str(i), values=(
-                v.rule.name or v.rule.kind, v.cell_name, self._violation_message(v)))
+                v.rule.name or v.rule.kind, v.cell_name, self._violation_message(v)),
+                tags=self._row_tag(self.viol_table, v.rule.color))
         if error_layer is not None:
             self.app.refresh_all()
         if self.violations:

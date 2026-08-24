@@ -34,19 +34,17 @@ class LayoutCanvas(tk.Canvas):
     GRID_MINOR_DBU = mm_to_dbu(1.0)   # 1 mm, in DBU (DBU-size independent)
     GRID_MAJOR_EVERY = 10  # every 10 minor lines -> 10 mm
 
+    # Grid dot size, in screen pixels of radius around the exact grid
+    # point (a (2r+1) x (2r+1) square blob) -- see _draw_grid_raster().
+    # Bumped up from 1px/single-pixel so dots actually read as dots at
+    # normal zoom, not a barely-visible speck.
+    GRID_MINOR_DOT_R = 1  # -> 3x3 px
+    GRID_MAJOR_DOT_R = 2  # -> 5x5 px
+
     # Default view scale, expressed as pixels-per-mm rather than a raw
     # pixels-per-DBU number, so it stays sensible regardless of how
     # fine DBU itself is.
     PX_PER_MM_DEFAULT = 20.0
-
-    # Upper bound on how many grid-dot canvas items a single redraw will
-    # create. Without this, zooming/resizing to a view where the minor
-    # grid is just above the "too dense" cutoff (see _draw_grid) can ask
-    # for tens of thousands of individual create_oval() calls, which is
-    # the single slowest thing this canvas can do. Past this cap, minor
-    # grid lines are thinned out (an adaptive stride) rather than skipped
-    # outright, so the grid stays visible but bounded in cost.
-    MAX_GRID_DOTS = 6000
 
     # A selected shape/cell-instance is redrawn in this colour (instead
     # of its layer's own colour, and without stipple) so it's
@@ -1290,27 +1288,137 @@ class LayoutCanvas(tk.Canvas):
         gy0 = int((y1 - pad_y) // self.grid_dbu) - 1
         gy1 = int((y0 + pad_y) // self.grid_dbu) + 1
 
-        # Adaptive stride: a (cols x rows) dot grid grows quadratically,
-        # and at zoom levels just above the "too dense" cutoff above it
-        # can demand tens of thousands of create_oval() calls in a single
-        # redraw -- by far the most expensive thing this canvas does.
-        # Past MAX_GRID_DOTS, thin the grid out instead of paying that
-        # cost every time the view changes.
-        cols = gx1 - gx0 + 1
-        rows = gy1 - gy0 + 1
-        stride = 1
-        total = cols * rows
-        if total > self.MAX_GRID_DOTS:
-            stride = max(1, int((total / self.MAX_GRID_DOTS) ** 0.5))
+        # Every minor-grid intersection in the (padded) viewport gets a
+        # dot -- no thinning/skipping. At zoom levels far enough out,
+        # that can be tens of thousands of points (bounded by the
+        # minor_px < 3 cutoff above, so at most roughly one dot per
+        # 3x3 screen pixels), which is far too many individual
+        # create_oval() canvas items to create every redraw without
+        # stalling the UI. So the whole grid is rasterized into a
+        # single PhotoImage instead -- one canvas item, however many
+        # dots it contains. See _draw_grid_raster().
+        self._draw_grid_raster(w, h, gx0, gx1, gy0, gy1)
 
-        for i in range(gx0, gx1 + 1, stride):
+    def _draw_grid_raster(self, w, h, gx0, gx1, gy0, gy1):
+        """Render every grid dot in [gx0, gx1] x [gy0, gy1] (grid-index
+        space) into one PhotoImage covering the viewport, then place it
+        as a single create_image() canvas item. Uses numpy when it's
+        installed, to fill the whole dot set with a few vectorized
+        array ops (effectively O(1) canvas/Tcl calls regardless of dot
+        count); falls back to a pure-Tk PhotoImage.put() path -- still
+        one canvas item, just built with a Python loop -- when numpy
+        isn't available, matching the lazy numpy import used by the
+        Trim Simulator elsewhere in this GUI (see requirements.txt)."""
+        bg = self.cget("bg") or "#1e1e1e"
+        minor_color = "#3a3a3a"
+        major_color = "#666666"
+
+        try:
+            import numpy as np
+        except ImportError:
+            np = None
+
+        if np is not None:
+            img = self._raster_grid_numpy(np, w, h, gx0, gx1, gy0, gy1,
+                                           bg, minor_color, major_color)
+        else:
+            img = self._raster_grid_pure(w, h, gx0, gx1, gy0, gy1,
+                                          bg, minor_color, major_color)
+        if img is None:
+            return
+        # Keep a reference -- Tk drops/blank the image if the Python
+        # PhotoImage object is garbage-collected, even while it's still
+        # showing on the canvas.
+        self._grid_image = img
+        self.create_image(0, 0, anchor="nw", image=img, tags=("grid",))
+
+    def _raster_grid_numpy(self, np, w, h, gx0, gx1, gy0, gy1,
+                            bg, minor_color, major_color):
+        bg_rgb = self._hex_to_rgb(bg)
+        minor_rgb = self._hex_to_rgb(minor_color)
+        major_rgb = self._hex_to_rgb(major_color)
+
+        arr = np.empty((h, w, 3), dtype=np.uint8)
+        arr[:, :] = bg_rgb
+
+        cols = np.arange(gx0, gx1 + 1)
+        rows = np.arange(gy0, gy1 + 1)
+        px = np.round(cols * self.grid_dbu * self.scale + self.offset_x).astype(np.int64)
+        py = np.round(-rows * self.grid_dbu * self.scale + self.offset_y).astype(np.int64)
+
+        col_ok = (px >= 0) & (px < w)
+        row_ok = (py >= 0) & (py < h)
+        px, cols = px[col_ok], cols[col_ok]
+        py, rows = py[row_ok], rows[row_ok]
+        if px.size == 0 or py.size == 0:
+            return self._to_photoimage(arr)
+
+        # A dot is "major" only at a true major-grid intersection --
+        # column AND row both on a major line -- not just whichever
+        # column it's in. Conditioning on the column alone (as an
+        # earlier version of this did) made every dot the whole way
+        # down a major column render big, so the vertical axis showed
+        # nothing but major-looking dots.
+        col_major = (cols % self.GRID_MAJOR_EVERY) == 0
+        row_major = (rows % self.GRID_MAJOR_EVERY) == 0
+        Y, X = np.meshgrid(py, px, indexing="ij")  # both shape (rows, cols)
+        is_major = row_major[:, None] & col_major[None, :]
+
+        # Stamp each dot as a (2r+1) x (2r+1) square blob around its
+        # exact pixel, minor dots first, then major dots on top (so a
+        # major dot's larger blob always wins where the two overlap).
+        min_y, min_x = Y[~is_major], X[~is_major]
+        r = self.GRID_MINOR_DOT_R
+        for dy in range(-r, r + 1):
+            for dx in range(-r, r + 1):
+                yy = np.clip(min_y + dy, 0, h - 1)
+                xx = np.clip(min_x + dx, 0, w - 1)
+                arr[yy, xx] = minor_rgb
+
+        maj_y, maj_x = Y[is_major], X[is_major]
+        r = self.GRID_MAJOR_DOT_R
+        for dy in range(-r, r + 1):
+            for dx in range(-r, r + 1):
+                yy = np.clip(maj_y + dy, 0, h - 1)
+                xx = np.clip(maj_x + dx, 0, w - 1)
+                arr[yy, xx] = major_rgb
+
+        return self._to_photoimage(arr)
+
+    def _raster_grid_pure(self, w, h, gx0, gx1, gy0, gy1,
+                           bg, minor_color, major_color):
+        img = tk.PhotoImage(width=w, height=h)
+        img.put(bg, to=(0, 0, w, h))
+        for i in range(gx0, gx1 + 1):
             px, _ = self.to_px(i * self.grid_dbu, 0)
-            major = (i % self.GRID_MAJOR_EVERY) == 0
-            r = 1.4 if major else 0.6
-            color = "#666666" if major else "#3a3a3a"
-            for j in range(gy0, gy1 + 1, stride):
+            px = int(round(px))
+            if px < 0 or px >= w:
+                continue
+            col_major = (i % self.GRID_MAJOR_EVERY) == 0
+            for j in range(gy0, gy1 + 1):
                 _, py = self.to_px(0, j * self.grid_dbu)
-                self.create_oval(px - r, py - r, px + r, py + r, fill=color, outline="")
+                py = int(round(py))
+                if py < 0 or py >= h:
+                    continue
+                # Major only at a true intersection -- both the column
+                # and the row on a major line -- see the numpy path's
+                # comment above for why the row also has to match.
+                major = col_major and (j % self.GRID_MAJOR_EVERY) == 0
+                color = major_color if major else minor_color
+                r = self.GRID_MAJOR_DOT_R if major else self.GRID_MINOR_DOT_R
+                img.put(color, to=(px - r, py - r, px + r + 1, py + r + 1))
+        return img
+
+    @staticmethod
+    def _hex_to_rgb(hex_color):
+        hex_color = hex_color.lstrip("#")
+        return tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+
+    @staticmethod
+    def _to_photoimage(arr):
+        h, w = arr.shape[:2]
+        header = ("P6 %d %d 255 " % (w, h)).encode("ascii")
+        return tk.PhotoImage(width=w, height=h, data=header + arr.tobytes(), format="PPM")
 
     def _draw_cell(self, name, ox, oy, rot, mag, mirror, depth):
         if depth > 64:

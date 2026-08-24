@@ -371,7 +371,7 @@ def save_route_rules(library: Library, rules: dict) -> None:
 # Unlike the fixed-shape dicts above, a set of DRC rules is a variable-
 # length LIST -- a process might have three rules or thirty -- so it's
 # stored as one JSON-encoded list of {"kind", "layer_a", "layer_b",
-# "value", "name"} dicts under a single tech_params key, same overall
+# "value", "name", "color"} dicts under a single tech_params key, same overall
 # pattern (one JSON blob per tech_params entry) as everything else in
 # this module. See hlayout.core.drc for what each rule kind means and
 # how a rule is actually checked; this module only knows how to
@@ -404,6 +404,7 @@ def load_drc_rules(library: Library) -> list:
             "layer_b": item.get("layer_b"),
             "value": item["value"],
             "name": item.get("name", ""),
+            "color": item.get("color", ""),
         })
     return rules
 
@@ -422,6 +423,7 @@ def save_drc_rules(library: Library, rules) -> None:
             "layer_b": d.get("layer_b"),
             "value": d["value"],
             "name": d.get("name", ""),
+            "color": d.get("color", ""),
         })
     library.tech_params[DRC_RULES_KEY] = json.dumps(payload)
 

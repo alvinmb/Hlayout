@@ -95,6 +95,14 @@ class DrcRule:
     value: float
     layer_b: Optional[int] = None
     name: str = ""
+    #: Hex RGB (e.g. "#e6194b") the GUI uses to tell this rule's
+    #: violations apart from other rules' in the DRC window's rule/
+    #: violation tables -- purely a display preference, never read by
+    #: check_rule()/run_drc(). "" means "no colour picked yet"; the GUI
+    #: assigns one from its default palette the first time a rule is
+    #: created (see hlayout.gui.drc_window._next_default_color) rather
+    #: than this module opining on what that palette should be.
+    color: str = ""
 
     def __post_init__(self):
         if self.kind not in DRC_RULE_KINDS:
@@ -108,12 +116,13 @@ class DrcRule:
 
     def to_dict(self) -> dict:
         return {"kind": self.kind, "layer_a": self.layer_a, "layer_b": self.layer_b,
-                "value": self.value, "name": self.name}
+                "value": self.value, "name": self.name, "color": self.color}
 
     @classmethod
     def from_dict(cls, data: dict) -> "DrcRule":
         return cls(kind=data["kind"], layer_a=data["layer_a"], value=data["value"],
-                    layer_b=data.get("layer_b"), name=data.get("name", ""))
+                    layer_b=data.get("layer_b"), name=data.get("name", ""),
+                    color=data.get("color", ""))
 
     @property
     def label(self) -> str:

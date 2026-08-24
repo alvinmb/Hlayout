@@ -1,9 +1,10 @@
 """Performance-focused regressions for LayoutCanvas.
 
 These guard against the specific bottlenecks fixed in this round: full
-delete-and-recreate redraw() on every pan/drag mouse-motion event, and an
-uncapped grid-dot count. All of this requires a real Tk canvas (real or
-Xvfb), so it skips automatically when no display is available.
+delete-and-recreate redraw() on every pan/drag mouse-motion event, and
+an uncapped number of individual grid-dot canvas items. All of this
+requires a real Tk canvas (real or Xvfb), so it skips automatically
+when no display is available.
 """
 import os
 import sys
@@ -35,11 +36,16 @@ def _ev(x, y):
     return types.SimpleNamespace(x=x, y=y)
 
 
-def test_grid_dot_count_is_bounded_even_at_dense_zoom():
-    # At a scale just above the "too dense" cutoff, the (cols x rows) dot
-    # grid used to grow unbounded -- tens of thousands of create_oval()
-    # calls in a single redraw. It should now be capped by MAX_GRID_DOTS
-    # (with generous slack for the pan buffer / stride rounding).
+def test_grid_is_one_rasterized_image_even_at_dense_zoom():
+    # At a scale just above the "too dense" cutoff, the (cols x rows)
+    # dot grid used to grow unbounded -- tens of thousands of
+    # create_oval() calls in a single redraw -- which an earlier round
+    # capped by thinning the grid out past MAX_GRID_DOTS (an adaptive
+    # stride), at the cost of visibly skipped grid points once you
+    # zoomed out far enough. The grid is now rasterized into a single
+    # PhotoImage/create_image() canvas item instead (see
+    # LayoutCanvas._draw_grid_raster()), so every point still gets a
+    # dot but the canvas item count stays flat regardless of zoom.
     app = _make_app()
     try:
         canvas = app.canvas
@@ -49,7 +55,10 @@ def test_grid_dot_count_is_bounded_even_at_dense_zoom():
             i for i in canvas.find_all()
             if canvas.type(i) == "oval" and "selection" not in canvas.gettags(i)
         ]
-        assert len(dots) <= canvas.MAX_GRID_DOTS * 1.3
+        assert dots == []
+        grid_items = [i for i in canvas.find_all() if "grid" in canvas.gettags(i)]
+        assert len(grid_items) == 1
+        assert canvas.type(grid_items[0]) == "image"
     finally:
         app.destroy()
 
