@@ -43,9 +43,11 @@ from ..io.techfile import (
     load_and_apply_techfile,
     load_drc_rules,
     load_resistor_geometry_rules,
+    load_thin_film_rules,
     resistor_ink_layer,
     save_techfile,
 )
+from ..core.thinfilm import generate_serpentine_geometry, generate_top_hat_geometry
 
 
 class Session:
@@ -718,6 +720,99 @@ class Session:
                 # rather than starting at the cell's own origin.
                 label_w = height * 0.6 * max(len(str(ref_des)), 1)
                 self.text(doc_layer_resolved, (-label_w / 2, -height / 2),
+                          str(ref_des), height=height)
+            self.use_cell(parent_cell_name)
+            self.sref(device_name, (x, y), rotation=rotation)
+        return device_name
+
+    def generate_serpentine_resistor(self, x, y, sol, rotation: float = 0.0,
+                                      ref_des=None, resistor_layer=None, pad_layer=None,
+                                      doc_layer=None, label_height=None, cell_name=None) -> str:
+        """Build a thin-film serpentine resistor -- link area (coarse
+        trim), serpentine area (fine trim), a connecting bridge, and
+        two probe pads -- as a new cell, then place one Sref of it at
+        (x, y) rotated ``rotation`` degrees. ``sol`` is a
+        hlayout.core.thinfilm.SerpentineSolution from
+        hlayout.core.thinfilm.solve_serpentine() (normally via Tools >
+        Thin-Film Resistor Designer...). Layers not given fall back to
+        this design's saved Setup > Thin-Film Resistor Rules...
+        (hlayout.io.techfile.load_thin_film_rules()). Building the
+        device cell and placing its Sref are one undo step. Returns
+        the new cell's name."""
+        parent_cell_name = self.current_cell_name
+        if parent_cell_name is None:
+            raise LayoutError("no current cell; call new_cell()/use_cell() first")
+
+        rules = load_thin_film_rules(self.library)
+        r_layer = resistor_layer if resistor_layer is not None else rules["resistor_layer"]
+        p_layer = pad_layer if pad_layer is not None else rules["pad_layer"]
+        doc_layer_resolved = doc_layer if doc_layer is not None else rules["doc_layer"]
+
+        geo = generate_serpentine_geometry(sol)
+        all_polys = geo["link_polys"] + [geo["bridge_poly"]] + geo["serpentine_polys"]
+        min_x, min_y, max_x, max_y = geo["outline_points"][0][0], geo["outline_points"][0][1], \
+            geo["outline_points"][2][0], geo["outline_points"][2][1]
+
+        pad_clear = rules["min_probe_pad_clearance"]
+        pad_len = max(rules["probe_pad_min"], pad_clear)
+        pad_width = max(sol.trace_width * 3, pad_clear * 2)
+
+        base_name = cell_name or (str(ref_des) if ref_des else "SERPENTINE")
+        device_name = self.library._unique_cell_name(base_name)
+
+        with self._batch():
+            self.new_cell(device_name)
+            for poly in all_polys:
+                self.polygon(r_layer, poly)
+            # Probe pads flush against each end of the combined
+            # footprint (link area's outer edge, serpentine area's
+            # outer edge), centered on that zone's own vertical middle.
+            self.rect(p_layer, min_x - pad_len, -pad_width / 2, min_x, pad_width / 2)
+            self.rect(p_layer, max_x, -pad_width / 2, max_x + pad_len, pad_width / 2)
+            if ref_des:
+                height = float(label_height) if label_height is not None else max(1.0, sol.trace_width * 0.8)
+                label_w = height * 0.6 * max(len(str(ref_des)), 1)
+                self.text(doc_layer_resolved, (-label_w / 2, max_y + height), str(ref_des), height=height)
+            self.use_cell(parent_cell_name)
+            self.sref(device_name, (x, y), rotation=rotation)
+        return device_name
+
+    def generate_top_hat_resistor(self, x, y, sol, rotation: float = 0.0,
+                                   ref_des=None, resistor_layer=None, pad_layer=None,
+                                   doc_layer=None, label_height=None, cell_name=None) -> str:
+        """Build a thin-film top-hat (dog-bone) resistor -- a narrow
+        trimmable bar between two wide contact pads -- as a new cell,
+        then place one Sref of it at (x, y) rotated ``rotation``
+        degrees. ``sol`` is a hlayout.core.thinfilm.TopHatSolution from
+        hlayout.core.thinfilm.solve_top_hat() (normally via Tools >
+        Thin-Film Resistor Designer...). Layers not given fall back to
+        this design's saved Setup > Thin-Film Resistor Rules...
+        (hlayout.io.techfile.load_thin_film_rules()). Building the
+        device cell and placing its Sref are one undo step. Returns
+        the new cell's name."""
+        parent_cell_name = self.current_cell_name
+        if parent_cell_name is None:
+            raise LayoutError("no current cell; call new_cell()/use_cell() first")
+
+        rules = load_thin_film_rules(self.library)
+        r_layer = resistor_layer if resistor_layer is not None else rules["resistor_layer"]
+        p_layer = pad_layer if pad_layer is not None else rules["pad_layer"]
+        doc_layer_resolved = doc_layer if doc_layer is not None else rules["doc_layer"]
+
+        geo = generate_top_hat_geometry(sol)
+
+        base_name = cell_name or (str(ref_des) if ref_des else "TOPHAT")
+        device_name = self.library._unique_cell_name(base_name)
+
+        with self._batch():
+            self.new_cell(device_name)
+            self.polygon(r_layer, geo["bar_points"])
+            self.polygon(p_layer, geo["pad_a_points"])
+            self.polygon(p_layer, geo["pad_b_points"])
+            if ref_des:
+                height = float(label_height) if label_height is not None else max(1.0, sol.bar_width * 0.6)
+                label_w = height * 0.6 * max(len(str(ref_des)), 1)
+                self.text(doc_layer_resolved, (-label_w / 2, sol.pad_width / 2 + height),
                           str(ref_des), height=height)
             self.use_cell(parent_cell_name)
             self.sref(device_name, (x, y), rotation=rotation)

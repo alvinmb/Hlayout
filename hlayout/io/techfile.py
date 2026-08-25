@@ -311,6 +311,65 @@ def save_resistor_geometry_rules(library: Library, rules: dict) -> None:
     library.tech_params[RESISTOR_GEOMETRY_KEY] = json.dumps(payload)
 
 
+# --- Tools > Thin-Film Resistor Designer... settings -------------------------
+#
+# Unlike the thick-film ink-print resistor above (a different ink, and
+# therefore a different sheet resistance, per resistor -- see
+# "ink_layers" above), a thin-film design has ONE sheet resistivity
+# for the whole design: it's a single uniformly-deposited film, not a
+# choice of printed inks. So "sheet_rho" here is one number per
+# design, set once in the wizard, not looked up per resistor.
+#
+# All lengths in DBU (1 DBU = 1 micron). The defaults below come from
+# a common laser-trim design-guide convention (probe pad clearance,
+# artwork overlap, minimum resistor length, and laser kerf width all
+# specified there in mils): 0.003in -> 76 DBU, 0.002in -> 51 DBU,
+# 0.0015in -> 38 DBU, 0.0005in -> 13 DBU.
+
+THIN_FILM_KEY = "thin_film_rules"
+
+DEFAULT_THIN_FILM = {
+    "sheet_rho": 100.0,          # Ω/sq -- the one design-wide sheet resistivity
+    "trace_width": 25,           # default serpentine trace / minimum feature width
+    "kerf": 38,                  # laser kerf width (~0.0015in)
+    "link_fraction": 0.15,       # fraction of squares reserved for coarse link-area trim
+    "corner_factor": 0.5,        # meander corner's squares contribution (see core.thinfilm)
+    "min_probe_pad_clearance": 76,   # ~0.003in
+    "min_artwork_overlap": 51,       # ~0.002in
+    "min_resistor_length": 51,       # ~0.002in
+    "probe_pad_min": 13,             # ~0.0005in
+    "resistor_layer": 40,
+    "pad_layer": 41,
+    "doc_layer": 33,             # shared with the thick-film doc layer by default
+}
+
+
+def load_thin_film_rules(library: Library) -> dict:
+    """Read the thin-film design-wide sheet resistivity and serpentine/
+    top-hat geometry rules from library.tech_params. Always returns a
+    complete dict, falling back to DEFAULT_THIN_FILM key by key --
+    same pattern as load_resistor_geometry_rules() above."""
+    rules = dict(DEFAULT_THIN_FILM)
+    raw = library.tech_params.get(THIN_FILM_KEY)
+    if not raw:
+        return rules
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return rules
+    if isinstance(data, dict):
+        rules.update({k: data[k] for k in DEFAULT_THIN_FILM if k in data})
+    return rules
+
+
+def save_thin_film_rules(library: Library, rules: dict) -> None:
+    """Write the thin-film sheet resistivity and geometry rules into
+    library.tech_params so Setup > Save Technology File... / TECH SAVE
+    captures them alongside the layer stack."""
+    payload = {k: rules[k] for k in DEFAULT_THIN_FILM if k in rules}
+    library.tech_params[THIN_FILM_KEY] = json.dumps(payload)
+
+
 # --- Create > Route (2-Layer) settings ---------------------------------------
 #
 # Setup > Route Layers... configures the two conductor layers the Route
