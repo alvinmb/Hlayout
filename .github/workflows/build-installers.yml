@@ -1,0 +1,117 @@
+﻿name: Build installers
+
+# Builds a Windows installer (.exe), a Debian package (.deb), and a
+# macOS .dmg on their real native runners -- PyInstaller/py2app-style
+# GUI bundling has to run on the target OS, it can't be cross-compiled.
+#
+# Push a tag like "v0.1.0" to build and attach installers to a GitHub
+# Release automatically. Or run this manually (workflow_dispatch) to
+# just get build artifacts without cutting a release.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - id: v
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0-dev${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          fi
+
+  windows:
+    needs: version
+    runs-on: windows-latest
+    env:
+      HLAYOUT_VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt pyinstaller
+      - run: pyinstaller packaging/hlayout.spec
+      - name: Build installer with Inno Setup
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.5
+        with:
+          path: packaging/windows/installer.iss
+          options: /DMyAppVersion=${{ needs.version.outputs.version }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hlayout-windows-installer
+          path: dist-installers/*.exe
+
+  linux:
+    needs: version
+    runs-on: ubuntu-latest
+    env:
+      HLAYOUT_VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: sudo apt-get update && sudo apt-get install -y python3-tk dpkg-dev
+      - run: pip install -r requirements.txt pyinstaller
+      - run: pyinstaller packaging/hlayout.spec
+      - run: |
+          chmod +x packaging/linux/build_deb.sh
+          packaging/linux/build_deb.sh "${{ needs.version.outputs.version }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hlayout-linux-deb
+          path: build/deb/*.deb
+
+  macos:
+    needs: version
+    runs-on: macos-15
+    env:
+      HLAYOUT_VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt pyinstaller
+      - run: pyinstaller packaging/hlayout.spec
+      - name: Package .dmg
+        run: |
+          mkdir -p dist-installers dmg-src
+          cp -R dist/HLayout.app dmg-src/
+          ln -s /Applications dmg-src/Applications
+          hdiutil create -volname "HLayout ${{ needs.version.outputs.version }}" \
+            -srcfolder dmg-src \
+            -ov -format UDZO \
+            "dist-installers/HLayout-${{ needs.version.outputs.version }}-macos.dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hlayout-macos-dmg
+          path: dist-installers/*.dmg
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [version, windows, linux, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Create/update release with installers attached
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/hlayout-windows-installer/*.exe
+            artifacts/hlayout-linux-deb/*.deb
+            artifacts/hlayout-macos-dmg/*.dmg
+          generate_release_notes: true
