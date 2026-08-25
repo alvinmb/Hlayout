@@ -3,3 +3,10 @@ __pycache__/
 _to_delete/
 hlayout_proj/
 hlayout_project.zip
+
+# Local PyInstaller/installer build output (packaging/windows/build.ps1,
+# packaging/linux/build.sh) -- CI produces these fresh on its own
+# runners, so a locally-built copy should never get committed.
+/build/
+/dist/
+/dist-installers/

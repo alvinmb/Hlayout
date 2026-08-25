@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=HLayout
+Comment=IC / PCB layout editor
+Exec=/usr/bin/hlayout %f
+Icon=hlayout
+Terminal=false
+Categories=Development;Electronics;Engineering;
+MimeType=application/x-gds;
+StartupNotify=true

@@ -34,6 +34,30 @@ The GUI uses **Tkinter**, which ships with the standard Python installer
 on Windows and macOS. On Debian/Ubuntu Linux you may need
 `sudo apt install python3-tk`.
 
+### Prebuilt installers (Windows / Linux / macOS)
+
+Pushing a version tag (`v0.1.0`, `v0.2.0`, ...) triggers
+`.github/workflows/build-installers.yml`, which builds a Windows
+installer (`.exe`, via PyInstaller + Inno Setup), a Debian package
+(`.deb`), and a macOS `.dmg` on GitHub's own native runners for each
+OS, then attaches all three to a GitHub Release:
+
+```
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+You can also trigger a build without cutting a release from the
+Actions tab ("Build installers" → Run workflow) to sanity-check a
+change; the resulting installers are attached to that run as
+downloadable artifacts instead of a release.
+
+These are unsigned builds -- Windows SmartScreen and macOS Gatekeeper
+will warn on first launch ("Windows protected your PC" → More info →
+Run anyway; on macOS, right-click the app → Open). See
+`packaging/` for the PyInstaller spec, Inno Setup script, and `.deb`
+packaging used by the workflow.
+
 ## Run the GUI
 
 ```
