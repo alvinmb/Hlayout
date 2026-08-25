@@ -84,6 +84,16 @@ class App(tk.Tk):
         # command line restores attached libraries the same way File >
         # Open GDS... does, not just the geometry.
         super().__init__()
+        # Tkinter's default report_callback_exception just prints the
+        # traceback to stderr. In the PyInstaller windowed build
+        # (console=False, the default for hlayout.exe -- see
+        # packaging/hlayout.spec) there's no console for that to reach
+        # on Windows, so a bug inside any button/menu callback used to
+        # fail completely silently: the click just appeared to do
+        # nothing, with no error and no clue why -- exactly the
+        # failure mode behind "Trim Simulator's Run Plunge does
+        # nothing" reports. Route it through a dialog instead.
+        self.report_callback_exception = self._report_callback_exception
         self._apply_global_font_size()
         self.title("HLayout — Thick & Thin Film Hybrid Layout CAD")
 
@@ -147,6 +157,27 @@ class App(tk.Tk):
         self.after(100, self.canvas.fit_view)
         self.body_pane.bind("<Configure>", self._on_body_configure)
         self.protocol("WM_DELETE_WINDOW", self._on_quit)
+
+    def _report_callback_exception(self, exc, val, tb):
+        """Installed as self.report_callback_exception in __init__ --
+        see the comment there for why this exists. Shows the exception
+        in a dialog (falling back to stderr if even that fails) instead
+        of letting Tkinter's default handler silently swallow it."""
+        import traceback
+        summary = "".join(traceback.format_exception_only(exc, val)).strip()
+        # This dialog has no scrollbar and is fixed-size (see
+        # dialogs._show), so an unbounded traceback could render taller
+        # than the screen -- the last few frames are what matters for
+        # a bug report anyway; the full one is always on stderr too.
+        frames = "".join(traceback.format_tb(tb)[-6:])
+        try:
+            traceback.print_exception(exc, val, tb)  # full traceback, for a console run
+        except Exception:
+            pass  # no console attached (windowed build) -- nothing to print to
+        try:
+            dialogs.show_error("Unexpected Error", f"{summary}\n\n{frames}", parent=self)
+        except Exception:
+            pass  # dialog itself failed -- we already tried stderr above
 
     def _anchor_sash(self):
         try:
