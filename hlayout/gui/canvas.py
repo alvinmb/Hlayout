@@ -9,8 +9,8 @@ from tkinter import font as tkfont
 from tkinter import simpledialog
 
 from ..core.errors import GeometryError
-from ..core.shapes import (ARef, CIRCLE_SEGMENT_CHOICES, Path, PathCap, Polygon, Rectangle, SRef,
-                           Text)
+from ..core.shapes import (ARef, CIRCLE_SEGMENT_CHOICES, MAX_PATH_POINTS, MAX_POLY_POINTS, Path,
+                           PathCap, Polygon, Rectangle, SRef, Text)
 from ..core.units import DBU_MM, dbu_to_mm, mm_to_dbu
 
 # Bitmaps used to approximate the 9 stipple/fill patterns on a Tk canvas.
@@ -150,6 +150,11 @@ class LayoutCanvas(tk.Canvas):
         self.checkpoint = lambda: None
         self._pending_points = []
         self._last_mouse_dbu = (0, 0)
+        # Set by continue_path() while extending an existing Path: the
+        # shape _commit_path() should replace (rather than adding a
+        # brand new one alongside it) once the extended point list is
+        # finished. None for an ordinary from-scratch path draw.
+        self._continue_target = None
 
         # --- selection / move / edit state -------------------------------
         self._item_to_shape = {}  # tk item id -> ("shape"|"sref", object), current cell only
@@ -325,6 +330,34 @@ class LayoutCanvas(tk.Canvas):
         # one-shot tool like the marquee-select drag it's modelled on.
         self.on_draw_mode_changed(mode)
 
+    def continue_path(self):
+        """Edit > Continue Path: re-enter Path drawing pre-seeded with an
+        existing Path shape's own points, so you can click to add more
+        points onto its end instead of only ever starting a brand new
+        path. Requires a single whole Path shape to currently be
+        selected (not a vertex/edge of one, not a window-selected
+        group); returns False and does nothing otherwise.
+
+        The original shape is left untouched until the extended path
+        is actually finished (double-click/Enter, see _commit_path()),
+        so Esc still cleanly cancels back to nothing having changed --
+        cancel_draw() just drops the pending points and the
+        _continue_target reference below."""
+        if self.selected is None or self.selected[0] != "shape":
+            return False
+        _, shape = self.selected
+        if not isinstance(shape, Path):
+            return False
+        self.set_mode("path")
+        self._pending_points = list(shape.points)
+        self._continue_target = shape
+        self._update_preview(*self._last_mouse_dbu)
+        self.on_mode_status(
+            f"Continue Path: click to add more points, double-click/Enter to finish "
+            f"({len(self._pending_points)} existing point(s) loaded, layer {shape.layer})"
+        )
+        return True
+
     def _mode_hint(self):
         hints = {
             "select": "Select: click a shape to select it, drag to move, "
@@ -352,6 +385,7 @@ class LayoutCanvas(tk.Canvas):
 
     def cancel_draw(self):
         self._pending_points = []
+        self._continue_target = None
         self.delete("preview")
         self.delete("zoomwin_box")
         self._zoomwin_start = None
@@ -827,6 +861,41 @@ class LayoutCanvas(tk.Canvas):
                                checkpoint=self.checkpoint)
         return True
 
+    def insert_vertex_on_selected_edge(self):
+        """Edit > Insert Vertex: add a new point on the currently
+        selected edge (Polygon or Path), at the spot on that edge you
+        clicked to select it -- click an edge, then call this, rather
+        than needing a whole separate "click precisely on the edge to
+        add a point" gesture layered onto plain selection. Returns
+        False (does nothing) if the selection isn't an edge, or the
+        shape is already at its point-count limit."""
+        if self.draw_mode != "select" or self.selected is None or self.selected[0] != "edge":
+            return False
+        _, shape, (i, j) = self.selected
+        limit = MAX_POLY_POINTS if isinstance(shape, Polygon) else MAX_PATH_POINTS
+        if len(shape.points) >= limit:
+            self.on_mode_status(f"can't insert a vertex: shape already has the max {limit} points")
+            return False
+        # The point on the edge that was actually clicked to select it
+        # (see _select_click_impl) -- inserting exactly there, rather
+        # than e.g. always the edge's midpoint, is what makes this feel
+        # like "add a point here" instead of "add a point somewhere on
+        # this edge".
+        pt = self._drag_start_mouse
+        if pt is None:
+            return False
+        if self.snap_enabled:
+            pt = self._snap(*pt)
+        pt = (int(round(pt[0])), int(round(pt[1])))
+        self.checkpoint()
+        pts = list(shape.points)
+        pts.insert(i + 1, pt)
+        shape.points = pts
+        self.selected = ("vertex", shape, i + 1)
+        self.redraw()
+        self._after_edit()
+        return True
+
     def delete_selected(self):
         if self.draw_mode != "select":
             return
@@ -864,8 +933,42 @@ class LayoutCanvas(tk.Canvas):
             shape.points = pts
             self.selected = None
         elif kind == "edge":
-            self.on_mode_status("select a vertex (not an edge) to delete a point")
-            return
+            _, shape, (i, j) = self.selected
+            if not isinstance(shape, Path):
+                # A polygon's edges are implied by consecutive vertices,
+                # not a segment that can be removed independently
+                # without either breaking the closed loop or requiring
+                # it to become an open shape -- select a vertex to
+                # delete a point instead.
+                self.on_mode_status("select a vertex (not an edge) to delete a point "
+                                     "-- deleting a polygon edge isn't supported")
+                return
+            # Deleting a segment out of the middle of a Path can't leave
+            # a single, still-connected Path behind -- it splits into up
+            # to two independent pieces (dropping either piece if it
+            # would be left with under 2 points, e.g. deleting the very
+            # first or last segment just trims that end instead of
+            # leaving a stray 1-point sliver).
+            pts = shape.points
+            left = pts[:i + 1]
+            right = pts[j:]
+            pieces = [p for p in (left, right) if len(p) >= 2]
+            if not pieces:
+                self.on_mode_status("can't delete the only segment of a 2-point path "
+                                     "-- delete the whole path instead")
+                return
+            self.checkpoint()
+            new_shapes = [Path(layer=shape.layer, points=p, width=shape.width,
+                                cap=shape.cap, datatype=shape.datatype) for p in pieces]
+            if shape in cell.shapes:
+                cell.shapes.remove(shape)
+            cell.shapes.extend(new_shapes)
+            if len(new_shapes) == 1:
+                self.selected = ("shape", new_shapes[0])
+            else:
+                self.selected = None
+                self.selected_multi = [("shape", s) for s in new_shapes]
+            self.on_mode_status(f"deleted segment -- path split into {len(new_shapes)} piece(s)")
         elif kind == "shape":
             _, shape = self.selected
             if shape in cell.shapes:
@@ -1139,9 +1242,22 @@ class LayoutCanvas(tk.Canvas):
             return
         self._pending_points = []
         self.delete("preview")
+        target = self._continue_target
+        self._continue_target = None
+        if target is not None:
+            # continue_path() in progress: reuse the original shape's own
+            # layer/width/cap (not whatever the toolbar currently shows —
+            # this may not be the active draw layer at all) and tell
+            # on_commit which shape this new one replaces.
+            layer = target.layer
+            extra = {"width": target.width,
+                     "cap": target.cap.value if hasattr(target.cap, "value") else target.cap,
+                     "replace": target}
+        else:
+            layer = self.current_layer
+            extra = {"width": self.path_width, "cap": self.path_cap, "replace": None}
         if self.on_commit:
-            self.on_commit("path", self.current_layer, points,
-                            {"width": self.path_width, "cap": self.path_cap})
+            self.on_commit("path", layer, points, extra)
 
     def _commit_route(self):
         """Finish the whole in-progress route (Enter/double-click): commit

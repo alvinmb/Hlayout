@@ -336,6 +336,9 @@ class App(tk.Tk):
         editm.add_command(label="Edit Selected...", command=self._edit_selected)
         editm.add_command(label="Delete Selected", command=self._delete_selected)
         editm.add_separator()
+        editm.add_command(label="Insert Vertex on Edge", command=self._insert_vertex_on_edge)
+        editm.add_command(label="Continue Path...", command=self._continue_path)
+        editm.add_separator()
         editm.add_command(label="Rotate...", command=self._rotate_selected)
         editm.add_command(label="Copy...", command=self._copy_selected)
         editm.add_command(label="Smash Selected to SRefs", command=self._smash_selected)
@@ -1281,6 +1284,41 @@ class App(tk.Tk):
     def _delete_selected(self):
         self.canvas.delete_selected()
 
+    def _insert_vertex_on_edge(self):
+        """Edit > Insert Vertex on Edge: add a new point on the
+        currently selected edge, at the spot on that edge you clicked
+        to select it. Works on both Path and Polygon edges. Deleting
+        the vertex right back out afterward (select it, Delete
+        Selected) gives an easy way to reshape a segment into two."""
+        if self.canvas.selected is None or self.canvas.selected[0] != "edge":
+            dialogs.show_info(
+                "Insert Vertex on Edge",
+                "Nothing suitable is selected. Switch to Select mode and click "
+                "an edge (a segment between two points, not a vertex itself) "
+                "of a path or polygon first.",
+                parent=self,
+            )
+            return
+        self.canvas.insert_vertex_on_selected_edge()
+
+    def _continue_path(self):
+        """Edit > Continue Path...: re-enter Path drawing pre-seeded
+        with the selected Path's own points, so more points can be
+        clicked onto its end instead of only ever starting a new path
+        from scratch. Finish the same way as any other path
+        (double-click/Enter); Esc cancels back to the unchanged
+        original. See LayoutCanvas.continue_path()/_commit_path()."""
+        if self.canvas.selected is None or self.canvas.selected[0] != "shape":
+            dialogs.show_info(
+                "Continue Path", "Nothing suitable is selected. Switch to Select "
+                "mode and click a whole path first (not a vertex/edge of one).",
+                parent=self,
+            )
+            return
+        if not self.canvas.continue_path():
+            dialogs.show_info("Continue Path", "The current selection isn't a path.",
+                               parent=self)
+
     # --- turning mouse-drawn shapes into real database edits -------------
     def _on_canvas_commit(self, mode, layer, points, extra):
         try:
@@ -1290,7 +1328,16 @@ class App(tk.Tk):
             elif mode == "poly":
                 self.session.polygon(layer, points)
             elif mode == "path":
-                self.session.path(layer, points, extra["width"], cap=extra["cap"])
+                replace = extra.get("replace")
+                if replace is not None:
+                    # Edit > Continue Path finishing: the extended point
+                    # list replaces the original shape rather than
+                    # sitting alongside it, as one undo step.
+                    with self.session.batch():
+                        self.session.remove(replace)
+                        self.session.path(layer, points, extra["width"], cap=extra["cap"])
+                else:
+                    self.session.path(layer, points, extra["width"], cap=extra["cap"])
             elif mode == "circle":
                 self.session.circle(layer, points[0], extra["radius"], segments=extra["segments"])
             elif mode == "text":
