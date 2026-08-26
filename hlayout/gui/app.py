@@ -2280,14 +2280,74 @@ class App(tk.Tk):
         win.bind("<Escape>", lambda e: win.destroy())
 
     def show_attached_libraries(self):
-        libs = self.session.list_attached_libraries()
-        if not libs:
-            dialogs.show_info("Attached Libraries", "No libraries attached (up to 2 allowed).", parent=self)
-            return
-        text = "\n\n".join(
-            f"[{l['index']}] {l['name']}  ({l['cells']} cells)\n{l['path']}" for l in libs
-        )
-        dialogs.show_info("Attached Libraries", text, parent=self)
+        """Setup > Attached Libraries...: view every reference library
+        currently attached (Session.attached_libraries -- up to
+        MAX_ATTACHED_LIBRARIES, 2) and detach one to free its slot for
+        Attach Library... . Detaching only removes it from the search/
+        attach list -- any cells already copied into this design via
+        Find & Place Cell (Session.import_cell_closure(), a real,
+        independent deep copy) are completely unaffected, so detaching
+        never touches anything already placed."""
+        win = tk.Toplevel(self)
+        win.title("Attached Libraries")
+        win.transient(self)
+        win.grab_set()
+        win.resizable(False, False)
+
+        ttk.Label(
+            win,
+            text=f"Up to {self.session.MAX_ATTACHED_LIBRARIES} reference libraries may be attached at once.",
+            foreground="#8b949e",
+        ).pack(anchor="w", padx=10, pady=(10, 4))
+
+        columns = ("index", "name", "cells", "path")
+        tree = ttk.Treeview(win, columns=columns, show="headings", height=4, selectmode="browse")
+        for col, label, width in (
+            ("index", "#", 30), ("name", "Name", 140), ("cells", "Cells", 60), ("path", "Path", 380),
+        ):
+            tree.heading(col, text=label)
+            tree.column(col, width=width, anchor="w" if col in ("name", "path") else "center")
+        tree.pack(fill="both", expand=True, padx=10, pady=(0, 6))
+
+        def refresh():
+            for row in tree.get_children():
+                tree.delete(row)
+            libs = self.session.list_attached_libraries()
+            for l in libs:
+                tree.insert("", "end", iid=str(l["index"]),
+                             values=(l["index"], l["name"], l["cells"], l["path"]))
+            empty_var.set("No libraries attached." if not libs else "")
+            detach_btn.config(state="disabled" if not libs else "normal")
+
+        empty_var = tk.StringVar(value="")
+        ttk.Label(win, textvariable=empty_var, foreground="#8b949e").pack(anchor="w", padx=10)
+
+        def detach_selected():
+            sel = tree.selection()
+            if not sel:
+                return
+            idx = int(sel[0])
+            libs = self.session.list_attached_libraries()
+            name = next((l["name"] for l in libs if l["index"] == idx), "?")
+            if not dialogs.ask_yes_no(
+                "Detach Library",
+                f"Detach {name!r}? Anything already placed from it stays in the "
+                "design untouched -- this only removes it from the attach list.",
+                parent=win,
+            ):
+                return
+            self.session.detach_library(idx)
+            self.status.set(f"detached library {idx}: {name!r}")
+            refresh()
+
+        btn_row = ttk.Frame(win)
+        btn_row.pack(fill="x", padx=10, pady=(0, 10))
+        detach_btn = ttk.Button(btn_row, text="Detach", command=detach_selected)
+        detach_btn.pack(side="left")
+        ttk.Button(btn_row, text="Close", command=win.destroy).pack(side="right")
+
+        refresh()
+        win.bind("<Escape>", lambda e: win.destroy())
 
     def find_and_place_cell(self):
         win = tk.Toplevel(self)
