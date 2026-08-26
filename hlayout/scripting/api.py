@@ -756,6 +756,13 @@ class Session:
         pad_clear = rules["min_probe_pad_clearance"]
         pad_len = max(rules["probe_pad_min"], pad_clear)
         pad_width = max(sol.trace_width * 3, pad_clear * 2)
+        # Figure 5's "Artwork Overlap" minimum -- a pad that only
+        # abuts the resistor element (zero overlap) can lose contact
+        # entirely under ordinary layer-to-layer alignment tolerance,
+        # so each pad is drawn reaching past the resistor's own edge
+        # by this much rather than stopping exactly at it. Capped so a
+        # very short leg can't have its pads overlap each other.
+        overlap = min(rules["min_artwork_overlap"], (max_x - min_x) / 2)
 
         base_name = cell_name or (str(ref_des) if ref_des else "SERPENTINE")
         device_name = self.library._unique_cell_name(base_name)
@@ -764,11 +771,13 @@ class Session:
             self.new_cell(device_name)
             for poly in all_polys:
                 self.polygon(r_layer, poly)
-            # Probe pads flush against each end of the combined
-            # footprint (link area's outer edge, serpentine area's
-            # outer edge), centered on that zone's own vertical middle.
-            self.rect(p_layer, min_x - pad_len, -pad_width / 2, min_x, pad_width / 2)
-            self.rect(p_layer, max_x, -pad_width / 2, max_x + pad_len, pad_width / 2)
+            # Probe pads at each end of the combined footprint (link
+            # area's outer edge, serpentine area's outer edge),
+            # reaching `overlap` past that edge into the resistor
+            # element itself, centered on that zone's own vertical
+            # middle.
+            self.rect(p_layer, min_x - pad_len, -pad_width / 2, min_x + overlap, pad_width / 2)
+            self.rect(p_layer, max_x - overlap, -pad_width / 2, max_x + pad_len, pad_width / 2)
             if ref_des:
                 height = float(label_height) if label_height is not None else max(1.0, sol.trace_width * 0.8)
                 label_w = height * 0.6 * max(len(str(ref_des)), 1)
@@ -799,7 +808,10 @@ class Session:
         p_layer = pad_layer if pad_layer is not None else rules["pad_layer"]
         doc_layer_resolved = doc_layer if doc_layer is not None else rules["doc_layer"]
 
-        geo = generate_top_hat_geometry(sol)
+        # Figure 5's "Artwork Overlap" minimum -- see the matching
+        # comment in generate_serpentine_resistor() above.
+        overlap = min(rules["min_artwork_overlap"], sol.bar_length / 2)
+        geo = generate_top_hat_geometry(sol, overlap=overlap)
 
         base_name = cell_name or (str(ref_des) if ref_des else "TOPHAT")
         device_name = self.library._unique_cell_name(base_name)

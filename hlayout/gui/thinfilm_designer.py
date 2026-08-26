@@ -27,6 +27,7 @@ from ..core.errors import GeometryError, LayoutError
 from ..core.thinfilm import (
     SerpentineSolution,
     TopHatSolution,
+    check_thin_film_rules,
     generate_serpentine_geometry,
     generate_top_hat_geometry,
     solve_serpentine,
@@ -195,6 +196,16 @@ class ThinFilmDesignerWindow(tk.Toplevel):
         self.cand_tree.pack(fill="both", expand=True)
         self.cand_tree.bind("<<TreeviewSelect>>", self._on_candidate_select)
 
+        # Design-rule warnings for the selected candidate (Figure 4/5's
+        # kerf-vs-spacing and minimum-length/width rules -- see
+        # hlayout.core.thinfilm.check_thin_film_rules). Advisory, not
+        # blocking: Place in Layout... still works with a warning
+        # showing, since a one-off part might deliberately push past a
+        # guideline.
+        self.rule_warning_var = tk.StringVar(value="")
+        ttk.Label(left, textvariable=self.rule_warning_var, foreground="#d29922",
+                  wraplength=380, justify="left").pack(fill="x", pady=(4, 0))
+
         btn_row = ttk.Frame(left)
         btn_row.pack(fill="x", pady=(8, 0))
         ttk.Button(btn_row, text="Place in Layout...", command=self._place_in_layout).pack(side="left")
@@ -244,6 +255,7 @@ class ThinFilmDesignerWindow(tk.Toplevel):
         for row in self.cand_tree.get_children():
             self.cand_tree.delete(row)
         self.preview.clear()
+        self.rule_warning_var.set("")
 
     def _solve(self):
         self.error_var.set("")
@@ -301,6 +313,12 @@ class ThinFilmDesignerWindow(tk.Toplevel):
             self.preview.show_serpentine(generate_serpentine_geometry(sol))
         else:
             self.preview.show_top_hat(generate_top_hat_geometry(sol))
+
+        rules = load_thin_film_rules(self.library) if self.library is not None else {}
+        violations = check_thin_film_rules(sol, rules) if rules else []
+        self.rule_warning_var.set(
+            ("Design rule warning: " + "; ".join(violations)) if violations else ""
+        )
 
     def _current_solution(self):
         if self.selected_index is None or not self.candidates:

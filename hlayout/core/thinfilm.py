@@ -40,6 +40,39 @@ docstring for the same spirit of caveat):
   module's default; override it per design if your process has
   measured a different value (see hlayout.io.techfile's thin-film
   rules -- "corner_factor").
+
+Laser trim design rules (see Figure 4 "Serpentine Resistor With Two
+Areas For Laser Trim" and Figure 5 "Probe Pad And Artwork Overlap
+Requirements" in the design guides this module follows) are enforced
+in two places:
+
+- generate_top_hat_geometry()'s ``overlap`` parameter and
+  Session.generate_serpentine_resistor()'s probe pad placement
+  (hlayout/scripting/api.py) make the pad geometry actually *overlap*
+  the resistive element by the design's "min_artwork_overlap" rule,
+  rather than merely abutting it (Figure 5's "Artwork Overlap, .002in"
+  callout exists specifically because two mask layers that only touch,
+  with zero overlap margin, can lose contact entirely under normal
+  layer-to-layer alignment tolerance).
+- check_thin_film_rules() validates a solved candidate against the
+  rest of Figure 5's minimums (resistor length, probe pad size) and
+  Figure 4's kerf-vs-spacing requirement (a laser trim cut needs at
+  least one kerf's width of clearance between adjacent legs, or the
+  cut risks severing the neighboring leg instead of just lengthening
+  the current path through the one being trimmed) -- see its own
+  docstring for exactly what's checked. It's advisory, not enforced by
+  solve_serpentine()/solve_top_hat() themselves (a design might
+  deliberately push past a guideline for a one-off part), but Tools >
+  Thin-Film Resistor Designer... surfaces any violation it finds.
+
+What this module does *not* model: the actual resistance-vs-cut-depth
+curve of trimming into the serpentine/bar area (how far a kerf can
+plunge before hitting the "compensated for laser kerf" limit implied
+by Figure 4's grid of pre-sized squares) -- that's a resistor-network
+simulation, and hlayout.core.trim_sim already does that once a
+placement exists (wired up as Tools > Thin-Film Resistor Designer...'s
+"Trim Simulator..." button). This module's job stops at producing a
+DRC-clean *nominal*, untrimmed shape for that simulator to start from.
 """
 
 import math
@@ -386,14 +419,89 @@ def solve_top_hat(
     )
 
 
-def generate_top_hat_geometry(sol: TopHatSolution) -> dict:
+def check_thin_film_rules(sol, rules: dict) -> List[str]:
+    """Validate a solved SerpentineSolution or TopHatSolution against a
+    design's thin-film rules (hlayout.io.techfile.load_thin_film_rules()
+    -- "min_resistor_length", "kerf", "probe_pad_min") and return a list
+    of human-readable violation descriptions (empty if clean). Advisory
+    only -- solve_serpentine()/solve_top_hat() don't call this
+    themselves, so a design can knowingly push past a guideline; Tools
+    > Thin-Film Resistor Designer... calls it after solving to warn
+    about the ones it finds.
+
+    Checks, all traceable to Figure 5 ("Probe Pad And Artwork Overlap
+    Requirements") and Figure 4 ("Serpentine Resistor With Two Areas
+    For Laser Trim") in the design guides this module follows:
+
+    - Each trimmable run (a TopHatSolution's bar, or a
+      SerpentineSolution's fine-trim leg) must be at least
+      rules["min_resistor_length"] long (Figure 5's "Resistor Length
+      0.002in Min.") -- a run shorter than this can't be laser-trimmed
+      with any useful precision.
+    - A SerpentineSolution's leg-to-leg spacing must be at least
+      rules["kerf"] (Figure 4's kerf lines run between legs to trim
+      one at a time) -- narrower than that and a trim cut aimed at one
+      leg risks clipping its neighbor instead of just lengthening the
+      current path through the one being trimmed.
+    - A TopHatSolution's bar (or a SerpentineSolution's trace) must be
+      at least 2x rules["kerf"] wide -- narrower than that, a partial
+      "plunge" trim cut has no controllable range: the very first cut
+      deep enough to matter already reaches most of the way across.
+    """
+    violations = []
+    min_len = rules.get("min_resistor_length", 0)
+    kerf = rules.get("kerf", 0)
+
+    if isinstance(sol, SerpentineSolution):
+        if sol.leg_length < min_len:
+            violations.append(
+                f"fine-trim leg length ({sol.leg_length:g} DBU) is below the "
+                f"minimum trimmable resistor length ({min_len:g} DBU)"
+            )
+        if sol.spacing < kerf:
+            violations.append(
+                f"leg spacing ({sol.spacing:g} DBU) is narrower than the laser "
+                f"kerf ({kerf:g} DBU) -- a trim cut could sever the neighboring leg"
+            )
+        if sol.trace_width < 2 * kerf:
+            violations.append(
+                f"trace width ({sol.trace_width:g} DBU) is less than 2x the laser "
+                f"kerf ({kerf:g} DBU) -- too narrow for a controlled partial trim cut"
+            )
+    elif isinstance(sol, TopHatSolution):
+        if sol.bar_length < min_len:
+            violations.append(
+                f"bar length ({sol.bar_length:g} DBU) is below the minimum "
+                f"trimmable resistor length ({min_len:g} DBU)"
+            )
+        if sol.bar_width < 2 * kerf:
+            violations.append(
+                f"bar width ({sol.bar_width:g} DBU) is less than 2x the laser "
+                f"kerf ({kerf:g} DBU) -- too narrow for a controlled partial trim cut"
+            )
+    return violations
+
+
+def generate_top_hat_geometry(sol: TopHatSolution, overlap: float = 0.0) -> dict:
     """Build the top-hat's polygon outline, centered on the origin
     with the bar running horizontally. Returns {"pad_a_points": [...],
     "bar_points": [...], "pad_b_points": [...]}, each a single point
-    list (rectangles), all (x, y) DBU pairs rounded to integers."""
+    list (rectangles), all (x, y) DBU pairs rounded to integers.
+
+    ``overlap`` (DBU) extends each pad *into* the bar by that much
+    instead of just abutting it at the bar's own endpoint -- see this
+    module's "Laser trim design rules" docstring section for why a
+    zero-overlap abutment isn't enough (Figure 5's "Artwork Overlap"
+    minimum). Pass hlayout.io.techfile's thin-film rules'
+    "min_artwork_overlap" here (Session.generate_top_hat_resistor()
+    does exactly that); defaults to 0 (the old abutting behaviour) so
+    a direct call without a rules dict still gets *some* valid shape,
+    just without the overlap margin.
+    """
     half_bar_l = sol.bar_length / 2
     half_bar_w = sol.bar_width / 2
     half_pad_w = sol.pad_width / 2
+    overlap = min(overlap, sol.bar_length / 2)  # never overlap past the bar's own middle
     pad_a_x0 = -half_bar_l - sol.pad_length
     pad_b_x1 = half_bar_l + sol.pad_length
 
@@ -401,7 +509,7 @@ def generate_top_hat_geometry(sol: TopHatSolution) -> dict:
         return [_round_pt(p) for p in [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]]
 
     return {
-        "pad_a_points": rect(pad_a_x0, -half_pad_w, -half_bar_l, half_pad_w),
+        "pad_a_points": rect(pad_a_x0, -half_pad_w, -half_bar_l + overlap, half_pad_w),
         "bar_points": rect(-half_bar_l, -half_bar_w, half_bar_l, half_bar_w),
-        "pad_b_points": rect(half_bar_l, -half_pad_w, pad_b_x1, half_pad_w),
+        "pad_b_points": rect(half_bar_l - overlap, -half_pad_w, pad_b_x1, half_pad_w),
     }
