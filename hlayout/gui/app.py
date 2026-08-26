@@ -648,7 +648,7 @@ class App(tk.Tk):
             ("Grid", lambda: self.canvas.toggle_grid()),
             ("New View", self.new_view_window),
         ]:
-            ttk.Button(bar, text=label, command=cmd).pack(side="left", padx=2, pady=2)
+            self._toolbar_button(bar, label, cmd).pack(side="left", padx=2, pady=2)
 
         ttk.Label(bar, text="Cell:").pack(side="left", padx=(12, 2))
         self.cell_var = tk.StringVar(value=self.session.current_cell_name or "")
@@ -713,7 +713,7 @@ class App(tk.Tk):
         self.grid_spacing_var = tk.StringVar()
         self._refresh_grid_spacing_var()
         ttk.Label(bar, textvariable=self.grid_spacing_var).pack(side="left", padx=(8, 2))
-        ttk.Button(bar, text="Grid...", command=self.show_grid_spacing_dialog).pack(
+        self._toolbar_button(bar, "Grid...", self.show_grid_spacing_dialog).pack(
             side="left", padx=(0, 2))
 
         self.mode_hint_var = tk.StringVar(value="")
@@ -734,6 +734,16 @@ class App(tk.Tk):
         self.context_bar.pack(side="top", fill="x")
         self._refresh_context_bar()
 
+    #: Fixed character width every button on the bottom toolbar and its
+    #: context row is drawn at, so the row reads as one consistent set
+    #: of controls instead of each button being sized to its own label
+    #: (ttk's default). Sized to comfortably fit the longest label
+    #: currently used there ("Insert Vertex on Edge").
+    TOOLBAR_BUTTON_WIDTH = 22
+
+    def _toolbar_button(self, parent, text, command):
+        return ttk.Button(parent, text=text, command=command, width=self.TOOLBAR_BUTTON_WIDTH)
+
     def _on_mode_change(self):
         self.canvas.set_mode(self.mode_var.get())
         self.mode_hint_var.set(self.canvas._mode_hint())
@@ -742,35 +752,41 @@ class App(tk.Tk):
     def _refresh_context_bar(self):
         """Rebuild the context bar's contents for the currently active
         draw/edit mode -- see the comment where self.context_bar is
-        created in _build_bottom_toolbar()."""
+        created in _build_bottom_toolbar(). Every Create-menu draw mode
+        gets the same baseline behaviour here: a Cancel button, since
+        canvas.cancel_draw() cleanly drops whatever's pending no matter
+        which tool is active (mid-rectangle, mid-circle, before an
+        sref's cell is even picked, ...) -- plus Finish for the
+        multi-click tools (poly/path/route) where there's a
+        click-to-add-another-point loop for it to actually end early."""
         bar = self.context_bar
         for w in bar.winfo_children():
             w.destroy()
         mode = self.mode_var.get()
 
-        def finish_cancel():
-            ttk.Button(bar, text="Finish", command=self.canvas.finish_draw).pack(
+        def cancel_btn():
+            self._toolbar_button(bar, "Cancel", self.canvas.cancel_draw).pack(
                 side="left", padx=2, pady=2)
-            ttk.Button(bar, text="Cancel", command=self.canvas.cancel_draw).pack(
-                side="left", padx=(0, 12), pady=2)
+
+        def finish_cancel():
+            self._toolbar_button(bar, "Finish", self.canvas.finish_draw).pack(
+                side="left", padx=2, pady=2)
+            cancel_btn()
 
         if mode == "select":
-            ttk.Button(bar, text="Delete Selected", command=self._delete_selected).pack(
-                side="left", padx=2, pady=2)
-            ttk.Button(bar, text="Edit Selected...", command=self._edit_selected).pack(
-                side="left", padx=2, pady=2)
-            ttk.Button(bar, text="Insert Vertex on Edge", command=self._insert_vertex_on_edge).pack(
-                side="left", padx=2, pady=2)
-            ttk.Button(bar, text="Continue Path...", command=self._continue_path).pack(
-                side="left", padx=2, pady=2)
-            ttk.Button(bar, text="Rotate...", command=self._rotate_selected).pack(
-                side="left", padx=2, pady=2)
-            ttk.Button(bar, text="Copy...", command=self._copy_selected).pack(
-                side="left", padx=2, pady=2)
-            ttk.Button(bar, text="Smash to SRefs", command=self._smash_selected).pack(
-                side="left", padx=2, pady=2)
+            for label, cmd in [
+                ("Delete Selected", self._delete_selected),
+                ("Edit Selected...", self._edit_selected),
+                ("Insert Vertex on Edge", self._insert_vertex_on_edge),
+                ("Continue Path...", self._continue_path),
+                ("Rotate...", self._rotate_selected),
+                ("Copy...", self._copy_selected),
+                ("Smash to SRefs", self._smash_selected),
+            ]:
+                self._toolbar_button(bar, label, cmd).pack(side="left", padx=2, pady=2)
+            return  # nothing pending to Cancel in Select -- it's not a draw tool
 
-        elif mode == "path":
+        if mode == "path":
             ttk.Label(bar, text="Width (DBU):").pack(side="left", padx=(2, 2))
             width_spin = ttk.Spinbox(bar, from_=1, to=100000, width=8, textvariable=self.width_var,
                                       command=self._on_path_opts_change)
@@ -793,6 +809,7 @@ class App(tk.Tk):
                                       values=[str(n) for n in CIRCLE_SEGMENT_CHOICES])
             seg_combo.pack(side="left", padx=(0, 12))
             seg_combo.bind("<<ComboboxSelected>>", lambda e: self._on_circle_opts_change())
+            cancel_btn()
 
         elif mode == "route":
             ttk.Label(bar, text="Layer A:").pack(side="left", padx=(2, 2))
@@ -805,16 +822,17 @@ class App(tk.Tk):
                                     values=self._layer_choices())
             b_combo.pack(side="left", padx=(0, 8))
             b_combo.bind("<<ComboboxSelected>>", lambda e: self._on_route_opts_change())
-            ttk.Button(bar, text="Route Settings...", command=self.show_route_layers_dialog).pack(
+            self._toolbar_button(bar, "Route Settings...", self.show_route_layers_dialog).pack(
                 side="left", padx=(0, 12))
             finish_cancel()
 
         elif mode in ("sref", "aref"):
-            ttk.Button(bar, text="Find & Place Cell...", command=self.find_and_place_cell).pack(
+            self._toolbar_button(bar, "Find & Place Cell...", self.find_and_place_cell).pack(
                 side="left", padx=2, pady=2)
+            cancel_btn()
 
-        elif mode == "zoomwin":
-            pass  # drag a box; nothing to configure
+        else:  # rect, text, zoomwin -- single-click-then-click-again tools
+            cancel_btn()
 
     def _layer_label(self, number):
         return f"{number}: {self.session.library.layers[number].name}"
