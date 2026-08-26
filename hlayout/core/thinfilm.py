@@ -19,10 +19,25 @@ area trimmed with parallel laser kerf cuts):
   resistance steps; the main meander is fine-trimmed afterward by
   cutting shallow parallel kerfs partway across it, lengthening the
   current path a little at a time.
-- Top-hat (dog-bone): a narrow resistive bar between two wide contact
-  pads. All the resistance lives in the bar (the pads are wide enough
-  that their own contribution is negligible); the bar is fine-trimmed
-  the same way as the serpentine's main area.
+- Top-hat: a narrow resistive bar between two wide contact pads, with
+  a narrower "crown" rising from the middle of the bar -- the shape a
+  real top-hat resistor is named for (a wide brim between the pads,
+  a tall crown standing up off it). All the resistance lives in the
+  bar (the pads are wide enough that their own contribution is
+  negligible); the crown itself carries no current in the nominal
+  (untrimmed) part -- current takes the straight, lower-resistance
+  path along the bar rather than detouring up into it. What the crown
+  is actually for is trim range: a plunge cut is made downward from
+  the crown's top edge, straight through the crown and into the bar
+  beneath it, and the maximum depth that cut can reach before
+  severing the part is however much material sits in its path --
+  crown_height + bar_width, instead of just bar_width for a plain
+  bar. Since sensitivity (dR / d(cut depth)) blows up as the cut
+  approaches full severance (see hlayout.core.trim_sim's docstring),
+  a plain bar's usable trim range is small; stacking extra height at
+  the one spot the cut travels through, without changing the bar
+  everywhere else, lets the same single plunge cut trim over a much
+  larger range before running out of runway.
 
 Modeling assumptions / limitations (see also hlayout.core.trim_sim's
 docstring for the same spirit of caveat):
@@ -358,16 +373,22 @@ def generate_serpentine_geometry(sol: SerpentineSolution) -> dict:
 
 @dataclass
 class TopHatSolution:
-    """A dog-bone/top-hat resistor: a narrow resistive bar between two
-    wide contact pads. All lengths in DBU. The pads' own resistance
-    contribution is treated as negligible (standard assumption when
-    pad_width >> bar_width), so ``resistance_ohm`` comes entirely from
-    the bar's squares count."""
+    """A top-hat resistor: a narrow resistive bar between two wide
+    contact pads, plus a narrower "crown" rising off the middle of the
+    bar for trim runway (see this module's docstring). All lengths in
+    DBU. The pads' own resistance contribution is treated as
+    negligible (standard assumption when pad_width >> bar_width), and
+    the crown's is treated as negligible too (nominal/untrimmed
+    current takes the straight path along the bar, not the detour up
+    into the crown) -- so ``resistance_ohm`` comes entirely from the
+    bar's squares count, same as before the crown existed."""
 
     bar_width: float
     bar_length: float
     pad_width: float
     pad_length: float
+    crown_width: float
+    crown_height: float
     squares: float
     resistance_ohm: float
     footprint_w: float
@@ -380,17 +401,26 @@ def solve_top_hat(
     bar_width: float,
     pad_width: Optional[float] = None,
     pad_length: Optional[float] = None,
+    crown_width: Optional[float] = None,
+    crown_height: Optional[float] = None,
     min_bar_length: float = 0.0,
 ) -> TopHatSolution:
-    """Size a top-hat/dog-bone resistor's bar to hit target_r_ohm.
+    """Size a top-hat resistor's bar (and crown) to hit target_r_ohm.
 
     ``pad_width`` defaults to 4x bar_width (wide enough that the
     negligible-pad-resistance assumption holds comfortably) and
-    ``pad_length`` to 2x bar_width if not given. Raises GeometryError
-    if the solved bar_length would be shorter than ``min_bar_length``
-    (e.g. a fab's minimum trimmable resistor length -- see Figure 5's
-    "Resistor Length 0.002in Min." in thin-film trim design guides) or
-    if any input isn't positive.
+    ``pad_length`` to 2x bar_width if not given. ``crown_width``
+    defaults to bar_width itself (the crown is the same width as the
+    bar it rises from -- a plunge cut down its middle then travels
+    through a constant-width channel the whole way, same as this
+    module's docstring describes) and ``crown_height`` to 4x bar_width
+    if not given -- extending a plain bar's plunge-trim runway
+    (bar_width alone) to crown_height + bar_width, i.e. 5x by default;
+    pass a larger crown_height for an even wider trim range. Raises
+    GeometryError if the solved bar_length would be shorter than
+    ``min_bar_length`` (e.g. a fab's minimum trimmable resistor length
+    -- see Figure 5's "Resistor Length 0.002in Min." in thin-film trim
+    design guides) or if any input isn't positive.
     """
     if target_r_ohm <= 0:
         raise GeometryError("target resistance must be positive")
@@ -400,6 +430,12 @@ def solve_top_hat(
         raise GeometryError("bar width must be positive")
     pad_width = bar_width * 4 if pad_width is None else pad_width
     pad_length = bar_width * 2 if pad_length is None else pad_length
+    crown_width = bar_width if crown_width is None else crown_width
+    crown_height = bar_width * 4 if crown_height is None else crown_height
+    if crown_width <= 0:
+        raise GeometryError("crown width must be positive")
+    if crown_height < 0:
+        raise GeometryError("crown height can't be negative")
 
     squares = target_r_ohm / sheet_rho_ohm_per_sq
     bar_length = squares * bar_width
@@ -409,11 +445,19 @@ def solve_top_hat(
             f"trimmable length {min_bar_length:g} DBU -- widen the bar or "
             "raise the sheet rho"
         )
-    footprint_w = pad_width
+    # The crown only rises off the bar's top edge (see
+    # generate_top_hat_geometry), so the footprint's Y extent is
+    # asymmetric around the bar's own centerline -- report the
+    # symmetric bounding box a placer/preview needs (half-extent is
+    # whichever of the pad's half-width or the bar-top-to-crown-top
+    # distance is larger), same convention _serpentine_footprint uses.
+    half_extent_y = max(pad_width / 2, bar_width / 2 + crown_height)
+    footprint_w = 2 * half_extent_y
     footprint_l = bar_length + 2 * pad_length
     return TopHatSolution(
         bar_width=bar_width, bar_length=bar_length,
         pad_width=pad_width, pad_length=pad_length,
+        crown_width=crown_width, crown_height=crown_height,
         squares=squares, resistance_ohm=squares * sheet_rho_ohm_per_sq,
         footprint_w=footprint_w, footprint_l=footprint_l,
     )
@@ -484,9 +528,16 @@ def check_thin_film_rules(sol, rules: dict) -> List[str]:
 
 def generate_top_hat_geometry(sol: TopHatSolution, overlap: float = 0.0) -> dict:
     """Build the top-hat's polygon outline, centered on the origin
-    with the bar running horizontally. Returns {"pad_a_points": [...],
-    "bar_points": [...], "pad_b_points": [...]}, each a single point
-    list (rectangles), all (x, y) DBU pairs rounded to integers.
+    with the bar running horizontally and the crown rising from the
+    middle of the bar's top edge. Returns {"pad_a_points": [...],
+    "bar_points": [...], "pad_b_points": [...], "crown_points": [...]},
+    each a single point list (rectangles), all (x, y) DBU pairs
+    rounded to integers. The crown shares an exact edge with the bar
+    (same convention the serpentine's leg/corner-connector rectangles
+    already use -- see _meander_polys) rather than needing an overlap
+    margin: both are the same resistor_layer, drawn in the same mask
+    step, so there's no layer-to-layer alignment tolerance to cover
+    the way there is between the bar and the pads.
 
     ``overlap`` (DBU) extends each pad *into* the bar by that much
     instead of just abutting it at the bar's own endpoint -- see this
@@ -501,6 +552,7 @@ def generate_top_hat_geometry(sol: TopHatSolution, overlap: float = 0.0) -> dict
     half_bar_l = sol.bar_length / 2
     half_bar_w = sol.bar_width / 2
     half_pad_w = sol.pad_width / 2
+    half_crown_w = sol.crown_width / 2
     overlap = min(overlap, sol.bar_length / 2)  # never overlap past the bar's own middle
     pad_a_x0 = -half_bar_l - sol.pad_length
     pad_b_x1 = half_bar_l + sol.pad_length
@@ -512,4 +564,11 @@ def generate_top_hat_geometry(sol: TopHatSolution, overlap: float = 0.0) -> dict
         "pad_a_points": rect(pad_a_x0, -half_pad_w, -half_bar_l + overlap, half_pad_w),
         "bar_points": rect(-half_bar_l, -half_bar_w, half_bar_l, half_bar_w),
         "pad_b_points": rect(half_bar_l - overlap, -half_pad_w, pad_b_x1, half_pad_w),
+        # None (not a degenerate zero-height rectangle) when
+        # crown_height is 0 -- solve_top_hat() allows 0 for a caller
+        # that explicitly wants the old plain-bar shape back.
+        "crown_points": (
+            rect(-half_crown_w, half_bar_w, half_crown_w, half_bar_w + sol.crown_height)
+            if sol.crown_height > 0 else None
+        ),
     }

@@ -112,6 +112,82 @@ def test_generate_top_hat_geometry_is_three_rectangles():
     assert len(geo["pad_b_points"]) == 4
 
 
+# --- top-hat crown (the actual hat shape -- wide brim + tall crown) ---------
+
+def test_solve_top_hat_crown_defaults():
+    # crown_width defaults to bar_width itself; crown_height to 4x
+    # bar_width -- see solve_top_hat()'s docstring for why (a plunge
+    # cut through the crown then travels a constant-width channel, and
+    # 4x bar_width extends the old bar-only trim runway 5x).
+    sol = solve_top_hat(target_r_ohm=5000.0, sheet_rho_ohm_per_sq=100.0, bar_width=100)
+    assert sol.crown_width == 100
+    assert sol.crown_height == 400
+
+
+def test_solve_top_hat_crown_explicit_and_rejects_bad_input():
+    sol = solve_top_hat(target_r_ohm=5000.0, sheet_rho_ohm_per_sq=100.0, bar_width=100,
+                         crown_width=60, crown_height=1000)
+    assert sol.crown_width == 60
+    assert sol.crown_height == 1000
+    with pytest.raises(GeometryError):
+        solve_top_hat(target_r_ohm=5000.0, sheet_rho_ohm_per_sq=100.0, bar_width=100, crown_width=0)
+    with pytest.raises(GeometryError):
+        solve_top_hat(target_r_ohm=5000.0, sheet_rho_ohm_per_sq=100.0, bar_width=100, crown_height=-1)
+
+
+def test_generate_top_hat_geometry_crown_sits_on_bar_top_edge():
+    sol = solve_top_hat(target_r_ohm=5000.0, sheet_rho_ohm_per_sq=100.0, bar_width=100,
+                         crown_width=60, crown_height=300)
+    geo = generate_top_hat_geometry(sol)
+    crown = geo["crown_points"]
+    assert len(crown) == 4
+    half_bar_w = sol.bar_width / 2
+    # the crown's bottom edge sits exactly on the bar's top edge (they
+    # share the resistor_layer, no overlap margin needed -- see the
+    # module docstring), and its top edge is crown_height above that.
+    assert min(p[1] for p in crown) == pytest.approx(half_bar_w, abs=1)
+    assert max(p[1] for p in crown) == pytest.approx(half_bar_w + 300, abs=1)
+    # narrower than the bar, and centered on it
+    assert max(p[0] for p in crown) == pytest.approx(30, abs=1)
+    assert min(p[0] for p in crown) == pytest.approx(-30, abs=1)
+
+
+def test_generate_top_hat_geometry_zero_crown_height_omits_crown():
+    # explicit crown_height=0 is the escape hatch back to the old
+    # plain-bar shape -- generate_top_hat_geometry must not emit a
+    # degenerate zero-height rectangle for it.
+    sol = solve_top_hat(target_r_ohm=5000.0, sheet_rho_ohm_per_sq=100.0, bar_width=100,
+                         crown_height=0)
+    geo = generate_top_hat_geometry(sol)
+    assert geo["crown_points"] is None
+
+
+def test_solve_top_hat_footprint_accounts_for_crown_height():
+    # a tall crown makes the true footprint taller than the pads alone
+    sol = solve_top_hat(target_r_ohm=5000.0, sheet_rho_ohm_per_sq=100.0, bar_width=100,
+                         pad_width=200, crown_height=1000)
+    assert sol.footprint_w == pytest.approx(2 * (50 + 1000))  # 2 * (bar_width/2 + crown_height)
+    # a short/no crown falls back to the pad width setting the footprint
+    sol2 = solve_top_hat(target_r_ohm=5000.0, sheet_rho_ohm_per_sq=100.0, bar_width=100,
+                          pad_width=200, crown_height=0)
+    assert sol2.footprint_w == pytest.approx(200)
+
+
+def test_session_generate_top_hat_resistor_includes_crown_shape():
+    s = _session()
+    sol = solve_top_hat(target_r_ohm=5000.0, sheet_rho_ohm_per_sq=100.0, bar_width=100)
+    name = s.generate_top_hat_resistor(0, 0, sol, ref_des="R9")
+    cell = s.library.cells[name]
+    rules = load_thin_film_rules(s.library)
+    r_layer = rules["resistor_layer"]
+    r_shapes = [shp for shp in cell.shapes if shp.layer == r_layer]
+    # bar + crown, both on the resistor layer, both 4-point rectangles
+    assert len(r_shapes) == 2
+    ys = [p[1] for shp in r_shapes for p in shp.points]
+    # the crown reaches well above the bar's own half-width
+    assert max(ys) > sol.bar_width / 2 + sol.crown_height / 2
+
+
 # --- techfile persistence ----------------------------------------------------
 
 def test_thin_film_rules_round_trip():

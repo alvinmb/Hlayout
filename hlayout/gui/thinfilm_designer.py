@@ -72,11 +72,16 @@ class PreviewCanvas(tk.Canvas):
                 + [("#58a6ff", self._geo["bridge_poly"])]
                 + [("#3fb950", p) for p in self._geo["serpentine_polys"]]
             )
-        return [
+        entries = [
             ("#f5c518", self._geo["pad_a_points"]),
             ("#58a6ff", self._geo["bar_points"]),
             ("#f5c518", self._geo["pad_b_points"]),
         ]
+        # Same color as the bar -- the crown is the same resistor_layer
+        # material, not a separate part (see generate_top_hat_geometry).
+        if self._geo.get("crown_points") is not None:
+            entries.insert(2, ("#58a6ff", self._geo["crown_points"]))
+        return entries
 
     def _redraw(self):
         self.delete("all")
@@ -165,6 +170,8 @@ class ThinFilmDesignerWindow(tk.Toplevel):
         self.bar_width_var = tk.DoubleVar(value=dbu_to_mm(self.rules.get("trace_width", 25)) * 1000)
         self.pad_width_var = tk.DoubleVar(value=0.0)  # 0 => auto (4x bar width)
         self.pad_length_var = tk.DoubleVar(value=0.0)  # 0 => auto (2x bar width)
+        self.crown_width_var = tk.DoubleVar(value=0.0)   # 0 => auto (= bar width)
+        self.crown_height_var = tk.DoubleVar(value=0.0)  # 0 => auto (4x bar width)
 
         self._serp_row0 = 2
         self._serp_fields = []
@@ -176,6 +183,8 @@ class ThinFilmDesignerWindow(tk.Toplevel):
         self._add_field(form, self._serp_row0, "Bar width (µm):", self.bar_width_var, self._tophat_fields)
         self._add_field(form, self._serp_row0 + 1, "Pad width (µm, 0=auto):", self.pad_width_var, self._tophat_fields)
         self._add_field(form, self._serp_row0 + 2, "Pad length (µm, 0=auto):", self.pad_length_var, self._tophat_fields)
+        self._add_field(form, self._serp_row0 + 3, "Crown width (µm, 0=auto):", self.crown_width_var, self._tophat_fields)
+        self._add_field(form, self._serp_row0 + 4, "Crown height (µm, 0=auto):", self.crown_height_var, self._tophat_fields)
 
         ttk.Button(left, text="Solve", command=self._solve).pack(fill="x", pady=(8, 0))
 
@@ -289,9 +298,12 @@ class ThinFilmDesignerWindow(tk.Toplevel):
                 bar_width = mm_to_dbu(self.bar_width_var.get() / 1000)
                 pad_width = mm_to_dbu(self.pad_width_var.get() / 1000) or None
                 pad_length = mm_to_dbu(self.pad_length_var.get() / 1000) or None
+                crown_width = mm_to_dbu(self.crown_width_var.get() / 1000) or None
+                crown_height = mm_to_dbu(self.crown_height_var.get() / 1000) or None
                 sol = solve_top_hat(
                     target_r_ohm=target_r, sheet_rho_ohm_per_sq=rho, bar_width=bar_width,
                     pad_width=pad_width, pad_length=pad_length,
+                    crown_width=crown_width, crown_height=crown_height,
                 )
                 self.candidates = [sol]
                 self.cand_tree.insert("", "end", iid="0", values=(
@@ -382,6 +394,17 @@ class ThinFilmDesignerWindow(tk.Toplevel):
             body_length = sol.squares * sol.trace_width
             body_width = sol.trace_width
         else:
+            # Same style of approximation as the serpentine case above:
+            # the Trim Simulator's engine only solves a uniform-width
+            # rectangular body (hlayout.core.trim_sim), so it's fed
+            # just the bar's own width/length here -- it does NOT
+            # currently account for the crown's extra plunge-cut
+            # runway (see TopHatSolution/generate_top_hat_geometry's
+            # docstrings), so its predicted trim range for a top-hat
+            # candidate is the plain-bar range, understating what the
+            # actual crowned part can do. Modeling the crown properly
+            # would mean teaching trim_sim to solve a non-uniform
+            # (T-shaped) body instead of a plain rectangle.
             body_length = sol.bar_length
             body_width = sol.bar_width
         resistor = Resistor(ref_des=ref_des, value=sol.resistance_ohm, tolerance="", power_mw=0.0,

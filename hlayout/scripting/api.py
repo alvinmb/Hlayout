@@ -819,6 +819,8 @@ class Session:
         with self._batch():
             self.new_cell(device_name)
             self.polygon(r_layer, geo["bar_points"])
+            if geo["crown_points"] is not None:
+                self.polygon(r_layer, geo["crown_points"])
             self.polygon(p_layer, geo["pad_a_points"])
             self.polygon(p_layer, geo["pad_b_points"])
             if ref_des:
