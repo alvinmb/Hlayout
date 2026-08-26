@@ -60,9 +60,14 @@ class ViewWindow(tk.Toplevel):
 class App(tk.Tk):
     # The Layers/Console panel keeps this fixed pixel width, anchored to
     # the right edge of the window (see _build_body). The canvas gets
-    # everything else — with the window width below, that makes the
-    # drawing area roughly 2.5x wider than the original 1280-wide layout.
-    RIGHT_PANEL_WIDTH = 600
+    # everything else. 600px was much wider than the panel's own content
+    # (the Layers table's columns, at UI_FONT_SIZE, need well under 500px)
+    # and ate into canvas space especially on laptop-sized screens, where
+    # the window is clamped well below CANVAS_WIDTH + RIGHT_PANEL_WIDTH and
+    # the two ended up nearly equal width instead of the canvas dominating.
+    # Trimmed to fit the panel's actual content with modest headroom, so
+    # the freed-up width goes to the canvas at every screen size.
+    RIGHT_PANEL_WIDTH = 520
     CANVAS_WIDTH = 1450
 
     # Smallest window size we'll ever request, regardless of screen size —
