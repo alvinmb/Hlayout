@@ -132,6 +132,12 @@ class App(tk.Tk):
         # Console/Command Bar) reference widgets/variables created by the
         # calls above.
         self._build_menu()
+        # After _build_menu(): needs self._menu_bar_anchor (set in
+        # _build_body()) and packs with before=self._menu_bar_anchor
+        # the same way the menu bar does, so it lands directly under
+        # the menu bar regardless of build order -- see
+        # _build_top_toolbar()'s own docstring.
+        self._build_top_toolbar()
         self._build_statusbar()
 
         self.canvas.on_commit = self._on_canvas_commit
@@ -662,6 +668,37 @@ class App(tk.Tk):
         )
         ttk.Button(entry_row, text="Run", command=self._on_console_enter).pack(side="left")
 
+    def _build_top_toolbar(self):
+        """The Cell/Layer selector row, pinned right under the menu bar
+        -- called from __init__ right after _build_menu(), packed with
+        before=self._menu_bar_anchor the same way the menu bar itself
+        is (see that method's docstring for why "before=" is needed at
+        all here: this is built after the canvas/body, but still needs
+        to land above it visually). Split out from _build_bottom_toolbar()
+        because Cell and Layer are the two controls reached for before
+        anything else on a given part of the design -- worth keeping
+        visible at the top instead of grouped in with view/draw-mode
+        options at the bottom."""
+        bar = ttk.Frame(self)
+        bar.pack(side="top", fill="x", before=self._menu_bar_anchor)
+        self._top_toolbar_frame = bar
+
+        ttk.Label(bar, text="Cell:").pack(side="left", padx=(4, 2), pady=2)
+        self.cell_var = tk.StringVar(value=self.session.current_cell_name or "")
+        self.cell_combo = ttk.Combobox(bar, textvariable=self.cell_var, width=18, state="readonly")
+        self.cell_combo.pack(side="left", pady=2)
+        self.cell_combo.bind("<<ComboboxSelected>>", self._on_cell_selected)
+        self._refresh_cell_list()
+
+        ttk.Label(bar, text="Layer:").pack(side="left", padx=(12, 2), pady=2)
+        self.layer_var = tk.StringVar(value=self._layer_label(0))
+        self.layer_combo = ttk.Combobox(bar, textvariable=self.layer_var, width=22,
+                                         values=self._layer_choices())
+        self.layer_combo.pack(side="left", pady=2)
+        self.layer_combo.bind("<<ComboboxSelected>>", lambda e: self._on_layer_change())
+        self.layer_combo.bind("<Return>", lambda e: self._on_layer_change())
+        self.layer_combo.bind("<FocusOut>", lambda e: self._on_layer_change())
+
     def _build_bottom_toolbar(self):
         """The toolbar row at the bottom of the window (above the status
         bar and Command bar). Used to be split across two rows: a view/
@@ -672,8 +709,11 @@ class App(tk.Tk):
         draw-mode buttons were dropped -- they just duplicated the
         Create menu (and Edit > Select), which is the only place to
         pick a draw tool now -- and everything else was merged into
-        this single row and moved down here, leaving the canvas
-        starting right below the menu bar."""
+        this single row and moved down here. Cell and Layer have since
+        moved back out to their own row at the top (_build_top_toolbar()),
+        pinned under the menu bar -- they're reached for more often than
+        the view controls here, so they stay visible without competing
+        with the context bar for space at the bottom."""
         bar = ttk.Frame(self)
         bar.pack(side="top", fill="x")
 
@@ -686,26 +726,20 @@ class App(tk.Tk):
         ]:
             self._toolbar_button(bar, label, cmd).pack(side="left", padx=2, pady=2)
 
-        ttk.Label(bar, text="Cell:").pack(side="left", padx=(12, 2))
-        self.cell_var = tk.StringVar(value=self.session.current_cell_name or "")
-        self.cell_combo = ttk.Combobox(bar, textvariable=self.cell_var, width=18, state="readonly")
-        self.cell_combo.pack(side="left")
-        self.cell_combo.bind("<<ComboboxSelected>>", self._on_cell_selected)
-        self._refresh_cell_list()
-
         # mode_var still exists and still drives the canvas's current
         # draw tool -- it's just set from the Create/Edit menu radio
         # buttons now instead of a duplicate set of buttons here.
         self.mode_var = tk.StringVar(value="select")
 
-        ttk.Label(bar, text="Layer:").pack(side="left", padx=(12, 2))
-        self.layer_var = tk.StringVar(value=self._layer_label(0))
-        self.layer_combo = ttk.Combobox(bar, textvariable=self.layer_var, width=22,
-                                         values=self._layer_choices())
-        self.layer_combo.pack(side="left")
-        self.layer_combo.bind("<<ComboboxSelected>>", lambda e: self._on_layer_change())
-        self.layer_combo.bind("<Return>", lambda e: self._on_layer_change())
-        self.layer_combo.bind("<FocusOut>", lambda e: self._on_layer_change())
+        # Cell/Layer selectors live in the top toolbar now (see
+        # _build_top_toolbar(), called right after _build_menu() in
+        # __init__) -- they're the two controls you reach for before
+        # anything else on a given cell/layer, so they sit right under
+        # the menu bar instead of down here with view/draw-mode
+        # options. cell_var/cell_combo/layer_var/layer_combo are all
+        # still created there; nothing else in this file needs to
+        # change since it only ever refers to those by name, not by
+        # which frame they're packed into.
 
         # Path Width/Cap moved to Setup > Path Style... (see _show_path_style_dialog);
         # width_var/cap_var still back the canvas's path drawing options, just
