@@ -716,16 +716,105 @@ class App(tk.Tk):
         ttk.Button(bar, text="Grid...", command=self.show_grid_spacing_dialog).pack(
             side="left", padx=(0, 2))
 
-        ttk.Button(bar, text="Delete Selected", command=self._delete_selected).pack(
-            side="left", padx=(12, 2))
-
         self.mode_hint_var = tk.StringVar(value="")
         ttk.Label(bar, textvariable=self.mode_hint_var, foreground="#0066cc").pack(
             side="left", padx=(12, 2))
 
+        # A second row, directly below the always-visible one above,
+        # whose contents change with the active Create/Edit tool (see
+        # _refresh_context_bar()) -- e.g. Delete Selected/Insert Vertex
+        # on Edge/Continue Path... while in Select, Width/Cap while
+        # drawing a Path, Finish/Cancel while mid-poly or mid-route.
+        # Its own controls (Width, Cap, Segments, route Layer A/B) are
+        # the same variables the Setup > Path Style.../Circle
+        # Segments.../Route Layers... dialogs edit -- either place
+        # keeps them in sync, this is just quicker access to the ones
+        # relevant to what you're doing right now.
+        self.context_bar = ttk.Frame(self)
+        self.context_bar.pack(side="top", fill="x")
+        self._refresh_context_bar()
+
     def _on_mode_change(self):
         self.canvas.set_mode(self.mode_var.get())
         self.mode_hint_var.set(self.canvas._mode_hint())
+        self._refresh_context_bar()
+
+    def _refresh_context_bar(self):
+        """Rebuild the context bar's contents for the currently active
+        draw/edit mode -- see the comment where self.context_bar is
+        created in _build_bottom_toolbar()."""
+        bar = self.context_bar
+        for w in bar.winfo_children():
+            w.destroy()
+        mode = self.mode_var.get()
+
+        def finish_cancel():
+            ttk.Button(bar, text="Finish", command=self.canvas.finish_draw).pack(
+                side="left", padx=2, pady=2)
+            ttk.Button(bar, text="Cancel", command=self.canvas.cancel_draw).pack(
+                side="left", padx=(0, 12), pady=2)
+
+        if mode == "select":
+            ttk.Button(bar, text="Delete Selected", command=self._delete_selected).pack(
+                side="left", padx=2, pady=2)
+            ttk.Button(bar, text="Edit Selected...", command=self._edit_selected).pack(
+                side="left", padx=2, pady=2)
+            ttk.Button(bar, text="Insert Vertex on Edge", command=self._insert_vertex_on_edge).pack(
+                side="left", padx=2, pady=2)
+            ttk.Button(bar, text="Continue Path...", command=self._continue_path).pack(
+                side="left", padx=2, pady=2)
+            ttk.Button(bar, text="Rotate...", command=self._rotate_selected).pack(
+                side="left", padx=2, pady=2)
+            ttk.Button(bar, text="Copy...", command=self._copy_selected).pack(
+                side="left", padx=2, pady=2)
+            ttk.Button(bar, text="Smash to SRefs", command=self._smash_selected).pack(
+                side="left", padx=2, pady=2)
+
+        elif mode == "path":
+            ttk.Label(bar, text="Width (DBU):").pack(side="left", padx=(2, 2))
+            width_spin = ttk.Spinbox(bar, from_=1, to=100000, width=8, textvariable=self.width_var,
+                                      command=self._on_path_opts_change)
+            width_spin.pack(side="left", padx=(0, 8))
+            width_spin.bind("<Return>", lambda e: self._on_path_opts_change())
+            width_spin.bind("<FocusOut>", lambda e: self._on_path_opts_change())
+            ttk.Label(bar, text="Cap:").pack(side="left", padx=(0, 2))
+            cap_combo = ttk.Combobox(bar, textvariable=self.cap_var, width=8, state="readonly",
+                                      values=["round", "square", "flush"])
+            cap_combo.pack(side="left", padx=(0, 12))
+            cap_combo.bind("<<ComboboxSelected>>", lambda e: self._on_path_opts_change())
+            finish_cancel()
+
+        elif mode == "poly":
+            finish_cancel()
+
+        elif mode == "circle":
+            ttk.Label(bar, text="Segments:").pack(side="left", padx=(2, 2))
+            seg_combo = ttk.Combobox(bar, textvariable=self.segments_var, width=6, state="readonly",
+                                      values=[str(n) for n in CIRCLE_SEGMENT_CHOICES])
+            seg_combo.pack(side="left", padx=(0, 12))
+            seg_combo.bind("<<ComboboxSelected>>", lambda e: self._on_circle_opts_change())
+
+        elif mode == "route":
+            ttk.Label(bar, text="Layer A:").pack(side="left", padx=(2, 2))
+            a_combo = ttk.Combobox(bar, textvariable=self.route_layer_a_var, width=16,
+                                    values=self._layer_choices())
+            a_combo.pack(side="left", padx=(0, 8))
+            a_combo.bind("<<ComboboxSelected>>", lambda e: self._on_route_opts_change())
+            ttk.Label(bar, text="Layer B:").pack(side="left", padx=(0, 2))
+            b_combo = ttk.Combobox(bar, textvariable=self.route_layer_b_var, width=16,
+                                    values=self._layer_choices())
+            b_combo.pack(side="left", padx=(0, 8))
+            b_combo.bind("<<ComboboxSelected>>", lambda e: self._on_route_opts_change())
+            ttk.Button(bar, text="Route Settings...", command=self.show_route_layers_dialog).pack(
+                side="left", padx=(0, 12))
+            finish_cancel()
+
+        elif mode in ("sref", "aref"):
+            ttk.Button(bar, text="Find & Place Cell...", command=self.find_and_place_cell).pack(
+                side="left", padx=2, pady=2)
+
+        elif mode == "zoomwin":
+            pass  # drag a box; nothing to configure
 
     def _layer_label(self, number):
         return f"{number}: {self.session.library.layers[number].name}"
