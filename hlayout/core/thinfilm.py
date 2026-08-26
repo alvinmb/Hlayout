@@ -410,13 +410,12 @@ def solve_top_hat(
     ``pad_width`` defaults to 4x bar_width (wide enough that the
     negligible-pad-resistance assumption holds comfortably) and
     ``pad_length`` to 2x bar_width if not given. ``crown_width``
-    defaults to bar_width itself (the crown is the same width as the
-    bar it rises from -- a plunge cut down its middle then travels
-    through a constant-width channel the whole way, same as this
-    module's docstring describes) and ``crown_height`` to 4x bar_width
-    if not given -- extending a plain bar's plunge-trim runway
-    (bar_width alone) to crown_height + bar_width, i.e. 5x by default;
-    pass a larger crown_height for an even wider trim range. Raises
+    defaults to 2x bar_width (the standard top-hat proportion: the
+    center "hat" is twice the width of the terminal legs it rises
+    from) and ``crown_height`` to 4x bar_width if not given --
+    extending a plain bar's plunge-trim runway (bar_width alone) to
+    crown_height + bar_width, i.e. 5x by default; pass a larger
+    crown_height for an even wider trim range. Raises
     GeometryError if the solved bar_length would be shorter than
     ``min_bar_length`` (e.g. a fab's minimum trimmable resistor length
     -- see Figure 5's "Resistor Length 0.002in Min." in thin-film trim
@@ -430,7 +429,7 @@ def solve_top_hat(
         raise GeometryError("bar width must be positive")
     pad_width = bar_width * 4 if pad_width is None else pad_width
     pad_length = bar_width * 2 if pad_length is None else pad_length
-    crown_width = bar_width if crown_width is None else crown_width
+    crown_width = bar_width * 2 if crown_width is None else crown_width
     crown_height = bar_width * 4 if crown_height is None else crown_height
     if crown_width <= 0:
         raise GeometryError("crown width must be positive")

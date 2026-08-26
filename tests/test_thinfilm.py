@@ -115,12 +115,13 @@ def test_generate_top_hat_geometry_is_three_rectangles():
 # --- top-hat crown (the actual hat shape -- wide brim + tall crown) ---------
 
 def test_solve_top_hat_crown_defaults():
-    # crown_width defaults to bar_width itself; crown_height to 4x
-    # bar_width -- see solve_top_hat()'s docstring for why (a plunge
-    # cut through the crown then travels a constant-width channel, and
-    # 4x bar_width extends the old bar-only trim runway 5x).
+    # crown_width defaults to 2x bar_width (the standard top-hat
+    # proportion -- the center "hat" is twice the width of the
+    # terminal legs it rises from) and crown_height to 4x bar_width --
+    # see solve_top_hat()'s docstring; 4x bar_width extends the old
+    # bar-only trim runway 5x.
     sol = solve_top_hat(target_r_ohm=5000.0, sheet_rho_ohm_per_sq=100.0, bar_width=100)
-    assert sol.crown_width == 100
+    assert sol.crown_width == 200
     assert sol.crown_height == 400
 
 
