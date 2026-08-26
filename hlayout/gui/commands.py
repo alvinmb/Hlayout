@@ -84,6 +84,12 @@ white so it's clear what's selected):
     SMASH                             explode the selected array instance (AREF) back
                                        into individual cell instances (SREFs), one per
                                        array position, and select the new SREFs
+    UNION                             merge a window-selected group of Polygon/
+                                       Rectangle shapes on the same layer into one
+                                       polygon, wherever they touch or overlap --
+                                       errors if they're on different layers or
+                                       don't actually touch/overlap; see also
+                                       MASKOP OR for unioning a whole layer instead
 
 Undo/redo (covers every edit, however it was made -- command bar,
 mouse-driven select/move/rotate/edit/delete, or a script):
@@ -570,6 +576,17 @@ class CommandInterpreter:
         if not self.view.smash_selected():
             raise CommandError("nothing selected to smash -- select an array instance (AREF) first")
         return "array instance smashed into individual cell instances"
+
+    def _cmd_union(self, args):
+        if self.view is None:
+            raise CommandError("UNION requires an attached view")
+        if args:
+            raise CommandError("usage: UNION  (merges the window-selected same-layer "
+                                "Polygon/Rectangle shapes into one)")
+        if not self.view.merge_selected():
+            raise CommandError("nothing suitable selected to merge -- window-select at "
+                                "least two Polygon/Rectangle shapes on the same layer first")
+        return "merged selected shapes into one polygon"
 
     # --- undo/redo --------------------------------------------------------
     def _cmd_undo(self, args):

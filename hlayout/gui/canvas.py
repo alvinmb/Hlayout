@@ -9,6 +9,7 @@ from tkinter import font as tkfont
 from tkinter import simpledialog
 
 from ..core.errors import GeometryError
+from ..core.maskops import layer_to_shapely, shapely_to_polygons
 from ..core.shapes import (ARef, CIRCLE_SEGMENT_CHOICES, MAX_PATH_POINTS, MAX_POLY_POINTS, Path,
                            PathCap, Polygon, Rectangle, SRef, Text)
 from ..core.units import DBU_MM, dbu_to_mm, mm_to_dbu
@@ -1009,6 +1010,75 @@ class LayoutCanvas(tk.Canvas):
         new_srefs = cell.smash_aref(ref)
         self.selected = None
         self.selected_multi = [("sref", s) for s in new_srefs]
+        self._after_edit()
+        return True
+
+    def merge_selected(self):
+        """Merge the window-selected group of same-layer Polygon/
+        Rectangle shapes into a single Polygon on that layer, wherever
+        they touch or overlap -- the MERGE command / Edit > Merge
+        Selected.... Uses hlayout.core.maskops' shapely-backed union,
+        the same machinery Tools > Mask Operations...' OR runs, just
+        scoped to a hand-picked set of shapes instead of a whole
+        layer.
+
+        Returns True if the selection merged into one polygon. Returns
+        False (no error, selection left alone) if the selection isn't
+        at least two Polygon/Rectangle shapes -- a single shape, a
+        vertex/edge, an SRef/ARef, or nothing at all. Raises
+        GeometryError (left for the caller to show) if the shapes
+        selected: are not all on the same layer; don't actually touch
+        or overlap, so there's nothing to merge; or shapely isn't
+        installed.
+
+        A merge that would leave a hole (e.g. an annular selection)
+        collapses that hole the same way every other mask-op result
+        in this tool does -- see hlayout.core.maskops.shapely_to_polygons
+        and its _close_holes() helper for why (this tool's Polygon
+        shape, like GDSII's own boundary record, has no native
+        "hole" concept)."""
+        if self.draw_mode != "select":
+            return False
+        if len(self.selected_multi) < 2:
+            return False
+        cell = self.library.cells.get(self.cell_name)
+        if cell is None:
+            return False
+        shapes = []
+        for kind, shape in self.selected_multi:
+            if kind != "shape" or not isinstance(shape, (Polygon, Rectangle)):
+                return False
+            shapes.append(shape)
+        layers = {s.layer for s in shapes}
+        if len(layers) != 1:
+            raise GeometryError(
+                "selected shapes are on different layers -- MERGE only "
+                "combines shapes that are already on the same layer"
+            )
+        layer = shapes[0].layer
+        datatype = shapes[0].datatype
+        union = layer_to_shapely(shapes)
+        if union.is_empty:
+            return False
+        if union.geom_type != "Polygon":
+            raise GeometryError(
+                "selected shapes don't touch or overlap -- nothing to merge "
+                "(MERGE only combines shapes that share at least an edge or area)"
+            )
+        new_polys = shapely_to_polygons(union, layer, datatype=datatype)
+        if not new_polys:
+            return False
+        self.checkpoint()
+        for s in shapes:
+            if s in cell.shapes:
+                cell.shapes.remove(s)
+        cell.shapes.extend(new_polys)
+        self.selected = None
+        # Exactly one polygon in practice (union.geom_type == "Polygon"
+        # was just checked above), but select via the general list form
+        # -- same convention smash_selected()/delete_selected() use for
+        # a result that replaces one selection with a new group.
+        self.selected_multi = [("shape", p) for p in new_polys]
         self._after_edit()
         return True
 

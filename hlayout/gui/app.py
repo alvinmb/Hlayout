@@ -379,6 +379,7 @@ class App(tk.Tk):
         editm.add_command(label="Rotate...", command=self._rotate_selected)
         editm.add_command(label="Copy...", command=self._copy_selected)
         editm.add_command(label="Smash Selected to SRefs", command=self._smash_selected)
+        editm.add_command(label="Merge Selected...", command=self._merge_selected)
         editm.add_separator()
         editm.add_command(label="Properties", command=self._show_properties_tab)
 
@@ -535,6 +536,36 @@ class App(tk.Tk):
             return
         self.canvas.smash_selected()
         self.status.set("array instance smashed into individual cell instances")
+
+    def _merge_selected(self):
+        """Edit > Merge Selected...: union a window-selected group of
+        same-layer Polygon/Rectangle shapes that touch or overlap into
+        a single polygon. Backed by LayoutCanvas.merge_selected(); same
+        operation as the command bar's UNION command. Unlike most
+        Select-mode actions this needs a *group* selection (drag a box
+        over the shapes, not a single click) -- a lone shape has
+        nothing to merge with."""
+        if len(self.canvas.selected_multi) < 2:
+            dialogs.show_info(
+                "Merge Selected", "Nothing suitable is selected. Switch to Select mode "
+                "and drag a box over at least two Polygon/Rectangle shapes on the same "
+                "layer first -- MERGE needs a window-selected group, not a single click.",
+                parent=self,
+            )
+            return
+        try:
+            merged = self.canvas.merge_selected()
+        except GeometryError as e:
+            dialogs.show_error("Merge Selected", str(e), parent=self)
+            return
+        if not merged:
+            dialogs.show_info(
+                "Merge Selected", "That selection can't be merged -- it must be all "
+                "Polygon/Rectangle shapes (not paths, text, or cell instances).",
+                parent=self,
+            )
+            return
+        self.status.set("merged selected shapes into one polygon")
 
     def run_script_file(self):
         path = filedialog.askopenfilename(filetypes=[("Python scripts", "*.py"), ("All files", "*.*")])
@@ -787,6 +818,7 @@ class App(tk.Tk):
                 ("Rotate...", self._rotate_selected),
                 ("Copy...", self._copy_selected),
                 ("Smash to SRefs", self._smash_selected),
+                ("Merge Selected...", self._merge_selected),
             ]:
                 self._toolbar_button(bar, label, cmd).pack(side="left", padx=2, pady=2)
             return  # nothing pending to Cancel in Select -- it's not a draw tool
