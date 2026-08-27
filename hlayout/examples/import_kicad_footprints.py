@@ -15,7 +15,13 @@ import argparse
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+_here = os.path.dirname(os.path.abspath(__file__))
+_root = _here
+for _ in range(4):
+    if os.path.isdir(os.path.join(_root, "hlayout")):
+        break
+    _root = os.path.dirname(_root)
+sys.path.insert(0, _root)
 
 from hlayout.core.library import Library
 from hlayout.io.gdsio import save_gds
