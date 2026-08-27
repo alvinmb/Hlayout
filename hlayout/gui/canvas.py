@@ -1730,12 +1730,27 @@ class LayoutCanvas(tk.Canvas):
                 # SRef.label) -- drawn from ref.origin every redraw, so
                 # it always tracks the instance's current position/
                 # rotation/mirror without being a separate shape the
-                # user has to remember to move themselves. Fixed
-                # on-screen size (not scaled by zoom), like the Measure
-                # tool's distance label, so it stays legible at any zoom.
+                # user has to remember to move themselves. This is a
+                # separate annotation, NOT a replacement for any Text
+                # shape baked into the referenced cell -- a library
+                # part's own ref-des placeholder (e.g. "C") keeps
+                # showing regardless. Fixed on-screen size in px
+                # (ref.label_height, user-editable -- not scaled by
+                # zoom), like the Measure tool's distance label, so it
+                # stays legible at any zoom. A backing rectangle (same
+                # trick as the Measure tool's label) keeps it readable
+                # over whatever's underneath it, including the
+                # referenced cell's own overlapping ref-des text.
                 label_color = self.SELECTED_COLOR if highlight else "#ffdd55"
-                label_item = self.create_text(hx, hy - 8, text=ref.label, fill=label_color,
-                                               font=self._get_font(11), anchor="s")
+                label_item = self.create_text(hx, hy - 10, text=ref.label, fill=label_color,
+                                               font=self._get_font(ref.label_height), anchor="s")
+                bbox = self.bbox(label_item)
+                if bbox:
+                    x0b, y0b, x1b, y1b = bbox
+                    backing = self.create_rectangle(x0b - 2, y0b - 1, x1b + 2, y1b + 1,
+                                                     fill="#0d1117", outline=label_color)
+                    self.tag_raise(label_item)
+                    self._item_to_shape[backing] = ("sref", ref)
                 self._item_to_shape[label_item] = ("sref", ref)
         for aref in cell.arefs:
             highlight = (aref is selected_aref) or (id(aref) in multi_aref_ids)
@@ -2285,8 +2300,11 @@ def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
         row += 1
         # Per-instance annotation (e.g. a reference designator) -- unlike
         # editing a Text shape inside the referenced cell, this belongs
-        # to just this one placement and follows it when moved.
+        # to just this one placement and follows it when moved. It's a
+        # separate annotation next to the instance, not a replacement
+        # for any ref-des Text baked into the referenced cell itself.
         add_field("Label", shape.label)
+        add_field("Label Size (px)", shape.label_height)
         add_field("X", shape.origin[0])
         add_field("Y", shape.origin[1])
         add_field("Rotation (deg)", shape.rotation)
@@ -2358,6 +2376,10 @@ def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
                 shape.x_reflection = bool(int(entries["Mirror (0/1)"].get()))
             else:  # sref
                 shape.label = entries["Label"].get()
+                label_height = int(round(float(entries["Label Size (px)"].get())))
+                if label_height <= 0:
+                    raise ValueError("label size must be positive")
+                shape.label_height = label_height
                 shape.origin = (int(round(float(entries["X"].get()))),
                                  int(round(float(entries["Y"].get()))))
                 shape.rotation = float(entries["Rotation (deg)"].get())

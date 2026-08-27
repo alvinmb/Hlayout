@@ -36,14 +36,15 @@ UNIT = DBU_MM * 1e-3  # metres per DBU (DBU_MM is in mm; 1 mm = 1e-3 m)
 PRECISION = 1e-9  # metres (1 nm internal precision)
 TEXT_BASE_HEIGHT = 10  # DBU; magnification 1.0 <=> this text height
 
-# GDSII element property number (PROPATTR, 1-127) used to round-trip
-# SRef.label -- a per-instance annotation -- through real GDSII files.
-# GDSII's native SREF element has no text field of its own, so this
-# rides along as a standard element property (PROPATTR/PROPVALUE
-# records), the same mechanism CAD tools use for arbitrary per-element
-# metadata. Chosen arbitrarily in the unreserved range; not used for
-# anything else in this codebase.
+# GDSII element property numbers (PROPATTR, 1-127) used to round-trip
+# SRef.label / SRef.label_height -- per-instance annotation and its
+# on-screen text size -- through real GDSII files. GDSII's native SREF
+# element has no text field of its own, so these ride along as standard
+# element properties (PROPATTR/PROPVALUE records), the same mechanism
+# CAD tools use for arbitrary per-element metadata. Chosen arbitrarily
+# in the unreserved range; not used for anything else in this codebase.
 SREF_LABEL_PROPATTR = 126
+SREF_LABEL_HEIGHT_PROPATTR = 125
 
 _CAP_TO_GDSTK = {
     PathCap.ROUND: "round",
@@ -98,6 +99,7 @@ def save_gds(library: Library, path: str) -> None:
             )
             if ref.label:
                 gref.set_gds_property(SREF_LABEL_PROPATTR, ref.label)
+                gref.set_gds_property(SREF_LABEL_HEIGHT_PROPATTR, str(ref.label_height))
             gcell.add(gref)
 
         for ref in cell.arefs:
@@ -208,6 +210,11 @@ def load_gds(path: str, library_name: Optional[str] = None) -> Library:
                 # gdstk pads GDS property strings to an even byte length
                 # with a trailing NUL; strip it back off.
                 label = (ref.get_gds_property(SREF_LABEL_PROPATTR) or "").rstrip("\x00")
+                label_height_raw = (ref.get_gds_property(SREF_LABEL_HEIGHT_PROPATTR) or "").rstrip("\x00")
+                try:
+                    label_height = int(label_height_raw) if label_height_raw else 14
+                except ValueError:
+                    label_height = 14
                 cell.srefs.append(SRef(
                     cell_name=ref.cell_name,
                     origin=ref.origin,
@@ -215,6 +222,7 @@ def load_gds(path: str, library_name: Optional[str] = None) -> Library:
                     magnification=ref.magnification,
                     x_reflection=ref.x_reflection,
                     label=label,
+                    label_height=label_height,
                 ))
 
     top = gdslib.top_level()

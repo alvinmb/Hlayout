@@ -191,12 +191,19 @@ class SRef:
     designator like "C1") that belongs to THIS placement only -- unlike
     editing a Text shape inside the referenced cell (which would change
     every instance of that cell), each SRef has its own independent
-    label. It's drawn near the instance origin and follows the instance
-    when it's moved, since it's rendered relative to ref.origin on every
-    redraw rather than being a separate freestanding shape. Persisted
-    through GDSII round-trips as a GDS element property (see
-    io/gdsio.py's SREF_LABEL_PROPATTR) since GDSII SREF elements have no
-    native text field of their own."""
+    label. It's a separate annotation drawn next to the instance, NOT a
+    replacement for any Text shape inside the referenced cell -- so a
+    cell's own built-in ref-des placeholder (e.g. "C" baked into a
+    library part) keeps showing regardless of what label an instance
+    is given. It's drawn near the instance origin and follows the
+    instance when it's moved, since it's rendered relative to
+    ref.origin on every redraw rather than being a separate freestanding
+    shape. `label_height` is its on-screen text size in pixels
+    (independent of zoom, like the Measure tool's distance label), user-
+    adjustable per instance. Persisted through GDSII round-trips as a
+    GDS element property (see io/gdsio.py's SREF_LABEL_PROPATTR /
+    SREF_LABEL_HEIGHT_PROPATTR) since GDSII SREF elements have no native
+    text field of their own."""
 
     cell_name: str
     origin: Point
@@ -204,12 +211,15 @@ class SRef:
     magnification: float = 1.0
     x_reflection: bool = False
     label: str = ""
+    label_height: int = 14  # on-screen px, independent of zoom
 
     def __post_init__(self):
         x, y = self.origin
         self.origin = (int(round(x)), int(round(y)))
         if self.magnification <= 0:
             raise GeometryError("sref magnification must be positive")
+        if self.label_height <= 0:
+            raise GeometryError("sref label_height must be positive")
 
 
 @dataclass
