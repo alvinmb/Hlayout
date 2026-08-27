@@ -257,9 +257,12 @@ class App(tk.Tk):
 
     def _build_menu(self):
         """Top-level menu bar: File, Setup, View, Create, Edit,
-        Tools, Help, About. Every command elsewhere in the app (draw
-        toolbar buttons, command bar, etc.) has a home under one of
-        these — this is the canonical, discoverable command structure.
+        Tools, Help. Every command elsewhere in the app (draw toolbar
+        buttons, command bar, etc.) has a home under one of these --
+        this is the canonical, discoverable command structure. About
+        lives under Help (Help > About HLayout) rather than as its own
+        top-level entry -- it's a single info dialog, not a set of
+        commands, so it doesn't need a menu of its own.
 
         This is deliberately NOT a native tk.Menu installed via
         self.config(menu=...). On Windows, a tk.Menu used as a
@@ -278,10 +281,9 @@ class App(tk.Tk):
         bar = ttk.Frame(self)
         bar.pack(side="top", fill="x", before=self._menu_bar_anchor)
         self._menu_bar_frame = bar
-        # Ordered (label, submenu-or-None) pairs, submenu is None for
-        # "About" (a direct button, not a dropdown) -- kept around so
-        # tests/other code can introspect the menu structure without
-        # needing a native tk.Menu / app["menu"] to walk.
+        # Ordered (label, submenu) pairs -- kept around so tests/other
+        # code can introspect the menu structure without needing a
+        # native tk.Menu / app["menu"] to walk.
         self._top_menus = []
         self._menu_buttons = {}
 
@@ -292,10 +294,8 @@ class App(tk.Tk):
         # (self._menu_font on the dropdown tk.Menus below is the
         # equivalent for those, which DO have a real -font option).
         self._menu_button_style = "HLayoutMenuBar.TMenubutton"
-        self._menu_about_style = "HLayoutMenuBar.TButton"
         style = ttk.Style(self)
         style.configure(self._menu_button_style, font=self._menu_font)
-        style.configure(self._menu_about_style, font=self._menu_font)
 
         def add_menu(label):
             mb = ttk.Menubutton(bar, text=label, style=self._menu_button_style)
@@ -418,13 +418,8 @@ class App(tk.Tk):
         # --- Help ----------------------------------------------------------
         helpm = add_menu("Help")
         helpm.add_command(label="Command Reference", command=self.show_command_reference, accelerator="F1")
-
-        # --- About: a single direct button, not a dropdown -----------------
-        about_btn = ttk.Button(bar, text="About", command=self.show_about,
-                                style=self._menu_about_style)
-        about_btn.pack(side="left", padx=(8, 0))
-        self._top_menus.append(("About", None))
-        self._menu_buttons["About"] = about_btn
+        helpm.add_separator()
+        helpm.add_command(label="About HLayout", command=self.show_about)
 
         self.bind("<Control-n>", lambda e: self.new_library())
         self.bind("<Control-o>", lambda e: self.open_gds())
