@@ -1725,6 +1725,18 @@ class LayoutCanvas(tk.Canvas):
                                             outline=handle_color, fill="",
                                             width=2 if highlight else 1)
             self._item_to_shape[handle] = ("sref", ref)
+            if ref.label:
+                # Per-instance label (e.g. a reference designator, see
+                # SRef.label) -- drawn from ref.origin every redraw, so
+                # it always tracks the instance's current position/
+                # rotation/mirror without being a separate shape the
+                # user has to remember to move themselves. Fixed
+                # on-screen size (not scaled by zoom), like the Measure
+                # tool's distance label, so it stays legible at any zoom.
+                label_color = self.SELECTED_COLOR if highlight else "#ffdd55"
+                label_item = self.create_text(hx, hy - 8, text=ref.label, fill=label_color,
+                                               font=self._get_font(11), anchor="s")
+                self._item_to_shape[label_item] = ("sref", ref)
         for aref in cell.arefs:
             highlight = (aref is selected_aref) or (id(aref) in multi_aref_ids)
             self._draw_aref(aref, depth, highlight=highlight)
@@ -2271,6 +2283,10 @@ def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
         tk.Label(win, text="Cell").grid(row=row, column=0, sticky="e", padx=6, pady=3)
         tk.Label(win, text=shape.cell_name).grid(row=row, column=1, sticky="w", padx=6, pady=3)
         row += 1
+        # Per-instance annotation (e.g. a reference designator) -- unlike
+        # editing a Text shape inside the referenced cell, this belongs
+        # to just this one placement and follows it when moved.
+        add_field("Label", shape.label)
         add_field("X", shape.origin[0])
         add_field("Y", shape.origin[1])
         add_field("Rotation (deg)", shape.rotation)
@@ -2340,7 +2356,8 @@ def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
                     raise ValueError("magnification must be positive")
                 shape.magnification = mag
                 shape.x_reflection = bool(int(entries["Mirror (0/1)"].get()))
-            else:
+            else:  # sref
+                shape.label = entries["Label"].get()
                 shape.origin = (int(round(float(entries["X"].get()))),
                                  int(round(float(entries["Y"].get()))))
                 shape.rotation = float(entries["Rotation (deg)"].get())

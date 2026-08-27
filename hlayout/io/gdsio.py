@@ -36,6 +36,15 @@ UNIT = DBU_MM * 1e-3  # metres per DBU (DBU_MM is in mm; 1 mm = 1e-3 m)
 PRECISION = 1e-9  # metres (1 nm internal precision)
 TEXT_BASE_HEIGHT = 10  # DBU; magnification 1.0 <=> this text height
 
+# GDSII element property number (PROPATTR, 1-127) used to round-trip
+# SRef.label -- a per-instance annotation -- through real GDSII files.
+# GDSII's native SREF element has no text field of its own, so this
+# rides along as a standard element property (PROPATTR/PROPVALUE
+# records), the same mechanism CAD tools use for arbitrary per-element
+# metadata. Chosen arbitrarily in the unreserved range; not used for
+# anything else in this codebase.
+SREF_LABEL_PROPATTR = 126
+
 _CAP_TO_GDSTK = {
     PathCap.ROUND: "round",
     PathCap.SQUARE: "extended",
@@ -80,13 +89,16 @@ def save_gds(library: Library, path: str) -> None:
         for ref in cell.srefs:
             if ref.cell_name not in gcells:
                 raise LayoutError(f"sref in {name!r} references unknown cell {ref.cell_name!r}")
-            gcell.add(gdstk.Reference(
+            gref = gdstk.Reference(
                 gcells[ref.cell_name],
                 origin=ref.origin,
                 rotation=math.radians(ref.rotation),
                 magnification=ref.magnification,
                 x_reflection=ref.x_reflection,
-            ))
+            )
+            if ref.label:
+                gref.set_gds_property(SREF_LABEL_PROPATTR, ref.label)
+            gcell.add(gref)
 
         for ref in cell.arefs:
             if ref.cell_name not in gcells:
@@ -193,12 +205,16 @@ def load_gds(path: str, library_name: Optional[str] = None) -> Library:
                     x_reflection=ref.x_reflection,
                 ))
             else:
+                # gdstk pads GDS property strings to an even byte length
+                # with a trailing NUL; strip it back off.
+                label = (ref.get_gds_property(SREF_LABEL_PROPATTR) or "").rstrip("\x00")
                 cell.srefs.append(SRef(
                     cell_name=ref.cell_name,
                     origin=ref.origin,
                     rotation=math.degrees(ref.rotation),
                     magnification=ref.magnification,
                     x_reflection=ref.x_reflection,
+                    label=label,
                 ))
 
     top = gdslib.top_level()

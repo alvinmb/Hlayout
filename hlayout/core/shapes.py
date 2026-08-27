@@ -185,13 +185,25 @@ class Text:
 class SRef:
     """An instance ('structure reference') of another cell, placed at an
     origin with optional rotation, magnification and mirroring. The
-    referenced cell may itself contain data on any layer."""
+    referenced cell may itself contain data on any layer.
+
+    `label` is an optional per-instance annotation (e.g. a reference
+    designator like "C1") that belongs to THIS placement only -- unlike
+    editing a Text shape inside the referenced cell (which would change
+    every instance of that cell), each SRef has its own independent
+    label. It's drawn near the instance origin and follows the instance
+    when it's moved, since it's rendered relative to ref.origin on every
+    redraw rather than being a separate freestanding shape. Persisted
+    through GDSII round-trips as a GDS element property (see
+    io/gdsio.py's SREF_LABEL_PROPATTR) since GDSII SREF elements have no
+    native text field of their own."""
 
     cell_name: str
     origin: Point
     rotation: float = 0.0  # degrees, counter-clockwise
     magnification: float = 1.0
     x_reflection: bool = False
+    label: str = ""
 
     def __post_init__(self):
         x, y = self.origin
