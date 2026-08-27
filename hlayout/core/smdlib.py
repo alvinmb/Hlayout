@@ -1,6 +1,6 @@
 """Generate a library of standard SMD component footprint cells.
 
-Each cell gets:
+Every cell gets:
   * a body-outline Path on layer 60 (BODY_OUTLINE_LAYER), traced along the
     package's maximum/worst-case rectangular body envelope, at a path
     width of 0.1 mm (100 DBU) -- per explicit user spec.
@@ -8,31 +8,34 @@ Each cell gets:
     using the standard prefix letter(s) for that component family
     (C=capacitor, R=resistor, T=transistor, D=diode, IC=integrated
     circuit), centred on the cell origin.
-  * for the passive chip R/C cells only: two filled terminal/end-cap
-    Rectangles on layer 62 (TERMINAL_LAYER) -- the wraparound metallized
-    terminations a real chip resistor/capacitor has at each end, which a
-    bare body outline doesn't show. See _add_chip_terminals() for the
-    sizing rule and its caveat.
+  * leg/lead geometry, so every component shows how it actually contacts
+    the board, not just a bare outline:
+      - chip R/C: two filled terminal/end-cap Rectangles on layer 62
+        (TERMINAL_LAYER) -- the wraparound metallized terminations a real
+        chip resistor/capacitor has at each end. See _add_chip_terminals().
+      - SOT-23 / SOD-123 / SOIC: filled gull-wing lead Rectangles on layer
+        63 (LEAD_LAYER), one per pin, projecting outward from the body
+        edge. See _add_gullwing_leads() and _SOT23_PINS/_SOD123_PINS.
 
 Package set covered:
   * Standard EIA chip resistor/capacitor body sizes (0201..2512) -- both
     R_<size> and C_<size> cells are generated, since a given EIA chip
     size is a single physical body shared by resistors and capacitors.
-  * T_SOT23   -- SOT-23 (3-terminal transistor/small-signal package)
-  * D_SOD123  -- SOD-123 (2-terminal diode package)
-  * IC_SOIC14, IC_SOIC16 -- narrow-body (3.9 mm) SOIC, JEDEC MS-012
-  * IC_SOIC24 -- wide-body (7.5 mm) SOIC, JEDEC MS-013
+  * T_SOT23   -- SOT-23 (3-terminal transistor/small-signal package),
+    JEDEC TO-236: 2 leads on one long side (0.95 mm pitch), 1 centred
+    lead on the opposite side.
+  * D_SOD123  -- SOD-123 (2-terminal diode package): 1 gull-wing lead
+    at each end.
+  * IC_SOIC14, IC_SOIC16 -- narrow-body (3.9 mm) SOIC, JEDEC MS-012,
+    N/2 gull-wing leads per long side at 1.27 mm pitch.
+  * IC_SOIC24 -- wide-body (7.5 mm) SOIC, JEDEC MS-013, same pitch.
 
-  T/D/IC cells do NOT get lead/terminal geometry -- their leads (gull-wing
-  pitch, lead width/length) vary by package in ways that need a real
-  datasheet to get right, unlike the simple wraparound end-cap shared by
-  every two-terminal chip R/C. Ask if you want those added too.
-
-IMPORTANT: the body dimensions below are generic, commonly-published
-JEDEC/EIA *nominal maximum* envelope values, not pulled from any one
-manufacturer's datasheet. They are a reasonable starting point for a
-component library but should be checked against the actual datasheet
-for any part before this geometry is used for fabrication or DRC.
+IMPORTANT: every dimension below -- body envelopes AND lead pitch/width/
+extension -- is a generic, commonly-published JEDEC/EIA/TO-236 *nominal*
+value, not pulled from any one manufacturer's datasheet. They're a
+reasonable starting point for a component library but should be checked
+against the real datasheet for any part before this geometry is used for
+fabrication or DRC.
 """
 from .library import Library
 from .units import mm_to_dbu
@@ -40,15 +43,34 @@ from .units import mm_to_dbu
 BODY_OUTLINE_LAYER = 60
 REFDES_LAYER = 61
 TERMINAL_LAYER = 62
+LEAD_LAYER = 63
 BODY_OUTLINE_WIDTH_MM = 0.1  # path width for the body-outline trace
 
 # Chip terminal (end-cap) length as a fraction of the body length, capped
 # at an absolute maximum -- a generic representative proportion (typical
 # real terminals run roughly a quarter to a third of body length on small
-# chips), not per-size datasheet values. Verify against a real datasheet
-# before using this for fabrication/DRC.
+# chips), not per-size datasheet values.
 TERMINAL_LENGTH_FRACTION = 0.25
 TERMINAL_LENGTH_MAX_MM = 0.6
+
+# Gull-wing lead nominal dimensions, generic per package family (not per
+# manufacturer). "pitch" is pin-to-pin spacing; "width" is the lead's
+# footprint along the pitch direction; "extension" is how far the lead
+# projects outward past the body edge.
+SOT23_PIN_PITCH_MM = 0.95     # TO-236 pitch between the 2 leads on one side
+SOT23_LEAD_WIDTH_MM = 0.4
+SOT23_LEAD_EXTENSION_MM = 0.4
+
+SOD123_LEAD_WIDTH_MM = 1.0
+SOD123_LEAD_EXTENSION_MM = 0.4
+
+SOIC_PIN_PITCH_MM = 1.27      # JEDEC MS-012/MS-013 standard pitch
+SOIC_LEAD_WIDTH_MM = 0.4
+# Chosen so body_width + 2*extension lands on the commonly-published
+# overall lead-span: ~6.0 mm for narrow-body (3.9 mm) SOIC, ~10.3 mm for
+# wide-body (7.5 mm) SOIC.
+SOIC_LEAD_EXTENSION_NARROW_MM = 1.05
+SOIC_LEAD_EXTENSION_WIDE_MM = 1.4
 
 # EIA chip size -> (length_mm, width_mm), nominal maximum body envelope.
 CHIP_SIZES_MM = {
@@ -63,13 +85,15 @@ CHIP_SIZES_MM = {
     "2512": (6.40, 3.20),
 }
 
-# Discrete/IC packages -> (prefix, length_mm, width_mm, refdes_text).
+# Discrete/IC packages -> (prefix, length_mm, width_mm, kind, pins).
+# "kind" selects which lead layout _add_leads() draws; "pins" is only
+# used for the SOIC kind (leads-per-side = pins // 2).
 OTHER_PACKAGES_MM = {
-    "T_SOT23": ("T", 2.90, 1.30),
-    "D_SOD123": ("D", 3.70, 1.70),
-    "IC_SOIC14": ("IC", 8.65, 3.90),
-    "IC_SOIC16": ("IC", 9.90, 3.90),
-    "IC_SOIC24": ("IC", 15.40, 7.50),
+    "T_SOT23": ("T", 2.90, 1.30, "sot23", 3),
+    "D_SOD123": ("D", 3.70, 1.70, "sod123", 2),
+    "IC_SOIC14": ("IC", 8.65, 3.90, "soic", 14),
+    "IC_SOIC16": ("IC", 9.90, 3.90, "soic", 16),
+    "IC_SOIC24": ("IC", 15.40, 7.50, "soic", 24),
 }
 
 
@@ -102,12 +126,71 @@ def _add_chip_terminals(cell, length_mm, width_mm):
     cell.add_rectangle(TERMINAL_LAYER, half_l - term_len, -half_w, half_l, half_w)
 
 
+def _side_lead_positions(n, pitch_mm):
+    """x-offsets (mm) for `n` leads centred on 0 at `pitch_mm` spacing."""
+    return [(k - (n - 1) / 2) * pitch_mm for k in range(n)]
+
+
+def _add_side_leads(cell, xs_mm, y_edge, extension, lead_width):
+    """Add gull-wing lead Rectangles projecting outward (+y direction if
+    y_edge > 0, else -y direction) from a body edge at `y_edge`, one per
+    x-offset in `xs_mm` (DBU)."""
+    half_w = mm_to_dbu(lead_width) / 2
+    ext = mm_to_dbu(extension)
+    for x_mm in xs_mm:
+        x = mm_to_dbu(x_mm)
+        if y_edge > 0:
+            cell.add_rectangle(LEAD_LAYER, x - half_w, y_edge, x + half_w, y_edge + ext)
+        else:
+            cell.add_rectangle(LEAD_LAYER, x - half_w, y_edge - ext, x + half_w, y_edge)
+
+
+def _add_end_leads(cell, ys_mm, x_edge, extension, lead_width):
+    """Add gull-wing lead Rectangles projecting outward from a body end
+    at `x_edge` (+x direction if x_edge > 0, else -x direction), one per
+    y-offset in `ys_mm` (DBU)."""
+    half_w = mm_to_dbu(lead_width) / 2
+    ext = mm_to_dbu(extension)
+    for y_mm in ys_mm:
+        y = mm_to_dbu(y_mm)
+        if x_edge > 0:
+            cell.add_rectangle(LEAD_LAYER, x_edge, y - half_w, x_edge + ext, y + half_w)
+        else:
+            cell.add_rectangle(LEAD_LAYER, x_edge - ext, y - half_w, x_edge, y + half_w)
+
+
+def _add_leads(cell, kind, length_mm, width_mm, pins):
+    half_l = mm_to_dbu(length_mm) / 2
+    half_w = mm_to_dbu(width_mm) / 2
+
+    if kind == "sot23":
+        # 2 leads on one long side (pitch SOT23_PIN_PITCH_MM), 1 lead
+        # centred on the opposite side -- standard TO-236 pinout.
+        xs = _side_lead_positions(2, SOT23_PIN_PITCH_MM)
+        _add_side_leads(cell, xs, -half_w, SOT23_LEAD_EXTENSION_MM, SOT23_LEAD_WIDTH_MM)
+        _add_side_leads(cell, [0.0], half_w, SOT23_LEAD_EXTENSION_MM, SOT23_LEAD_WIDTH_MM)
+
+    elif kind == "sod123":
+        # 1 gull-wing lead at each end.
+        _add_end_leads(cell, [0.0], half_l, SOD123_LEAD_EXTENSION_MM, SOD123_LEAD_WIDTH_MM)
+        _add_end_leads(cell, [0.0], -half_l, SOD123_LEAD_EXTENSION_MM, SOD123_LEAD_WIDTH_MM)
+
+    elif kind == "soic":
+        # N/2 leads per long side, 1.27 mm pitch, standard SOIC pinout.
+        n_per_side = pins // 2
+        xs = _side_lead_positions(n_per_side, SOIC_PIN_PITCH_MM)
+        extension = SOIC_LEAD_EXTENSION_WIDE_MM if width_mm > 5.0 else SOIC_LEAD_EXTENSION_NARROW_MM
+        _add_side_leads(cell, xs, -half_w, extension, SOIC_LEAD_WIDTH_MM)
+        _add_side_leads(cell, xs, half_w, extension, SOIC_LEAD_WIDTH_MM)
+
+
 def generate_smd_library(name="SMD_LIBRARY") -> Library:
     """Build and return a Library of standard SMD component cells.
 
     Body outlines: Path, layer 60, width 0.1 mm.
     Ref-des placeholders: Text, layer 61, prefix only (C/R/T/D/IC).
     Chip R/C terminals (end-caps): Rectangle, layer 62.
+    SOT-23/SOD-123/SOIC gull-wing leads: Rectangle, layer 63.
     """
     lib = Library(name)
 
@@ -120,8 +203,9 @@ def generate_smd_library(name="SMD_LIBRARY") -> Library:
         _add_body_and_refdes(c_cell, "C", length_mm, width_mm)
         _add_chip_terminals(c_cell, length_mm, width_mm)
 
-    for cell_name, (prefix, length_mm, width_mm) in OTHER_PACKAGES_MM.items():
+    for cell_name, (prefix, length_mm, width_mm, kind, pins) in OTHER_PACKAGES_MM.items():
         cell = lib.new_cell(cell_name)
         _add_body_and_refdes(cell, prefix, length_mm, width_mm)
+        _add_leads(cell, kind, length_mm, width_mm, pins)
 
     return lib

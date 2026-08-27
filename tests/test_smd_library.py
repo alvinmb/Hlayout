@@ -4,8 +4,9 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from hlayout.core.shapes import Path, Rectangle, Text
-from hlayout.core.smdlib import (BODY_OUTLINE_LAYER, CHIP_SIZES_MM, OTHER_PACKAGES_MM,
-                                  REFDES_LAYER, TERMINAL_LAYER, generate_smd_library)
+from hlayout.core.smdlib import (BODY_OUTLINE_LAYER, CHIP_SIZES_MM, LEAD_LAYER,
+                                  OTHER_PACKAGES_MM, REFDES_LAYER, TERMINAL_LAYER,
+                                  generate_smd_library)
 from hlayout.core.units import mm_to_dbu
 
 
@@ -78,11 +79,62 @@ def test_chip_rc_cells_get_two_terminals_on_layer_62():
             assert all(t.layer == TERMINAL_LAYER for t in terminals)
 
 
-def test_other_packages_get_no_terminals():
+def test_other_packages_get_no_terminal_layer_rectangles():
+    # T/D/IC packages get gull-wing LEAD_LAYER rectangles, not the
+    # TERMINAL_LAYER wraparound end-caps chip R/C uses.
     lib = generate_smd_library()
     for cell_name in OTHER_PACKAGES_MM:
         cell = lib.cells[cell_name]
-        assert not any(isinstance(s, Rectangle) for s in cell.shapes)
+        assert not any(isinstance(s, Rectangle) and s.layer == TERMINAL_LAYER
+                        for s in cell.shapes)
+
+
+def test_each_package_gets_one_lead_per_pin_on_layer_63():
+    lib = generate_smd_library()
+    expected_pins = {"T_SOT23": 3, "D_SOD123": 2, "IC_SOIC14": 14,
+                      "IC_SOIC16": 16, "IC_SOIC24": 24}
+    for cell_name, pins in expected_pins.items():
+        cell = lib.cells[cell_name]
+        leads = [s for s in cell.shapes if isinstance(s, Rectangle) and s.layer == LEAD_LAYER]
+        assert len(leads) == pins, f"{cell_name}: expected {pins} leads, got {len(leads)}"
+
+
+def test_soic_leads_sit_outside_the_body_on_both_long_sides():
+    lib = generate_smd_library()
+    length_mm, width_mm = 9.90, 3.90  # IC_SOIC16
+    half_w = mm_to_dbu(width_mm) / 2
+    cell = lib.cells["IC_SOIC16"]
+    leads = [s for s in cell.shapes if isinstance(s, Rectangle) and s.layer == LEAD_LAYER]
+    assert len(leads) == 16
+    top = [l for l in leads if min(p[1] for p in l.points) >= half_w]
+    bottom = [l for l in leads if max(p[1] for p in l.points) <= -half_w]
+    assert len(top) == 8
+    assert len(bottom) == 8
+
+
+def test_sot23_leads_are_2_plus_1():
+    lib = generate_smd_library()
+    width_mm = 1.30
+    half_w = mm_to_dbu(width_mm) / 2
+    cell = lib.cells["T_SOT23"]
+    leads = [s for s in cell.shapes if isinstance(s, Rectangle) and s.layer == LEAD_LAYER]
+    assert len(leads) == 3
+    one_side = [l for l in leads if min(p[1] for p in l.points) >= half_w]
+    other_side = [l for l in leads if max(p[1] for p in l.points) <= -half_w]
+    assert {len(one_side), len(other_side)} == {1, 2}
+
+
+def test_sod123_leads_are_at_each_end():
+    lib = generate_smd_library()
+    length_mm = 3.70
+    half_l = mm_to_dbu(length_mm) / 2
+    cell = lib.cells["D_SOD123"]
+    leads = [s for s in cell.shapes if isinstance(s, Rectangle) and s.layer == LEAD_LAYER]
+    assert len(leads) == 2
+    left = [l for l in leads if max(p[0] for p in l.points) <= -half_l]
+    right = [l for l in leads if min(p[0] for p in l.points) >= half_l]
+    assert len(left) == 1
+    assert len(right) == 1
 
 
 def test_terminals_span_full_body_width_and_sit_at_each_end():
