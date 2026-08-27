@@ -79,7 +79,7 @@ class LayoutCanvas(tk.Canvas):
         self._font_cache = {}
 
         # --- interactive drawing state ---------------------------------
-        self.draw_mode = "select"  # select | rect | poly | path | text | sref | aref | circle | zoomwin | route
+        self.draw_mode = "select"  # select | rect | poly | path | text | sref | aref | circle | zoomwin | route | measure
         self.current_layer = 0
         self.path_width = 2
         self.path_cap = "round"
@@ -374,6 +374,8 @@ class LayoutCanvas(tk.Canvas):
                     "and array parameters",
             "circle": "Circle: click the center, then click a point on the edge to set the radius",
             "route": self._route_hint(),
+            "measure": "Measure: click a start point, then click a second point -- "
+                       "the distance between them is shown on the canvas and in the status bar",
         }
         return hints.get(self.draw_mode, "")
 
@@ -389,6 +391,7 @@ class LayoutCanvas(tk.Canvas):
         self._continue_target = None
         self.delete("preview")
         self.delete("zoomwin_box")
+        self.delete("measure_result")
         self._zoomwin_start = None
         if self.draw_mode == "route":
             self._route_active_layer = self.route_layer_a
@@ -498,6 +501,15 @@ class LayoutCanvas(tk.Canvas):
             # Pixel coordinates, not the snapped DBU `pt` computed above
             # -- zooming to a view is a screen-space drag, not geometry.
             self._zoomwin_start = (e.x, e.y)
+        elif self.draw_mode == "measure":
+            # A fresh first click starts a new measurement -- drop
+            # whatever the previous one left on screen rather than
+            # letting it linger once a new one is started.
+            if not self._pending_points:
+                self.delete("measure_result")
+            self._pending_points.append(pt)
+            if len(self._pending_points) == 2:
+                self._commit_measure()
 
     def _on_double_click(self, e):
         if self.draw_mode == "select":
@@ -1249,6 +1261,9 @@ class LayoutCanvas(tk.Canvas):
                               outline="#00d0ff", dash=(3, 2), tags="preview")
             self.create_oval(p0[0] - 2, p0[1] - 2, p0[0] + 2, p0[1] + 2, fill="#00d0ff",
                               outline="", tags="preview")
+        elif self.draw_mode == "measure" and len(self._pending_points) == 1:
+            x0, y0 = self._pending_points[0]
+            self._draw_measure_overlay(x0, y0, mouse_x, mouse_y, tag="preview")
         elif self.draw_mode in ("poly", "path", "route"):
             coords = []
             for p in self._pending_points:
@@ -1276,6 +1291,51 @@ class LayoutCanvas(tk.Canvas):
                 px, py = self.to_px(*p)
                 self.create_oval(px - 2, py - 2, px + 2, py + 2, fill="#00d0ff",
                                   outline="", tags="preview")
+
+    def _format_distance(self, x0, y0, x1, y1):
+        dx, dy = x1 - x0, y1 - y0
+        dist = (dx * dx + dy * dy) ** 0.5
+        return (f"{dbu_to_mm(dist):.3f} mm  (dx={dbu_to_mm(dx):.3f}, dy={dbu_to_mm(dy):.3f})")
+
+    def _draw_measure_overlay(self, x0, y0, x1, y1, tag):
+        """Draw a Measure tool line from (x0, y0) to (x1, y1) DBU plus a
+        distance label at its midpoint, tagged `tag` -- "preview" for
+        the live line that follows the mouse after the first click (so
+        it's cleared/redrawn like every other rubber-band preview), or
+        "measure_result" for the final line left on screen once the
+        second click lands (cleared by cancel_draw()/the next
+        measurement's first click, or any redraw() -- see
+        _on_click()'s "measure" branch and cancel_draw())."""
+        p0 = self.to_px(x0, y0)
+        p1 = self.to_px(x1, y1)
+        self.create_line(*p0, *p1, fill="#00d0ff", dash=(3, 2), width=1.5, tags=tag)
+        for px, py in (p0, p1):
+            self.create_oval(px - 3, py - 3, px + 3, py + 3, outline="#00d0ff",
+                              fill="#0d1117", tags=tag)
+        label = self._format_distance(x0, y0, x1, y1)
+        mx, my = (p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2 - 12
+        # A small backing rectangle behind the text so the label stays
+        # legible over the design/grid underneath it -- text_bbox needs
+        # the text item to already exist to measure it, so create the
+        # text first, size the rectangle to its bbox, then raise the
+        # text back above the rectangle.
+        text_id = self.create_text(mx, my, text=label, fill="#00d0ff",
+                                    font=("TkDefaultFont", 9), tags=tag)
+        bbox = self.bbox(text_id)
+        if bbox:
+            x0b, y0b, x1b, y1b = bbox
+            self.create_rectangle(x0b - 3, y0b - 1, x1b + 3, y1b + 1,
+                                   fill="#0d1117", outline="#00d0ff", tags=tag)
+            self.tag_raise(text_id)
+
+    def _commit_measure(self):
+        (x0, y0), (x1, y1) = self._pending_points
+        self._pending_points = []
+        self.delete("preview")
+        self.delete("measure_result")
+        self._draw_measure_overlay(x0, y0, x1, y1, tag="measure_result")
+        self.on_mode_status(f"Measure: distance = {self._format_distance(x0, y0, x1, y1)} "
+                             f"-- click a new start point to measure again")
 
     # --- commits: turn pending points into a shape via on_commit ---------
     def _commit_rect(self):

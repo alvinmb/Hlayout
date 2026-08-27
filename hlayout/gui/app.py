@@ -349,6 +349,8 @@ class App(tk.Tk):
         viewm.add_separator()
         viewm.add_radiobutton(label="Zoom Window", value="zoomwin", variable=self.mode_var,
                                command=self._on_mode_change, accelerator="W")
+        viewm.add_radiobutton(label="Measure", value="measure", variable=self.mode_var,
+                               command=self._on_mode_change, accelerator="M")
         viewm.add_separator()
         viewm.add_command(label="New View Window", command=self.new_view_window)
 
@@ -902,7 +904,7 @@ class App(tk.Tk):
                 side="left", padx=2, pady=2)
             cancel_btn()
 
-        else:  # rect, text, zoomwin -- single-click-then-click-again tools
+        else:  # rect, text, zoomwin, measure -- single-click-then-click-again tools
             cancel_btn()
 
     def _layer_label(self, number):
