@@ -530,6 +530,12 @@ class LayoutCanvas(tk.Canvas):
     VERTEX_HIT_PX = 6
     EDGE_HIT_PX = 5
 
+    #: Radius (screen px) of the endpoint markers _draw_measure_overlay()
+    #: draws at each end of a Measure tool line -- bumped up from the
+    #: original 3px so the endpoints read clearly at a glance instead of
+    #: needing to zoom in to see exactly where the line lands.
+    MEASURE_POINT_RADIUS = 6
+
     def _pick_item_at(self, ex, ey):
         items = self.find_overlapping(ex - 3, ey - 3, ex + 3, ey + 3)
         for item in reversed(items):
@@ -1309,9 +1315,10 @@ class LayoutCanvas(tk.Canvas):
         p0 = self.to_px(x0, y0)
         p1 = self.to_px(x1, y1)
         self.create_line(*p0, *p1, fill="#00d0ff", dash=(3, 2), width=1.5, tags=tag)
+        r = self.MEASURE_POINT_RADIUS
         for px, py in (p0, p1):
-            self.create_oval(px - 3, py - 3, px + 3, py + 3, outline="#00d0ff",
-                              fill="#0d1117", tags=tag)
+            self.create_oval(px - r, py - r, px + r, py + r, outline="#00d0ff",
+                              width=2, fill="#0d1117", tags=tag)
         label = self._format_distance(x0, y0, x1, y1)
         mx, my = (p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2 - 12
         # A small backing rectangle behind the text so the label stays
@@ -1319,7 +1326,7 @@ class LayoutCanvas(tk.Canvas):
         # the text item to already exist to measure it, so create the
         # text first, size the rectangle to its bbox, then raise the
         # text back above the rectangle.
-        text_id = self.create_text(mx, my, text=label, fill="#00d0ff",
+        text_id = self.create_text(mx, my, text=label, fill="white",
                                     font=("TkDefaultFont", 9), tags=tag)
         bbox = self.bbox(text_id)
         if bbox:
