@@ -3,9 +3,9 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from hlayout.core.shapes import Path, Text
+from hlayout.core.shapes import Path, Rectangle, Text
 from hlayout.core.smdlib import (BODY_OUTLINE_LAYER, CHIP_SIZES_MM, OTHER_PACKAGES_MM,
-                                  REFDES_LAYER, generate_smd_library)
+                                  REFDES_LAYER, TERMINAL_LAYER, generate_smd_library)
 from hlayout.core.units import mm_to_dbu
 
 
@@ -66,3 +66,41 @@ def test_soic_packages_use_correct_body_width():
     wide_ys = [p[1] for p in wide.points]
     assert max(narrow_ys) - min(narrow_ys) == mm_to_dbu(3.90)
     assert max(wide_ys) - min(wide_ys) == mm_to_dbu(7.50)
+
+
+def test_chip_rc_cells_get_two_terminals_on_layer_62():
+    lib = generate_smd_library()
+    for size in CHIP_SIZES_MM:
+        for prefix in ("R", "C"):
+            cell = lib.cells[f"{prefix}_{size}"]
+            terminals = [s for s in cell.shapes if isinstance(s, Rectangle)]
+            assert len(terminals) == 2
+            assert all(t.layer == TERMINAL_LAYER for t in terminals)
+
+
+def test_other_packages_get_no_terminals():
+    lib = generate_smd_library()
+    for cell_name in OTHER_PACKAGES_MM:
+        cell = lib.cells[cell_name]
+        assert not any(isinstance(s, Rectangle) for s in cell.shapes)
+
+
+def test_terminals_span_full_body_width_and_sit_at_each_end():
+    lib = generate_smd_library()
+    length_mm, width_mm = CHIP_SIZES_MM["0805"]
+    cell = lib.cells["C_0805"]
+    left, right = [s for s in cell.shapes if isinstance(s, Rectangle)]
+    if left.points[0][0] > right.points[0][0]:
+        left, right = right, left
+
+    half_l = mm_to_dbu(length_mm) / 2
+    half_w = mm_to_dbu(width_mm) / 2
+    xs_left = [p[0] for p in left.points]
+    ys_left = [p[1] for p in left.points]
+    xs_right = [p[0] for p in right.points]
+
+    assert min(xs_left) == -half_l
+    assert max(xs_right) == half_l
+    assert min(ys_left) == -half_w and max(ys_left) == half_w
+    # the two terminals don't overlap in the middle of the body
+    assert max(xs_left) <= min(xs_right)

@@ -8,6 +8,11 @@ Each cell gets:
     using the standard prefix letter(s) for that component family
     (C=capacitor, R=resistor, T=transistor, D=diode, IC=integrated
     circuit), centred on the cell origin.
+  * for the passive chip R/C cells only: two filled terminal/end-cap
+    Rectangles on layer 62 (TERMINAL_LAYER) -- the wraparound metallized
+    terminations a real chip resistor/capacitor has at each end, which a
+    bare body outline doesn't show. See _add_chip_terminals() for the
+    sizing rule and its caveat.
 
 Package set covered:
   * Standard EIA chip resistor/capacitor body sizes (0201..2512) -- both
@@ -17,6 +22,11 @@ Package set covered:
   * D_SOD123  -- SOD-123 (2-terminal diode package)
   * IC_SOIC14, IC_SOIC16 -- narrow-body (3.9 mm) SOIC, JEDEC MS-012
   * IC_SOIC24 -- wide-body (7.5 mm) SOIC, JEDEC MS-013
+
+  T/D/IC cells do NOT get lead/terminal geometry -- their leads (gull-wing
+  pitch, lead width/length) vary by package in ways that need a real
+  datasheet to get right, unlike the simple wraparound end-cap shared by
+  every two-terminal chip R/C. Ask if you want those added too.
 
 IMPORTANT: the body dimensions below are generic, commonly-published
 JEDEC/EIA *nominal maximum* envelope values, not pulled from any one
@@ -29,7 +39,16 @@ from .units import mm_to_dbu
 
 BODY_OUTLINE_LAYER = 60
 REFDES_LAYER = 61
+TERMINAL_LAYER = 62
 BODY_OUTLINE_WIDTH_MM = 0.1  # path width for the body-outline trace
+
+# Chip terminal (end-cap) length as a fraction of the body length, capped
+# at an absolute maximum -- a generic representative proportion (typical
+# real terminals run roughly a quarter to a third of body length on small
+# chips), not per-size datasheet values. Verify against a real datasheet
+# before using this for fabrication/DRC.
+TERMINAL_LENGTH_FRACTION = 0.25
+TERMINAL_LENGTH_MAX_MM = 0.6
 
 # EIA chip size -> (length_mm, width_mm), nominal maximum body envelope.
 CHIP_SIZES_MM = {
@@ -69,20 +88,37 @@ def _add_body_and_refdes(cell, prefix, length_mm, width_mm):
     cell.add_text(REFDES_LAYER, (0, 0), prefix, height=int(text_height))
 
 
+def _add_chip_terminals(cell, length_mm, width_mm):
+    """Draw the two wraparound end-cap terminals (layer 62) a chip R/C
+    has at each end of its body, full body width, extending inward from
+    each end by TERMINAL_LENGTH_FRACTION of the body length (capped at
+    TERMINAL_LENGTH_MAX_MM)."""
+    term_len_mm = min(length_mm * TERMINAL_LENGTH_FRACTION, TERMINAL_LENGTH_MAX_MM)
+    half_l = mm_to_dbu(length_mm) / 2
+    half_w = mm_to_dbu(width_mm) / 2
+    term_len = mm_to_dbu(term_len_mm)
+
+    cell.add_rectangle(TERMINAL_LAYER, -half_l, -half_w, -half_l + term_len, half_w)
+    cell.add_rectangle(TERMINAL_LAYER, half_l - term_len, -half_w, half_l, half_w)
+
+
 def generate_smd_library(name="SMD_LIBRARY") -> Library:
     """Build and return a Library of standard SMD component cells.
 
     Body outlines: Path, layer 60, width 0.1 mm.
     Ref-des placeholders: Text, layer 61, prefix only (C/R/T/D/IC).
+    Chip R/C terminals (end-caps): Rectangle, layer 62.
     """
     lib = Library(name)
 
     for size, (length_mm, width_mm) in CHIP_SIZES_MM.items():
         r_cell = lib.new_cell(f"R_{size}")
         _add_body_and_refdes(r_cell, "R", length_mm, width_mm)
+        _add_chip_terminals(r_cell, length_mm, width_mm)
 
         c_cell = lib.new_cell(f"C_{size}")
         _add_body_and_refdes(c_cell, "C", length_mm, width_mm)
+        _add_chip_terminals(c_cell, length_mm, width_mm)
 
     for cell_name, (prefix, length_mm, width_mm) in OTHER_PACKAGES_MM.items():
         cell = lib.new_cell(cell_name)
