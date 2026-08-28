@@ -90,6 +90,13 @@ white so it's clear what's selected):
                                        errors if they're on different layers or
                                        don't actually touch/overlap; see also
                                        MASKOP OR for unioning a whole layer instead
+    MAKECELL <name> <x,y>             turn the current selection into a new named
+                                       cell (moves the selected shapes/instances
+                                       into it, re-based so x,y becomes the new
+                                       cell's local origin), then places a fresh
+                                       instance of it at x,y so nothing visually
+                                       moves -- draw/place geometry, select it,
+                                       MAKECELL, and it's a reusable library cell
 
 Undo/redo (covers every edit, however it was made -- command bar,
 mouse-driven select/move/rotate/edit/delete, or a script):
@@ -587,6 +594,18 @@ class CommandInterpreter:
             raise CommandError("nothing suitable selected to merge -- window-select at "
                                 "least two Polygon/Rectangle shapes on the same layer first")
         return "merged selected shapes into one polygon"
+
+    def _cmd_makecell(self, args):
+        if self.view is None:
+            raise CommandError("MAKECELL requires an attached view")
+        if len(args) != 2:
+            raise CommandError("usage: MAKECELL <new cell name> <origin x,y>")
+        name, origin_text = args
+        origin = _parse_point(origin_text)
+        if not self.view.create_cell_from_selection(name, origin):
+            raise CommandError("nothing suitable selected to make a cell from -- select a "
+                                "whole shape or cell instance (not a single vertex/edge) first")
+        return f"cell {name!r} created from the selection"
 
     # --- undo/redo --------------------------------------------------------
     def _cmd_undo(self, args):

@@ -9,7 +9,7 @@ from tkinter import filedialog, simpledialog, ttk
 from . import dialogs
 
 from .. import __version__
-from ..core.errors import GeometryError, LayoutError
+from ..core.errors import CellError, GeometryError, LayoutError
 from ..core.library import Library
 from ..core.maskops import MASK_OPS
 from ..core.shapes import CIRCLE_SEGMENT_CHOICES
@@ -388,6 +388,7 @@ class App(tk.Tk):
         editm.add_command(label="Copy...", command=self._copy_selected)
         editm.add_command(label="Smash Selected to SRefs", command=self._smash_selected)
         editm.add_command(label="Merge Selected...", command=self._merge_selected)
+        editm.add_command(label="Create Cell from Selection...", command=self._create_cell_from_selection)
         editm.add_separator()
         editm.add_command(label="Properties", command=self._show_properties_tab)
 
@@ -569,6 +570,52 @@ class App(tk.Tk):
             )
             return
         self.status.set("merged selected shapes into one polygon")
+
+    def _create_cell_from_selection(self):
+        """Edit > Create Cell from Selection...: the classic Calma GDSII
+        workflow -- draw or place geometry, window-select it, "make
+        cell", give it a name, pick an origin, and the graphics become
+        a new reusable library cell (a bondpad or SMD land pattern is
+        the typical use). Backed by LayoutCanvas.create_cell_from_selection();
+        the current cell ends up with a fresh instance of the new cell
+        sitting exactly where the original geometry was, so nothing
+        visually moves."""
+        if self.canvas.selected is None and not self.canvas.selected_multi:
+            dialogs.show_info(
+                "Create Cell from Selection", "Nothing is selected. Switch to Select mode, "
+                "click a shape or cell instance, or drag a box over several, then try again.",
+                parent=self,
+            )
+            return
+        name = simpledialog.askstring("Create Cell from Selection", "New cell name:", parent=self)
+        if not name:
+            return
+        origin_text = simpledialog.askstring(
+            "Create Cell from Selection",
+            "Cell origin, in this cell's current x,y coordinates\n"
+            "(becomes (0, 0) inside the new cell):",
+            parent=self, initialvalue="0,0",
+        )
+        if origin_text is None:
+            return
+        try:
+            origin = _parse_point(origin_text)
+        except CommandError as e:
+            dialogs.show_error("Create Cell from Selection", str(e), parent=self)
+            return
+        try:
+            created = self.canvas.create_cell_from_selection(name, origin)
+        except CellError as e:
+            dialogs.show_error("Create Cell from Selection", str(e), parent=self)
+            return
+        if not created:
+            dialogs.show_info(
+                "Create Cell from Selection", "That selection can't become a cell -- "
+                "select a whole shape or cell instance (not a single vertex/edge).",
+                parent=self,
+            )
+            return
+        self.status.set(f"created cell {name!r} from the selection")
 
     def run_script_file(self):
         path = filedialog.askopenfilename(filetypes=[("Python scripts", "*.py"), ("All files", "*.*")])
@@ -850,6 +897,7 @@ class App(tk.Tk):
                 ("Copy...", self._copy_selected),
                 ("Smash to SRefs", self._smash_selected),
                 ("Merge Selected...", self._merge_selected),
+                ("Create Cell...", self._create_cell_from_selection),
             ]:
                 self._toolbar_button(bar, label, cmd).pack(side="left", padx=2, pady=2)
             return  # nothing pending to Cancel in Select -- it's not a draw tool

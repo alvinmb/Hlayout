@@ -1112,6 +1112,58 @@ class LayoutCanvas(tk.Canvas):
         self._after_edit()
         return True
 
+    def create_cell_from_selection(self, name, origin):
+        """Make a new named cell out of the current selection -- draw or
+        place geometry, window-select it, and turn it into a reusable
+        library cell -- the classic "draw it, window it, name it, pick
+        an origin, and it's a cell" Calma GDSII workflow (a bondpad or
+        SMD land pattern is the typical use).
+
+        Every selected shape/SRef/ARef is moved (not copied) out of the
+        current cell and into a brand-new cell called `name`, with its
+        geometry re-based so that `origin` (DBU, in the *current* cell's
+        coordinates) becomes the new cell's local (0, 0) -- the same
+        "pick the origin" step Calma's version has. To leave the design
+        looking the same as before, the current cell then gets a fresh
+        SRef instance of the new cell placed at `origin`, which becomes
+        the new selection -- so this reads as "wrap the selection into
+        a cell", not "delete what I had and make an empty cell".
+
+        Returns True if a cell was created. Returns False (selection
+        left alone, nothing created) if nothing suitable is selected --
+        a single vertex/edge, or nothing at all. Raises CellError (left
+        for the caller to show) if `name` is already used by another
+        cell in this library."""
+        if self.draw_mode != "select":
+            return False
+        items = list(self.selected_multi)
+        if not items and self.selected is not None and self.selected[0] in ("shape", "sref", "aref"):
+            items = [self.selected]
+        items = [it for it in items if it[0] in ("shape", "sref", "aref")]
+        if not items:
+            return False
+        cell = self.library.cells.get(self.cell_name)
+        if cell is None:
+            return False
+
+        self.checkpoint()
+        new_cell = self.library.new_cell(name)  # raises CellError if name is taken
+        ox, oy = origin
+        for kind, obj in items:
+            source_list = {"shape": cell.shapes, "sref": cell.srefs, "aref": cell.arefs}[kind]
+            dest_list = {"shape": new_cell.shapes, "sref": new_cell.srefs, "aref": new_cell.arefs}[kind]
+            if obj in source_list:
+                source_list.remove(obj)
+            snapshot = _geom_snapshot(kind, obj)
+            _apply_translate(obj, snapshot, -ox, -oy)
+            dest_list.append(obj)
+
+        new_ref = cell.add_sref(name, origin)
+        self.selected = ("sref", new_ref)
+        self.selected_multi = []
+        self._after_edit()
+        return True
+
     def move_selected(self, dx, dy):
         """Move the current selection by (dx, dy) DBU. Works for a whole
         shape or cell instance ("shape"/"sref" selections), a single
