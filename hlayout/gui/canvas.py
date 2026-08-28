@@ -547,11 +547,17 @@ class LayoutCanvas(tk.Canvas):
         """Polygon/Path shapes in the current cell — the ones whose
         individual vertices/edges can be grabbed and edited directly.
         (Rectangle is excluded: reshaping one corner would break its
-        4-point-rectangle invariant; use the edit dialog for that.)"""
+        4-point-rectangle invariant; use the edit dialog for that.)
+        Shapes on a hidden layer are excluded too -- selection should
+        only ever pick up what's actually visible on screen, the same
+        as whole-shape/sref selection (_pick_item_at, backed by
+        _item_to_shape, which redraw() only populates for visible
+        layers) already does."""
         cell = self.library.cells.get(self.cell_name)
         if cell is None:
             return []
-        return [s for s in cell.shapes if isinstance(s, (Polygon, Path))]
+        return [s for s in cell.shapes if isinstance(s, (Polygon, Path))
+                and self.library.layers[s.layer].visible]
 
     def _hit_test_vertex(self, ex, ey):
         best = None
@@ -786,6 +792,12 @@ class LayoutCanvas(tk.Canvas):
 
         picked = []
         for shape in cell.shapes:
+            if not self.library.layers[shape.layer].visible:
+                # Window-select should only pick up what's actually
+                # visible on screen, same as a plain click (_pick_item_at
+                # / _editable_point_shapes both already skip hidden
+                # layers).
+                continue
             bx1, by1, bx2, by2 = shape.bbox()
             if bx1 >= rx1 and bx2 <= rx2 and by1 >= ry1 and by2 <= ry2:
                 picked.append(("shape", shape))
