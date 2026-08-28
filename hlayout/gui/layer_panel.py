@@ -34,13 +34,30 @@ class LayerPanel(ttk.Frame):
         self.library = library
         self._populate()
 
+    @staticmethod
+    def _set_visible_checkbox(state, value: bool):
+        """Set a row's visibility BooleanVar AND explicitly force the
+        actual Checkbutton widget's ttk selected/!selected state to
+        match. Normally a ttk.Checkbutton repaints its indicator purely
+        from a trace on its -variable, but that trace can silently miss
+        an update when the variable is set programmatically (as All On/
+        All Off and sync() below both do, rather than a real click) --
+        the box then shows only its focus outline, unchecked, no matter
+        what the variable/model actually holds ("switch all layers off,
+        then can't switch one back on" -- the checkbox LOOKED stuck off
+        even though clicking it did flip the underlying layer). Calling
+        .state() directly bypasses the trace entirely, so the indicator
+        can never visually diverge from the model."""
+        state["visible_var"].set(value)
+        state["visible_cb"].state(["selected"] if value else ["!selected"])
+
     def set_all_visible(self, value: bool):
         """Turn every layer's visibility on (True) or off (False) at
         once — the "All On"/"All Off" buttons above the layer table."""
         for n in range(NUM_LAYERS):
             self.library.layers[n].visible = value
         for state in self._row_state.values():
-            state["visible_var"].set(value)
+            self._set_visible_checkbox(state, value)
         self.on_change()
 
     def sync(self):
@@ -51,7 +68,7 @@ class LayerPanel(ttk.Frame):
             layer = self.library.layers[n]
             if not state["name_entry"].winfo_ismapped() or not state["name_focused"][0]:
                 state["name_var"].set(layer.name)
-            state["visible_var"].set(layer.visible)
+            self._set_visible_checkbox(state, layer.visible)
             state["swatch"].configure(bg=layer.color)
             state["fill_var"].set(layer.fill)
             state["stipple_var"].set(STIPPLE_NAMES[layer.stipple])
@@ -77,10 +94,18 @@ class LayerPanel(ttk.Frame):
         # hlayout.gui.fonts.section_header_font) rather than a
         # hardcoded point size that would drift out of sync with the
         # rest of the app's font size.
+        # Widths/padding here must mirror each row's actual widgets
+        # (Checkbutton On, Label #, Entry Name, swatch Color, Checkbutton
+        # Fill, Combobox Stipple in _make_row below) exactly, or the
+        # header labels drift out of alignment with the columns beneath
+        # them -- e.g. "Color" used to claim more width than the swatch
+        # actually takes, which visually shifted "Fill" to the right of
+        # its own checkbox, making it easy to click Fill (which only
+        # controls solid-vs-outline) while aiming for On (visibility).
         header_font = section_header_font(self)
-        for text, w in [("On", 3), ("#", 3), ("Name", 12), ("Color", 6),
-                         ("Fill", 4), ("Stipple", 14)]:
-            ttk.Label(header, text=text, width=w, font=header_font).pack(side="left")
+        for text, w, padx in [("On", 3, 0), ("#", 3, 0), ("Name", 12, 0), ("Color", 3, 2),
+                               ("Fill", 4, 0), ("Stipple", 13, 2)]:
+            ttk.Label(header, text=text, width=w, font=header_font).pack(side="left", padx=padx)
 
         for n in range(NUM_LAYERS):
             self._make_row(n)
@@ -96,7 +121,8 @@ class LayerPanel(ttk.Frame):
             layer.visible = visible_var.get()
             self.on_change()
 
-        ttk.Checkbutton(row, variable=visible_var, command=toggle_visible, width=3).pack(side="left")
+        visible_cb = ttk.Checkbutton(row, variable=visible_var, command=toggle_visible, width=3)
+        visible_cb.pack(side="left")
         ttk.Label(row, text=str(n), width=3).pack(side="left")
 
         name_var = tk.StringVar(value=layer.name)
@@ -156,6 +182,7 @@ class LayerPanel(ttk.Frame):
             "name_entry": name_entry,
             "name_focused": name_focused,
             "visible_var": visible_var,
+            "visible_cb": visible_cb,
             "swatch": swatch,
             "fill_var": fill_var,
             "stipple_var": stipple_var,
