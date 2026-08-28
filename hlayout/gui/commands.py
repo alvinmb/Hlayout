@@ -143,11 +143,15 @@ Attached libraries:
                                        find-and-place a cell as an Sref; source
                                        disambiguates if the name exists in more
                                        than one attached library
-    VIA <layer1> <layer2> [shape=square|round] [size=<dbu>] [index=0|1] [overwrite=0|1]
+    VIA <layer1> <layer2> [shape=square|round] [size=<dbu>] [name=<cellname>]
+        [dielectric_layer=<n>] [dielectric_window=<dbu>] [index=0|1] [overwrite=0|1]
                                        create a via cell (a square/round pad on both
-                                       layers, named VIA_Layer<n1>_to_Layer<n2>) directly
-                                       inside an attached library and save that library's
-                                       file in place; shape/size default to square/100
+                                       layers, named <name> or VIA_Layer<n1>_to_Layer<n2>
+                                       if not given) directly inside an attached library
+                                       and save that library's file in place; shape/size
+                                       default to square/100. dielectric_layer/window (if
+                                       both given) also cut a same-shape opening in the
+                                       dielectric between the two conductor layers
     PAD <name> <conductor_layer> <paste_layer> <length_mm> <width_mm> <margin_mm>
            [rows=1] [cols=1] [pitch_x=<mm>] [pitch_y=<mm>] [index=0|1] [overwrite=0|1]
                                        create a rectangular pad cell -- a conductor
@@ -1009,6 +1013,7 @@ class CommandInterpreter:
 
     def _cmd_via(self, args):
         usage = ("usage: VIA <layer1> <layer2> [shape=square|round] [size=<dbu>] "
+                 "[name=<cellname>] [dielectric_layer=<n>] [dielectric_window=<dbu>] "
                  "[index=0|1] [overwrite=0|1]")
         if len(args) < 2:
             raise CommandError(usage)
@@ -1022,6 +1027,12 @@ class CommandInterpreter:
                     kwargs["shape"] = v
                 elif k == "size":
                     kwargs["size"] = float(v)
+                elif k == "name":
+                    kwargs["name"] = v
+                elif k == "dielectric_layer":
+                    kwargs["dielectric_layer"] = v
+                elif k == "dielectric_window":
+                    kwargs["dielectric_window"] = float(v)
                 elif k == "index":
                     kwargs["index"] = int(v)
                 elif k == "overwrite":

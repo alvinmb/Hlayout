@@ -2116,11 +2116,24 @@ class App(tk.Tk):
     def show_via_wizard(self):
         """Tools > Via Wizard...: create a via cell -- a square or round
         pad drawn on two layers, representing the contact area where a
-        via connects them -- and save it directly into an attached
-        reference library's own file, so it becomes a reusable part
-        (rather than something that only lives in this design). Backed
-        by Session.create_via_cell(); same operation as the command bar's
-        VIA <layer1> <layer2> ... command."""
+        via connects them, optionally with a dielectric via window cut
+        between them -- and save it directly into an attached reference
+        library's own file, so it becomes a reusable part (rather than
+        something that only lives in this design). Backed by
+        Session.create_via_cell(); same operation as the command bar's
+        VIA <layer1> <layer2> ... command.
+
+        Cell name defaults to VIA_Layer<n1>_to_Layer<n2> (shown as a
+        placeholder, updated live as Layer 1/2 change) but can be
+        overridden -- e.g. to give a process-specific via more than one
+        library part could otherwise collide on a distinct name.
+
+        The dielectric via window (off by default -- a bare two-pad via
+        has no dielectric) is a same-shape opening cut in a third layer
+        between the two conductor layers, representing the actual
+        electrical contact area in a real process; normally sized AT OR
+        ABOVE the pad size, since the pad lands within/over the opening.
+        """
         if not self.session.attached_libraries:
             dialogs.show_info(
                 "Via Wizard",
@@ -2140,7 +2153,8 @@ class App(tk.Tk):
         ttk.Label(
             win,
             text="Create a via cell -- a square or round pad drawn on both "
-                 "layers -- and save it into an attached library.",
+                 "layers, optionally with a dielectric via window -- and "
+                 "save it into an attached library.",
             wraplength=380, justify="left",
         ).pack(anchor="w", padx=12, pady=(12, 8))
 
@@ -2179,6 +2193,40 @@ class App(tk.Tk):
                      values=choices).grid(row=row, column=1, sticky="w", padx=4, pady=4)
         row += 1
 
+        # Cell name -- pre-filled with the default (VIA_Layer<n1>_to_
+        # Layer<n2>), editable to give the via a different name. Keeps
+        # tracking the default as Layer 1/2 change, but only until the
+        # user actually types something of their own -- _name_edited
+        # below flips permanently on the first manual edit, same
+        # "auto-fill until the user overrides it" pattern used for
+        # generated names elsewhere in this file (e.g. the resistor
+        # designer's ref-des-derived cell name).
+        def default_via_name():
+            n1 = int(layer1_var.get().split(" ", 1)[0])
+            n2 = int(layer2_var.get().split(" ", 1)[0])
+            return f"VIA_Layer{n1}_to_Layer{n2}"
+
+        ttk.Label(form, text="Cell name:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        name_var = tk.StringVar(value=default_via_name())
+        name_entry = ttk.Entry(form, textvariable=name_var, width=22)
+        name_entry.grid(row=row, column=1, sticky="w", padx=4, pady=4)
+
+        _name_edited = [False]
+
+        def _on_name_key(event=None):
+            _name_edited[0] = True
+
+        def _on_layer_choice_change(*_):
+            if not _name_edited[0]:
+                name_var.set(default_via_name())
+
+        name_entry.bind("<Key>", _on_name_key)
+        layer1_combo = form.grid_slaves(row=2, column=1)[0]
+        layer2_combo = form.grid_slaves(row=3, column=1)[0]
+        layer1_combo.bind("<<ComboboxSelected>>", _on_layer_choice_change)
+        layer2_combo.bind("<<ComboboxSelected>>", _on_layer_choice_change)
+        row += 1
+
         lib_choices = [f"[{l['index']}] {l['name']} ({l['path']})"
                        for l in self.session.list_attached_libraries()]
         ttk.Label(form, text="Save to library:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
@@ -2189,6 +2237,47 @@ class App(tk.Tk):
         if len(lib_choices) == 1:
             lib_combo.configure(state="disabled")
         row += 1
+
+        ttk.Separator(form, orient="horizontal").grid(
+            row=row, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4))
+        row += 1
+
+        dielectric_var = tk.BooleanVar(value=False)
+        dielectric_check = ttk.Checkbutton(form, text="Add dielectric via window",
+                                            variable=dielectric_var)
+        dielectric_check.grid(row=row, column=0, columnspan=2, sticky="w", padx=4, pady=4)
+        row += 1
+
+        ttk.Label(form, text="Dielectric layer:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        dielectric_layer_var = tk.StringVar(value=choices[2] if len(choices) > 2 else choices[0])
+        dielectric_layer_combo = ttk.Combobox(form, textvariable=dielectric_layer_var, width=20,
+                                               state="disabled", values=choices)
+        dielectric_layer_combo.grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+
+        ttk.Label(form, text="Dielectric window size (mm):").grid(
+            row=row, column=0, sticky="e", padx=4, pady=4)
+        dielectric_window_var = tk.DoubleVar(value=dbu_to_mm(140))
+        dielectric_window_spin = ttk.Spinbox(form, from_=0.001, to=100.0, increment=0.001,
+                                              width=10, textvariable=dielectric_window_var,
+                                              state="disabled")
+        dielectric_window_spin.grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+        ttk.Label(
+            form,
+            text="Opening cut in the dielectric between Layer 1 and Layer 2,\n"
+                 "normally sized AT OR ABOVE the pad size (the pad lands\n"
+                 "within/over the opening).",
+            foreground="#555", justify="left",
+        ).grid(row=row, column=0, columnspan=2, sticky="w", padx=4)
+        row += 1
+
+        def _on_dielectric_toggle():
+            state = "readonly" if dielectric_var.get() else "disabled"
+            dielectric_layer_combo.configure(state=state)
+            dielectric_window_spin.configure(state="normal" if dielectric_var.get() else "disabled")
+
+        dielectric_check.configure(command=_on_dielectric_toggle)
 
         error_var = tk.StringVar(value="")
         ttk.Label(win, textvariable=error_var, foreground="red", wraplength=380,
@@ -2207,23 +2296,46 @@ class App(tk.Tk):
                 error_var.set("Size must be a positive number.")
                 return
 
+            name = name_var.get().strip()
+            if not name:
+                error_var.set("Cell name can't be blank.")
+                return
+
+            dielectric_layer = None
+            dielectric_window = None
+            if dielectric_var.get():
+                n3 = int(dielectric_layer_var.get().split(" ", 1)[0])
+                if n3 in (n1, n2):
+                    error_var.set("Dielectric layer must be different from Layer 1 and Layer 2.")
+                    return
+                try:
+                    dielectric_window = mm_to_dbu(float(dielectric_window_var.get()))
+                except (tk.TclError, ValueError):
+                    error_var.set("Dielectric window size must be a number.")
+                    return
+                if dielectric_window <= 0:
+                    error_var.set("Dielectric window size must be positive.")
+                    return
+                dielectric_layer = n3
+
             def do_create(overwrite):
                 return self.session.create_via_cell(
-                    n1, n2, shape=shape_var.get(), size=size, index=index, overwrite=overwrite
+                    n1, n2, shape=shape_var.get(), size=size, index=index, overwrite=overwrite,
+                    name=name, dielectric_layer=dielectric_layer, dielectric_window=dielectric_window,
                 )
 
             try:
-                name, path = do_create(overwrite=False)
+                created_name, path = do_create(overwrite=False)
             except LayoutError as e:
                 if "already exists" in str(e):
                     if dialogs.ask_yes_no(
                         "Via Wizard",
-                        f"A via cell named {f'VIA_Layer{n1}_to_Layer{n2}'!r} already "
+                        f"A via cell named {name!r} already "
                         "exists in that library. Replace it?",
                         parent=self,
                     ):
                         try:
-                            name, path = do_create(overwrite=True)
+                            created_name, path = do_create(overwrite=True)
                         except LayoutError as e2:
                             error_var.set(str(e2))
                             return
@@ -2233,7 +2345,7 @@ class App(tk.Tk):
                     error_var.set(str(e))
                     return
             self.refresh_all()
-            self.status.set(f"created via cell {name!r}, saved to {path}")
+            self.status.set(f"created via cell {created_name!r}, saved to {path}")
             win.destroy()
 
         btn_row = ttk.Frame(win)

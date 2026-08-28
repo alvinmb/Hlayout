@@ -319,7 +319,8 @@ class Session:
 
     def create_via_cell(self, layer1, layer2, shape: str = "square",
                          size: float = 100, index: Optional[int] = None,
-                         overwrite: bool = False):
+                         overwrite: bool = False, name: Optional[str] = None,
+                         dielectric_layer=None, dielectric_window: Optional[float] = None):
         """Create a via cell -- a same-size square or round pad drawn on
         both layer1 and layer2, representing the contact area where a
         via connects them -- directly inside an attached reference
@@ -335,9 +336,19 @@ class Session:
         "square" or "round". size is the pad's full width/diameter, in
         DBU (1 DBU = 1 micron).
 
+        `dielectric_layer`/`dielectric_window`, if both given, also draw
+        a same-shape opening of size `dielectric_window` DBU on
+        `dielectric_layer`, centred at the cell's origin same as the two
+        pads -- the window cut in the dielectric between the two
+        conductor layers that actually defines the electrical contact
+        area in a real process (must differ from both layer1 and
+        layer2). Leave both unset (the default) for a bare two-pad via
+        with no dielectric window. They must be given together --
+        passing only one raises.
+
         index picks which attached library (0 or 1, see
         list_attached_libraries()); if exactly one is attached it's
-        used automatically. The new cell is named
+        used automatically. The new cell is named `name` if given, else
         f"VIA_Layer{n1}_to_Layer{n2}" -- raises if that name already
         exists in the target library, unless overwrite=True (which
         replaces it).
@@ -368,7 +379,22 @@ class Session:
 
         n1 = self.library.layers.resolve(layer1)
         n2 = self.library.layers.resolve(layer2)
-        name = f"VIA_Layer{n1}_to_Layer{n2}"
+
+        n3 = None
+        if (dielectric_layer is None) != (dielectric_window is None):
+            raise LibraryError(
+                "dielectric_layer and dielectric_window must be given together"
+            )
+        if dielectric_layer is not None:
+            n3 = self.library.layers.resolve(dielectric_layer)
+            if n3 in (n1, n2):
+                raise LibraryError(
+                    "dielectric_layer must be different from layer1 and layer2"
+                )
+            if dielectric_window <= 0:
+                raise LibraryError("dielectric_window must be a positive number of DBU")
+
+        name = name or f"VIA_Layer{n1}_to_Layer{n2}"
 
         lib = self.attached_libraries[index]
         if name in lib.cells:
@@ -385,6 +411,12 @@ class Session:
                 cell.add_rectangle(n, -half, -half, half, half)
             else:
                 cell.add_circle(n, (0, 0), half, segments=32)
+        if n3 is not None:
+            dhalf = dielectric_window / 2.0
+            if shape == "square":
+                cell.add_rectangle(n3, -dhalf, -dhalf, dhalf, dhalf)
+            else:
+                cell.add_circle(n3, (0, 0), dhalf, segments=32)
 
         path = self._attached_paths[index]
         save_gds(lib, path)
