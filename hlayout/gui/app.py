@@ -801,18 +801,14 @@ class App(tk.Tk):
 
         # Route (2-Layer) tool options -- Setup > Route Layers... (see
         # show_route_layers_dialog); these back canvas.route_layer_a/b/
-        # route_via_size/route_via_shape/route_dielectric_layer/
-        # route_dielectric_window, same pattern as width_var/cap_var
-        # above. Seeded from the technology file (hlayout.io.techfile's
+        # route_via_cell, same pattern as width_var/cap_var above. Seeded
+        # from the technology file (hlayout.io.techfile's
         # load_route_rules()) rather than hardcoded, so a route setup
         # configured once survives a save/reopen instead of needing to
         # be re-entered -- see _reload_route_settings_from_library().
         self.route_layer_a_var = tk.StringVar()
         self.route_layer_b_var = tk.StringVar()
-        self.route_via_size_var = tk.IntVar()
-        self.route_via_shape_var = tk.StringVar()
-        self.route_dielectric_layer_var = tk.StringVar()
-        self.route_dielectric_window_var = tk.DoubleVar()
+        self.route_via_cell_var = tk.StringVar()
         self._reload_route_settings_from_library()
 
         self.snap_var = tk.BooleanVar(value=True)
@@ -972,10 +968,6 @@ class App(tk.Tk):
         if hasattr(self, "route_layer_a_var"):
             self.route_layer_a_var.set(self._layer_label(self.canvas.route_layer_a))
             self.route_layer_b_var.set(self._layer_label(self.canvas.route_layer_b))
-            self.route_dielectric_layer_var.set(
-                self._layer_label(self.canvas.route_dielectric_layer)
-                if self.canvas.route_dielectric_layer is not None else "(none)"
-            )
 
     def _on_layer_change(self):
         text = self.layer_var.get().strip()
@@ -1112,23 +1104,7 @@ class App(tk.Tk):
         a, b = rules["layer_a"], rules["layer_b"]
         self.route_layer_a_var.set(self._layer_label(a))
         self.route_layer_b_var.set(self._layer_label(b))
-        self.route_via_size_var.set(rules["via_size"])
-        self.route_via_shape_var.set(rules["via_shape"])
-        # A real via always has a dielectric window (see
-        # Session.drop_via()) -- so even a technology file saved before
-        # this field existed (dielectric_layer/window == None) gets a
-        # real fallback here rather than leaving the tool without one:
-        # the first layer that isn't already Layer A/B, and a window at
-        # least as large as the via size.
-        dielectric_layer = rules["dielectric_layer"]
-        if dielectric_layer is None or dielectric_layer in (a, b):
-            dielectric_layer = next(
-                (n for n in range(len(self.session.library.layers)) if n not in (a, b)), a)
-        dielectric_window = rules["dielectric_window"] or 0.0
-        if dielectric_window < rules["via_size"]:
-            dielectric_window = rules["via_size"] + 40
-        self.route_dielectric_layer_var.set(self._layer_label(dielectric_layer))
-        self.route_dielectric_window_var.set(dielectric_window)
+        self.route_via_cell_var.set(rules["via_cell"])
         self._on_route_opts_change()
 
     def _on_route_opts_change(self):
@@ -1137,45 +1113,27 @@ class App(tk.Tk):
             self.canvas.route_layer_b = self._resolve_layer_field(self.route_layer_b_var.get())
         except LayoutError:
             pass  # dialog's own apply_and_close() already validated and reported this
-        try:
-            self.canvas.route_via_size = int(self.route_via_size_var.get())
-        except (tk.TclError, ValueError):
-            pass
-        self.canvas.route_via_shape = self.route_via_shape_var.get()
-        # A real via always has a dielectric window -- Setup > Route
-        # Layers... no longer offers "(none)" -- but this stays tolerant
-        # of a still-blank field (e.g. a technology file saved before
-        # this feature existed) rather than raising.
-        dielectric_text = self.route_dielectric_layer_var.get().strip()
-        if dielectric_text and dielectric_text != "(none)":
-            try:
-                self.canvas.route_dielectric_layer = self._resolve_layer_field(dielectric_text)
-            except LayoutError:
-                pass
-        else:
-            self.canvas.route_dielectric_layer = None
-        try:
-            window = float(self.route_dielectric_window_var.get())
-            self.canvas.route_dielectric_window = window if window > 0 else None
-        except (tk.TclError, ValueError):
-            self.canvas.route_dielectric_window = None
+        self.canvas.route_via_cell = self.route_via_cell_var.get().strip()
         if self.canvas.draw_mode == "route":
             self.canvas._route_active_layer = self.canvas.route_layer_a
 
     def show_route_layers_dialog(self):
         """Setup > Route Layers...: configure the two conductor layers
-        and via style the Create > Route (2-Layer) tool uses. Route
-        starts on Layer A; each Space press during a route drops a via
-        connecting Layer A/B at the current point and switches which of
-        the two you're routing on -- see LayoutCanvas._route_drop_via().
+        the Create > Route (2-Layer) tool uses, and which reusable via
+        cell it places between them. Route starts on Layer A; each Space
+        press during a route places an instance (Sref) of the via cell
+        at the current point and switches which of the two layers you're
+        routing on -- see LayoutCanvas._route_drop_via()/App._on_route_via().
 
-        Also configures the dielectric via window: a same-centred
-        opening cut in the dielectric layer between A and B,
-        representing the actual electrical contact area (see
-        Session.drop_via()). A real via always has this window, so a
-        dielectric layer and window size are always required here --
-        normally the window is sized AT OR ABOVE the via pad size (the
-        pad lands within/over the opening).
+        The via cell itself -- its pad size/shape, any dielectric window,
+        anything else its own geometry carries -- is built once via
+        Tools > Via Wizard... (or scripting's create_via_cell()) and just
+        named here, the same "build the reusable part once, place
+        instances of it" pattern as any other cell (Create > Cell
+        Instance, Find && Place Cell...) -- this dialog used to also ask
+        for via size/shape and a separate dielectric layer/window, which
+        only duplicated what the via cell's own geometry already
+        describes.
 
         Everything here is saved into the technology file
         (hlayout.io.techfile.save_route_rules()) on OK, the same
@@ -1205,44 +1163,22 @@ class App(tk.Tk):
         ttk.Combobox(form, textvariable=layer_b_var, width=22,
                      values=self._layer_choices()).grid(row=1, column=1, sticky="w", padx=4, pady=4)
 
-        ttk.Label(form, text="Via size (mm):").grid(row=2, column=0, sticky="e", padx=4, pady=4)
-        via_size_var = tk.DoubleVar(value=dbu_to_mm(self.route_via_size_var.get()))
-        ttk.Spinbox(form, from_=0.001, to=100.0, increment=0.001, width=8, textvariable=via_size_var).grid(
-            row=2, column=1, sticky="w", padx=4, pady=4)
-
-        ttk.Label(form, text="Via shape:").grid(row=3, column=0, sticky="e", padx=4, pady=4)
-        via_shape_var = tk.StringVar(value=self.route_via_shape_var.get())
-        ttk.Combobox(form, textvariable=via_shape_var, width=10, state="readonly",
-                     values=["square", "round"]).grid(row=3, column=1, sticky="w", padx=4, pady=4)
-
-        ttk.Label(form, text="Dielectric layer (via window):").grid(
-            row=4, column=0, sticky="e", padx=4, pady=4)
-        _initial_dielectric = self.route_dielectric_layer_var.get()
-        if _initial_dielectric == "(none)" or not _initial_dielectric:
-            _initial_dielectric = self._layer_choices()[0]
-        dielectric_layer_var = tk.StringVar(value=_initial_dielectric)
-        ttk.Combobox(form, textvariable=dielectric_layer_var, width=22, state="readonly",
-                     values=self._layer_choices()).grid(
-            row=4, column=1, sticky="w", padx=4, pady=4)
-
-        ttk.Label(form, text="Dielectric window size (mm):").grid(
-            row=5, column=0, sticky="e", padx=4, pady=4)
-        _initial_window = self.route_dielectric_window_var.get() or self.route_via_size_var.get()
-        dielectric_window_var = tk.DoubleVar(value=dbu_to_mm(_initial_window))
-        ttk.Spinbox(form, from_=0.001, to=100.0, increment=0.001, width=8, textvariable=dielectric_window_var).grid(
-            row=5, column=1, sticky="w", padx=4, pady=4)
+        ttk.Label(form, text="Via cell (Space places an instance):").grid(
+            row=2, column=0, sticky="e", padx=4, pady=4)
+        via_cell_choices = self._placeable_cell_names()
+        via_cell_var = tk.StringVar(value=self.route_via_cell_var.get())
+        ttk.Combobox(form, textvariable=via_cell_var, width=22,
+                     values=via_cell_choices).grid(row=2, column=1, sticky="w", padx=4, pady=4)
         ttk.Label(
             form,
-            text="Opening cut in the dielectric between A and B -- a real\n"
-                 "via always has one. Normally sized AT OR ABOVE the via\n"
-                 "size, so the pad lands within/over the opening.",
+            text="Built once via Tools > Via Wizard... (or scripting's\n"
+                 "create_via_cell()); this just names which one to place.",
             foreground="#555", justify="left",
-        ).grid(row=6, column=0, columnspan=2, sticky="w", padx=4)
+        ).grid(row=3, column=0, columnspan=2, sticky="w", padx=4)
 
         error_var = tk.StringVar(value="")
-        ttk.Label(form, textvariable=error_var, foreground="red").grid(
-            row=7, column=0, columnspan=2, sticky="w", padx=4
-        )
+        ttk.Label(form, textvariable=error_var, foreground="red", wraplength=340,
+                  justify="left").grid(row=4, column=0, columnspan=2, sticky="w", padx=4)
 
         def apply_and_close():
             try:
@@ -1254,54 +1190,29 @@ class App(tk.Tk):
             if a == b:
                 error_var.set("Layer A and Layer B must be different.")
                 return
-            try:
-                size = mm_to_dbu(float(via_size_var.get()))
-            except (tk.TclError, ValueError):
-                error_var.set("Via size must be a number.")
-                return
-            if size <= 0:
-                error_var.set("Via size must be positive.")
-                return
-            try:
-                dielectric_layer = self._resolve_layer_field(dielectric_layer_var.get())
-            except LayoutError as e:
-                error_var.set(str(e))
-                return
-            if dielectric_layer in (a, b):
-                error_var.set("Dielectric layer must be different from Layer A and Layer B.")
-                return
-            try:
-                dielectric_window = mm_to_dbu(float(dielectric_window_var.get()))
-            except tk.TclError:
-                error_var.set("Dielectric window size must be a number.")
-                return
-            if dielectric_window <= 0:
-                error_var.set("Dielectric window size must be positive -- a real via always has a window.")
-                return
-            if dielectric_window < size:
+            via_cell = via_cell_var.get().strip()
+            if not via_cell:
                 error_var.set(
-                    "Dielectric window size must be at least as large as the via size "
-                    "(the window, not the pad, defines the contact area)."
+                    "Pick a via cell -- build one first with Tools > Via Wizard... "
+                    "if none exists yet."
+                )
+                return
+            if via_cell not in via_cell_choices:
+                error_var.set(
+                    f"No cell named {via_cell!r} in this design or any attached library."
                 )
                 return
 
             self.route_layer_a_var.set(self._layer_label(a))
             self.route_layer_b_var.set(self._layer_label(b))
-            self.route_via_size_var.set(size)
-            self.route_via_shape_var.set(via_shape_var.get())
-            self.route_dielectric_layer_var.set(self._layer_label(dielectric_layer))
-            self.route_dielectric_window_var.set(dielectric_window)
+            self.route_via_cell_var.set(via_cell)
             self._on_route_opts_change()
             save_route_rules(self.session.library, {
-                "layer_a": a, "layer_b": b, "via_size": size, "via_shape": via_shape_var.get(),
-                "dielectric_layer": dielectric_layer,
-                "dielectric_window": dielectric_window,
+                "layer_a": a, "layer_b": b, "via_cell": via_cell,
             })
             self.status.set(
                 f"route layers: A={self._layer_label(a)}  B={self._layer_label(b)}  "
-                f"via={dbu_to_mm(size):g} mm {via_shape_var.get()}  "
-                f"dielectric={self._layer_label(dielectric_layer)} "
-                f"window={dbu_to_mm(dielectric_window):g} mm"
+                f"via cell={via_cell!r}"
             )
             win.destroy()
 
@@ -1313,24 +1224,32 @@ class App(tk.Tk):
         win.bind("<Return>", lambda e: apply_and_close())
         win.bind("<Escape>", lambda e: win.destroy())
 
-    def _on_route_via(self, x, y, layer_a, layer_b, size, shape, segment=None,
-                       dielectric_layer=None, dielectric_window=None):
+    def _on_route_via(self, x, y, layer_a, layer_b, via_cell, segment=None):
         """Wired as canvas.on_route_via -- fired when Space drops a via
         mid-route (see LayoutCanvas._route_drop_via()). `segment`, if
         given, is (layer, points, width, cap) for the path drawn so far
         on the layer being left -- committed in the same Session.batch()
-        as the via so the whole space-press is one undo step.
-        `dielectric_layer`/`dielectric_window` (from Setup > Route
-        Layers...) also cut a via window in the dielectric, if set --
-        see Session.drop_via()."""
+        as the via so the whole space-press is one undo step. The via
+        itself is an instance of `via_cell` (Setup > Route Layers...,
+        built via Tools > Via Wizard...) placed at (x, y) with
+        Session.place_cell() -- not raw pad/dielectric-window shapes --
+        so its footprint is whatever that cell's own geometry says.
+        `layer_a`/`layer_b` are only used for the error message; the
+        placement itself doesn't need them, since the via cell already
+        carries its own layers."""
+        if not via_cell:
+            dialogs.show_error(
+                "Route", "No via cell configured -- set one in Setup > Route Layers... "
+                "(build one first with Tools > Via Wizard... if none exists yet).",
+                parent=self,
+            )
+            return
         try:
             with self.session.batch():
                 if segment is not None:
                     seg_layer, points, width, cap = segment
                     self.session.path(seg_layer, points, width, cap=cap)
-                self.session.drop_via(x, y, layer_a, layer_b, size=size, shape=shape,
-                                       dielectric_layer=dielectric_layer,
-                                       dielectric_window=dielectric_window)
+                self.session.place_cell(via_cell, (x, y))
         except LayoutError as e:
             dialogs.show_error("Route", f"Could not place via: {e}", parent=self)
 

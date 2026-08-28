@@ -89,32 +89,25 @@ class LayoutCanvas(tk.Canvas):
         # route starts, route_layer_b is what Space switches to (and back).
         self.route_layer_a = 0
         self.route_layer_b = 1
-        self.route_via_size = 100  # DBU
-        self.route_via_shape = "square"  # "square" | "round"
-        # Dielectric via window -- a same-shape opening in the dielectric
-        # layer sitting between route_layer_a/route_layer_b, normally
-        # sized AT OR ABOVE route_via_size, representing the actual
-        # electrical contact area (see Session.drop_via()). A real via
-        # always has this window; App._reload_route_settings_from_library()
-        # sets real values here immediately at startup. None/None is
-        # just this attribute's pre-setup placeholder (and remains
-        # supported at the API level for bare two-pad vias).
-        self.route_dielectric_layer = None
-        self.route_dielectric_window = None
+        # Which reusable via cell (see Tools > Via Wizard.../scripting's
+        # create_via_cell()) Space places at the switch point -- an SRef
+        # to this cell, not raw pad/dielectric-window shapes, so the via's
+        # actual footprint (size, shape, dielectric window, anything else
+        # the cell's own geometry carries) lives in one place: the cell
+        # itself. Empty string means "not configured yet" -- see
+        # App._on_route_via(), which refuses to drop a via and asks the
+        # user to set one via Setup > Route Layers... first.
+        self.route_via_cell = ""
         self._route_active_layer = self.route_layer_a
-        # Optional callback(x, y, layer_a, layer_b, size, shape,
-        # segment=None, dielectric_layer=None, dielectric_window=None),
+        # Optional callback(x, y, layer_a, layer_b, via_cell, segment=None),
         # fired when Space drops a via mid-route. When given, `segment`
         # is (layer, points, width, cap) for the path segment drawn so
         # far that should be committed *atomically with* the via as one
         # undo step -- wired by the app to wrap Session.path() +
-        # Session.drop_via() in one session.batch(). Left as a no-op so
+        # Session.place_cell() in one session.batch(). Left as a no-op so
         # a bare LayoutCanvas (e.g. in a test) works without an
         # app/session wiring it up.
-        self.on_route_via = (
-            lambda x, y, a, b, size, shape, segment=None,
-            dielectric_layer=None, dielectric_window=None: None
-        )
+        self.on_route_via = lambda x, y, a, b, via_cell, segment=None: None
         self.snap_enabled = True
         self.snap_dbu = self.grid_dbu  # snap to the current grid spacing by default
         self.on_commit = None  # callback(mode, layer, points, extra_dict)
@@ -1496,9 +1489,7 @@ class LayoutCanvas(tk.Canvas):
             segment = (self._route_active_layer, list(self._pending_points),
                        self.path_width, self.path_cap)
         self.on_route_via(last[0], last[1], self.route_layer_a, self.route_layer_b,
-                           self.route_via_size, self.route_via_shape, segment=segment,
-                           dielectric_layer=self.route_dielectric_layer,
-                           dielectric_window=self.route_dielectric_window)
+                           self.route_via_cell, segment=segment)
         self._route_active_layer = (
             self.route_layer_b if self._route_active_layer == self.route_layer_a
             else self.route_layer_a

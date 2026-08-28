@@ -186,24 +186,21 @@ def test_load_resistor_geometry_rules_tolerates_malformed_entry():
     assert load_resistor_geometry_rules(lib) == DEFAULT_RESISTOR_GEOMETRY
 
 
-# --- Create > Route (2-Layer) settings, incl. dielectric via window --------
+# --- Create > Route (2-Layer) settings --------------------------------------
+# Simplified to just the two conductor layers plus the name of a reusable
+# via cell (Tools > Via Wizard.../scripting's create_via_cell()) that Space
+# places an instance of -- the via's own pad size/shape/dielectric window
+# live in that cell's own geometry instead of being duplicated here.
 
 def test_load_route_rules_returns_defaults_when_absent():
-    # A real via always has a dielectric window (per the user's report:
-    # "You never have no window on the dielectric layer"), so even the
-    # bare defaults ship with a real dielectric layer/window rather than
-    # None/off, and the default window is >= the default via size.
     lib = Library("DEMO")
     assert load_route_rules(lib) == DEFAULT_ROUTE_RULES
-    assert DEFAULT_ROUTE_RULES["dielectric_layer"] is not None
-    assert DEFAULT_ROUTE_RULES["dielectric_window"] is not None
-    assert DEFAULT_ROUTE_RULES["dielectric_window"] >= DEFAULT_ROUTE_RULES["via_size"]
+    assert DEFAULT_ROUTE_RULES["via_cell"] == ""
 
 
 def test_route_rules_round_trip_through_tech_params():
     lib = Library("DEMO")
-    custom = {"layer_a": 2, "layer_b": 5, "via_size": 80, "via_shape": "round",
-              "dielectric_layer": 9, "dielectric_window": 20.0}
+    custom = {"layer_a": 2, "layer_b": 5, "via_cell": "VIA_Layer2_to_Layer5"}
     save_route_rules(lib, custom)
     assert lib.tech_params
     assert load_route_rules(lib) == custom
@@ -211,13 +208,11 @@ def test_route_rules_round_trip_through_tech_params():
 
 def test_route_rules_survive_a_full_techfile_save_and_load(tmp_path):
     # The actual point of the request: configure the Route Layers dialog
-    # (including the new dielectric via window) once, and a later
-    # session loading this technology file sees it again with nothing
-    # re-entered by hand.
+    # once, and a later session loading this technology file sees it
+    # again with nothing re-entered by hand.
     lib = Library("DEMO")
     save_route_rules(lib, {
-        "layer_a": 3, "layer_b": 7, "via_size": 120, "via_shape": "square",
-        "dielectric_layer": 10, "dielectric_window": 30.0,
+        "layer_a": 3, "layer_b": 7, "via_cell": "VIA_Layer3_to_Layer7",
     })
     path = str(tmp_path / "tech.json")
     save_techfile(lib, path)
@@ -227,9 +222,7 @@ def test_route_rules_survive_a_full_techfile_save_and_load(tmp_path):
     rules = load_route_rules(lib2)
     assert rules["layer_a"] == 3
     assert rules["layer_b"] == 7
-    assert rules["via_size"] == 120
-    assert rules["dielectric_layer"] == 10
-    assert rules["dielectric_window"] == 30.0
+    assert rules["via_cell"] == "VIA_Layer3_to_Layer7"
 
 
 def test_load_route_rules_tolerates_malformed_entry():

@@ -373,17 +373,15 @@ def save_thin_film_rules(library: Library, rules: dict) -> None:
 # --- Create > Route (2-Layer) settings ---------------------------------------
 #
 # Setup > Route Layers... configures the two conductor layers the Route
-# tool draws on, the via it drops (Space) when switching between them,
-# and its dielectric via window: a same-centred opening cut in the
-# dielectric layer that sits between the two conductor layers,
-# representing the actual electrical contact area. A real via always
-# has this opening -- there is no "no window" case in a real process --
-# and it's normally sized AT OR ABOVE the via pad size (the pad lands
-# within/over the opening), which is why it's a separate size rather
-# than reusing via_size. dielectric_layer/dielectric_window therefore
-# ship with real defaults rather than None/off. Same one-JSON-blob-
-# per-tech_params-entry pattern as everything else in this module, so
-# these settings are saved/reloaded automatically with the technology
+# tool draws on, and which reusable via cell (Tools > Via Wizard.../
+# scripting's create_via_cell()) Space places at the point where a route
+# switches between them. The via's own footprint -- pad size/shape,
+# dielectric window, anything else -- lives entirely in that cell's own
+# geometry, not here: this dialog used to also ask for via size/shape and
+# a separate dielectric layer/window, but that duplicated what the via
+# cell itself already describes, so it's just the cell's name now. Same
+# one-JSON-blob-per-tech_params-entry pattern as everything else in this
+# module, so this is saved/reloaded automatically with the technology
 # file/sidecar instead of needing to be re-entered every session.
 
 ROUTE_RULES_KEY = "route_rules"
@@ -391,10 +389,7 @@ ROUTE_RULES_KEY = "route_rules"
 DEFAULT_ROUTE_RULES = {
     "layer_a": 0,
     "layer_b": 1,
-    "via_size": 100,
-    "via_shape": "square",
-    "dielectric_layer": 2,
-    "dielectric_window": 140,
+    "via_cell": "",
 }
 
 
