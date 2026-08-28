@@ -328,6 +328,8 @@ class App(tk.Tk):
         setupm.add_command(label="Layers...", command=self._show_layers_tab)
         setupm.add_checkbutton(label="Snap to Grid", variable=self.snap_var,
                                 command=self._on_snap_change)
+        setupm.add_checkbutton(label="Orthogonal/45° Routing", variable=self.ortho_var,
+                                command=self._on_ortho_change)
         setupm.add_command(label="Grid Spacing...", command=self.show_grid_spacing_dialog)
         setupm.add_separator()
         setupm.add_command(label="Path Style...", command=self.show_path_style_dialog)
@@ -814,6 +816,15 @@ class App(tk.Tk):
         self.snap_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(bar, text="Snap to grid", variable=self.snap_var,
                          command=self._on_snap_change).pack(side="left", padx=(12, 2))
+
+        # Constrains Path/Route (2-Layer) drawing to horizontal/vertical/
+        # 45-degree segments (LayoutCanvas.ortho_enabled -- see
+        # _constrain_to_ortho()/_next_draw_point()) -- on by default,
+        # matching how real traces are actually routed. Alongside Snap
+        # to grid since both change how a click's point gets placed.
+        self.ortho_var = tk.BooleanVar(value=self.canvas.ortho_enabled)
+        ttk.Checkbutton(bar, text="Ortho/45° routing", variable=self.ortho_var,
+                         command=self._on_ortho_change).pack(side="left", padx=(2, 2))
 
         # Always-visible current grid spacing readout + a quick way to
         # change it, alongside Snap to grid since they're the same
@@ -1401,6 +1412,9 @@ class App(tk.Tk):
 
     def _on_snap_change(self):
         self.canvas.snap_enabled = self.snap_var.get()
+
+    def _on_ortho_change(self):
+        self.canvas.ortho_enabled = self.ortho_var.get()
 
     def _refresh_grid_spacing_var(self):
         """Keep the toolbar's "Grid: N mm" readout in sync with

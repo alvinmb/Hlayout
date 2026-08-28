@@ -110,6 +110,17 @@ class LayoutCanvas(tk.Canvas):
         self.on_route_via = lambda x, y, a, b, via_cell, segment=None: None
         self.snap_enabled = True
         self.snap_dbu = self.grid_dbu  # snap to the current grid spacing by default
+        # Orthogonal/45-degree routing constraint -- Path and Route
+        # (2-Layer) drawing (Setup > Orthogonal/45 Routing / the "Ortho
+        # 45" toolbar checkbox). On by default: every new segment is
+        # forced to horizontal, vertical, or a clean 45-degree diagonal
+        # from the last point already placed, the way real traces are
+        # actually routed (arbitrary angles are unusual on any process,
+        # and clean 45s route/mitre corners better than a hard 90).
+        # Only constrains NEW points going forward -- doesn't touch
+        # points already placed. See _constrain_to_ortho()/
+        # _next_draw_point().
+        self.ortho_enabled = True
         self.on_commit = None  # callback(mode, layer, points, extra_dict)
         self.on_mode_status = lambda msg: None  # optional extra status callback
         # Optional callback(mode), fired by set_mode() every time
@@ -409,6 +420,48 @@ class LayoutCanvas(tk.Canvas):
         s = self.snap_dbu
         return (int(round(x / s)) * s, int(round(y / s)) * s)
 
+    def _constrain_to_ortho(self, x0, y0, x, y):
+        """Snap raw candidate point (x, y) onto the nearest of the 8
+        compass/diagonal directions (0/45/90/.../315 degrees) from
+        (x0, y0) -- the last point already placed -- so the segment
+        from (x0, y0) is always horizontal, vertical, or a clean
+        45-degree diagonal. Used by Path/Route drawing when
+        self.ortho_enabled is on; see _next_draw_point().
+
+        The distance travelled along that direction is preserved (and
+        snapped to the current grid, same as _snap(), if snapping is
+        on) rather than the raw (x, y) itself -- so an ortho segment's
+        LENGTH still lands on-grid even though a 45-degree diagonal's
+        endpoint generally won't (cos/sin 45 degrees isn't a grid
+        multiple of the perpendicular axis; this matches how real
+        45-degree routing works in any EDA tool)."""
+        dx, dy = x - x0, y - y0
+        if dx == 0 and dy == 0:
+            return (x0, y0)
+        length = math.hypot(dx, dy)
+        if self.snap_enabled and self.snap_dbu > 0:
+            length = round(length / self.snap_dbu) * self.snap_dbu
+        angle = round(math.atan2(dy, dx) / (math.pi / 4)) * (math.pi / 4)
+        nx = x0 + length * math.cos(angle)
+        ny = y0 + length * math.sin(angle)
+        return (int(round(nx)), int(round(ny)))
+
+    def _next_draw_point(self, x, y):
+        """Turn a raw DBU cursor position into the point a click would
+        actually place: grid-snapped via _snap(), and -- for Path/Route
+        drawing, once at least one point is already pending, with
+        self.ortho_enabled on -- further constrained to a clean
+        horizontal/vertical/45-degree segment from the last point via
+        _constrain_to_ortho(). Shared by _on_click() and _on_motion()
+        so the rubber-band preview always shows exactly the point a
+        click would commit, never a raw diagonal the click wouldn't
+        actually land on."""
+        if (self.ortho_enabled and self.draw_mode in ("path", "route")
+                and self._pending_points):
+            x0, y0 = self._pending_points[-1]
+            return self._constrain_to_ortho(x0, y0, x, y)
+        return self._snap(x, y)
+
     # --- mouse handlers -----------------------------------------------
     def _pan_start_evt(self, e):
         self._pan_start = (e.x, e.y, self.offset_x, self.offset_y)
@@ -442,7 +495,7 @@ class LayoutCanvas(tk.Canvas):
 
     def _on_motion(self, e):
         x, y = self.to_dbu(e.x, e.y)
-        sx, sy = self._snap(x, y)
+        sx, sy = self._next_draw_point(x, y)
         self._last_mouse_dbu = (sx, sy)
         self.on_status(f"x={dbu_to_mm(sx):.3f} mm  y={dbu_to_mm(sy):.3f} mm")
         self._update_preview(sx, sy)
@@ -468,7 +521,7 @@ class LayoutCanvas(tk.Canvas):
             self._select_click(e)
             return
         x, y = self.to_dbu(e.x, e.y)
-        pt = self._snap(x, y)
+        pt = self._next_draw_point(x, y)
 
         if self.draw_mode == "rect":
             self._pending_points.append(pt)
