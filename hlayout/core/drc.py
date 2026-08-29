@@ -76,16 +76,18 @@ from typing import List, Optional
 
 from .errors import GeometryError
 from .maskops import _ShapelyPolygon, _require_shapely, layer_geoms_flattened, shapely_to_polygons, unary_union
+from .units import mm_to_dbu
 
 DRC_RULE_KINDS = ("MIN_WIDTH", "MIN_AREA", "MIN_SPACE", "MIN_SPACE_BETWEEN", "MIN_ENCLOSURE")
 
 #: Which rule kinds take a second layer.
 TWO_LAYER_KINDS = ("MIN_SPACE_BETWEEN", "MIN_ENCLOSURE")
 
-#: A small fixed half-width (DBU) used to turn a spacing violation's two
-#: nearest points into a visible marker polygon (a thin rectangle along
-#: the gap) rather than a zero-area line.
-_SPACE_MARKER_HALF_WIDTH = 1.0
+#: Half-width (DBU) used to turn a spacing violation's two nearest points
+#: into a visible marker polygon (a thin rectangle along the gap, or a
+#: dot when the two points coincide) rather than a zero-area line. The
+#: marker is 0.1 mm wide overall, i.e. twice this half-width.
+_SPACE_MARKER_HALF_WIDTH = mm_to_dbu(0.1) / 2.0
 
 
 @dataclass
