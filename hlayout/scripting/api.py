@@ -27,6 +27,7 @@ from typing import Callable, List, Optional, Union
 from ..core.cell import Cell
 from ..core.errors import LayoutError, LibraryError
 from ..core.library import Library, merge_libraries
+from ..core.shapes import Polygon, Rectangle
 from ..core.maskops import (
     MASK_OPS,
     boolean_op,
@@ -456,6 +457,15 @@ class Session:
         used automatically. Raises if `name` already exists in the
         target library, unless overwrite=True (which replaces it).
 
+        A genuine 2-pad footprint (rows*cols == 2, e.g. a simple
+        connector or discrete-part land pattern) is unambiguous, so its
+        two conductor pads are auto-numbered pin "1"/"2" (lower X, then
+        lower Y, is pin "1") -- see Rectangle.pin. Any other grid size
+        is left unnumbered (pin=""); number those by hand via Edit >
+        Number Pins... or Session.set_pin(), since which physical pad is
+        pin 1 on a 3+ pin footprint depends on the part's actual pinout,
+        not just its geometry.
+
         Returns (cell_name, path, pad_count) for the pad cell just
         written. The attached library object in memory is updated in
         place too, so Create > Cell Instance / Find & Place Cell... see
@@ -512,15 +522,29 @@ class Session:
         cell = lib.new_cell(name)
         half_l, half_w = length / 2.0, width / 2.0
         paste_half_l, paste_half_w = half_l - margin, half_w - margin
-        pad_count = 0
+
+        centers = []
         for r in range(rows):
             cy = (r - (rows - 1) / 2.0) * (pitch_y or 0)
             for c in range(cols):
                 cx = (c - (cols - 1) / 2.0) * (pitch_x or 0)
-                cell.add_rectangle(n_cond, cx - half_l, cy - half_w, cx + half_l, cy + half_w)
-                cell.add_rectangle(n_paste, cx - paste_half_l, cy - paste_half_w,
-                                    cx + paste_half_l, cy + paste_half_w)
-                pad_count += 1
+                centers.append((cx, cy))
+
+        # A genuine 2-pad footprint is unambiguous -- auto-number it.
+        # Any other pad count is left unpinned; see the docstring.
+        pins_by_index = {}
+        if len(centers) == 2:
+            order = sorted(range(2), key=lambda i: centers[i])
+            pins_by_index[order[0]] = "1"
+            pins_by_index[order[1]] = "2"
+
+        pad_count = 0
+        for i, (cx, cy) in enumerate(centers):
+            cell.add_rectangle(n_cond, cx - half_l, cy - half_w, cx + half_l, cy + half_w,
+                                pin=pins_by_index.get(i, ""))
+            cell.add_rectangle(n_paste, cx - paste_half_l, cy - paste_half_w,
+                                cx + paste_half_l, cy + paste_half_w)
+            pad_count += 1
 
         path = self._attached_paths[index]
         save_gds(lib, path)
@@ -741,8 +765,11 @@ class Session:
             self.new_cell(device_name)  # also switches current_cell_name
             self.rect(r_layer, -(half_l + a), -half_w, half_l + a, half_w)
             self.rect(g_layer, -(half_l + a + d), -(half_w + d), half_l + a + d, half_w + d)
-            self.rect(c_layer, -(half_l + a + b), -pad_half_w, -half_l, pad_half_w)
-            self.rect(c_layer, half_l, -pad_half_w, half_l + a + b, pad_half_w)
+            # A resistor is an inherently unambiguous 2-terminal part, so
+            # its pads are auto-numbered the same way create_pad_cell()
+            # numbers a 2-pad footprint: lower X is pin "1".
+            self.rect(c_layer, -(half_l + a + b), -pad_half_w, -half_l, pad_half_w, pin="1")
+            self.rect(c_layer, half_l, -pad_half_w, half_l + a + b, pad_half_w, pin="2")
             if ref_des:
                 height = float(label_height) if label_height is not None else max(1.0, body_width * 0.4)
                 # Text origin is its bottom-left corner (see Text.bbox()'s
@@ -754,7 +781,13 @@ class Session:
                 self.text(doc_layer_resolved, (-label_w / 2, -height / 2),
                           str(ref_des), height=height)
             self.use_cell(parent_cell_name)
-            self.sref(device_name, (x, y), rotation=rotation)
+            # Setting the placed instance's own label (not just the
+            # silkscreen Text baked into the device cell above) keeps
+            # SRef.label -- the field netlist extraction reads as the
+            # ref designator -- consistent for every resistor placed
+            # this way, without requiring a separate Edit Selected...
+            # step afterward.
+            self.sref(device_name, (x, y), rotation=rotation, label=str(ref_des) if ref_des else "")
         return device_name
 
     def generate_serpentine_resistor(self, x, y, sol, rotation: float = 0.0,
@@ -808,14 +841,15 @@ class Session:
             # reaching `overlap` past that edge into the resistor
             # element itself, centered on that zone's own vertical
             # middle.
-            self.rect(p_layer, min_x - pad_len, -pad_width / 2, min_x + overlap, pad_width / 2)
-            self.rect(p_layer, max_x - overlap, -pad_width / 2, max_x + pad_len, pad_width / 2)
+            # Two-terminal part -- auto-number pads same as generate_resistor().
+            self.rect(p_layer, min_x - pad_len, -pad_width / 2, min_x + overlap, pad_width / 2, pin="1")
+            self.rect(p_layer, max_x - overlap, -pad_width / 2, max_x + pad_len, pad_width / 2, pin="2")
             if ref_des:
                 height = float(label_height) if label_height is not None else max(1.0, sol.trace_width * 0.8)
                 label_w = height * 0.6 * max(len(str(ref_des)), 1)
                 self.text(doc_layer_resolved, (-label_w / 2, max_y + height), str(ref_des), height=height)
             self.use_cell(parent_cell_name)
-            self.sref(device_name, (x, y), rotation=rotation)
+            self.sref(device_name, (x, y), rotation=rotation, label=str(ref_des) if ref_des else "")
         return device_name
 
     def generate_top_hat_resistor(self, x, y, sol, rotation: float = 0.0,
@@ -853,15 +887,17 @@ class Session:
             self.polygon(r_layer, geo["bar_points"])
             if geo["crown_points"] is not None:
                 self.polygon(r_layer, geo["crown_points"])
-            self.polygon(p_layer, geo["pad_a_points"])
-            self.polygon(p_layer, geo["pad_b_points"])
+            # Two-terminal part -- auto-number pads same as generate_resistor()
+            # (pad_a is the lower-X pad, see generate_top_hat_geometry()).
+            self.polygon(p_layer, geo["pad_a_points"], pin="1")
+            self.polygon(p_layer, geo["pad_b_points"], pin="2")
             if ref_des:
                 height = float(label_height) if label_height is not None else max(1.0, sol.bar_width * 0.6)
                 label_w = height * 0.6 * max(len(str(ref_des)), 1)
                 self.text(doc_layer_resolved, (-label_w / 2, sol.pad_width / 2 + height),
                           str(ref_des), height=height)
             self.use_cell(parent_cell_name)
-            self.sref(device_name, (x, y), rotation=rotation)
+            self.sref(device_name, (x, y), rotation=rotation, label=str(ref_des) if ref_des else "")
         return device_name
 
     def clear_undo_history(self) -> None:
@@ -933,17 +969,17 @@ class Session:
     # --- shape shortcuts (operate on the current cell) -------------------
     # `layer` accepts either a layer number (0-63) or a layer name (e.g.
     # "Thick-Film Conductor"), resolved via the library's layer table.
-    def rect(self, layer, x1, y1, x2, y2, datatype: int = 0):
+    def rect(self, layer, x1, y1, x2, y2, datatype: int = 0, pin: str = ""):
         self._checkpoint()
         layer = self.library.layers.resolve(layer)
-        shape = self.cell.add_rectangle(layer, x1, y1, x2, y2, datatype=datatype)
+        shape = self.cell.add_rectangle(layer, x1, y1, x2, y2, datatype=datatype, pin=pin)
         self._notify()
         return shape
 
-    def polygon(self, layer, points, datatype: int = 0):
+    def polygon(self, layer, points, datatype: int = 0, pin: str = ""):
         self._checkpoint()
         layer = self.library.layers.resolve(layer)
-        shape = self.cell.add_polygon(layer, points, datatype=datatype)
+        shape = self.cell.add_polygon(layer, points, datatype=datatype, pin=pin)
         self._notify()
         return shape
 
@@ -973,7 +1009,7 @@ class Session:
         return shape
 
     def sref(self, cell_name: str, origin, rotation: float = 0.0,
-             magnification: float = 1.0, x_reflection: bool = False):
+             magnification: float = 1.0, x_reflection: bool = False, label: str = ""):
         # Checked before any mutation (and before the undo checkpoint,
         # so a rejected placement doesn't leave a spurious undo step):
         # a cell instancing itself, directly or by way of one of its
@@ -989,12 +1025,14 @@ class Session:
             )
         self._checkpoint()
         ref = self.cell.add_sref(cell_name, origin, rotation=rotation,
-                                  magnification=magnification, x_reflection=x_reflection)
+                                  magnification=magnification, x_reflection=x_reflection,
+                                  label=label)
         self._notify()
         return ref
 
     def place_cell(self, cell_name: str, origin, source: Union[str, int, None] = None,
-                    rotation: float = 0.0, magnification: float = 1.0, x_reflection: bool = False):
+                    rotation: float = 0.0, magnification: float = 1.0, x_reflection: bool = False,
+                    label: str = ""):
         """Search for a cell by exact name and place an Sref to it in the
         current cell — the normal way to place a symbol/part found via
         find_cells() or attached from another library.
@@ -1006,6 +1044,10 @@ class Session:
         everything it references) is copied into the current library
         first, since GDSII Srefs require their target cell to be
         defined in the same file.
+
+        `label`, if given, sets the placed instance's ref designator
+        (SRef.label) directly -- e.g. for a netlist-ready placement --
+        the same field Edit Selected... calls "Label".
         """
         with self._batch():
             if source is None:
@@ -1035,7 +1077,8 @@ class Session:
                 local_name = self.library.import_cell_closure(self.attached_libraries[idx], cell_name)
 
             return self.sref(local_name, origin, rotation=rotation,
-                              magnification=magnification, x_reflection=x_reflection)
+                              magnification=magnification, x_reflection=x_reflection,
+                              label=label)
 
     def place_cell_array(self, cell_name: str, origin, columns: int = 1, rows: int = 1,
                           col_spacing: float = 0.0, row_spacing: float = 0.0,
@@ -1349,6 +1392,55 @@ class Session:
         self._notify()
         return violations
 
+    def extract_netlist(self, conductor_layers, cell_name: Optional[str] = None) -> List["Net"]:
+        """Extract the electrical netlist of `cell_name` (default: the
+        current cell), as seen across `conductor_layers` -- an iterable
+        of layer numbers or names (each resolved the same way every
+        other layer argument in this API is). See hlayout.core.netlist
+        for exactly how this works: every touching/overlapping piece of
+        copper on those layers becomes one Net, and Rectangle.pin/
+        Polygon.pin plus the owning SRef's .label identify each net's
+        members as RefDes.Pin.
+
+        There's no saved "which layers are conductors" setting in the
+        technology file today, so `conductor_layers` must be passed
+        explicitly every call -- e.g. `s.extract_netlist([31])` for a
+        design whose Resistor Geometry Rules... conductor_layer is 31,
+        or `s.extract_netlist([0, 1])` for a two-layer Route (2-Layer)
+        design.
+
+        Returns a list of hlayout.core.netlist.Net (each has .id,
+        .pins -- a list of NetPin(ref_des, pin) -- and
+        .unresolved_count for members whose owning instance has no ref
+        designator yet). A pin whose own shape isn't on any of
+        `conductor_layers` is reported in one final Net(id="UNASSIGNED")
+        rather than silently dropped -- see extract_netlist()'s own
+        docstring. Requires the shapely package (see mask_op())."""
+        from ..core.netlist import extract_netlist as _extract_netlist
+
+        cell = self.library.get_cell(cell_name) if cell_name else self.cell
+        resolved = [self.library.layers.resolve(l) for l in conductor_layers]
+        return _extract_netlist(self.library, cell, resolved)
+
+    def export_netlist_csv(self, nets: List["Net"], path: str) -> None:
+        """Write `nets` (as returned by extract_netlist()) to a CSV file,
+        one row per (net, ref_des, pin) -- net, ref_des, pin columns,
+        matching the row-per-item convention of the Resistor Designer's
+        own CSV export. A net with no pins at all (rare -- copper with
+        no numbered pad touching it anywhere) still gets one row with
+        empty ref_des/pin columns, so the net's existence isn't lost."""
+        import csv
+
+        with open(path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["net", "ref_des", "pin"])
+            for net in nets:
+                if not net.pins:
+                    writer.writerow([net.id, "", ""])
+                    continue
+                for p in net.pins:
+                    writer.writerow([net.id, p.ref_des, p.pin])
+
     def remap_layers(self, mapping, cell_names: Optional[List[str]] = None) -> dict:
         """Reassign shapes from one layer to another, in bulk, across the
         library. `mapping` is {old_layer: new_layer}; each side accepts
@@ -1389,3 +1481,40 @@ class Session:
 
     def bbox(self, cell_name: Optional[str] = None):
         return self.library.cell_bbox(cell_name or self.current_cell_name)
+
+    # --- pin numbering -------------------------------------------------
+    def list_pins(self, cell_name: Optional[str] = None) -> List[dict]:
+        """Every Rectangle/Polygon shape in `cell_name` (default: the
+        current cell) that could carry a pin number -- Path/Text can't
+        and are omitted. One dict per shape: {"index", "layer", "pin",
+        "bbox"}. `index` is what set_pin()/the PIN SET command expect;
+        `pin` is "" for a pad that hasn't been numbered yet. This is
+        also how the pin-numbering canvas tool (Edit > Number Pins...)
+        and netlist extraction find what's already assigned in a cell.
+        The command-bar form is PIN LIST [cell=<name>]."""
+        cell = self.library.get_cell(cell_name) if cell_name else self.cell
+        return [
+            {"index": i, "layer": shape.layer, "pin": shape.pin, "bbox": shape.bbox()}
+            for i, shape in enumerate(cell.shapes)
+            if isinstance(shape, (Rectangle, Polygon))
+        ]
+
+    def set_pin(self, index: int, pin: str, cell_name: Optional[str] = None):
+        """Set the pin number/name of the shape at `index` within
+        `cell_name`'s (default: current cell) shape list -- see
+        list_pins() for indices. Only Rectangle/Polygon shapes carry a
+        pin; raises if the shape at that index is some other type or
+        the index is out of range. The command-bar form is
+        PIN SET <index> <pin> [cell=<name>]."""
+        cell = self.library.get_cell(cell_name) if cell_name else self.cell
+        if index < 0 or index >= len(cell.shapes):
+            raise LayoutError(f"no shape at index {index} in cell {cell.name!r}")
+        shape = cell.shapes[index]
+        if not isinstance(shape, (Rectangle, Polygon)):
+            raise LayoutError(
+                f"shape at index {index} is a {type(shape).__name__}, which has no pin"
+            )
+        self._checkpoint()
+        shape.pin = pin
+        self._notify()
+        return shape

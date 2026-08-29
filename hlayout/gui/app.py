@@ -385,6 +385,7 @@ class App(tk.Tk):
         editm.add_separator()
         editm.add_command(label="Insert Vertex on Edge", command=self._insert_vertex_on_edge)
         editm.add_command(label="Continue Path...", command=self._continue_path)
+        editm.add_command(label="Number Pins...", command=self._number_pins)
         editm.add_separator()
         editm.add_command(label="Rotate...", command=self._rotate_selected)
         editm.add_command(label="Copy...", command=self._copy_selected)
@@ -414,6 +415,7 @@ class App(tk.Tk):
         toolsm.add_command(label="Mask Operations...", command=self.show_mask_op_dialog)
         toolsm.add_command(label="Mask Operation Batch...", command=lambda: open_maskop_batch_window(self))
         toolsm.add_command(label="DRC...", command=lambda: open_drc_window(self))
+        toolsm.add_command(label="Extract Netlist...", command=self.show_extract_netlist_dialog)
         toolsm.add_separator()
         toolsm.add_command(label="Gerber Export Sets...", command=lambda: open_gerber_batch_window(self))
         toolsm.add_command(label="DXF Export Sets...", command=lambda: open_dxf_batch_window(self))
@@ -900,6 +902,7 @@ class App(tk.Tk):
                 ("Edit Selected...", self._edit_selected),
                 ("Insert Vertex on Edge", self._insert_vertex_on_edge),
                 ("Continue Path...", self._continue_path),
+                ("Number Pins...", self._number_pins),
                 ("Rotate...", self._rotate_selected),
                 ("Copy...", self._copy_selected),
                 ("Smash to SRefs", self._smash_selected),
@@ -1492,6 +1495,23 @@ class App(tk.Tk):
             )
             return
         self.canvas.insert_vertex_on_selected_edge()
+
+    def _number_pins(self):
+        """Edit > Number Pins...: enter the click-to-increment pin-
+        numbering tool (LayoutCanvas.start_pin_numbering()) for the
+        current cell -- click each pad (Rectangle/Polygon) in the
+        physical pinout order you want; each click stamps the current
+        pin number and moves to the next one automatically. Prompts
+        for a starting number (default "1"); Esc stops and returns to
+        Select. See Session.list_pins()/set_pin() and the PIN command
+        for reviewing/correcting assignments afterward, and
+        hlayout.core.netlist for what pin numbers are ultimately for."""
+        start = simpledialog.askstring(
+            "Number Pins", "Starting pin number:", initialvalue="1", parent=self,
+        )
+        if start is None:
+            return
+        self.canvas.start_pin_numbering(start)
 
     def _continue_path(self):
         """Edit > Continue Path...: re-enter Path drawing pre-seeded
@@ -2124,6 +2144,104 @@ class App(tk.Tk):
         btn_row.pack(pady=(6, 12))
         ttk.Button(btn_row, text="Apply", command=apply_and_close).pack(side="left", padx=6)
         ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=6)
+
+        win.bind("<Escape>", lambda e: win.destroy())
+
+    def show_extract_netlist_dialog(self):
+        """Tools > Extract Netlist...: pick the conductor layer(s) to
+        treat as electrically connected copper, run
+        Session.extract_netlist() against the current cell (or another
+        cell), and show the resulting nets -- each as a comma-separated
+        list of RefDes.Pin members (Rectangle.pin/Polygon.pin plus the
+        placing Sref's Label). See hlayout.core.netlist for exactly how
+        a net is determined; see Edit > Number Pins... and PAD/RESGEN's
+        auto-numbering for how pins get set in the first place. Same
+        operation as the command bar's NETLIST RUN command. Requires
+        the shapely package."""
+        win = tk.Toplevel(self)
+        win.title("Extract Netlist")
+        win.transient(self)
+        win.grab_set()
+
+        ttk.Label(
+            win,
+            text="Pick every conductor layer that's electrically connected copper "
+                 "in this design (Ctrl/Shift-click for more than one). Touching or "
+                 "overlapping shapes on those layers become one net; each net's "
+                 "members are read from Rectangle/Polygon pin numbers (Edit > "
+                 "Number Pins...) and the ref designator (Label) of the cell "
+                 "instance that placed them.",
+            wraplength=460, justify="left",
+        ).pack(anchor="w", padx=12, pady=(12, 6))
+
+        form = ttk.Frame(win)
+        form.pack(padx=12, fill="x")
+
+        ttk.Label(form, text="Conductor layers:").grid(row=0, column=0, sticky="ne", padx=4, pady=4)
+        layers_list = tk.Listbox(form, selectmode="extended", height=8, exportselection=False)
+        for n in range(len(self.session.library.layers)):
+            layers_list.insert("end", f"{n} ({self.session.library.layers[n].name})")
+        layers_list.grid(row=0, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="Cell:").grid(row=1, column=0, sticky="e", padx=4, pady=4)
+        cell_var = tk.StringVar(value=self.session.current_cell_name or "")
+        cell_names = list(self.session.library.cells.keys())
+        ttk.Combobox(form, textvariable=cell_var, state="readonly", width=22,
+                     values=cell_names).grid(row=1, column=1, sticky="w", padx=4, pady=4)
+
+        error_var = tk.StringVar(value="")
+        ttk.Label(win, textvariable=error_var, foreground="red", wraplength=460,
+                  justify="left").pack(anchor="w", padx=12)
+
+        columns = ("net", "members", "unresolved")
+        results = ttk.Treeview(win, columns=columns, show="headings", height=10)
+        results.heading("net", text="Net")
+        results.heading("members", text="Members")
+        results.heading("unresolved", text="Unresolved")
+        results.column("net", width=90, anchor="w")
+        results.column("members", width=340, anchor="w")
+        results.column("unresolved", width=80, anchor="center")
+        results.pack(padx=12, pady=(6, 6), fill="both", expand=True)
+
+        state = {"nets": []}
+
+        def run_extract():
+            error_var.set("")
+            sel = [layers_list.get(i).split(" ", 1)[0] for i in layers_list.curselection()]
+            if not sel:
+                error_var.set("Pick at least one conductor layer.")
+                return
+            layers = [int(n) for n in sel]
+            for row in results.get_children():
+                results.delete(row)
+            try:
+                nets = self.session.extract_netlist(layers, cell_name=cell_var.get() or None)
+            except LayoutError as e:
+                error_var.set(str(e))
+                return
+            state["nets"] = nets
+            for net in nets:
+                members = ", ".join(p.label() for p in net.pins) or "(no pins)"
+                results.insert("", "end", values=(net.id, members, net.unresolved_count))
+            self.status.set(f"Extract Netlist: {len(nets)} net(s) found")
+
+        def export_csv():
+            if not state["nets"]:
+                error_var.set("Run extraction first.")
+                return
+            path = filedialog.asksaveasfilename(
+                parent=win, title="Export Netlist CSV", initialfile="netlist.csv",
+                defaultextension=".csv", filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")])
+            if not path:
+                return
+            self.session.export_netlist_csv(state["nets"], path)
+            self.status.set(f"Netlist exported to {path}")
+
+        btn_row = ttk.Frame(win)
+        btn_row.pack(pady=(0, 12))
+        ttk.Button(btn_row, text="Run", command=run_extract).pack(side="left", padx=6)
+        ttk.Button(btn_row, text="Export CSV...", command=export_csv).pack(side="left", padx=6)
+        ttk.Button(btn_row, text="Close", command=win.destroy).pack(side="left", padx=6)
 
         win.bind("<Escape>", lambda e: win.destroy())
 

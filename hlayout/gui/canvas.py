@@ -6,7 +6,7 @@ import copy
 import math
 import tkinter as tk
 from tkinter import font as tkfont
-from tkinter import simpledialog
+from tkinter import messagebox, simpledialog
 
 from ..core.errors import GeometryError
 from ..core.maskops import layer_to_shapely, shapely_to_polygons
@@ -79,8 +79,13 @@ class LayoutCanvas(tk.Canvas):
         self._font_cache = {}
 
         # --- interactive drawing state ---------------------------------
-        self.draw_mode = "select"  # select | rect | poly | path | text | sref | aref | circle | zoomwin | route | measure
+        self.draw_mode = "select"  # select | rect | poly | path | text | sref | aref | circle | zoomwin | route | measure | pin_number
         self.current_layer = 0
+        # --- Pin numbering tool (Edit > Number Pins...) -------------------
+        # The pin number the NEXT click will stamp onto a Rectangle/Polygon
+        # in the current cell; increments (numerically) after each click.
+        # See increment_pin_str() and _pin_number_click().
+        self.pin_number_next = "1"
         self.path_width = 2
         self.path_cap = "round"
         self.circle_segments = 32  # one of CIRCLE_SEGMENT_CHOICES
@@ -380,8 +385,13 @@ class LayoutCanvas(tk.Canvas):
             "route": self._route_hint(),
             "measure": "Measure: click a start point, then click a second point -- "
                        "the distance between them is shown on the canvas and in the status bar",
+            "pin_number": self._pin_number_hint(),
         }
         return hints.get(self.draw_mode, "")
+
+    def _pin_number_hint(self):
+        return (f"Number Pins: click a pad to stamp pin {self.pin_number_next!r} "
+                f"(numbers auto-increment); Esc stops")
 
     def _route_hint(self):
         layer = self._route_active_layer
@@ -399,6 +409,47 @@ class LayoutCanvas(tk.Canvas):
         self._zoomwin_start = None
         if self.draw_mode == "route":
             self._route_active_layer = self.route_layer_a
+        if self.draw_mode == "pin_number":
+            # Esc stops the pin-numbering tool and drops back to Select,
+            # same as any other one-shot/modal tool (Zoom Window, ...).
+            # Done directly here rather than via set_mode() (which itself
+            # calls cancel_draw()) to avoid recursing.
+            self.draw_mode = "select"
+            self.selected = None
+            self.selected_multi = []
+            self.redraw()
+            self.on_mode_status(self._mode_hint())
+            self.on_draw_mode_changed("select")
+
+    def start_pin_numbering(self, start: str = "1"):
+        """Edit > Number Pins...: enter the click-to-increment pin-
+        numbering tool. Each click on a Rectangle/Polygon in the
+        current cell stamps `start` on it, then increments (see
+        increment_pin_str()) for the next click. Re-clicking an
+        already-numbered pad asks for confirmation before overwriting.
+        Esc (cancel_draw()) exits back to Select."""
+        self.pin_number_next = (start or "1").strip() or "1"
+        self.set_mode("pin_number")
+
+    def _pin_number_click(self, e):
+        item = self._pick_item_at(e.x, e.y)
+        if item is None:
+            return
+        kind, shape = self._item_to_shape[item]
+        if kind != "shape" or not isinstance(shape, (Rectangle, Polygon)):
+            return
+        if shape.pin and shape.pin != self.pin_number_next:
+            if not messagebox.askyesno(
+                "Renumber pad?",
+                f"This pad is already pin {shape.pin!r}. Reassign it to "
+                f"{self.pin_number_next!r}?",
+            ):
+                return
+        self.checkpoint()
+        shape.pin = self.pin_number_next
+        self.pin_number_next = increment_pin_str(self.pin_number_next)
+        self.on_mode_status(self._pin_number_hint())
+        self._after_edit()
 
     def _undo_point(self):
         if self._pending_points:
@@ -519,6 +570,9 @@ class LayoutCanvas(tk.Canvas):
         self.focus_set()
         if self.draw_mode == "select":
             self._select_click(e)
+            return
+        if self.draw_mode == "pin_number":
+            self._pin_number_click(e)
             return
         x, y = self.to_dbu(e.x, e.y)
         pt = self._next_draw_point(x, y)
@@ -2346,6 +2400,17 @@ def _points_to_str(points):
     return " ".join(f"{x},{y}" for x, y in points)
 
 
+def increment_pin_str(pin: str) -> str:
+    """The "next" pin after `pin`, for the click-to-increment pin-
+    numbering tool (Edit > Number Pins...). A purely-numeric pin counts
+    up ("1" -> "2", "9" -> "10"); anything else (a letter pin like "K",
+    or blank) is left as-is, since there's no obvious next value to
+    guess -- the operator just types the next one in that case."""
+    if pin.isdigit():
+        return str(int(pin) + 1)
+    return pin
+
+
 def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
     """A small property-edit form for the selected shape or sref.
     `checkpoint`, if given, is called once -- right before the shape's
@@ -2377,8 +2442,10 @@ def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
             add_field("Y1", y1)
             add_field("X2", x2)
             add_field("Y2", y2)
+            add_field("Pin", shape.pin)
         elif isinstance(shape, Polygon):
             add_field("Points (x,y x,y ...)", _points_to_str(shape.points))
+            add_field("Pin", shape.pin)
         elif isinstance(shape, Path):
             add_field("Points (x,y x,y ...)", _points_to_str(shape.points))
             add_field("Width", shape.width)
@@ -2434,6 +2501,7 @@ def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
                     y1, y2 = sorted((y1, y2))
                     x1, x2, y1, y2 = int(round(x1)), int(round(x2)), int(round(y1)), int(round(y2))
                     shape.points = [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
+                    shape.pin = entries["Pin"].get().strip()
                 elif isinstance(shape, Polygon):
                     pts = _parse_points_str(entries["Points (x,y x,y ...)"].get())
                     if len(pts) < 3:
@@ -2441,6 +2509,7 @@ def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
                     if len(pts) > 200:
                         raise ValueError("polygon max is 200 points")
                     shape.points = pts
+                    shape.pin = entries["Pin"].get().strip()
                 elif isinstance(shape, Path):
                     pts = _parse_points_str(entries["Points (x,y x,y ...)"].get())
                     if len(pts) < 2:

@@ -382,14 +382,29 @@ const DATA = [
    desc:"Create a via cell &mdash; a same-size pad on both layers &mdash; directly inside an attached library, and save that library in place. Named <code>name</code> if given, otherwise <code>VIA_Layer&lt;n1&gt;_to_Layer&lt;n2&gt;</code>. Give <code>dielectric_layer</code> and <code>dielectric_window</code> together to also cut a same-shape opening of that size in the dielectric between the two conductor layers &mdash; the same options exposed by Tools &gt; Via Wizard&hellip;'s &ldquo;Add dielectric via window&rdquo; checkbox.",
    example:"VIA 1 3 shape=round size=150 name=VIA_TOP dielectric_layer=2 dielectric_window=180"},
   {name:"PAD", syntax:"PAD <name> <conductor_layer> <paste_layer> <length_mm> <width_mm> <margin_mm> [rows=1] [cols=1] [pitch_x=<mm>] [pitch_y=<mm>] [index=0|1] [overwrite=0|1]",
-   desc:"Create a rectangular pad cell &mdash; conductor + solder-paste rectangle undersized by <code>margin_mm</code> &mdash; inside an attached library. <code>rows</code>/<code>cols</code> lay out a centred grid.",
+   desc:"Create a rectangular pad cell &mdash; conductor + solder-paste rectangle undersized by <code>margin_mm</code> &mdash; inside an attached library. <code>rows</code>/<code>cols</code> lay out a centred grid. A genuine 2-pad grid (rows&times;cols == 2) is unambiguous, so its two conductor pads are auto-numbered pin &ldquo;1&rdquo;/&ldquo;2&rdquo; (lower X, then lower Y, is pin &ldquo;1&rdquo;); any other pad count is left unnumbered &mdash; see the Pin Numbering section below.",
    example:"PAD SOT23_PAD 1 5 1.2 0.6 0.05"},
 ]},
 
 {group:"command", groupLabel:"Command Bar", cat:"Thick-Film Resistors", items:[
   {name:"RESGEN", syntax:"RESGEN <x,y> <body_width> <body_length> [rotation=<deg>] [ink=<rsh>] [ref=<designator>] [a=] [b=] [c=] [d=] [rlayer=] [clayer=] [glayer=] [dlayer=]",
-   desc:"Build a resistor &mdash; ink body, glaze overprint, two end conductor pads, optional ref-des label &mdash; as its own new cell, and place one instance at x,y. <code>body_width</code>/<code>body_length</code> normally come from Tools &gt; Thick-Film Resistor Designer&hellip;; <code>ink=&lt;rsh&gt;</code> looks the ink layer up by sheet resistance; anything else defaults to Setup &gt; Resistor Geometry Rules&hellip;.",
+   desc:"Build a resistor &mdash; ink body, glaze overprint, two end conductor pads, optional ref-des label &mdash; as its own new cell, and place one instance at x,y. <code>body_width</code>/<code>body_length</code> normally come from Tools &gt; Thick-Film Resistor Designer&hellip;; <code>ink=&lt;rsh&gt;</code> looks the ink layer up by sheet resistance; anything else defaults to Setup &gt; Resistor Geometry Rules&hellip;. Being an unambiguous 2-terminal part, its pads are auto-numbered pin &ldquo;1&rdquo;/&ldquo;2&rdquo; (lower X is &ldquo;1&rdquo;) and, if <code>ref=</code> is given, the placed instance's own Label is set to it too (not just the silkscreen text) &mdash; both read by NETLIST RUN.",
    example:"RESGEN 0,0 500 2000 ink=100 ref=R1"},
+]},
+
+{group:"command", groupLabel:"Command Bar", cat:"Pin Numbering", items:[
+  {name:"PIN LIST", syntax:"PIN LIST [cell=<name>]",
+   desc:"List every pin-capable shape (Rectangle/Polygon) in a cell (default: current cell) by index, layer, pin, and bbox. The index is what PIN SET expects. Also the GUI's Edit &gt; Number Pins&hellip; click-to-increment tool, for pads whose numbering isn't inherently unambiguous (e.g. a 3+ pin footprint or an imported package) &mdash; PAD/RESGEN's 2-pad auto-numbering covers the unambiguous case.",
+   example:"PIN LIST"},
+  {name:"PIN SET", syntax:"PIN SET <index> <pin> [cell=<name>]",
+   desc:"Set the pin number/name of the shape at <code>index</code> (from PIN LIST). Pass an empty string to clear a pin.",
+   example:"PIN SET 3 2"},
+]},
+
+{group:"command", groupLabel:"Command Bar", cat:"Netlist Extraction", items:[
+  {name:"NETLIST RUN", syntax:"NETLIST RUN <layer1> [layer2 ...] [cell=<name>] [export=<path.csv>]",
+   desc:"Extract the netlist across the given conductor layer(s) of a cell (default: current cell), descending into every placed cell instance the same way MASKOP/DRC do. Touching/overlapping copper on those layers becomes one net; each net's members are read as RefDes.Pin from Rectangle.pin/Polygon.pin plus the placing SREF's Label. <code>export=&lt;path.csv&gt;</code> also writes a <code>net,ref_des,pin</code> CSV. Same operation as Tools &gt; Extract Netlist&hellip; and <code>Session.extract_netlist()</code>/<code>export_netlist_csv()</code>. Requires <code>shapely</code>.",
+   example:"NETLIST RUN 31 export=netlist.csv"},
 ]},
 
 {group:"command", groupLabel:"Command Bar", cat:"Mask Operations", items:[
@@ -486,8 +501,26 @@ const DATA = [
    desc:"Create a via cell (a same-size pad on both layers) directly inside an attached library and save it back to disk. Returns <code>(cell_name, path)</code>. Named <code>name</code> if given, otherwise <code>VIA_Layer&lt;n1&gt;_to_Layer&lt;n2&gt;</code>. Give <code>dielectric_layer</code> and <code>dielectric_window</code> together to also draw a same-shape dielectric-window pad, centred at the origin like the two conductor pads &mdash; what Tools &gt; Via Wizard&hellip;'s &ldquo;Add dielectric via window&rdquo; checkbox calls.",
    example:'name, path = s.create_via_cell(1, 3, shape="round", size=150,\n                               name="VIA_TOP", dielectric_layer=2,\n                               dielectric_window=180)'},
   {name:"create_pad_cell()", syntax:"s.create_pad_cell(name, conductor_layer, paste_layer, length, width, margin, *, rows=1, cols=1, pitch_x=None, pitch_y=None, index=None, overwrite=False)",
-   desc:"Create a rectangular pad cell (conductor + undersized solder-paste rectangle) inside an attached library; <code>rows</code>&times;<code>cols</code> lays out a centred grid. Returns <code>(cell_name, path, pad_count)</code>.",
+   desc:"Create a rectangular pad cell (conductor + undersized solder-paste rectangle) inside an attached library; <code>rows</code>&times;<code>cols</code> lays out a centred grid. Returns <code>(cell_name, path, pad_count)</code>. A genuine 2-pad grid (rows&times;cols == 2) is auto-numbered pin &ldquo;1&rdquo;/&ldquo;2&rdquo; (lower X, then lower Y, is &ldquo;1&rdquo;); any other pad count is left unnumbered &mdash; see <code>set_pin()</code>/Edit &gt; Number Pins&hellip;.",
    example:'name, path, n = s.create_pad_cell(\n    "SOT23_PAD", conductor_layer=1, paste_layer=5,\n    length=1200, width=600, margin=50,\n)'},
+]},
+
+{group:"python", groupLabel:"Python API", cat:"Pin Numbering", items:[
+  {name:"list_pins()", syntax:"s.list_pins(cell_name=None) -> list[dict]",
+   desc:"Every Rectangle/Polygon shape in a cell (default: current cell) that could carry a pin &mdash; <code>[{'index','layer','pin','bbox'}, &hellip;]</code>. <code>pin</code> is <code>\"\"</code> for a pad not yet numbered; <code>index</code> is what <code>set_pin()</code> expects.",
+   example:'for p in s.list_pins():\n    print(p["index"], p["layer"], p["pin"] or "(unset)")'},
+  {name:"set_pin()", syntax:"s.set_pin(index: int, pin: str, cell_name=None)",
+   desc:"Set the pin number/name of the shape at <code>index</code> (from <code>list_pins()</code>). Raises if the shape isn't a Rectangle/Polygon, or the index is out of range. Backs Edit &gt; Number Pins&hellip;'s click-to-increment canvas tool and the PIN SET command.",
+   example:'s.set_pin(3, "2")'},
+]},
+
+{group:"python", groupLabel:"Python API", cat:"Netlist Extraction", items:[
+  {name:"extract_netlist()", syntax:"s.extract_netlist(conductor_layers, cell_name=None) -> list[Net]",
+   desc:"Extract the netlist of a cell (default: current cell) across <code>conductor_layers</code> (numbers or names), descending into placed instances. Touching/overlapping copper on those layers becomes one <code>Net</code> (<code>.id</code>, <code>.pins</code> &mdash; a list of <code>NetPin(ref_des, pin)</code> &mdash; and <code>.unresolved_count</code> for members whose owning instance has no ref designator yet). A pin whose own shape isn't on any given layer lands in one final <code>Net(id=\"UNASSIGNED\")</code> rather than being silently dropped. See <code>hlayout.core.netlist</code> for the full algorithm. Requires <code>shapely</code>.",
+   example:'nets = s.extract_netlist([31])\nfor net in nets:\n    print(net.id, [p.label() for p in net.pins])'},
+  {name:"export_netlist_csv()", syntax:"s.export_netlist_csv(nets: list[Net], path: str) -> None",
+   desc:"Write <code>nets</code> (from <code>extract_netlist()</code>) to a <code>net,ref_des,pin</code> CSV, one row per pin (a net with no pins gets one row with blank ref_des/pin).",
+   example:'s.export_netlist_csv(nets, "netlist.csv")'},
 ]},
 
 {group:"python", groupLabel:"Python API", cat:"Library & Cell Queries", items:[
@@ -536,10 +569,12 @@ const DATA = [
 ]},
 
 {group:"python", groupLabel:"Python API", cat:"Shapes", items:[
-  {name:"rect()", syntax:"s.rect(layer, x1, y1, x2, y2, datatype=0)",
-   desc:"Add a rectangle to the current cell.", example:"s.rect(layer=0, x1=0, y1=0, x2=100, y2=50)"},
-  {name:"polygon()", syntax:"s.polygon(layer, points, datatype=0)",
-   desc:"Add a closed polygon (3&ndash;200 points).", example:"s.polygon(layer=1, points=[(0,0), (10,0), (5,10)])"},
+  {name:"rect()", syntax:"s.rect(layer, x1, y1, x2, y2, datatype=0, pin=\"\")",
+   desc:"Add a rectangle to the current cell. <code>pin</code>, if given, sets its pin number/name directly (see the Pin Numbering category).",
+   example:"s.rect(layer=0, x1=0, y1=0, x2=100, y2=50)"},
+  {name:"polygon()", syntax:"s.polygon(layer, points, datatype=0, pin=\"\")",
+   desc:"Add a closed polygon (3&ndash;200 points). <code>pin</code>, if given, sets its pin number/name directly.",
+   example:"s.polygon(layer=1, points=[(0,0), (10,0), (5,10)])"},
   {name:"circle()", syntax:"s.circle(layer, center, radius, segments=32, datatype=0)",
    desc:"Add a circle, stored as a regular polygon. <code>segments</code>: 8, 16, 32, or 64.",
    example:"s.circle(layer=0, center=(0,0), radius=250, segments=32)"},
@@ -550,10 +585,10 @@ const DATA = [
 ]},
 
 {group:"python", groupLabel:"Python API", cat:"Cell Instances (SRef / ARef)", items:[
-  {name:"sref()", syntax:"s.sref(cell_name, origin, rotation=0.0, magnification=1.0, x_reflection=False)",
-   desc:"Place one instance of a cell that already exists in the current library. Raises on a cyclic reference.",
+  {name:"sref()", syntax:"s.sref(cell_name, origin, rotation=0.0, magnification=1.0, x_reflection=False, label=\"\")",
+   desc:"Place one instance of a cell that already exists in the current library. Raises on a cyclic reference. <code>label</code>, if given, sets the instance's ref designator directly &mdash; the same field Edit Selected&hellip; calls &ldquo;Label&rdquo;, and what netlist extraction reads as each pin's RefDes.",
    example:'s.sref("VIA_Layer1_to_Layer3", (200, 0))'},
-  {name:"place_cell()", syntax:"s.place_cell(cell_name, origin, source=None, rotation=0.0, magnification=1.0, x_reflection=False)",
+  {name:"place_cell()", syntax:"s.place_cell(cell_name, origin, source=None, rotation=0.0, magnification=1.0, x_reflection=False, label=\"\")",
    desc:"Like <code>sref()</code>, but searches the current library and every attached library too &mdash; importing the cell's whole dependency closure first if it's found in an attached one. This is what the GUI's Create &gt; Cell Instance actually calls.",
    example:'s.place_cell("VIA_Layer1_to_Layer3", (200, 0))'},
   {name:"aref()", syntax:"s.aref(cell_name, origin, columns=1, rows=1, col_spacing=0.0, row_spacing=0.0, rotation=0.0, magnification=1.0, x_reflection=False)",
@@ -575,7 +610,7 @@ const DATA = [
    desc:"Draw a same-size via pad straight into the current cell on both layers &mdash; the inline equivalent of a via cell, no SREF indirection. Both pads (+ dielectric window, if given) are one undo step.",
    example:"s.drop_via(0, 0, layer_a=1, layer_b=3, size=150,\n           dielectric_layer=2, dielectric_window=180)"},
   {name:"generate_resistor()", syntax:"s.generate_resistor(x, y, body_width, body_length, rotation=0.0, ink_rsh=None, ref_des=None, ...)",
-   desc:"Build a complete thick-film resistor (ink body, glaze overprint, two end pads, optional ref-des label) as a new cell, then place one instance at (x, y). Returns the new cell's name.",
+   desc:"Build a complete thick-film resistor (ink body, glaze overprint, two end pads, optional ref-des label) as a new cell, then place one instance at (x, y). Returns the new cell's name. The two pads are auto-numbered pin &ldquo;1&rdquo;/&ldquo;2&rdquo; (lower X is &ldquo;1&rdquo;) and, if <code>ref_des</code> is given, the placed instance's Label is set to it too &mdash; both read by <code>extract_netlist()</code>. <code>generate_serpentine_resistor()</code>/<code>generate_top_hat_resistor()</code> do the same for their two probe pads.",
    example:'name = s.generate_resistor(0, 0, body_width=500, body_length=2000,\n                           ink_rsh=100, ref_des="R1")'},
 ]},
 

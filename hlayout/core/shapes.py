@@ -63,11 +63,21 @@ class PathCap(Enum):
 
 @dataclass
 class Polygon:
-    """A closed polygon on a single layer, up to 200 vertices."""
+    """A closed polygon on a single layer, up to 200 vertices.
+
+    `pin` is an optional pin-number/name (e.g. "1", "2", "K") for a
+    polygon that represents part of a component footprint's pad (e.g. a
+    gull-wing lead) -- empty string means "not a pin" / "not yet
+    numbered". See Rectangle.pin for the common case (most pads are
+    plain rectangles); this exists on Polygon too so shaped leads can
+    be numbered the same way. Persisted through GDSII round-trips as a
+    GDS element property (see io/gdsio.py's POLY_PIN_PROPATTR), same
+    mechanism as SRef.label."""
 
     layer: int
     points: List[Point]
     datatype: int = 0
+    pin: str = ""
 
     def __post_init__(self):
         _check_layer(self.layer)
@@ -119,11 +129,24 @@ class Path:
 
 @dataclass
 class Rectangle:
-    """An axis-aligned or rotated rectangle, stored as its 4 corner points."""
+    """An axis-aligned or rotated rectangle, stored as its 4 corner points.
+
+    `pin` is an optional pin-number/name (e.g. "1", "2", "K") identifying
+    this rectangle as a specific pad of a component footprint -- empty
+    string (the default) means "not a pin" or "not yet numbered". Set
+    automatically for unambiguous 2-pad parts (Session.create_via_cell()
+    does NOT set it -- vias aren't pins; Session.create_pad_cell()/
+    generate_resistor() do, for a genuine 2-terminal footprint) or by
+    hand/via the pin-numbering canvas tool (Edit > Number Pins...) for
+    everything else -- see hlayout.core.netlist for how these feed a
+    netlist extraction. Persisted through GDSII round-trips as a GDS
+    element property (see io/gdsio.py's RECT_PIN_PROPATTR), same
+    mechanism as SRef.label."""
 
     layer: int
     points: List[Point]
     datatype: int = 0
+    pin: str = ""
 
     def __post_init__(self):
         _check_layer(self.layer)
@@ -132,11 +155,13 @@ class Rectangle:
             raise GeometryError("rectangle must have exactly 4 points")
 
     @classmethod
-    def from_corners(cls, layer: int, x1: int, y1: int, x2: int, y2: int, datatype: int = 0):
+    def from_corners(cls, layer: int, x1: int, y1: int, x2: int, y2: int, datatype: int = 0,
+                      pin: str = ""):
         """Convenience constructor for an axis-aligned rectangle."""
         x1, x2 = sorted((int(round(x1)), int(round(x2))))
         y1, y2 = sorted((int(round(y1)), int(round(y2))))
-        return cls(layer=layer, points=[(x1, y1), (x2, y1), (x2, y2), (x1, y2)], datatype=datatype)
+        return cls(layer=layer, points=[(x1, y1), (x2, y1), (x2, y2), (x1, y2)],
+                    datatype=datatype, pin=pin)
 
     def bbox(self):
         xs = [p[0] for p in self.points]

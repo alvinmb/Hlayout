@@ -159,7 +159,17 @@ Attached libraries:
                                        by margin_mm on every side -- directly inside an
                                        attached library and save that library's file in
                                        place; rows/cols lay out a centred grid of pads
-                                       (pitch_x/pitch_y required when cols/rows > 1)
+                                       (pitch_x/pitch_y required when cols/rows > 1); a
+                                       genuine 2-pad grid is auto-numbered pin 1/2
+
+Pin numbering (a Rectangle/Polygon's pin -- see Edit > Number Pins... for the
+click-to-increment canvas tool this backs; PAD/RESGEN auto-number 2-pad parts):
+    PIN LIST [cell=<name>]            list every pin-capable shape in a cell (default:
+                                       current cell) by index, layer, pin, and bbox
+    PIN SET <index> <pin> [cell=<name>]
+                                       set the pin number/name of the shape at <index>
+                                       (from PIN LIST) -- pass an empty string ("") to
+                                       clear a pin
 
 Thick-film resistor generation (Tools > Thick-Film Resistor Designer... sizes
 a resistor; this draws it):
@@ -242,6 +252,20 @@ requires the shapely package; also available as Tools > DRC...):
                                        polygon onto that layer in the design; reports a
                                        violation count broken down by rule; also
                                        available as Session.run_drc()
+
+Netlist Extraction (requires the shapely package; also available as
+Tools > Extract Netlist...):
+    NETLIST RUN <layer1> [layer2 ...] [cell=<name>] [export=<path.csv>]
+                                       extract the netlist across the given conductor
+                                       layer(s) of the current cell (or cell=<name>),
+                                       descending into every placed cell instance
+                                       (Sref) same as MASKOP/DRC; each net's members
+                                       are identified as RefDes.Pin from Rectangle.pin/
+                                       Polygon.pin and the placing Sref's Label (Edit
+                                       Selected... "Label", or PAD/RESGEN's built-in
+                                       auto-numbering); export=<path.csv> also writes
+                                       a net,ref_des,pin CSV; also available as
+                                       Session.extract_netlist()/export_netlist_csv()
 
 Scripting:
     PY <python source>                run arbitrary Python against the session
@@ -983,6 +1007,34 @@ class CommandInterpreter:
 
         raise CommandError(usage)
 
+    def _cmd_netlist(self, args):
+        usage = "usage: NETLIST RUN <layer1> [layer2 ...] [cell=<name>] [export=<path.csv>]"
+        if not args or args[0].upper() != "RUN":
+            raise CommandError(usage)
+        cell_name = None
+        export_path = None
+        layers = []
+        for a in args[1:]:
+            if a.lower().startswith("cell="):
+                cell_name = a.split("=", 1)[1]
+            elif a.lower().startswith("export="):
+                export_path = a.split("=", 1)[1]
+            else:
+                layers.append(a)
+        if not layers:
+            raise CommandError(f"{usage}\n(at least one conductor layer is required)")
+        nets = self.session.extract_netlist(layers, cell_name=cell_name)
+        if export_path:
+            self.session.export_netlist_csv(nets, export_path)
+        lines = [f"netlist: {len(nets)} net(s)"]
+        for net in nets:
+            members = ", ".join(p.label() for p in net.pins) or "(no pins)"
+            extra = f" [{net.unresolved_count} unresolved]" if net.unresolved_count else ""
+            lines.append(f"  {net.id}: {members}{extra}")
+        if export_path:
+            lines.append(f"exported to {export_path}")
+        return "\n".join(lines)
+
     def _cmd_drc(self, args):
         usage = "usage: DRC RUN [cell=<name>] [error=<layer>]"
         if not args or args[0].upper() != "RUN":
@@ -1010,6 +1062,46 @@ class CommandInterpreter:
         for label, count in by_rule.items():
             lines.append(f"  {count} x {label}")
         return "\n".join(lines)
+
+    def _cmd_pin(self, args):
+        usage = (
+            "usage: PIN LIST [cell=<name>]\n"
+            "       PIN SET <index> <pin> [cell=<name>]"
+        )
+        if not args:
+            raise CommandError(usage)
+        sub = args[0].upper()
+        rest = args[1:]
+        cell_name = None
+        positional = []
+        for a in rest:
+            if a.lower().startswith("cell="):
+                cell_name = a.split("=", 1)[1]
+            else:
+                positional.append(a)
+
+        if sub == "LIST":
+            if positional:
+                raise CommandError(usage)
+            pins = self.session.list_pins(cell_name=cell_name)
+            if not pins:
+                return "no pin-capable shapes (Rectangle/Polygon) in this cell"
+            lines = [f"{p['index']}: layer {p['layer']}, pin={p['pin'] or '(unset)'}, bbox={p['bbox']}"
+                     for p in pins]
+            return "\n".join(lines)
+
+        if sub == "SET":
+            if len(positional) != 2:
+                raise CommandError(usage)
+            try:
+                index = int(positional[0])
+            except ValueError:
+                raise CommandError(usage)
+            pin = positional[1]
+            self.session.set_pin(index, pin, cell_name=cell_name)
+            return f"set shape {index} pin={pin!r}"
+
+        raise CommandError(usage)
 
     def _cmd_via(self, args):
         usage = ("usage: VIA <layer1> <layer2> [shape=square|round] [size=<dbu>] "

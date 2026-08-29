@@ -46,6 +46,12 @@ TEXT_BASE_HEIGHT = 10  # DBU; magnification 1.0 <=> this text height
 SREF_LABEL_PROPATTR = 126
 SREF_LABEL_HEIGHT_PROPATTR = 125
 
+# Same idea, for Rectangle.pin / Polygon.pin -- a pad's pin number/name.
+# GDSII boundaries have no native "pin" field either, so this rides
+# along the same way as a standard element property.
+RECT_PIN_PROPATTR = 124
+POLY_PIN_PROPATTR = 123
+
 _CAP_TO_GDSTK = {
     PathCap.ROUND: "round",
     PathCap.SQUARE: "extended",
@@ -65,7 +71,11 @@ def save_gds(library: Library, path: str) -> None:
         gcell = gcells[name]
         for shape in cell.shapes:
             if isinstance(shape, (Polygon, Rectangle)):
-                gcell.add(gdstk.Polygon(shape.points, layer=shape.layer, datatype=shape.datatype))
+                gpoly = gdstk.Polygon(shape.points, layer=shape.layer, datatype=shape.datatype)
+                if shape.pin:
+                    propattr = RECT_PIN_PROPATTR if isinstance(shape, Rectangle) else POLY_PIN_PROPATTR
+                    gpoly.set_gds_property(propattr, shape.pin)
+                gcell.add(gpoly)
             elif isinstance(shape, Path):
                 gcell.add(gdstk.FlexPath(
                     shape.points,
@@ -144,9 +154,11 @@ def load_gds(path: str, library_name: Optional[str] = None) -> Library:
         for poly in gcell.polygons:
             pts = [(int(round(x)), int(round(y))) for x, y in poly.points]
             if len(pts) == 4:
-                cell.shapes.append(Rectangle(layer=poly.layer, points=pts, datatype=poly.datatype))
+                pin = (poly.get_gds_property(RECT_PIN_PROPATTR) or "").rstrip("\x00")
+                cell.shapes.append(Rectangle(layer=poly.layer, points=pts, datatype=poly.datatype, pin=pin))
             else:
-                cell.shapes.append(Polygon(layer=poly.layer, points=pts, datatype=poly.datatype))
+                pin = (poly.get_gds_property(POLY_PIN_PROPATTR) or "").rstrip("\x00")
+                cell.shapes.append(Polygon(layer=poly.layer, points=pts, datatype=poly.datatype, pin=pin))
 
         for fp in gcell.paths:
             spine = [(int(round(x)), int(round(y))) for x, y in fp.spine()]

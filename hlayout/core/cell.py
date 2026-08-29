@@ -17,8 +17,8 @@ class Cell:
     arefs: List[ARef] = field(default_factory=list)
 
     # --- adders -----------------------------------------------------
-    def add_polygon(self, layer: int, points, datatype: int = 0) -> Polygon:
-        shape = Polygon(layer=layer, points=points, datatype=datatype)
+    def add_polygon(self, layer: int, points, datatype: int = 0, pin: str = "") -> Polygon:
+        shape = Polygon(layer=layer, points=points, datatype=datatype, pin=pin)
         self.shapes.append(shape)
         return shape
 
@@ -27,8 +27,8 @@ class Cell:
         self.shapes.append(shape)
         return shape
 
-    def add_rectangle(self, layer: int, x1, y1, x2, y2, datatype: int = 0) -> Rectangle:
-        shape = Rectangle.from_corners(layer, x1, y1, x2, y2, datatype=datatype)
+    def add_rectangle(self, layer: int, x1, y1, x2, y2, datatype: int = 0, pin: str = "") -> Rectangle:
+        shape = Rectangle.from_corners(layer, x1, y1, x2, y2, datatype=datatype, pin=pin)
         self.shapes.append(shape)
         return shape
 
@@ -47,9 +47,11 @@ class Cell:
         return shape
 
     def add_sref(self, cell_name: str, origin, rotation: float = 0.0,
-                 magnification: float = 1.0, x_reflection: bool = False) -> SRef:
+                 magnification: float = 1.0, x_reflection: bool = False,
+                 label: str = "") -> SRef:
         ref = SRef(cell_name=cell_name, origin=origin, rotation=rotation,
-                   magnification=magnification, x_reflection=x_reflection)
+                   magnification=magnification, x_reflection=x_reflection,
+                   label=label)
         self.srefs.append(ref)
         return ref
 
