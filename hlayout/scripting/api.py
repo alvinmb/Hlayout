@@ -1311,8 +1311,14 @@ class Session:
         `error_layer`, if given, additionally draws every violation's
         marker polygon onto that layer in the cell it was found in (as
         a single undo step alongside everything else DRC touches -- DRC
-        itself never modifies any other geometry). Pass None (the
-        default) for a dry-run report with no drawing.
+        itself never modifies any other geometry). Every checked cell's
+        EXISTING shapes on `error_layer` are removed first, so re-running
+        DRC (after a fix, or with different rules) never leaves stale
+        markers from a previous run mixed in with -- or standing in for --
+        this run's results; a cell that had violations last time but is
+        now clean is left with none, not last run's leftovers. Pass None
+        (the default) for a dry-run report with no drawing (and no
+        clearing either -- a dry run never touches the design).
 
         Returns the list of DrcViolation found (each has .rule,
         .cell_name, .points, .message, .bbox()).
@@ -1335,9 +1341,10 @@ class Session:
             by_cell = {}
             for v in violations:
                 by_cell.setdefault(v.cell_name, []).append(v)
-            for cell_name, cell_violations in by_cell.items():
+            for cell_name in cell_names:
                 cell = self.library.get_cell(cell_name)
-                for v in cell_violations:
+                cell.shapes = [s for s in cell.shapes if s.layer != e_layer]
+                for v in by_cell.get(cell_name, []):
                     cell.add_polygon(e_layer, v.points)
         self._notify()
         return violations

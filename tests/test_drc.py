@@ -329,6 +329,38 @@ def test_session_run_drc_error_layer_draws_markers_as_one_undo_step():
     assert len(s.cell.shapes) == before
 
 
+def test_session_run_drc_rerun_does_not_duplicate_markers():
+    # A violation still present on the second run should draw exactly one
+    # marker, not one leftover from run 1 plus a fresh one from run 2.
+    s = _fresh_session()
+    s.rect(0, 0, 0, 5, 5)
+    s.clear_undo_history()
+    rules = [DrcRule("MIN_AREA", layer_a=0, value=100)]
+    s.run_drc(rules, error_layer=9)
+    s.run_drc(rules, error_layer=9)
+    markers = [sh for sh in s.cell.shapes if sh.layer == 9]
+    assert len(markers) == 1
+
+
+def test_session_run_drc_rerun_after_fix_leaves_no_stale_markers():
+    # Once the underlying violation is fixed, re-running DRC must remove
+    # the marker left over from the earlier failing run -- not leave it
+    # standing in for a violation that no longer exists.
+    s = _fresh_session()
+    small = s.rect(0, 0, 0, 5, 5)
+    s.clear_undo_history()
+    rules = [DrcRule("MIN_AREA", layer_a=0, value=100)]
+    violations = s.run_drc(rules, error_layer=9)
+    assert len(violations) == 1
+    assert len([sh for sh in s.cell.shapes if sh.layer == 9]) == 1
+
+    s.cell.shapes.remove(small)
+    s.rect(0, 0, 0, 50, 50)  # now well above the MIN_AREA threshold
+    violations = s.run_drc(rules, error_layer=9)
+    assert len(violations) == 0
+    assert len([sh for sh in s.cell.shapes if sh.layer == 9]) == 0
+
+
 def test_session_run_drc_without_error_layer_does_not_modify_the_design():
     s = _fresh_session()
     s.rect(0, 0, 0, 5, 5)
