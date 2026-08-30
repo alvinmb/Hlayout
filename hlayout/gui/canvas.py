@@ -2139,10 +2139,11 @@ def _describe_one(kind, shape, library):
     a lone selection and each member of a window-selected group."""
     if kind == "sref" or isinstance(shape, SRef):
         mirror = "yes" if shape.x_reflection else "no"
+        label_part = f"  label={shape.label!r}" if shape.label else ""
         return (f"Cell Instance  cell={shape.cell_name!r}  "
                 f"origin=({shape.origin[0]},{shape.origin[1]})  "
                 f"rotation={shape.rotation:g}°  magnification={shape.magnification:g}  "
-                f"mirror={mirror}")
+                f"mirror={mirror}{label_part}")
     if kind == "aref" or isinstance(shape, ARef):
         mirror = "yes" if shape.x_reflection else "no"
         return (f"Array Instance  cell={shape.cell_name!r}  "
@@ -2157,12 +2158,14 @@ def _describe_one(kind, shape, library):
                 f"points={len(shape.points)}")
     if isinstance(shape, Rectangle):
         x1, y1, x2, y2 = shape.bbox()
+        pin_part = f"  pin={shape.pin!r}" if shape.pin else ""
         return (f"Rectangle  layer={_layer_label(library, shape.layer)}  "
                 f"{x1},{y1} to {x2},{y2}  "
-                f"size={x2 - x1}x{y2 - y1}")
+                f"size={x2 - x1}x{y2 - y1}{pin_part}")
     if isinstance(shape, Polygon):
+        pin_part = f"  pin={shape.pin!r}" if shape.pin else ""
         return (f"Polygon  layer={_layer_label(library, shape.layer)}  "
-                f"points={len(shape.points)}")
+                f"points={len(shape.points)}{pin_part}")
     if isinstance(shape, Text):
         return (f"Text  layer={_layer_label(library, shape.layer)}  "
                 f"text={shape.text!r}  height={shape.height}  font={shape.font}  "

@@ -265,3 +265,68 @@ def test_pin_numbering_tool_reclicking_a_numbered_pad_asks_for_confirmation(monk
         assert app.canvas.pin_number_next == "1"  # not consumed either
     finally:
         app.destroy()
+
+
+# --- Properties panel / PROPS command surface pin and label -----------------
+
+def test_describe_selection_reports_pin_on_a_selected_pad():
+    from hlayout.gui.canvas import describe_selection
+
+    lib = Library("L")
+    cell = lib.new_cell("TOP")
+    rect = cell.add_rectangle(0, 0, 0, 1000, 1000, pin="2")
+
+    fake_canvas = types.SimpleNamespace(
+        library=lib, selected_multi=[], selected=("shape", rect),
+    )
+    text = describe_selection(fake_canvas)
+    assert "pin='2'" in text
+
+
+def test_describe_selection_omits_pin_when_unset():
+    from hlayout.gui.canvas import describe_selection
+
+    lib = Library("L")
+    cell = lib.new_cell("TOP")
+    rect = cell.add_rectangle(0, 0, 0, 1000, 1000)
+
+    fake_canvas = types.SimpleNamespace(
+        library=lib, selected_multi=[], selected=("shape", rect),
+    )
+    text = describe_selection(fake_canvas)
+    assert "pin=" not in text
+
+
+def test_describe_selection_reports_label_on_a_selected_cell_instance():
+    from hlayout.gui.canvas import describe_selection
+
+    lib = Library("L")
+    lib.new_cell("PART")
+    top = lib.new_cell("TOP")
+    ref = top.add_sref("PART", (0, 0), label="R1")
+
+    fake_canvas = types.SimpleNamespace(
+        library=lib, selected_multi=[], selected=("sref", ref),
+    )
+    text = describe_selection(fake_canvas)
+    assert "label='R1'" in text
+
+
+def test_props_command_reports_pin_and_label():
+    from hlayout.gui.commands import CommandInterpreter
+
+    s = Session.new("L")
+    s.new_cell("PART")
+    top = s.new_cell("TOP")
+    ref = top.add_sref("PART", (0, 0), label="R1")
+
+    class _FakeView:
+        def __init__(self, library, selected):
+            self.library = library
+            self.selected_multi = []
+            self.selected = selected
+
+    interp = CommandInterpreter(s, console=None)
+    interp.view = _FakeView(s.library, ("sref", ref))
+    out = interp.run("PROPS")
+    assert "label='R1'" in out
