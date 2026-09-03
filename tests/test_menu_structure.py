@@ -381,7 +381,7 @@ def test_open_resistor_designer_reuses_a_single_window():
         win1 = open_resistor_designer(app)
         win2 = open_resistor_designer(app)
         assert win1 is win2
-        assert len(win1.resistors) == 8  # demo data populated once
+        assert win1.resistors == []  # opens empty -- no hard-coded demo set
     finally:
         app.destroy()
 
@@ -593,6 +593,36 @@ def test_placing_cell_instance_from_attached_library_imports_it():
             # dangling reference to the attached library's copy.
             assert "RES100" in app.session.library.cells
             assert app.session.library.cells["RES100"].shapes
+    finally:
+        app.destroy()
+
+
+def test_cell_instance_tool_places_unrotated_with_no_rotation_prompt(monkeypatch):
+    # The Cell Instance tool used to pop a "Rotation (degrees)" dialog
+    # after the cell picker. It now places at 0 deg -- rotate afterwards
+    # with R / Rotate -- and must not call askfloat at all.
+    from hlayout.gui import canvas as canvas_module
+    app = _make_app()
+    try:
+        app.session.new_cell("PAD")
+        app.session.rect(0, 0, 0, 10, 10)
+        app.session.current_cell_name = "TOP"
+        app.canvas.set_cell("TOP")
+
+        monkeypatch.setattr(canvas_module, "_choose_from_list",
+                            lambda *a, **k: "PAD")
+
+        def _boom(*a, **k):
+            raise AssertionError("rotation prompt should be gone")
+        monkeypatch.setattr(canvas_module.simpledialog, "askfloat", _boom)
+
+        app.canvas._pending_points = [(4000, 5000)]
+        app.canvas._prompt_sref()
+
+        top = app.session.library.cells["TOP"]
+        assert [r.cell_name for r in top.srefs] == ["PAD"]
+        assert top.srefs[0].rotation == 0.0
+        assert top.srefs[0].origin == (4000, 5000)
     finally:
         app.destroy()
 
@@ -984,6 +1014,7 @@ def test_editorial_menu_has_rotate_and_copy_but_no_move_dialog():
         assert "Rotate..." in labels
         assert "Copy..." in labels
         assert "Properties" in labels
+        assert "Auto-Route Two Pins" in labels
     finally:
         app.destroy()
 
@@ -1515,11 +1546,31 @@ def test_edit_selected_dialog_apply_is_undoable():
         app.destroy()
 
 
-def test_setup_menu_has_resistor_geometry_rules_item():
+def test_setup_menu_has_technology_properties_item():
+    # The individual Route Layers / Resistor Geometry / Ref-Des / Wire
+    # Bond dialogs were consolidated into one tabbed Setup > Technology
+    # Properties... window.
     app = _make_app()
     try:
         labels = _submenu_labels(app, "Setup")
-        assert "Resistor Geometry Rules..." in labels
+        assert "Technology Properties..." in labels
+        for gone in ("Route Layers...", "Resistor Geometry Rules...",
+                     "Ref-Des Annotation Layer...", "Wire Bond Rules..."):
+            assert gone not in labels
+    finally:
+        app.destroy()
+
+
+def test_technology_properties_dialog_has_all_rule_tabs():
+    from tkinter import ttk
+    app = _make_app()
+    try:
+        win = app.show_technology_properties_dialog()
+        nb = next(w for w in _collect_widgets(win, ttk.Notebook))
+        tabs = [nb.tab(t, "text") for t in nb.tabs()]
+        for expected in ("Route", "Resistors", "Ref-Des", "Wire Bonds", "Dielectric"):
+            assert expected in tabs
+        win.destroy()
     finally:
         app.destroy()
 

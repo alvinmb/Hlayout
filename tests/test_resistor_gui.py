@@ -33,6 +33,20 @@ def _find_toplevels(widget):
     return found
 
 
+def _seed(win, specs=(("R1", 1000, "5%", 125.0), ("R2", 10000, "1%", 62.5),
+                       ("R3", 470, "5%", 200.0))):
+    """The Resistor Designer opens with an EMPTY table now (the old
+    hard-coded R1..R8 demo set was removed). Tests that need a few sized
+    resistors to work with add them explicitly via this helper."""
+    from hlayout.gui.resistor_designer import Resistor, width_for_power
+    for ref, val, tol, pwr in specs:
+        r = Resistor(ref_des=ref, value=val, tolerance=tol,
+                     power_mw=pwr, body_width=float(width_for_power(pwr)))
+        r.compute_solutions(win.rules)
+        win.resistors.append(r)
+    win._refresh_all()
+
+
 def test_show_resistor_geometry_dialog_saves_rules_on_return():
     # show_resistor_geometry_dialog() just creates a non-modal-to-Python
     # Toplevel and returns immediately (same pattern as
@@ -62,8 +76,9 @@ def test_resistor_designer_place_in_layout_draws_resistor():
         from hlayout.gui.resistor_designer import open_resistor_designer, PlaceResistorDialog
 
         win = open_resistor_designer(app)
+        _seed(win)
         app.update()
-        # Use the first demo resistor -- it already has a solution selected.
+        # Use the first seeded resistor -- it already has a solution selected.
         assert win.resistors
         win.res_table.select_row(0)
         app.update()
@@ -127,6 +142,7 @@ def test_place_in_layout_matches_ink_layer_to_sheet_resistance():
         from hlayout.io.techfile import save_resistor_geometry_rules
 
         win = open_resistor_designer(app)
+        _seed(win)
         app.update()
         win.res_table.select_row(0)
         app.update()
@@ -164,6 +180,7 @@ def test_place_in_layout_conductor_layer_can_be_overridden_per_placement():
         from hlayout.gui.resistor_designer import open_resistor_designer, PlaceResistorDialog
 
         win = open_resistor_designer(app)
+        _seed(win)
         app.update()
         win.res_table.select_row(0)
         app.update()
@@ -249,6 +266,7 @@ def test_placing_two_resistors_in_a_row_does_not_overlap():
         from hlayout.gui.resistor_designer import open_resistor_designer, PlaceResistorDialog
 
         win = open_resistor_designer(app)
+        _seed(win)
         app.update()
 
         def accept_default(_dlg_list=[]):
@@ -300,6 +318,7 @@ def test_place_all_in_layout_places_every_sized_resistor_without_overlap():
         from hlayout.gui.resistor_designer import open_resistor_designer
 
         win = open_resistor_designer(app)
+        _seed(win)
         app.update()
         assert len(win.resistors) >= 2
         sized_before = [r for r in win.resistors if r.selected is not None]
@@ -334,6 +353,7 @@ def test_place_all_in_layout_skips_resistors_with_no_solution(monkeypatch):
         from hlayout.gui.resistor_designer import open_resistor_designer, Resistor
 
         win = open_resistor_designer(app)
+        _seed(win)
         r = Resistor(ref_des="RX", value=1e15, tolerance="5%", power_mw=1.0, body_width=1000.0)
         r.compute_solutions(win.rules)
         assert r.selected is None
@@ -359,6 +379,7 @@ def test_advance_place_cursor_moves_past_the_footprint_plus_margin():
         from hlayout.gui.resistor_designer import open_resistor_designer
 
         win = open_resistor_designer(app)
+        _seed(win)
         res = win.resistors[0]
         sol = res.selected
         from hlayout.io.techfile import load_resistor_geometry_rules

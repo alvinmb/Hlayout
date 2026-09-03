@@ -9,6 +9,7 @@ tk = pytest.importorskip("tkinter")
 
 from hlayout.core.library import Library
 from hlayout.io.gdsio import load_gds, save_gds
+from hlayout.io.techfile import save_refdes_annotation_layer
 
 
 def _make_app_with_two_instances(tmp_path=None):
@@ -164,6 +165,115 @@ def test_edit_dialog_has_label_and_label_size_fields():
         assert app.canvas.edit_selected() is True
         assert a.label == "IC1"
         assert a.label_height == 20
+    finally:
+        app.destroy()
+
+
+def _app_with_instance_of(part_shapes, label):
+    """App showing TOP, which holds one SRef of PART (built from
+    `part_shapes`, a list of (kind, *args)) carrying `label`."""
+    from hlayout.gui.app import App
+
+    lib = Library("LBL")
+    part = lib.new_cell("PART")
+    for kind, *args in part_shapes:
+        if kind == "rect":
+            part.add_rectangle(*args)
+        elif kind == "text":
+            layer, origin, text = args
+            part.add_text(layer, origin, text)
+    top = lib.new_cell("TOP")
+    ref = top.add_sref("PART", (0, 0), label=label)
+    try:
+        app = App(lib)
+    except tk.TclError as e:
+        pytest.skip(f"no display available: {e}")
+    app.update()
+    app._refresh_cell_list()
+    app.cell_var.set("TOP")
+    app.session.use_cell("TOP")
+    app.canvas.set_cell("TOP")
+    app.canvas.fit_view()
+    app.canvas.redraw()
+    app.update()
+    return app, ref
+
+
+def _floating_label_items(canvas, text):
+    return [i for i in canvas.find_all()
+            if canvas.type(i) == "text" and canvas.itemcget(i, "text") == text]
+
+
+def test_floating_ref_des_is_suppressed_when_cell_bakes_it_as_text():
+    # PART carries "R1" as a real Text shape (its assigned ref-des
+    # layer) -- the canvas must NOT also float "R1" over the instance.
+    app, ref = _app_with_instance_of(
+        [("rect", 0, 0, 0, 100, 100), ("text", 13, (0, 0), "R1")], "R1")
+    try:
+        # the baked Text on layer 13 is drawn once; no *second* "R1".
+        assert len(_floating_label_items(app.canvas, "R1")) == 1
+    finally:
+        app.destroy()
+
+
+def test_floating_ref_des_still_shows_when_cell_only_bakes_a_prefix():
+    # PART bakes just the prefix "C" (a placeholder, != "C1"): the
+    # per-instance floating "C1" annotation still appears.
+    app, ref = _app_with_instance_of(
+        [("rect", 0, 0, 0, 100, 100), ("text", 13, (0, 0), "C")], "C1")
+    try:
+        assert len(_floating_label_items(app.canvas, "C1")) == 1
+        assert len(_floating_label_items(app.canvas, "C")) == 1
+    finally:
+        app.destroy()
+
+
+def test_floating_ref_des_is_dropped_when_every_layer_is_off_even_unconfigured():
+    # No annotation layer configured (default). The float still shows
+    # normally, but "All Off" must blank it too, not leave it hanging.
+    app, ref = _app_with_instance_of([("rect", 0, 0, 0, 100, 100)], "U1")
+    try:
+        assert len(_floating_label_items(app.canvas, "U1")) == 1
+        app.layer_panel.set_all_visible(False)
+        app.canvas.redraw(); app.update()
+        assert _floating_label_items(app.canvas, "U1") == []
+        app.layer_panel.set_all_visible(True)
+        app.canvas.redraw(); app.update()
+        assert len(_floating_label_items(app.canvas, "U1")) == 1
+    finally:
+        app.destroy()
+
+
+def test_floating_ref_des_follows_the_configured_annotation_layer_visibility():
+    from hlayout.gui.app import App
+
+    lib = Library("LBL")
+    part = lib.new_cell("PART")
+    part.add_rectangle(0, 0, 0, 100, 100)
+    top = lib.new_cell("TOP")
+    top.add_sref("PART", (0, 0), label="U1")
+    save_refdes_annotation_layer(lib, 5)      # tie the annotation to layer 5
+    try:
+        app = App(lib)
+    except tk.TclError as e:
+        pytest.skip(f"no display available: {e}")
+    try:
+        app.update()
+        app.cell_var.set("TOP")
+        app.session.use_cell("TOP")
+        app.canvas.set_cell("TOP")
+
+        lib.layers[5].visible = True
+        app.canvas.redraw(); app.update()
+        assert len(_floating_label_items(app.canvas, "U1")) == 1
+
+        lib.layers[5].visible = False        # "all layers off" case
+        app.canvas.redraw(); app.update()
+        assert _floating_label_items(app.canvas, "U1") == []
+
+        lib.layers[5].visible = True
+        app.canvas.redraw(); app.update()
+        assert len(_floating_label_items(app.canvas, "U1")) == 1
     finally:
         app.destroy()
 

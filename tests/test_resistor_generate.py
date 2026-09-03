@@ -7,6 +7,7 @@ from hlayout.core.shapes import Rectangle, Text
 from hlayout.io.techfile import (
     load_resistor_geometry_rules,
     resistor_ink_layer,
+    save_refdes_annotation_layer,
     save_resistor_geometry_rules,
 )
 from hlayout.scripting import Session
@@ -135,6 +136,55 @@ def test_generate_resistor_uses_explicit_overrides_over_saved_rules():
         assert (px1 - px0) == 30.0  # 10 + 20
 
 
+def test_generate_resistor_no_dielectric_keepout_by_default():
+    s = _fresh_session()
+    save_resistor_geometry_rules(s.library, {
+        "overlap_a": 100.0, "pad_b": 300.0, "space_c": 50.0, "glaze_oversize": 0.0,
+        "resistor_layer": 10, "conductor_layer": 11, "glaze_layer": 12,
+    })
+    s.generate_resistor(0, 0, body_width=200.0, body_length=1000.0)
+    # ink + glaze + 2 pads, and nothing else -- keepout_layer defaults to -1.
+    assert len(_device_shapes(s)) == 4
+
+
+def test_generate_resistor_draws_dielectric_keepout_between_terminals():
+    s = _fresh_session()
+    save_resistor_geometry_rules(s.library, {
+        "overlap_a": 100.0, "pad_b": 300.0, "space_c": 50.0, "glaze_oversize": 0.0,
+        "keepout_oversize": 25.0,
+        "resistor_layer": 10, "conductor_layer": 11, "glaze_layer": 12,
+        "keepout_layer": 20,
+    })
+    s.generate_resistor(0, 0, body_width=200.0, body_length=1000.0)
+    shapes = _device_shapes(s)
+    assert len(shapes) == 5
+    ko = next(sh for sh in shapes if isinstance(sh, Rectangle) and sh.layer == 20)
+    x0, y0, x1, y1 = ko.bbox()
+    # length = body_length + 2*E = 1000 + 50 ; the gap between the two
+    # terminals (inner pad edges are at +-half_l = +-500) plus E each end.
+    assert (x1 - x0) == 1050.0
+    # width = body_width + 2*C + 2*E = 200 + 100 + 50
+    assert (y1 - y0) == 350.0
+    # centred on the resistor, i.e. strictly inside the terminal gap +/- E
+    assert x0 == -525.0 and x1 == 525.0
+
+
+def test_generate_resistor_keepout_layer_arg_overrides_saved_rule():
+    s = _fresh_session()
+    save_resistor_geometry_rules(s.library, {
+        "overlap_a": 100.0, "pad_b": 300.0, "space_c": 50.0,
+        "resistor_layer": 10, "conductor_layer": 11, "glaze_layer": 12,
+        "keepout_layer": -1,
+    })
+    s.generate_resistor(0, 0, body_width=200.0, body_length=1000.0,
+                        keepout_layer=21, keepout_oversize=0.0)
+    shapes = _device_shapes(s)
+    ko = [sh for sh in shapes if isinstance(sh, Rectangle) and sh.layer == 21]
+    assert len(ko) == 1
+    x0, _, x1, _ = ko[0].bbox()
+    assert (x1 - x0) == 1000.0  # E=0 -> exactly the body_length gap
+
+
 def test_generate_resistor_with_90_degree_rotation_places_sref_rotated():
     s = _fresh_session()
     save_resistor_geometry_rules(s.library, {
@@ -241,7 +291,7 @@ def test_ink_layers_round_trip_through_geometry_rules():
 
 # --- reference-designator label (ref_des / doc_layer) -----------------------
 
-def test_generate_resistor_with_ref_des_adds_a_text_label_on_doc_layer():
+def test_generate_resistor_ref_des_is_a_text_shape_only_on_the_doc_layer():
     s = _fresh_session()
     save_resistor_geometry_rules(s.library, {
         "overlap_a": 100.0, "pad_b": 300.0, "space_c": 50.0, "glaze_oversize": 0.0,
@@ -250,11 +300,41 @@ def test_generate_resistor_with_ref_des_adds_a_text_label_on_doc_layer():
     s.generate_resistor(0, 0, body_width=200.0, body_length=1000.0, ref_des="R1")
 
     shapes = _device_shapes(s)
-    assert len(shapes) == 5  # ink + glaze + 2 pads + label
+    assert len(shapes) == 5  # ink + glaze + 2 pads + ref-des text
     labels = [sh for sh in shapes if isinstance(sh, Text)]
     assert len(labels) == 1
-    assert labels[0].layer == 13
+    assert labels[0].layer == 13          # only on the assigned ref-des layer
     assert labels[0].text == "R1"
+    # still set on the instance for netlist extraction (the canvas knows
+    # not to also float it -- see Canvas._refdes_baked_into_cell).
+    assert s.cell.srefs[-1].label == "R1"
+
+
+def test_generate_resistor_ref_des_uses_the_refdes_annotation_layer_when_set():
+    # The design's one Reference Designator layer (Setup > Technology
+    # Properties > Ref-Des) wins over the legacy resistor_geometry_rules
+    # doc_layer -- the two settings were merged into one.
+    s = _fresh_session()
+    save_resistor_geometry_rules(s.library, {
+        "overlap_a": 100.0, "pad_b": 300.0, "space_c": 50.0, "glaze_oversize": 0.0,
+        "resistor_layer": 10, "conductor_layer": 11, "glaze_layer": 12, "doc_layer": 13,
+    })
+    save_refdes_annotation_layer(s.library, 40)
+    s.generate_resistor(0, 0, body_width=200.0, body_length=1000.0, ref_des="R1")
+    label = next(sh for sh in _device_shapes(s) if isinstance(sh, Text))
+    assert label.layer == 40
+
+
+def test_generate_resistor_ref_des_falls_back_to_doc_layer_without_annotation_layer():
+    s = _fresh_session()
+    save_resistor_geometry_rules(s.library, {
+        "overlap_a": 100.0, "pad_b": 300.0, "space_c": 50.0, "glaze_oversize": 0.0,
+        "resistor_layer": 10, "conductor_layer": 11, "glaze_layer": 12, "doc_layer": 13,
+    })
+    save_refdes_annotation_layer(s.library, -1)   # "(none)"
+    s.generate_resistor(0, 0, body_width=200.0, body_length=1000.0, ref_des="R1")
+    label = next(sh for sh in _device_shapes(s) if isinstance(sh, Text))
+    assert label.layer == 13
 
 
 def test_generate_resistor_without_ref_des_adds_no_label():
@@ -301,6 +381,7 @@ def test_resgen_ref_option_adds_a_label():
     assert len(labels) == 1
     assert labels[0].text == "R5"
     assert labels[0].layer == 3
+    assert s.cell.srefs[-1].label == "R5"
 
 
 # --- each resistor becomes its own reusable/uniquely-named cell -----------

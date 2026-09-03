@@ -230,6 +230,49 @@ def test_pin_numbering_tool_stamps_increasing_pins_on_successive_clicks():
         app.destroy()
 
 
+def _pin_label_items(canvas, text):
+    return [i for i in canvas.find_all()
+            if canvas.type(i) == "text" and canvas.itemcget(i, "text") == text]
+
+
+def test_numbered_pad_shows_its_pin_number_on_the_canvas():
+    app, top = _make_app()
+    try:
+        r = top.add_rectangle(0, 0, 0, 4000, 4000, pin="3")
+        top.add_rectangle(0, 6000, 0, 8000, 4000)          # unnumbered -> no label
+        app.canvas.fit_view()
+        app.canvas.redraw()
+        assert len(_pin_label_items(app.canvas, "3")) == 1
+        # clicking the number picks the pad it belongs to
+        item = _pin_label_items(app.canvas, "3")[0]
+        assert app.canvas._item_to_shape[item] == ("shape", r)
+
+        app.show_pins_var.set(False)
+        app._on_show_pins_change()
+        assert _pin_label_items(app.canvas, "3") == []
+    finally:
+        app.destroy()
+
+
+def test_pin_number_appears_as_soon_as_the_tool_stamps_it():
+    app, top = _make_app()
+    try:
+        r = top.add_rectangle(0, 0, 0, 4000, 4000)
+        app.canvas.fit_view()
+        app.canvas.redraw()
+        assert _pin_label_items(app.canvas, "1") == []      # nothing yet
+
+        app.canvas.start_pin_numbering("1")
+        cx = (r.points[0][0] + r.points[2][0]) // 2
+        cy = (r.points[0][1] + r.points[2][1]) // 2
+        app.canvas._on_click(_ev(*app.canvas.to_px(cx, cy)))
+        app.update()
+        assert r.pin == "1"
+        assert len(_pin_label_items(app.canvas, "1")) == 1   # visible right away
+    finally:
+        app.destroy()
+
+
 def test_pin_numbering_tool_escape_returns_to_select():
     app, top = _make_app()
     try:

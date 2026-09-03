@@ -13,10 +13,12 @@ from hlayout.io.techfile import (
     DEFAULT_ROUTE_RULES,
     apply_techfile,
     load_and_apply_techfile,
+    load_refdes_annotation_layer,
     load_resistor_design_rules,
     load_resistor_geometry_rules,
     load_route_rules,
     load_techfile,
+    save_refdes_annotation_layer,
     save_resistor_design_rules,
     save_resistor_geometry_rules,
     save_route_rules,
@@ -154,8 +156,9 @@ def test_load_resistor_geometry_rules_returns_defaults_when_absent():
 def test_resistor_geometry_rules_round_trip_through_tech_params():
     lib = Library("DEMO")
     custom = {"overlap_a": 150.0, "pad_b": 400.0, "space_c": 100.0, "glaze_oversize": 75.0,
-              "resistor_layer": 12, "conductor_layer": 13,
-              "glaze_layer": 14, "doc_layer": 15, "ink_layers": {"1000": 20}}
+              "keepout_oversize": 40.0, "resistor_layer": 12, "conductor_layer": 13,
+              "glaze_layer": 14, "doc_layer": 15, "keepout_layer": 16,
+              "ink_layers": {"1000": 20}}
     save_resistor_geometry_rules(lib, custom)
     assert lib.tech_params
     assert load_resistor_geometry_rules(lib) == custom
@@ -229,6 +232,32 @@ def test_load_route_rules_tolerates_malformed_entry():
     lib = Library("DEMO")
     lib.tech_params["route_rules"] = "not valid json{{{"
     assert load_route_rules(lib) == DEFAULT_ROUTE_RULES
+
+
+# --- ref-des annotation layer --------------------------------------------
+
+def test_refdes_annotation_layer_defaults_to_minus_one_when_absent():
+    assert load_refdes_annotation_layer(Library("DEMO")) == -1
+
+
+def test_refdes_annotation_layer_round_trips_and_survives_a_full_techfile(tmp_path):
+    lib = Library("DEMO")
+    save_refdes_annotation_layer(lib, 62)
+    assert load_refdes_annotation_layer(lib) == 62
+
+    path = str(tmp_path / "tech.json")
+    save_techfile(lib, path)
+    lib2 = Library("OTHER")
+    load_and_apply_techfile(lib2, path)
+    # apply_techfile() stringifies every tech_param value -- the loader
+    # must still return an int.
+    assert load_refdes_annotation_layer(lib2) == 62
+
+
+def test_load_refdes_annotation_layer_tolerates_malformed_entry():
+    lib = Library("DEMO")
+    lib.tech_params["refdes_annotation_layer"] = "not a number"
+    assert load_refdes_annotation_layer(lib) == -1
 
 
 def test_load_resistor_geometry_rules_fills_in_missing_keys_from_defaults():

@@ -11,6 +11,7 @@ from hlayout.core.errors import GeometryError, LayoutError
 from hlayout.core.maskops import (
     MASK_OPS,
     boolean_op,
+    fracture_polygons,
     layer_to_shapely,
     layer_to_shapely_flattened,
     shapely_to_polygons,
@@ -508,3 +509,34 @@ def test_shapely_to_polygons_raises_over_the_vertex_limit():
 
 def test_mask_ops_tuple_matches_expected_six_operations():
     assert set(MASK_OPS) == {"OVERSIZE", "UNDERSIZE", "AND", "OR", "NOT", "XOR"}
+
+
+# --- fracture_polygons ---------------------------------------------------
+
+def test_fracture_polygons_splits_a_holed_sheet_into_holefree_pieces():
+    from shapely.geometry import box
+    from shapely.ops import unary_union
+    sheet = box(0, 0, 10000, 10000)
+    holes = unary_union([box(x, y, x + 300, y + 300)
+                         for x in range(500, 10000, 900)
+                         for y in range(500, 10000, 900)])
+    holed = sheet.difference(holes)
+    assert list(holed.interiors)  # sanity: it really has holes
+
+    pieces = fracture_polygons(holed, max_points=200)
+    assert len(pieces) > 1
+    for p in pieces:
+        assert p.geom_type == "Polygon"
+        assert not p.interiors                       # hole-free
+        assert len(p.exterior.coords) - 1 <= 200     # under the limit
+    # area is preserved (no geometry lost to the fracture)
+    assert unary_union(pieces).area == pytest.approx(holed.area, rel=1e-9)
+    # and none of the pieces cover a hole centre
+    assert not unary_union(pieces).covers(box(600, 600, 700, 700).centroid)
+
+
+def test_fracture_polygons_passes_a_small_holefree_polygon_through_unchanged():
+    from shapely.geometry import box
+    b = box(0, 0, 100, 100)
+    out = fracture_polygons(b)
+    assert len(out) == 1 and out[0].equals(b)
