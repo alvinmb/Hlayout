@@ -129,3 +129,36 @@ def ask_yes_no(title, message, parent) -> bool:
     yes_btn.focus_set()
     win.wait_window()
     return result[0]
+
+
+def ask_choice(title, message, parent, choices, default=0) -> str:
+    """Modal dialog with one button per option. `choices` is a list of
+    (key, label) pairs (or plain strings, used as both key and label).
+    Returns the chosen key, or None if closed/Escape. `default` indexes
+    which button gets focus."""
+    win, body = _build(parent, title, message, _WARNING)
+    result = [None]
+
+    btn_row = ttk.Frame(body)
+    btn_row.pack(anchor="e")
+
+    def choose(value):
+        result[0] = value
+        win.destroy()
+
+    norm = [(c, c) if isinstance(c, str) else c for c in choices]
+    buttons = []
+    for key, label in norm:
+        b = ttk.Button(btn_row, text=label, command=lambda k=key: choose(k))
+        b.pack(side="left", padx=(6, 0))
+        buttons.append(b)
+
+    win.bind("<Escape>", lambda e: choose(None))
+    win.protocol("WM_DELETE_WINDOW", lambda: choose(None))
+
+    _center_over(win, parent)
+    win.grab_set()
+    if buttons:
+        buttons[max(0, min(default, len(buttons) - 1))].focus_set()
+    win.wait_window()
+    return result[0]

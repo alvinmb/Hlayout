@@ -1004,25 +1004,7 @@ class ResistorDesignerWindow(tk.Toplevel):
         self._next_place_x = 0.0
         self._next_place_y = 0.0
         self._build()
-        self._demo_data()
         self._refresh_all()
-
-    # -- demo data, matching the original tool's starting point ----------
-    def _demo_data(self):
-        for ref, val, tol, pwr in [
-            ("R1", 1000, "5%", 125.0),
-            ("R2", 10000, "1%", 62.5),
-            ("R3", 470, "5%", 200.0),
-            ("R4", 100000, "10%", 50.0),
-            ("R5", 33, "5%", 500.0),
-            ("R6", 1e6, "5%", 125.0),
-            ("R7", 2200, "2%", 375.0),
-            ("R8", 560, "5%", 800.0),
-        ]:
-            res = Resistor(ref_des=ref, value=val, tolerance=tol,
-                            power_mw=pwr, body_width=float(width_for_power(pwr)))
-            res.compute_solutions(self.rules)
-            self.resistors.append(res)
 
     # -- UI ----------------------------------------------------------------
     def _build(self):

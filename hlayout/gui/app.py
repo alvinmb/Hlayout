@@ -16,8 +16,14 @@ from ..core.shapes import CIRCLE_SEGMENT_CHOICES
 from ..core.units import dbu_to_mm, mm_to_dbu
 from ..io.sidecar import load_design
 from ..io.techfile import (
+    load_bond_rules,
+    load_dielectric_rules,
+    load_refdes_annotation_layer,
     load_resistor_geometry_rules,
     load_route_rules,
+    save_bond_rules,
+    save_dielectric_rules,
+    save_refdes_annotation_layer,
     save_resistor_geometry_rules,
     save_route_rules,
 )
@@ -148,6 +154,7 @@ class App(tk.Tk):
         self.canvas.on_select = self._update_properties_panel
         self._update_properties_panel()
         self.canvas.on_route_via = self._on_route_via
+        self.canvas.on_auto_route = self._on_auto_route
         self.canvas.on_draw_mode_changed = lambda mode: self.mode_var.set(mode)
         self._on_route_opts_change()
 
@@ -334,8 +341,9 @@ class App(tk.Tk):
         setupm.add_separator()
         setupm.add_command(label="Path Style...", command=self.show_path_style_dialog)
         setupm.add_command(label="Circle Segments...", command=self.show_circle_segments_dialog)
-        setupm.add_command(label="Route Layers...", command=self.show_route_layers_dialog)
-        setupm.add_command(label="Resistor Geometry Rules...", command=self.show_resistor_geometry_dialog)
+        setupm.add_separator()
+        setupm.add_command(label="Technology Properties...",
+                           command=self.show_technology_properties_dialog)
         setupm.add_separator()
         setupm.add_command(label="Remap Layers...", command=self.show_remap_layers_dialog)
         setupm.add_separator()
@@ -348,6 +356,9 @@ class App(tk.Tk):
         viewm.add_command(label="Zoom In", command=lambda: self.canvas.zoom_in(), accelerator="+")
         viewm.add_command(label="Zoom Out", command=lambda: self.canvas.zoom_out(), accelerator="-")
         viewm.add_command(label="Toggle Grid", command=lambda: self.canvas.toggle_grid(), accelerator="G")
+        self.show_pins_var = tk.BooleanVar(value=self.canvas.show_pin_numbers)
+        viewm.add_checkbutton(label="Show Pin Numbers", variable=self.show_pins_var,
+                               command=self._on_show_pins_change)
         viewm.add_separator()
         viewm.add_radiobutton(label="Zoom Window", value="zoomwin", variable=self.mode_var,
                                command=self._on_mode_change, accelerator="W")
@@ -368,6 +379,8 @@ class App(tk.Tk):
         createm.add_separator()
         createm.add_radiobutton(label="Route (2-Layer)", value="route", variable=self.mode_var,
                                  command=self._on_mode_change)
+        createm.add_radiobutton(label="Wire Bond", value="wire_bond", variable=self.mode_var,
+                                 command=self._on_mode_change)
         createm.add_separator()
         createm.add_command(label="Find && Place Cell...", command=self.find_and_place_cell)
 
@@ -386,6 +399,7 @@ class App(tk.Tk):
         editm.add_command(label="Insert Vertex on Edge", command=self._insert_vertex_on_edge)
         editm.add_command(label="Continue Path...", command=self._continue_path)
         editm.add_command(label="Number Pins...", command=self._number_pins)
+        editm.add_command(label="Auto-Route Two Pins", command=self._auto_route_two_pins)
         editm.add_separator()
         editm.add_command(label="Rotate...", command=self._rotate_selected)
         editm.add_command(label="Copy...", command=self._copy_selected)
@@ -416,6 +430,8 @@ class App(tk.Tk):
         toolsm.add_command(label="Mask Operation Batch...", command=lambda: open_maskop_batch_window(self))
         toolsm.add_command(label="DRC...", command=lambda: open_drc_window(self))
         toolsm.add_command(label="Extract Netlist...", command=self.show_extract_netlist_dialog)
+        toolsm.add_command(label="Generate Dielectric Fill...", command=self.show_dielectric_dialog)
+        toolsm.add_command(label="Remove Dielectric Fill", command=self.remove_dielectric_fill)
         toolsm.add_separator()
         toolsm.add_command(label="Gerber Export Sets...", command=lambda: open_gerber_batch_window(self))
         toolsm.add_command(label="DXF Export Sets...", command=lambda: open_dxf_batch_window(self))
@@ -594,32 +610,56 @@ class App(tk.Tk):
         name = simpledialog.askstring("Create Cell from Selection", "New cell name:", parent=self)
         if not name:
             return
-        origin_text = simpledialog.askstring(
-            "Create Cell from Selection",
-            "Cell origin, in this cell's current x,y coordinates\n"
-            "(becomes (0, 0) inside the new cell):",
-            parent=self, initialvalue="0,0",
-        )
-        if origin_text is None:
-            return
-        try:
-            origin = _parse_point(origin_text)
-        except CommandError as e:
-            dialogs.show_error("Create Cell from Selection", str(e), parent=self)
-            return
-        try:
-            created = self.canvas.create_cell_from_selection(name, origin)
-        except CellError as e:
-            dialogs.show_error("Create Cell from Selection", str(e), parent=self)
-            return
-        if not created:
+        name = name.strip()
+        replace = False
+        if name in self.session.library.cells:
+            if name == self.canvas.cell_name:
+                dialogs.show_error(
+                    "Create Cell from Selection",
+                    f"{name!r} is the cell you're editing -- it can't be replaced "
+                    "with a selection from inside itself.", parent=self)
+                return
+            rev = self.session.library._unique_cell_name(name)
+            choice = dialogs.ask_choice(
+                "Create Cell from Selection",
+                f"A cell named {name!r} already exists.\n\n"
+                f"New revision  -  save as {rev!r}; {name!r} and every instance of "
+                f"it stay exactly as they are, so you can swap in the new version "
+                f"where you want it.\n\n"
+                f"Replace  -  rebuild {name!r} in place; every instance of it in "
+                f"the design switches to the new geometry.",
+                parent=self,
+                choices=[("revision", f"New revision ({rev})"),
+                         ("replace", "Replace"), (None, "Cancel")],
+            )
+            if choice == "revision":
+                name = rev
+            elif choice == "replace":
+                replace = True
+            else:
+                return
+        # Rather than typing an origin, pick it with a click: the tool
+        # enters "cell_origin" mode and the next canvas click is the
+        # point that becomes the new cell's local (0, 0).
+        if not self.canvas.start_cell_from_selection(name, replace=replace):
             dialogs.show_info(
                 "Create Cell from Selection", "That selection can't become a cell -- "
                 "select a whole shape or cell instance (not a single vertex/edge).",
                 parent=self,
             )
             return
-        self.status.set(f"created cell {name!r} from the selection")
+        # The mode is otherwise silent apart from the status line -- tell
+        # the user the next step is to click the cell's origin.
+        dialogs.show_info(
+            "Create Cell from Selection",
+            f"Now click a point on the canvas to set the origin of {name!r}.\n\n"
+            "That point becomes local (0, 0) inside the new cell -- pick a "
+            "reference feature such as a pad centre or a corner. Press Esc to "
+            "cancel.",
+            parent=self,
+        )
+        self.status.set(
+            f"Create Cell {name!r}: click the point to use as the cell's origin (Esc cancels)")
 
     def run_script_file(self):
         path = filedialog.askopenfilename(filetypes=[("Python scripts", "*.py"), ("All files", "*.*")])
@@ -667,7 +707,8 @@ class App(tk.Tk):
         body.add(right, weight=0)
         self.right_notebook = right  # so menu items (Setup > Layers..., Tools > Script Console) can switch tabs
 
-        self.layer_panel = LayerPanel(right, self.session.library, on_change=self.refresh_all)
+        self.layer_panel = LayerPanel(right, self.session.library,
+                                       on_change=self._on_layer_panel_change)
         right.add(self.layer_panel, text="Layers")
 
         props_frame = ttk.Frame(right)
@@ -1155,14 +1196,11 @@ class App(tk.Tk):
         own saved rules, so it travels with Setup > Save Technology
         File... / TECH SAVE and the per-design .hlaux sidecar -- a route
         setup configured once doesn't need to be re-entered next
-        session."""
-        win = tk.Toplevel(self)
-        win.title("Route Layers")
-        win.transient(self)
-        win.grab_set()
-        win.resizable(False, False)
+        session. Also a tab of Setup > Technology Properties..."""
+        return self._setting_window("Route Layers", self._build_route_form)
 
-        form = ttk.Frame(win)
+    def _build_route_form(self, parent):
+        form = ttk.Frame(parent)
         form.pack(padx=12, pady=12)
 
         ttk.Label(form, text="Layer A (route starts here):").grid(
@@ -1179,43 +1217,45 @@ class App(tk.Tk):
 
         ttk.Label(form, text="Via cell (Space places an instance):").grid(
             row=2, column=0, sticky="e", padx=4, pady=4)
-        via_cell_choices = self._placeable_cell_names()
+        via_cell_choices = list(self._placeable_cell_names())
         via_cell_var = tk.StringVar(value=self.route_via_cell_var.get())
-        ttk.Combobox(form, textvariable=via_cell_var, width=22,
-                     values=via_cell_choices).grid(row=2, column=1, sticky="w", padx=4, pady=4)
+        via_combo = ttk.Combobox(form, textvariable=via_cell_var, width=22,
+                                 values=via_cell_choices)
+        via_combo.grid(row=2, column=1, sticky="w", padx=4, pady=4)
+
+        def _via_created(name):
+            """Called back by the Via Wizard once it actually creates a
+            cell -- refresh this combo's list and select the new one, so
+            a missing via cell never traps you here with nothing to pick."""
+            via_cell_choices[:] = list(self._placeable_cell_names())
+            via_combo.configure(values=via_cell_choices)
+            via_cell_var.set(name)
+
+        ttk.Button(form, text="New Via Cell…",
+                   command=lambda: self.show_via_wizard(on_created=_via_created)).grid(
+            row=2, column=2, sticky="w", padx=4, pady=4)
+
         ttk.Label(
             form,
-            text="Built once via Tools > Via Wizard... (or scripting's\n"
-                 "create_via_cell()); this just names which one to place.",
+            text="Built once via Tools > Via Wizard... (\"New Via Cell…\" above)\n"
+                 "or scripting's create_via_cell(); this just names which one\n"
+                 "to place. Leave blank for now -- routing works, but Space\n"
+                 "can't drop a via until one is set.",
             foreground="#555", justify="left",
-        ).grid(row=3, column=0, columnspan=2, sticky="w", padx=4)
+        ).grid(row=3, column=0, columnspan=3, sticky="w", padx=4)
 
-        error_var = tk.StringVar(value="")
-        ttk.Label(form, textvariable=error_var, foreground="red", wraplength=340,
-                  justify="left").grid(row=4, column=0, columnspan=2, sticky="w", padx=4)
-
-        def apply_and_close():
+        def apply():
             try:
                 a = self._resolve_layer_field(layer_a_var.get())
                 b = self._resolve_layer_field(layer_b_var.get())
             except LayoutError as e:
-                error_var.set(str(e))
-                return
+                return str(e)
             if a == b:
-                error_var.set("Layer A and Layer B must be different.")
-                return
+                return "Layer A and Layer B must be different."
             via_cell = via_cell_var.get().strip()
-            if not via_cell:
-                error_var.set(
-                    "Pick a via cell -- build one first with Tools > Via Wizard... "
-                    "if none exists yet."
-                )
-                return
-            if via_cell not in via_cell_choices:
-                error_var.set(
-                    f"No cell named {via_cell!r} in this design or any attached library."
-                )
-                return
+            if via_cell and via_cell not in via_cell_choices:
+                return (f"No cell named {via_cell!r} in this design or any "
+                        f"attached library -- use \"New Via Cell…\" to build one.")
 
             self.route_layer_a_var.set(self._layer_label(a))
             self.route_layer_b_var.set(self._layer_label(b))
@@ -1224,19 +1264,19 @@ class App(tk.Tk):
             save_route_rules(self.session.library, {
                 "layer_a": a, "layer_b": b, "via_cell": via_cell,
             })
-            self.status.set(
-                f"route layers: A={self._layer_label(a)}  B={self._layer_label(b)}  "
-                f"via cell={via_cell!r}"
-            )
-            win.destroy()
+            if via_cell:
+                self.status.set(
+                    f"route layers: A={self._layer_label(a)}  B={self._layer_label(b)}  "
+                    f"via cell={via_cell!r}"
+                )
+            else:
+                self.status.set(
+                    f"route layers: A={self._layer_label(a)}  B={self._layer_label(b)}  "
+                    f"(no via cell set yet -- add one with \"New Via Cell…\" to drop vias)"
+                )
+            return None
 
-        btn_row = ttk.Frame(win)
-        btn_row.pack(pady=(0, 12))
-        ttk.Button(btn_row, text="OK", command=apply_and_close).pack(side="left", padx=6)
-        ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=6)
-
-        win.bind("<Return>", lambda e: apply_and_close())
-        win.bind("<Escape>", lambda e: win.destroy())
+        return apply
 
     def _on_route_via(self, x, y, layer_a, layer_b, via_cell, segment=None):
         """Wired as canvas.on_route_via -- fired when Space drops a via
@@ -1268,14 +1308,14 @@ class App(tk.Tk):
             dialogs.show_error("Route", f"Could not place via: {e}", parent=self)
 
     def show_resistor_geometry_dialog(self):
-        """Setup > Resistor Geometry Rules...: configure the A/B/C/D
-        dimensions and the layers used when a resistor is actually
-        drawn into the layout -- Session.generate_resistor() (the RESGEN
-        command bar command, and Tools > Thick-Film Resistor
-        Designer.../"Place in Layout..."). Saved into this design's
-        technology file (Library.tech_params) via
-        hlayout.io.techfile.save_resistor_geometry_rules(), same pattern
-        as the Resistor Designer's own sizing "Design Rules...".
+        """Setup > Technology Properties... > Resistors tab (and still
+        its own window): the A/B/C/D/E dimensions and the layers used
+        when a resistor is drawn into the layout -- Session.generate_
+        resistor() (RESGEN, and Tools > Thick-Film Resistor Designer.../
+        "Place in Layout..."). The reference-designator layer is NOT
+        set here any more -- it's the one on the Ref-Des tab
+        (Setup > Reference Designator Layer). Saved via
+        hlayout.io.techfile.save_resistor_geometry_rules().
 
         A = overlap: resistor ink extends this far beyond the electrical
             body_length at BOTH ends, so it overlaps (contacts) the
@@ -1287,23 +1327,13 @@ class App(tk.Tk):
         D = glaze oversize: the glaze overprint is the resistor ink
             body's own shape, grown by D on ALL FOUR sides (not just
             matching the ink's footprint).
-
-        The resistor ink layer set here is only the *fallback* used when
-        a resistor's ink has no per-Rsh entry in Tools > Thick-Film
-        Resistor Designer... > Design Rules... 's ink layer map (each
-        available ink sheet resistance is normally matched to its own
-        layer there -- see hlayout.io.techfile.resistor_ink_layer()).
-        Conductor pad layer, glaze layer, and documentation layer (for
-        the reference-designator label -- see "Place in Layout...") are
-        single, process-wide layers (the conductor layer can still be
-        overridden per placement from "Place in Layout...").
         """
+        return self._setting_window("Resistor Geometry Rules",
+                                    self._build_resistor_geometry_form)
+
+    def _build_resistor_geometry_form(self, parent):
         rules = load_resistor_geometry_rules(self.session.library)
-        win = tk.Toplevel(self)
-        win.title("Resistor Geometry Rules")
-        win.transient(self)
-        win.grab_set()
-        win.resizable(False, False)
+        win = parent
 
         ttk.Label(
             win,
@@ -1315,7 +1345,10 @@ class App(tk.Tk):
                  "     body_width + 2×C)\n"
                  "D = glaze oversize -- the glaze overprint is the resistor's\n"
                  "     own shape, grown by D on all 4 sides (not just matching\n"
-                 "     the ink body), for post-trim protection.",
+                 "     the ink body), for post-trim protection.\n"
+                 "E = dielectric keep-out oversize -- a rectangle in the gap\n"
+                 "     BETWEEN the two terminals (subtract from the dielectric),\n"
+                 "     grown by E on all 4 sides. Needs a keep-out layer set.",
             justify="left", foreground="#555",
         ).pack(anchor="w", padx=12, pady=(12, 8))
 
@@ -1342,76 +1375,472 @@ class App(tk.Tk):
         ttk.Spinbox(form, from_=0, to=1000.0, increment=0.001, width=10, textvariable=d_var).grid(
             row=3, column=1, sticky="w", padx=4, pady=4)
 
-        ttk.Label(form, text="Resistor ink layer (fallback):").grid(
+        ttk.Label(form, text="E - Dielectric keep-out oversize (mm):").grid(
             row=4, column=0, sticky="e", padx=4, pady=4)
+        e_var = tk.DoubleVar(value=dbu_to_mm(rules["keepout_oversize"]))
+        ttk.Spinbox(form, from_=0, to=1000.0, increment=0.001, width=10, textvariable=e_var).grid(
+            row=4, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="Resistor ink layer (fallback):").grid(
+            row=5, column=0, sticky="e", padx=4, pady=4)
         r_layer_var = tk.StringVar(value=self._layer_label(rules["resistor_layer"]))
         ttk.Combobox(form, textvariable=r_layer_var, width=22,
-                     values=self._layer_choices()).grid(row=4, column=1, sticky="w", padx=4, pady=4)
-
-        ttk.Label(form, text="Conductor pad layer:").grid(row=5, column=0, sticky="e", padx=4, pady=4)
-        c_layer_var = tk.StringVar(value=self._layer_label(rules["conductor_layer"]))
-        ttk.Combobox(form, textvariable=c_layer_var, width=22,
                      values=self._layer_choices()).grid(row=5, column=1, sticky="w", padx=4, pady=4)
 
-        ttk.Label(form, text="Glaze overprint layer:").grid(row=6, column=0, sticky="e", padx=4, pady=4)
-        g_layer_var = tk.StringVar(value=self._layer_label(rules["glaze_layer"]))
-        ttk.Combobox(form, textvariable=g_layer_var, width=22,
+        ttk.Label(form, text="Conductor pad layer:").grid(row=6, column=0, sticky="e", padx=4, pady=4)
+        c_layer_var = tk.StringVar(value=self._layer_label(rules["conductor_layer"]))
+        ttk.Combobox(form, textvariable=c_layer_var, width=22,
                      values=self._layer_choices()).grid(row=6, column=1, sticky="w", padx=4, pady=4)
 
-        ttk.Label(form, text="Documentation (ref-des) layer:").grid(
-            row=7, column=0, sticky="e", padx=4, pady=4)
-        doc_layer_var = tk.StringVar(value=self._layer_label(rules["doc_layer"]))
-        ttk.Combobox(form, textvariable=doc_layer_var, width=22,
+        ttk.Label(form, text="Glaze overprint layer:").grid(row=7, column=0, sticky="e", padx=4, pady=4)
+        g_layer_var = tk.StringVar(value=self._layer_label(rules["glaze_layer"]))
+        ttk.Combobox(form, textvariable=g_layer_var, width=22,
                      values=self._layer_choices()).grid(row=7, column=1, sticky="w", padx=4, pady=4)
 
-        error_var = tk.StringVar(value="")
-        ttk.Label(form, textvariable=error_var, foreground="red").grid(
-            row=8, column=0, columnspan=2, sticky="w", padx=4
-        )
+        ttk.Label(form, text="Dielectric keep-out layer:").grid(
+            row=8, column=0, sticky="e", padx=4, pady=4)
+        _KO_NONE = "(none - disabled)"
+        k_layer_var = tk.StringVar(
+            value=(self._layer_label(rules["keepout_layer"])
+                   if int(rules["keepout_layer"]) >= 0 else _KO_NONE))
+        ttk.Combobox(form, textvariable=k_layer_var, width=22,
+                     values=[_KO_NONE] + self._layer_choices()).grid(
+            row=8, column=1, sticky="w", padx=4, pady=4)
 
-        def apply_and_close():
+        ttk.Label(form,
+                  text="(the reference-designator layer is on the Ref-Des tab)",
+                  foreground="#888").grid(row=9, column=0, columnspan=2,
+                                          sticky="w", padx=4, pady=(2, 0))
+
+        def apply():
             try:
-                a, b, c, d = (mm_to_dbu(a_var.get()), mm_to_dbu(b_var.get()),
-                              mm_to_dbu(c_var.get()), mm_to_dbu(d_var.get()))
+                a, b, c, d, e = (mm_to_dbu(a_var.get()), mm_to_dbu(b_var.get()),
+                                 mm_to_dbu(c_var.get()), mm_to_dbu(d_var.get()),
+                                 mm_to_dbu(e_var.get()))
             except tk.TclError:
-                error_var.set("A, B, C, and D must be numbers.")
-                return
-            if a < 0 or b < 0 or c < 0 or d < 0:
-                error_var.set("A, B, C, and D must not be negative.")
-                return
+                return "A, B, C, D, and E must be numbers."
+            if a < 0 or b < 0 or c < 0 or d < 0 or e < 0:
+                return "A, B, C, D, and E must not be negative."
             try:
                 r_layer = self._resolve_layer_field(r_layer_var.get())
                 c_layer = self._resolve_layer_field(c_layer_var.get())
                 g_layer = self._resolve_layer_field(g_layer_var.get())
-                doc_layer = self._resolve_layer_field(doc_layer_var.get())
-            except LayoutError as e:
-                error_var.set(str(e))
-                return
-            if len({r_layer, c_layer, g_layer, doc_layer}) != 4:
-                error_var.set(
-                    "Resistor ink, conductor pad, glaze, and documentation layers "
-                    "must all be different.")
-                return
+                k_text = k_layer_var.get().strip()
+                k_layer = (-1 if k_text == _KO_NONE or not k_text
+                           else self._resolve_layer_field(k_text))
+            except LayoutError as exc:
+                return str(exc)
+            distinct = [r_layer, c_layer, g_layer]
+            if k_layer >= 0:
+                distinct.append(k_layer)
+            if len(set(distinct)) != len(distinct):
+                return ("Resistor ink, conductor pad, glaze, and keep-out "
+                        "layers must all be different.")
             save_resistor_geometry_rules(self.session.library, {
                 "overlap_a": a, "pad_b": b, "space_c": c, "glaze_oversize": d,
+                "keepout_oversize": e,
                 "resistor_layer": r_layer, "conductor_layer": c_layer,
-                "glaze_layer": g_layer, "doc_layer": doc_layer,
+                "glaze_layer": g_layer,
+                # doc_layer is no longer edited here -- carried forward
+                # untouched as the legacy fallback for generate_resistor()
+                # (the live ref-des layer is refdes_annotation_layer).
+                "doc_layer": rules["doc_layer"],
+                "keepout_layer": k_layer,
                 "ink_layers": rules["ink_layers"],
             })
+            ko = self._layer_label(k_layer) if k_layer >= 0 else "(none)"
             self.status.set(
                 f"resistor geometry rules saved: A={dbu_to_mm(a):g} B={dbu_to_mm(b):g} "
-                f"C={dbu_to_mm(c):g} D={dbu_to_mm(d):g} mm  "
+                f"C={dbu_to_mm(c):g} D={dbu_to_mm(d):g} E={dbu_to_mm(e):g} mm  "
                 f"ink={self._layer_label(r_layer)}  pad={self._layer_label(c_layer)}  "
-                f"glaze={self._layer_label(g_layer)}  doc={self._layer_label(doc_layer)}")
+                f"glaze={self._layer_label(g_layer)}  keepout={ko}")
+            return None
+
+        return apply
+
+    def show_refdes_annotation_layer_dialog(self):
+        """Setup > Technology Properties... > Ref-Des tab (and still its
+        own window): the design's ONE reference-designator layer. It is
+        where generate_resistor() bakes a resistor's ref-des Text, and
+        the layer whose visibility gates the per-instance ref-des
+        annotation the canvas floats at each placed part's origin, so
+        every ref-des shows and hides together. "(none)" leaves the
+        annotation always shown. Saved via
+        hlayout.io.techfile.save_refdes_annotation_layer()."""
+        return self._setting_window("Reference Designator Layer",
+                                    self._build_refdes_form)
+
+    def _build_refdes_form(self, parent):
+        current = load_refdes_annotation_layer(self.session.library)
+
+        ttk.Label(
+            parent,
+            text="The one layer this design uses for reference designators.\n"
+                 "A resistor's ref-des Text is baked here, and the per-instance\n"
+                 "ref-des annotation the canvas floats at each part's origin is\n"
+                 "drawn only while this layer is visible, so every ref-des shows\n"
+                 "and hides together. \"(none)\" = annotation always shown.",
+            justify="left", foreground="#555",
+        ).pack(anchor="w", padx=12, pady=(12, 8))
+
+        form = ttk.Frame(parent)
+        form.pack(padx=12, fill="x")
+        ttk.Label(form, text="Ref-des layer:").grid(row=0, column=0, sticky="e", padx=4, pady=6)
+        _NONE = "(none - always shown)"
+        var = tk.StringVar(value=self._layer_label(current) if current >= 0 else _NONE)
+        ttk.Combobox(form, textvariable=var, width=24, state="readonly",
+                     values=[_NONE] + self._layer_choices()).grid(
+            row=0, column=1, sticky="w", padx=4, pady=6)
+
+        def apply():
+            text = var.get().strip()
+            try:
+                layer = -1 if text == _NONE or not text else self._resolve_layer_field(text)
+            except LayoutError as exc:
+                return str(exc)
+            save_refdes_annotation_layer(self.session.library, layer)
+            self.canvas.redraw()
+            self.status.set(
+                "ref-des layer: "
+                + (self._layer_label(layer) if layer >= 0 else "(none - always shown)"))
+            return None
+
+        return apply
+
+    def _setting_window(self, title, build_form):
+        """Wrap one `_build_*_form(parent) -> apply()` in a standalone
+        Toplevel with a shared OK / Cancel / error row -- so every
+        technology-property form is available both on its own (menu /
+        tests) and as a tab of Setup > Technology Properties...
+        `apply()` returns an error string (shown, dialog stays open) or
+        None (saved -- dialog closes)."""
+        win = tk.Toplevel(self)
+        win.title(title)
+        win.transient(self)
+        win.grab_set()
+        win.resizable(False, False)
+
+        body = ttk.Frame(win)
+        body.pack(fill="both", expand=True)
+        apply_fn = build_form(body)
+
+        err = tk.StringVar(value="")
+        ttk.Label(win, textvariable=err, foreground="red", wraplength=360,
+                  justify="left").pack(anchor="w", padx=12)
+
+        def ok():
+            msg = apply_fn()
+            if msg:
+                err.set(msg)
+            else:
+                win.destroy()
+
+        row = ttk.Frame(win)
+        row.pack(pady=(8, 12))
+        ttk.Button(row, text="OK", command=ok).pack(side="left", padx=6)
+        ttk.Button(row, text="Cancel", command=win.destroy).pack(side="left", padx=6)
+        win.bind("<Return>", lambda e: ok())
+        win.bind("<Escape>", lambda e: win.destroy())
+        return win
+
+    def show_technology_properties_dialog(self):
+        """Setup > Technology Properties...: every technology-file-backed
+        setting in one tabbed window. Each tab is the same form as its
+        old standalone dialog; one OK validates and saves all of them
+        (a tab that fails validation is selected and its message shown).
+        The DRC / mask-op batch / export-job editors keep their own
+        windows -- the last tab just links to them."""
+        win = tk.Toplevel(self)
+        win.title("Technology Properties")
+        win.transient(self)
+        win.grab_set()
+        win.resizable(False, False)
+
+        nb = ttk.Notebook(win)
+        nb.pack(fill="both", expand=True, padx=8, pady=(8, 4))
+
+        tabs = []   # (label, frame, apply_fn)
+        for label, builder in (
+            ("Route", self._build_route_form),
+            ("Resistors", self._build_resistor_geometry_form),
+            ("Ref-Des", self._build_refdes_form),
+            ("Wire Bonds", self._build_wire_bond_form),
+            ("Dielectric", self._build_dielectric_form),
+        ):
+            frame = ttk.Frame(nb)
+            nb.add(frame, text=label)
+            tabs.append((label, frame, builder(frame)))
+
+        more = ttk.Frame(nb)
+        nb.add(more, text="More…")
+        ttk.Label(more, text="Editors with their own windows:",
+                  foreground="#555").pack(anchor="w", padx=12, pady=(12, 6))
+        for text, opener in (
+            ("DRC Rules…", open_drc_window),
+            ("Mask Operation Batch…", open_maskop_batch_window),
+            ("Gerber Export Sets…", open_gerber_batch_window),
+            ("DXF Export Sets…", open_dxf_batch_window),
+        ):
+            ttk.Button(more, text=text, width=26,
+                       command=lambda o=opener: o(self)).pack(anchor="w", padx=16, pady=3)
+
+        err = tk.StringVar(value="")
+        ttk.Label(win, textvariable=err, foreground="red", wraplength=420,
+                  justify="left").pack(anchor="w", padx=12)
+
+        def ok():
+            for label, frame, apply_fn in tabs:
+                msg = apply_fn()
+                if msg:
+                    nb.select(frame)
+                    err.set(f"{label}: {msg}")
+                    return
             win.destroy()
 
-        btn_row = ttk.Frame(win)
-        btn_row.pack(pady=(8, 12))
-        ttk.Button(btn_row, text="OK", command=apply_and_close).pack(side="left", padx=6)
-        ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=6)
-
-        win.bind("<Return>", lambda e: apply_and_close())
+        row = ttk.Frame(win)
+        row.pack(pady=(6, 12))
+        ttk.Button(row, text="OK", command=ok).pack(side="left", padx=6)
+        ttk.Button(row, text="Cancel", command=win.destroy).pack(side="left", padx=6)
         win.bind("<Escape>", lambda e: win.destroy())
+        return win
+
+    def show_wire_bond_rules_dialog(self):
+        """Setup > Wire Bond Rules...: the layer and defaults the BOND
+        command / Session.wire_bond() use to draw a chip-and-wire
+        assembly wire bond (an O------O ball-to-ball figure), and the
+        min/max span it enforces. This layer is also folded into
+        Extract Netlist automatically, so a bond carries connectivity
+        through to the die pin. Also a tab of Setup > Technology
+        Properties... Saved via hlayout.io.techfile.save_bond_rules()."""
+        return self._setting_window("Wire Bond Rules", self._build_wire_bond_form)
+
+    def _build_wire_bond_form(self, parent):
+        rules = load_bond_rules(self.session.library)
+
+        ttk.Label(
+            parent,
+            text="A wire bond ties a bare-die pad to a conductor pad, a conductor\n"
+                 "pad to a package pin, or two conductor pads (a jumper). It is\n"
+                 "drawn on the bond layer as a ball of the given diameter at each\n"
+                 "end joined by a wire of the given width. The span must fall\n"
+                 "between min and max, and a new bond may not cross an existing\n"
+                 "one. Extract Netlist treats this layer as conductor.",
+            justify="left", foreground="#555",
+        ).pack(anchor="w", padx=12, pady=(12, 8))
+
+        form = ttk.Frame(parent)
+        form.pack(padx=12, fill="x")
+
+        ttk.Label(form, text="Bond layer:").grid(row=0, column=0, sticky="e", padx=4, pady=4)
+        layer_var = tk.StringVar(
+            value=self._layer_label(rules["layer"]) if rules["layer"] >= 0 else "")
+        ttk.Combobox(form, textvariable=layer_var, width=24, state="readonly",
+                     values=self._layer_choices()).grid(row=0, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="Wire width (mm):").grid(row=1, column=0, sticky="e", padx=4, pady=4)
+        width_var = tk.DoubleVar(value=dbu_to_mm(rules["width"]))
+        ttk.Spinbox(form, from_=0.001, to=10.0, increment=0.005, width=10,
+                    textvariable=width_var).grid(row=1, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="End ball dia. (mm):").grid(row=2, column=0, sticky="e", padx=4, pady=4)
+        pad_var = tk.DoubleVar(value=dbu_to_mm(rules["pad"]))
+        ttk.Spinbox(form, from_=0.001, to=10.0, increment=0.01, width=10,
+                    textvariable=pad_var).grid(row=2, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="Min length (mm):").grid(row=3, column=0, sticky="e", padx=4, pady=4)
+        min_var = tk.DoubleVar(value=dbu_to_mm(rules["min_length"]))
+        ttk.Spinbox(form, from_=0, to=100.0, increment=0.05, width=10,
+                    textvariable=min_var).grid(row=3, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="Max length (mm):").grid(row=4, column=0, sticky="e", padx=4, pady=4)
+        max_var = tk.DoubleVar(value=dbu_to_mm(rules["max_length"]))
+        ttk.Spinbox(form, from_=0, to=100.0, increment=0.1, width=10,
+                    textvariable=max_var).grid(row=4, column=1, sticky="w", padx=4, pady=4)
+
+        def apply():
+            text = layer_var.get().strip()
+            try:
+                layer = -1 if not text else self._resolve_layer_field(text)
+            except LayoutError as exc:
+                return str(exc)
+            try:
+                width = mm_to_dbu(width_var.get())
+                pad = mm_to_dbu(pad_var.get())
+                min_len = mm_to_dbu(min_var.get())
+                max_len = mm_to_dbu(max_var.get())
+            except tk.TclError:
+                return "Width, ball diameter and lengths must be numbers."
+            if min(width, pad, min_len, max_len) < 0:
+                return "Values must not be negative."
+            if max_len and max_len < min_len:
+                return "Max length must not be less than min length."
+            save_bond_rules(self.session.library, {
+                "layer": layer, "width": width, "pad": pad,
+                "min_length": min_len, "max_length": max_len,
+            })
+            self.status.set(
+                "wire bond layer: "
+                + (self._layer_label(layer) if layer >= 0 else "(none)"))
+            return None
+
+        return apply
+
+    def _build_dielectric_form(self, parent):
+        """The Dielectric Fill *rules* form (layer / margin / clearance /
+        extra keep-out layers). apply() only SAVES the rules -- the
+        Tools > Generate Dielectric Fill... window adds a Generate
+        button that runs generate_dielectric() after saving."""
+        rules = load_dielectric_rules(self.session.library)
+
+        ttk.Label(
+            parent,
+            text="The dielectric layer's own datatype-0 geometry is the input:\n"
+                 "the shape that encloses all the others is the fill boundary\n"
+                 "(or the design bbox + margin if none), and every other shape\n"
+                 "inside it -- a via window, a resistor keep-out, a hand-drawn\n"
+                 "exclusion rect -- becomes a hole, grown by the clearance.\n"
+                 "The fill is written at datatype 1; re-running replaces just\n"
+                 "that, never the inputs.",
+            justify="left", foreground="#555",
+        ).pack(anchor="w", padx=12, pady=(12, 8))
+
+        form = ttk.Frame(parent)
+        form.pack(padx=12, fill="x")
+
+        ttk.Label(form, text="Dielectric layer:").grid(row=0, column=0, sticky="e", padx=4, pady=4)
+        layer_var = tk.StringVar(
+            value=self._layer_label(rules["layer"]) if rules["layer"] >= 0 else "")
+        ttk.Combobox(form, textvariable=layer_var, width=24, state="readonly",
+                     values=self._layer_choices()).grid(row=0, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="Margin (mm):").grid(row=1, column=0, sticky="e", padx=4, pady=4)
+        margin_var = tk.DoubleVar(value=dbu_to_mm(rules["margin"]))
+        ttk.Spinbox(form, from_=0, to=1000.0, increment=0.05, width=10,
+                    textvariable=margin_var).grid(row=1, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="Clearance (mm):").grid(row=2, column=0, sticky="e", padx=4, pady=4)
+        clr_var = tk.DoubleVar(value=dbu_to_mm(rules["clearance"]))
+        ttk.Spinbox(form, from_=0, to=1000.0, increment=0.01, width=10,
+                    textvariable=clr_var).grid(row=2, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="Extra keep-out layers:").grid(row=3, column=0, sticky="e", padx=4, pady=4)
+        ko_var = tk.StringVar(value=", ".join(str(n) for n in rules["keepout_layers"]))
+        ttk.Entry(form, textvariable=ko_var, width=26).grid(
+            row=3, column=1, sticky="w", padx=4, pady=4)
+        ttk.Label(form, text="(optional, comma-separated layer numbers or names)",
+                  foreground="#888").grid(row=4, column=1, sticky="w", padx=4)
+
+        def parse():
+            """Return (rules_dict, None) or (None, error_message).
+            A blank layer means "not configured yet" (layer = -1) rather
+            than an error -- so this never traps the tabbed Technology
+            Properties dialog; Generate Dielectric Fill raises its own
+            clear error if you actually run it with no layer set."""
+            if not layer_var.get().strip():
+                r_layer = -1
+            else:
+                try:
+                    r_layer = self._resolve_layer_field(layer_var.get())
+                except LayoutError as exc:
+                    return None, str(exc)
+            try:
+                margin = mm_to_dbu(margin_var.get())
+                clearance = mm_to_dbu(clr_var.get())
+            except tk.TclError:
+                return None, "Margin and clearance must be numbers."
+            if margin < 0 or clearance < 0:
+                return None, "Margin and clearance must not be negative."
+            ko_nums = []
+            for tok in ko_var.get().replace(",", " ").split():
+                try:
+                    ko_nums.append(self._resolve_layer_field(tok))
+                except LayoutError as exc:
+                    return None, str(exc)
+            return {"layer": r_layer, "margin": margin, "clearance": clearance,
+                    "keepout_layers": ko_nums}, None
+
+        def apply():
+            new_rules, msg = parse()
+            if msg:
+                return msg
+            save_dielectric_rules(self.session.library, new_rules)
+            self.status.set("dielectric fill rules saved")
+            return None
+
+        apply.parse = parse   # exposed for the Generate button below
+        return apply
+
+    def show_dielectric_dialog(self):
+        """Tools > Generate Dielectric Fill...: the Dielectric tab's rules
+        form plus a Generate button that saves the rules and runs
+        Session.generate_dielectric() -- lay a solid sheet on the chosen
+        layer, opening a clearance hole around every via window / keep-out
+        it finds. Re-running replaces the previous fill. The rules alone
+        are also editable from Setup > Technology Properties... >
+        Dielectric. Saved via hlayout.io.techfile.save_dielectric_rules()."""
+        win = tk.Toplevel(self)
+        win.title("Generate Dielectric Fill")
+        win.transient(self)
+        win.grab_set()
+        win.resizable(False, False)
+
+        body = ttk.Frame(win)
+        body.pack(fill="both", expand=True)
+        apply_fn = self._build_dielectric_form(body)
+
+        err = tk.StringVar(value="")
+        ttk.Label(win, textvariable=err, foreground="red", wraplength=360,
+                  justify="left").pack(anchor="w", padx=12)
+
+        def generate():
+            new_rules, msg = apply_fn.parse()
+            if msg:
+                err.set(msg)
+                return
+            save_dielectric_rules(self.session.library, new_rules)
+            try:
+                n = self.session.generate_dielectric()
+            except LayoutError as exc:
+                err.set(str(exc))
+                return
+            r_layer = new_rules["layer"]
+            self.session.library.layers[r_layer].visible = True
+            self.refresh_all()
+            self.status.set(f"dielectric fill: {n} polygon(s) on "
+                            f"{self._layer_label(r_layer)}")
+            win.destroy()
+
+        def save_only():
+            msg = apply_fn()
+            if msg:
+                err.set(msg)
+            else:
+                win.destroy()
+
+        row = ttk.Frame(win)
+        row.pack(pady=(8, 12))
+        ttk.Button(row, text="Generate", command=generate).pack(side="left", padx=6)
+        ttk.Button(row, text="Save Rules", command=save_only).pack(side="left", padx=6)
+        ttk.Button(row, text="Cancel", command=win.destroy).pack(side="left", padx=6)
+        win.bind("<Return>", lambda e: generate())
+        win.bind("<Escape>", lambda e: win.destroy())
+        return win
+
+    def remove_dielectric_fill(self):
+        """Tools > Remove Dielectric Fill: clear every shape on the
+        dielectric layer (from Dielectric Fill Rules) in the current
+        cell, so it can be regenerated."""
+        try:
+            removed = self.session.clear_dielectric()
+        except LayoutError as exc:
+            dialogs.show_error("Remove Dielectric Fill", str(exc), parent=self)
+            return
+        self.refresh_all()
+        self.status.set(f"removed {removed} dielectric polygon(s)")
+
+    def _on_show_pins_change(self):
+        self.canvas.show_pin_numbers = self.show_pins_var.get()
+        self.canvas.redraw()
 
     def _on_snap_change(self):
         self.canvas.snap_enabled = self.snap_var.get()
@@ -1513,6 +1942,37 @@ class App(tk.Tk):
             return
         self.canvas.start_pin_numbering(start)
 
+    def _auto_route_two_pins(self):
+        """Edit > Auto-Route Two Pins: enter the two-click auto-router --
+        click the first pin, click the second, and a clear orthogonal
+        trace is routed between them on the 1st routing conductor (Route
+        Layers layer_a), around every other shape on that layer, snapped
+        to the current grid and drawn at the current path width. Stays
+        armed for the next pair; Esc exits. See _on_auto_route() /
+        Session.auto_route()."""
+        self.canvas.start_auto_route()
+
+    def _on_auto_route(self, a, b):
+        """Wired as canvas.on_auto_route -- fired by the two-click
+        Auto-Route tool once the second pin is clicked. `a` / `b` are
+        each a picked pad shape or a snapped (x, y) point."""
+        try:
+            path = self.session.auto_route(
+                a, b,
+                grid=int(self.canvas.grid_dbu), width=int(self.canvas.path_width),
+            )
+        except LayoutError as e:
+            dialogs.show_error("Auto-Route", str(e), parent=self)
+            return
+        self.refresh_all()
+        self.status.set(
+            f"auto-routed: {len(path.points)}-point trace on "
+            f"{self._layer_label(path.layer)} "
+            f"(grid {dbu_to_mm(self.canvas.grid_dbu):g} mm, "
+            f"width {dbu_to_mm(self.canvas.path_width):g} mm) -- "
+            f"click two more pins, or Esc to stop"
+        )
+
     def _continue_path(self):
         """Edit > Continue Path...: re-enter Path drawing pre-seeded
         with the selected Path's own points, so more points can be
@@ -1552,6 +2012,8 @@ class App(tk.Tk):
                     self.session.path(layer, points, extra["width"], cap=extra["cap"])
             elif mode == "circle":
                 self.session.circle(layer, points[0], extra["radius"], segments=extra["segments"])
+            elif mode == "wire_bond":
+                self.session.wire_bond(points)
             elif mode == "text":
                 self.session.text(layer, points[0], extra["text"], height=extra["height"],
                                    font=extra["font"])
@@ -2245,7 +2707,7 @@ class App(tk.Tk):
 
         win.bind("<Escape>", lambda e: win.destroy())
 
-    def show_via_wizard(self):
+    def show_via_wizard(self, on_created=None):
         """Tools > Via Wizard...: create a via cell -- a square or round
         pad drawn on two layers, representing the contact area where a
         via connects them, optionally with a dielectric via window cut
@@ -2254,6 +2716,10 @@ class App(tk.Tk):
         something that only lives in this design). Backed by
         Session.create_via_cell(); same operation as the command bar's
         VIA <layer1> <layer2> ... command.
+
+        `on_created`, if given, is called with the new cell's name once
+        a via cell is successfully created -- used by the Route Layers
+        form's "New Via Cell..." button to select it straight away.
 
         Cell name defaults to VIA_Layer<n1>_to_Layer<n2> (shown as a
         placeholder, updated live as Layer 1/2 change) but can be
@@ -2478,6 +2944,8 @@ class App(tk.Tk):
                     return
             self.refresh_all()
             self.status.set(f"created via cell {created_name!r}, saved to {path}")
+            if on_created is not None:
+                on_created(created_name)
             win.destroy()
 
         btn_row = ttk.Frame(win)
@@ -2835,6 +3303,19 @@ class App(tk.Tk):
         text.configure(state="disabled")
 
         ttk.Button(win, text="Close", command=win.destroy).pack(pady=(0, 8))
+
+    def _on_layer_panel_change(self):
+        """Wired as LayerPanel.on_change -- a layer toggle/colour/stipple
+        edit made IN the panel. Only repaint the things that depend on
+        layer state; do NOT call the panel's own sync() back (it already
+        updated its widgets and the model, and re-syncing mid-click is
+        what made the On/Fill checkboxes stick or flicker). Full
+        refresh_all() -- which does sync the panel -- is still used for
+        changes that come from outside it (command bar, script, undo,
+        file open, cell switch)."""
+        self.canvas.redraw()
+        self._refresh_layer_choices()
+        self._update_properties_panel()
 
     def refresh_all(self):
         self.canvas.redraw()

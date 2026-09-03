@@ -209,6 +209,7 @@ class MaskOpBatchWindow(tk.Toplevel):
         self.steps = [MaskOpStep.from_dict(s) for s in load_mask_op_steps(library)]
         self._build()
         self._refresh_steps()
+        self.bind("<Escape>", lambda e: self.destroy())
 
     def _build(self):
         toolbar = ttk.Frame(self, padding=6)
@@ -228,6 +229,7 @@ class MaskOpBatchWindow(tk.Toplevel):
         ttk.Combobox(toolbar, textvariable=self.scope_var, state="readonly", width=18,
                      values=["Current cell"] + cell_names).pack(side="left", padx=2)
 
+        ttk.Button(toolbar, text="Close", command=self.destroy).pack(side="right", padx=2)
         ttk.Button(toolbar, text="About", command=self._about).pack(side="right", padx=2)
 
         body = ttk.Panedwindow(self, orient="vertical")

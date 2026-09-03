@@ -8,11 +8,12 @@ import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import messagebox, simpledialog
 
-from ..core.errors import GeometryError
+from ..core.errors import CellError, GeometryError
 from ..core.maskops import layer_to_shapely, shapely_to_polygons
 from ..core.shapes import (ARef, CIRCLE_SEGMENT_CHOICES, MAX_PATH_POINTS, MAX_POLY_POINTS, Path,
                            PathCap, Polygon, Rectangle, SRef, Text)
 from ..core.units import DBU_MM, dbu_to_mm, mm_to_dbu
+from ..io.techfile import load_refdes_annotation_layer
 
 # Bitmaps used to approximate the 9 stipple/fill patterns on a Tk canvas.
 # Index 0 ("solid") is drawn as a plain filled polygon (no stipple).
@@ -65,6 +66,12 @@ class LayoutCanvas(tk.Canvas):
         self.offset_x = 0.0  # pixels
         self.offset_y = 0.0
         self.show_grid = True
+        # Draw each numbered pad's pin string (Rectangle/Polygon .pin) at
+        # its centre while editing the current cell's own shapes -- a
+        # visual aid for the Edit > Number Pins... click-to-increment
+        # tool and for checking an imported footprint. View > Show Pin
+        # Numbers toggles it; see _draw_cell() and toggle_pin_numbers().
+        self.show_pin_numbers = True
         # Current minor-grid spacing, in DBU -- an instance attribute (not
         # just the GRID_MINOR_DBU class default) so it can be changed at
         # runtime via set_grid_spacing() (see Setup > Grid Spacing... and
@@ -79,7 +86,14 @@ class LayoutCanvas(tk.Canvas):
         self._font_cache = {}
 
         # --- interactive drawing state ---------------------------------
-        self.draw_mode = "select"  # select | rect | poly | path | text | sref | aref | circle | zoomwin | route | measure | pin_number
+        self.draw_mode = "select"  # select | rect | poly | path | text | sref | aref | circle | zoomwin | route | measure | pin_number | cell_origin | auto_route
+        # Create Cell from Selection: after the name is entered the tool
+        # enters "cell_origin" mode -- the next canvas click is the point
+        # that becomes the new cell's local (0, 0). The selection is
+        # stashed here because switching draw mode clears it.
+        self._pending_cell_name = None
+        self._pending_cell_items = []
+        self._pending_cell_replace = False
         self.current_layer = 0
         # --- Pin numbering tool (Edit > Number Pins...) -------------------
         # The pin number the NEXT click will stamp onto a Rectangle/Polygon
@@ -113,6 +127,11 @@ class LayoutCanvas(tk.Canvas):
         # a bare LayoutCanvas (e.g. in a test) works without an
         # app/session wiring it up.
         self.on_route_via = lambda x, y, a, b, via_cell, segment=None: None
+        # callback(a, b) -- fired by the Auto-Route two-click tool with
+        # each endpoint being either a picked pad shape or a snapped
+        # (x, y) DBU point. No-op so a bare LayoutCanvas still works.
+        self.on_auto_route = lambda a, b: None
+        self._auto_route_a = None
         self.snap_enabled = True
         self.snap_dbu = self.grid_dbu  # snap to the current grid spacing by default
         # Orthogonal/45-degree routing constraint -- Path and Route
@@ -261,8 +280,18 @@ class LayoutCanvas(tk.Canvas):
     def zoom_out(self):
         self.zoom(0.8)
 
+    def _cell_bbox_safe(self, name):
+        """library.cell_bbox() but never raises: a design that somehow
+        contains a cyclic cell reference must still open and redraw so
+        the user can find and break it, rather than crashing every
+        redraw with 'Unexpected Error'. Returns None on a cycle."""
+        try:
+            return self.library.cell_bbox(name)
+        except CellError:
+            return None
+
     def fit_view(self, padding=0.08):
-        box = self.library.cell_bbox(self.cell_name) if self.cell_name else None
+        box = self._cell_bbox_safe(self.cell_name) if self.cell_name else None
         w = max(self.winfo_width(), 1)
         h = max(self.winfo_height(), 1)
         if box is None:
@@ -304,6 +333,10 @@ class LayoutCanvas(tk.Canvas):
         self.show_grid = not self.show_grid
         self.redraw()
 
+    def toggle_pin_numbers(self):
+        self.show_pin_numbers = not self.show_pin_numbers
+        self.redraw()
+
     def set_grid_spacing(self, dbu, sync_snap=True):
         """Change the minor grid line spacing (in DBU) -- see Setup >
         Grid Spacing... and the GRID <spacing> command. Raises
@@ -322,7 +355,7 @@ class LayoutCanvas(tk.Canvas):
 
     # --- interactive drawing: mode control -------------------------------
     def set_mode(self, mode):
-        """Switch the active drawing tool: select, rect, poly, path, text, sref, aref, zoomwin, route."""
+        """Switch the active drawing tool: select, rect, poly, path, text, sref, aref, zoomwin, route, wire_bond."""
         self.cancel_draw()
         if mode != "select":
             self.selected = None
@@ -378,7 +411,8 @@ class LayoutCanvas(tk.Canvas):
             "poly": "Polygon: click each vertex, double-click/Enter to finish (Esc cancels, Backspace undoes a point)",
             "path": "Path: click each point, double-click/Enter to finish (Esc cancels, Backspace undoes a point)",
             "text": "Text: click the insertion point, then fill in the text",
-            "sref": "Cell instance: click the placement point, then choose the cell",
+            "sref": "Cell instance: click the placement point, then choose the cell "
+                    "(placed unrotated -- rotate afterwards with R / Rotate)",
             "aref": "Array instance: click the placement point, then choose the cell "
                     "and array parameters",
             "circle": "Circle: click the center, then click a point on the edge to set the radius",
@@ -386,8 +420,30 @@ class LayoutCanvas(tk.Canvas):
             "measure": "Measure: click a start point, then click a second point -- "
                        "the distance between them is shown on the canvas and in the status bar",
             "pin_number": self._pin_number_hint(),
+            "cell_origin": self._cell_origin_hint(),
+            "wire_bond": self._wire_bond_hint(),
+            "auto_route": self._auto_route_hint(),
         }
         return hints.get(self.draw_mode, "")
+
+    def _auto_route_hint(self):
+        if self._auto_route_a is None:
+            return ("Auto-Route: click the FIRST pin (a pad, or any point). "
+                    "Esc stops.")
+        return ("Auto-Route: first pin set -- now click the SECOND pin. A clear "
+                "trace is routed between them on the 1st routing conductor, "
+                "around other metal on that layer, at the current grid/path "
+                "width. Esc stops.")
+
+    def _wire_bond_hint(self):
+        return ("Wire Bond: click the first pad, then the second -- an O------O "
+                "bond wire is drawn on the bond layer (Setup > Wire Bond "
+                "Rules...). Bonds can't cross and must be within min/max "
+                "length; Esc cancels the current one")
+
+    def _cell_origin_hint(self):
+        return (f"Create Cell {self._pending_cell_name!r}: click the point to use as "
+                f"the cell's origin -- it becomes local (0, 0); Esc cancels")
 
     def _pin_number_hint(self):
         return (f"Number Pins: click a pad to stamp pin {self.pin_number_next!r} "
@@ -414,6 +470,29 @@ class LayoutCanvas(tk.Canvas):
             # same as any other one-shot/modal tool (Zoom Window, ...).
             # Done directly here rather than via set_mode() (which itself
             # calls cancel_draw()) to avoid recursing.
+            self.draw_mode = "select"
+            self.selected = None
+            self.selected_multi = []
+            self.redraw()
+            self.on_mode_status(self._mode_hint())
+            self.on_draw_mode_changed("select")
+        if self.draw_mode == "cell_origin":
+            # Esc aborts Create Cell from Selection without making a cell,
+            # and restores the selection it was going to wrap so the user
+            # doesn't have to re-select. Same direct-exit trick as above.
+            self.draw_mode = "select"
+            self.selected = None
+            self.selected_multi = list(self._pending_cell_items)
+            self._pending_cell_name = None
+            self._pending_cell_items = []
+            self._pending_cell_replace = False
+            self.redraw()
+            self.on_mode_status(self._mode_hint())
+            self.on_draw_mode_changed("select")
+        if self.draw_mode == "auto_route":
+            # Esc stops the two-click Auto-Route tool and returns to
+            # Select, same as pin_number above.
+            self._auto_route_a = None
             self.draw_mode = "select"
             self.selected = None
             self.selected_multi = []
@@ -450,6 +529,82 @@ class LayoutCanvas(tk.Canvas):
         self.pin_number_next = increment_pin_str(self.pin_number_next)
         self.on_mode_status(self._pin_number_hint())
         self._after_edit()
+
+    def start_auto_route(self):
+        """Edit > Auto-Route Two Pins: enter the two-click auto-router.
+        Click the first pin, click the second, and a clear orthogonal
+        trace is routed between them on the 1st routing conductor,
+        around other metal on that layer, at the current grid and path
+        width (via on_auto_route -> Session.auto_route()). Stays armed
+        for the next pair; Esc (cancel_draw()) exits to Select."""
+        self._auto_route_a = None
+        self.set_mode("auto_route")
+
+    def _auto_route_endpoint(self, e):
+        """A click in Auto-Route mode resolves to the pad shape under
+        the cursor (so the router lands on its centre and excludes its
+        own copper), or, over empty space, the snapped (x, y) point."""
+        item = self._pick_item_at(e.x, e.y)
+        if item is not None:
+            kind, shape = self._item_to_shape[item]
+            if kind == "shape" and isinstance(shape, (Rectangle, Polygon)):
+                return shape
+        x, y = self.to_dbu(e.x, e.y)
+        return self._snap(x, y)
+
+    def _auto_route_click(self, e):
+        target = self._auto_route_endpoint(e)
+        if self._auto_route_a is None:
+            self._auto_route_a = target
+            self._draw_auto_route_marker(target)
+            self.on_mode_status(self._auto_route_hint())
+            return
+        a, self._auto_route_a = self._auto_route_a, None
+        self.delete("preview")
+        self.on_auto_route(a, target)
+        self.on_mode_status(self._auto_route_hint())
+
+    def _draw_auto_route_marker(self, target):
+        """Ring the first picked endpoint while waiting for the second."""
+        self.delete("preview")
+        if isinstance(target, (Rectangle, Polygon)):
+            x0, y0, x1, y1 = target.bbox()
+            cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+        else:
+            cx, cy = target
+        px, py = self.to_px(cx, cy)
+        r = 7
+        self.create_oval(px - r, py - r, px + r, py + r, outline="#00d0ff",
+                          width=2, tags="preview")
+        self.create_line(px - r - 3, py, px + r + 3, py, fill="#00d0ff", tags="preview")
+        self.create_line(px, py - r - 3, px, py + r + 3, fill="#00d0ff", tags="preview")
+
+    def _cell_origin_click(self, e):
+        """A click in "cell_origin" mode: the snapped point becomes the
+        new cell's local (0, 0). Restores the stashed selection, drops
+        back to Select, and wraps it into the cell via
+        create_cell_from_selection()."""
+        x, y = self.to_dbu(e.x, e.y)
+        ox, oy = self._next_draw_point(x, y)
+        name = self._pending_cell_name
+        items = self._pending_cell_items
+        replace = self._pending_cell_replace
+        self._pending_cell_name = None
+        self._pending_cell_items = []
+        self._pending_cell_replace = False
+        self.draw_mode = "select"
+        self.selected = None
+        self.selected_multi = list(items)
+        self.on_draw_mode_changed("select")
+        try:
+            self.create_cell_from_selection(name, (int(round(ox)), int(round(oy))),
+                                             replace=replace)
+        except CellError as err:
+            messagebox.showerror("Create Cell from Selection", str(err))
+            self.redraw()
+            self.on_mode_status(self._mode_hint())
+            return
+        self.on_mode_status(self._mode_hint())
 
     def _undo_point(self):
         if self._pending_points:
@@ -574,6 +729,12 @@ class LayoutCanvas(tk.Canvas):
         if self.draw_mode == "pin_number":
             self._pin_number_click(e)
             return
+        if self.draw_mode == "auto_route":
+            self._auto_route_click(e)
+            return
+        if self.draw_mode == "cell_origin":
+            self._cell_origin_click(e)
+            return
         x, y = self.to_dbu(e.x, e.y)
         pt = self._next_draw_point(x, y)
 
@@ -610,6 +771,12 @@ class LayoutCanvas(tk.Canvas):
             self._pending_points.append(pt)
             if len(self._pending_points) == 2:
                 self._commit_measure()
+        elif self.draw_mode == "wire_bond":
+            self._pending_points.append(pt)
+            if len(self._pending_points) == 2:
+                self._commit_wire_bond()
+            else:
+                self._update_preview(*pt)
 
     def _on_double_click(self, e):
         if self.draw_mode == "select":
@@ -902,7 +1069,7 @@ class LayoutCanvas(tk.Canvas):
             if bx1 >= rx1 and bx2 <= rx2 and by1 >= ry1 and by2 <= ry2:
                 picked.append(("shape", shape))
         for ref in cell.srefs:
-            box = self.library.cell_bbox(ref.cell_name)
+            box = self._cell_bbox_safe(ref.cell_name)
             if box is not None:
                 from ..core.library import _transform_bbox
                 bx1, by1, bx2, by2 = _transform_bbox(box, ref)
@@ -949,7 +1116,7 @@ class LayoutCanvas(tk.Canvas):
         aref handling, but for a single ARef in isolation (used by
         selection/window-select/highlight, which don't need the whole
         cell's box)."""
-        box = self.library.cell_bbox(ref.cell_name)
+        box = self._cell_bbox_safe(ref.cell_name)
         if box is None:
             ox, oy = ref.origin
             return (ox, oy, ox, oy)
@@ -964,6 +1131,32 @@ class LayoutCanvas(tk.Canvas):
         x2 = max(b[2] for b in boxes)
         y2 = max(b[3] for b in boxes)
         return (x1, y1, x2, y2)
+
+    def selection_bbox(self):
+        """Combined DBU bounding box (x0, y0, x1, y1) of everything
+        currently selected -- a window group or a single shape/instance
+        -- or None if nothing selectable is selected (a bare vertex or
+        edge doesn't count). Used to give Create Cell from Selection a
+        sensible default origin at the selection's lower-left corner
+        rather than the design's (0, 0)."""
+        from ..core.library import _transform_bbox
+        items = list(self.selected_multi)
+        if not items and self.selected is not None and self.selected[0] in ("shape", "sref", "aref"):
+            items = [self.selected]
+        boxes = []
+        for kind, obj in items:
+            if kind == "shape":
+                boxes.append(obj.bbox())
+            elif kind == "sref":
+                box = self._cell_bbox_safe(obj.cell_name)
+                boxes.append(_transform_bbox(box, obj) if box is not None else None)
+            elif kind == "aref":
+                boxes.append(self._aref_bbox(obj))
+        boxes = [b for b in boxes if b is not None]
+        if not boxes:
+            return None
+        return (min(b[0] for b in boxes), min(b[1] for b in boxes),
+                max(b[2] for b in boxes), max(b[3] for b in boxes))
 
     def edit_selected(self):
         """Open the property-edit dialog for the current selection —
@@ -1212,7 +1405,38 @@ class LayoutCanvas(tk.Canvas):
         self._after_edit()
         return True
 
-    def create_cell_from_selection(self, name, origin):
+    def _selected_groupable_items(self):
+        """The current selection as a list of ("shape"/"sref"/"aref",
+        obj) tuples -- window group or single object, vertex/edge
+        selections dropped. Shared by create_cell_from_selection() and
+        start_cell_from_selection()."""
+        items = list(self.selected_multi)
+        if not items and self.selected is not None and self.selected[0] in ("shape", "sref", "aref"):
+            items = [self.selected]
+        return [it for it in items if it[0] in ("shape", "sref", "aref")]
+
+    def start_cell_from_selection(self, name, replace=False):
+        """Enter the click-to-set-origin step of Create Cell from
+        Selection: stash the current selection, `name`, and whether an
+        existing same-named cell should be replaced, then switch to
+        "cell_origin" mode so the next canvas click picks the point that
+        becomes the new cell's local (0, 0) -- rather than typing
+        coordinates. Returns True if a valid selection was captured and
+        the mode entered, False (nothing changed) if the selection can't
+        become a cell. Esc (cancel_draw()) aborts and restores the
+        selection; the click itself is handled in _on_click()."""
+        if self.draw_mode != "select":
+            return False
+        items = self._selected_groupable_items()
+        if not items:
+            return False
+        self._pending_cell_name = name
+        self._pending_cell_items = items
+        self._pending_cell_replace = replace
+        self.set_mode("cell_origin")
+        return True
+
+    def create_cell_from_selection(self, name, origin, replace=False):
         """Make a new named cell out of the current selection -- draw or
         place geometry, window-select it, and turn it into a reusable
         library cell -- the classic "draw it, window it, name it, pick
@@ -1229,29 +1453,65 @@ class LayoutCanvas(tk.Canvas):
         the new selection -- so this reads as "wrap the selection into
         a cell", not "delete what I had and make an empty cell".
 
-        Returns True if a cell was created. Returns False (selection
-        left alone, nothing created) if nothing suitable is selected --
-        a single vertex/edge, or nothing at all. Raises CellError (left
-        for the caller to show) if `name` is already used by another
-        cell in this library."""
+        If a cell called `name` already exists: with replace=False this
+        raises CellError (the caller offers a Replace prompt); with
+        replace=True the existing cell's contents are cleared and
+        rebuilt from the selection *in place* -- the Cell object is
+        kept, so every SRef/ARef already pointing at `name` stays valid
+        and just switches to the new geometry (updating a footprint
+        definition everywhere it's used).
+
+        Returns True if a cell was created/replaced. Returns False
+        (selection left alone) if nothing suitable is selected -- a
+        single vertex/edge, or nothing at all."""
         if self.draw_mode != "select":
             return False
-        items = list(self.selected_multi)
-        if not items and self.selected is not None and self.selected[0] in ("shape", "sref", "aref"):
-            items = [self.selected]
-        items = [it for it in items if it[0] in ("shape", "sref", "aref")]
+        items = self._selected_groupable_items()
         if not items:
             return False
         cell = self.library.cells.get(self.cell_name)
         if cell is None:
             return False
 
+        existing = self.library.cells.get(name)
+        if existing is not None:
+            if not replace:
+                raise CellError(f"cell {name!r} already exists")
+            if name == self.cell_name:
+                raise CellError(
+                    f"can't replace {name!r} -- it's the cell you're editing")
+
+        # Cycle guard -- for BOTH new and replaced cells, checked before
+        # any mutation so a rejected attempt leaves the design intact.
+        # The wrapper cell `name` ends up placed inside the current cell
+        # and containing every selected instance; neither hop may close
+        # a loop in the cell hierarchy (which would later crash redraw /
+        # save via cell_bbox()'s cycle detection).
+        for kind, obj in items:
+            if kind not in ("sref", "aref"):
+                continue
+            t = obj.cell_name
+            if (t == name or t == self.cell_name
+                    or self.library.would_create_cycle(self.cell_name, t)
+                    or (name in self.library.cells
+                        and self.library.would_create_cycle(name, t))):
+                raise CellError(
+                    f"that selection can't be wrapped into {name!r} -- the "
+                    f"instance of {t!r} it contains would make the cell "
+                    "hierarchy cyclic")
+
         self.checkpoint()
-        new_cell = self.library.new_cell(name)  # raises CellError if name is taken
+        if existing is not None:
+            target = existing
+            target.shapes.clear()
+            target.srefs.clear()
+            target.arefs.clear()
+        else:
+            target = self.library.new_cell(name)
         ox, oy = origin
         for kind, obj in items:
             source_list = {"shape": cell.shapes, "sref": cell.srefs, "aref": cell.arefs}[kind]
-            dest_list = {"shape": new_cell.shapes, "sref": new_cell.srefs, "aref": new_cell.arefs}[kind]
+            dest_list = {"shape": target.shapes, "sref": target.srefs, "aref": target.arefs}[kind]
             if obj in source_list:
                 source_list.remove(obj)
             snapshot = _geom_snapshot(kind, obj)
@@ -1434,6 +1694,9 @@ class LayoutCanvas(tk.Canvas):
         elif self.draw_mode == "measure" and len(self._pending_points) == 1:
             x0, y0 = self._pending_points[0]
             self._draw_measure_overlay(x0, y0, mouse_x, mouse_y, tag="preview")
+        elif self.draw_mode == "wire_bond" and len(self._pending_points) == 1:
+            x0, y0 = self._pending_points[0]
+            self._draw_wire_bond_overlay(x0, y0, mouse_x, mouse_y, tag="preview")
         elif self.draw_mode in ("poly", "path", "route"):
             coords = []
             for p in self._pending_points:
@@ -1498,6 +1761,37 @@ class LayoutCanvas(tk.Canvas):
             self.create_rectangle(x0b - 3, y0b - 1, x1b + 3, y1b + 1,
                                    fill="#0d1117", outline="#00d0ff", tags=tag)
             self.tag_raise(text_id)
+
+    def _draw_wire_bond_overlay(self, x0, y0, x1, y1, tag):
+        """Rubber-band for the Wire Bond tool after the first click: an
+        ``O------O`` figure -- a dashed line with a ring at each end --
+        plus the span length, so you can see it against the bond rules'
+        min/max before the second click commits it."""
+        p0 = self.to_px(x0, y0)
+        p1 = self.to_px(x1, y1)
+        self.create_line(*p0, *p1, fill="#ffb020", dash=(4, 3), width=1.5, tags=tag)
+        r = 5
+        for px, py in (p0, p1):
+            self.create_oval(px - r, py - r, px + r, py + r, outline="#ffb020",
+                              width=2, fill="#0d1117", tags=tag)
+        label = self._format_distance(x0, y0, x1, y1)
+        mx, my = (p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2 - 12
+        text_id = self.create_text(mx, my, text=label, fill="white",
+                                    font=("TkDefaultFont", 9), tags=tag)
+        bbox = self.bbox(text_id)
+        if bbox:
+            x0b, y0b, x1b, y1b = bbox
+            self.create_rectangle(x0b - 3, y0b - 1, x1b + 3, y1b + 1,
+                                   fill="#0d1117", outline="#ffb020", tags=tag)
+            self.tag_raise(text_id)
+
+    def _commit_wire_bond(self):
+        p0, p1 = self._pending_points
+        self._pending_points = []
+        self.delete("preview")
+        if self.on_commit:
+            self.on_commit("wire_bond", self.current_layer, [p0, p1], {})
+        self.on_mode_status(self._wire_bond_hint())
 
     def _commit_measure(self):
         (x0, y0), (x1, y1) = self._pending_points
@@ -1637,11 +1931,12 @@ class LayoutCanvas(tk.Canvas):
         cell_name = _choose_from_list(self, "Add Cell Instance", "Cell to place:", names)
         if not cell_name:
             return
-        rotation = simpledialog.askfloat("Add Cell Instance", "Rotation (degrees):",
-                                          parent=self, initialvalue=0.0) or 0.0
+        # Placed unrotated -- no rotation prompt. Rotate afterwards with
+        # the Rotate command / R key, or Edit Selected... for an exact
+        # angle/magnification/mirror.
         if self.on_commit:
             self.on_commit("sref", self.current_layer, [pt],
-                            {"cell_name": cell_name, "rotation": rotation,
+                            {"cell_name": cell_name, "rotation": 0.0,
                              "magnification": 1.0, "x_reflection": False})
 
     def _prompt_aref(self):
@@ -1675,6 +1970,11 @@ class LayoutCanvas(tk.Canvas):
     def redraw(self):
         self.delete("all")
         self._item_to_shape = {}
+        # Whether the per-instance ref-des annotation (SRef.label float)
+        # should be drawn this pass -- it's tied to the technology's
+        # ref-des annotation layer's visibility (see
+        # _refdes_annotation_layer_visible). Computed once per redraw.
+        self._refdes_anno_visible = self._refdes_annotation_layer_visible()
         if self.show_grid:
             self._draw_grid()
         if self.cell_name and self.cell_name in self.library.cells:
@@ -1802,7 +2102,11 @@ class LayoutCanvas(tk.Canvas):
 
     def _raster_grid_pure(self, w, h, gx0, gx1, gy0, gy1,
                            bg, minor_color, major_color):
-        img = tk.PhotoImage(width=w, height=h)
+        # master=self pins the image to THIS widget's Tk interpreter --
+        # without it a PhotoImage binds to tk._default_root, which throws
+        # `image "pyimageN" doesn't exist` on create_image() if anything
+        # ever created a second Tk root (e.g. a mis-set-up test harness).
+        img = tk.PhotoImage(master=self, width=w, height=h)
         img.put(bg, to=(0, 0, w, h))
         for i in range(gx0, gx1 + 1):
             px, _ = self.to_px(i * self.grid_dbu, 0)
@@ -1829,11 +2133,12 @@ class LayoutCanvas(tk.Canvas):
         hex_color = hex_color.lstrip("#")
         return tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
 
-    @staticmethod
-    def _to_photoimage(arr):
+    def _to_photoimage(self, arr):
         h, w = arr.shape[:2]
         header = ("P6 %d %d 255 " % (w, h)).encode("ascii")
-        return tk.PhotoImage(width=w, height=h, data=header + arr.tobytes(), format="PPM")
+        # master=self -- see _raster_grid_pure() for why this matters.
+        return tk.PhotoImage(master=self, width=w, height=h,
+                             data=header + arr.tobytes(), format="PPM")
 
     def _draw_cell(self, name, ox, oy, rot, mag, mirror, depth):
         if depth > 64:
@@ -1874,6 +2179,9 @@ class LayoutCanvas(tk.Canvas):
             item = self._draw_shape(shape, layer, selected=is_selected)
             if item is not None:
                 self._item_to_shape[item] = ("shape", shape)
+            if (self.show_pin_numbers and isinstance(shape, (Polygon, Rectangle))
+                    and getattr(shape, "pin", "")):
+                self._draw_pin_label(shape)
         for ref in cell.srefs:
             # Recursive draw with the ref's transform folded in (flattened
             # rendering; good enough for the visual editor).
@@ -1887,16 +2195,23 @@ class LayoutCanvas(tk.Canvas):
                                             outline=handle_color, fill="",
                                             width=2 if highlight else 1)
             self._item_to_shape[handle] = ("sref", ref)
-            if ref.label:
+            if (ref.label and getattr(self, "_refdes_anno_visible", True)
+                    and not self._refdes_baked_into_cell(ref)):
                 # Per-instance label (e.g. a reference designator, see
                 # SRef.label) -- drawn from ref.origin every redraw, so
                 # it always tracks the instance's current position/
                 # rotation/mirror without being a separate shape the
                 # user has to remember to move themselves. This is a
-                # separate annotation, NOT a replacement for any Text
-                # shape baked into the referenced cell -- a library
-                # part's own ref-des placeholder (e.g. "C") keeps
-                # showing regardless. Fixed on-screen size in px
+                # separate annotation, NOT a replacement for a mere
+                # ref-des *placeholder* baked into the referenced cell
+                # (a library part's "C"): that keeps showing alongside
+                # this. It IS suppressed, though, when the referenced
+                # cell already carries this exact label as a real Text
+                # shape on its own layer (see _refdes_baked_into_cell)
+                # -- e.g. a resistor from Session.generate_resistor(),
+                # whose ref-des must live only on its assigned ref-des
+                # layer, not float here on no layer as a duplicate.
+                # Fixed on-screen size in px
                 # (ref.label_height, user-editable -- not scaled by
                 # zoom), like the Measure tool's distance label, so it
                 # stays legible at any zoom. A backing rectangle (same
@@ -1926,6 +2241,40 @@ class LayoutCanvas(tk.Canvas):
                                             outline=handle_color, fill="",
                                             width=2 if highlight else 1)
             self._item_to_shape[handle] = ("aref", aref)
+
+    def _refdes_annotation_layer_visible(self) -> bool:
+        """Whether the per-instance ref-des annotation (SRef.label,
+        floated at the instance origin) should be drawn this pass.
+
+        If the technology names a ref-des annotation layer, the
+        annotation follows THAT layer's visibility, so every
+        ref-designator hides together with the rest of the ref-des
+        documentation. If none is named (-1, the default) the
+        annotation is still shown -- EXCEPT when every layer is hidden
+        ("All Off"), where the expectation is a blank canvas rather
+        than these labels floating on nothing."""
+        n = load_refdes_annotation_layer(self.library)
+        if n is not None and n >= 0:
+            try:
+                return bool(self.library.layers[n].visible)
+            except (KeyError, IndexError):
+                pass
+        return any(layer.visible for layer in self.library.layers)
+
+    def _refdes_baked_into_cell(self, ref: SRef) -> bool:
+        """True when the cell `ref` points at already carries this
+        instance's label as a real Text shape (on whatever layer it
+        assigns to ref-designators). When it does, drawing the
+        per-instance floating annotation too would put the same ref-des
+        on-screen a second time on no layer at all -- so it's
+        suppressed and the ref-des shows only on its assigned layer.
+        A cell that only bakes a prefix *placeholder* ("C" for "C1")
+        has no exact-match Text, so its floating "C1" still shows."""
+        child = self.library.cells.get(ref.cell_name)
+        if child is None:
+            return False
+        return any(isinstance(sh, Text) and sh.text == ref.label
+                   for sh in child.shapes)
 
     def _draw_aref(self, ref: "ARef", depth, highlight=False):
         """Draw every array position by delegating to _draw_sref() with a
@@ -2049,6 +2398,33 @@ class LayoutCanvas(tk.Canvas):
             self._font_cache[key] = tkfont.Font(family="Courier", size=size)
         return self._font_cache[key]
 
+    def _draw_pin_label(self, shape):
+        """Stamp a Rectangle/Polygon's pin string at its centre, on a
+        small dark chip so it reads over any layer colour -- the visual
+        aid for the Number Pins tool. Skipped when the pad is smaller on
+        screen than the label, so a tiny pad is never buried; the label
+        and its chip both pick the same pad when clicked (so you can
+        click the number itself to renumber it)."""
+        xs = [p[0] for p in shape.points]
+        ys = [p[1] for p in shape.points]
+        x0, y0 = self.to_px(min(xs), min(ys))
+        x1, y1 = self.to_px(max(xs), max(ys))
+        w, h = abs(x1 - x0), abs(y1 - y0)
+        if w < 15 or h < 13:
+            return
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+        size = max(7, min(12, int(min(w, h) * 0.45)))
+        label = self.create_text(cx, cy, text=shape.pin, fill="#7fdfff",
+                                  font=self._get_font(size), anchor="c")
+        bbox = self.bbox(label)
+        if bbox:
+            bx0, by0, bx1, by1 = bbox
+            chip = self.create_rectangle(bx0 - 3, by0 - 1, bx1 + 3, by1 + 1,
+                                          fill="#0d1117", outline="#7fdfff")
+            self.tag_raise(label)
+            self._item_to_shape[chip] = ("shape", shape)
+        self._item_to_shape[label] = ("shape", shape)
+
     def _draw_selection_highlight(self):
         cell = self.library.cells.get(self.cell_name)
         if cell is None:
@@ -2106,7 +2482,7 @@ class LayoutCanvas(tk.Canvas):
         selection -- shared by the single-selection and window-selected
         (multi) cases in _draw_selection_highlight()."""
         if kind == "sref":
-            box = self.library.cell_bbox(shape.cell_name)
+            box = self._cell_bbox_safe(shape.cell_name)
             if box is not None:
                 from ..core.library import _transform_bbox
                 x1, y1, x2, y2 = _transform_bbox(box, shape)

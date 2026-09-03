@@ -275,6 +275,7 @@ class DrcWindow(tk.Toplevel):
             self._persist()
         self._build()
         self._refresh_rules()
+        self.bind("<Escape>", lambda e: self.destroy())
 
     def _build(self):
         toolbar = ttk.Frame(self, padding=6)
@@ -292,6 +293,7 @@ class DrcWindow(tk.Toplevel):
         ttk.Combobox(toolbar, textvariable=self.error_layer_var, width=16, state="readonly",
                      values=_layer_choices(self.library)).pack(side="left", padx=2)
 
+        ttk.Button(toolbar, text="Close", command=self.destroy).pack(side="right", padx=2)
         ttk.Button(toolbar, text="About", command=self._about).pack(side="right", padx=2)
 
         body = ttk.Panedwindow(self, orient="vertical")

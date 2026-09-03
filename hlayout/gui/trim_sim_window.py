@@ -96,7 +96,11 @@ class HeatmapCanvas(tk.Canvas):
         grid = self._grid
         ny, nx = grid.shape
         vmax = float(grid.max())
-        img = tk.PhotoImage(width=nx, height=ny)
+        # master=self pins the image to this widget's Tk interpreter --
+        # otherwise it binds to tk._default_root and create_image() can
+        # raise `image "pyimageN" doesn't exist` when a second Tk root
+        # exists (see LayoutCanvas._raster_grid_pure for the same fix).
+        img = tk.PhotoImage(master=self, width=nx, height=ny)
         if vmax > 0:
             for j in range(ny):
                 row = grid[j]
