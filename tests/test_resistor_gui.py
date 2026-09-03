@@ -110,7 +110,7 @@ def test_resistor_designer_place_in_layout_draws_resistor():
         assert len(cell.srefs) == 1
         sref = cell.srefs[0]
         device_cell = app.session.library.cells[sref.cell_name]
-        assert len(device_cell.shapes) == 5  # ink + glaze + 2 pads + ref-des label
+        assert len(device_cell.shapes) == 4  # ink + glaze + 2 pads (ref-des is the instance label)
         rules = load_resistor_geometry_rules(app.session.library)
         ink = next(sh for sh in device_cell.shapes if isinstance(sh, Rectangle)
                    and sh.layer == rules["resistor_layer"])
@@ -120,10 +120,8 @@ def test_resistor_designer_place_in_layout_draws_resistor():
         ix0, iy0, ix1, iy1 = ink.bbox()
         d = rules["glaze_oversize"]
         assert (gx0, gy0, gx1, gy1) == (ix0 - d, iy0 - d, ix1 + d, iy1 + d)
-        labels = [sh for sh in device_cell.shapes if isinstance(sh, Text)]
-        assert len(labels) == 1
-        assert labels[0].text == res.ref_des
-        assert labels[0].layer == rules["doc_layer"]
+        assert not any(isinstance(sh, Text) for sh in device_cell.shapes)
+        assert sref.label == res.ref_des
         # The device cell's own ink is drawn at local origin; the Sref
         # placement in the parent cell carries the requested (1000, 500).
         assert sref.origin == (1000, 500)

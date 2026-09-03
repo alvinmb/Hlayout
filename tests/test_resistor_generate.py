@@ -7,7 +7,6 @@ from hlayout.core.shapes import Rectangle, Text
 from hlayout.io.techfile import (
     load_resistor_geometry_rules,
     resistor_ink_layer,
-    save_refdes_annotation_layer,
     save_resistor_geometry_rules,
 )
 from hlayout.scripting import Session
@@ -289,55 +288,38 @@ def test_ink_layers_round_trip_through_geometry_rules():
     assert rules["ink_layers"] == {"10": 15, "1000000": 16}
 
 
-# --- reference-designator label (ref_des / doc_layer) -----------------------
+# --- reference designator ------------------------------------------------
+# The ref-des is the placed instance's SRef.label -- the same
+# per-instance floating annotation every other placed part gets --
+# NOT a Text shape baked into the device cell.
 
-def test_generate_resistor_ref_des_is_a_text_shape_only_on_the_doc_layer():
+def test_generate_resistor_ref_des_is_the_instance_label_not_a_baked_shape():
     s = _fresh_session()
     save_resistor_geometry_rules(s.library, {
         "overlap_a": 100.0, "pad_b": 300.0, "space_c": 50.0, "glaze_oversize": 0.0,
-        "resistor_layer": 10, "conductor_layer": 11, "glaze_layer": 12, "doc_layer": 13,
+        "resistor_layer": 10, "conductor_layer": 11, "glaze_layer": 12,
     })
     s.generate_resistor(0, 0, body_width=200.0, body_length=1000.0, ref_des="R1")
 
     shapes = _device_shapes(s)
-    assert len(shapes) == 5  # ink + glaze + 2 pads + ref-des text
-    labels = [sh for sh in shapes if isinstance(sh, Text)]
-    assert len(labels) == 1
-    assert labels[0].layer == 13          # only on the assigned ref-des layer
-    assert labels[0].text == "R1"
-    # still set on the instance for netlist extraction (the canvas knows
-    # not to also float it -- see Canvas._refdes_baked_into_cell).
+    assert len(shapes) == 4                       # ink + glaze + 2 pads, no text
+    assert not any(isinstance(sh, Text) for sh in shapes)
+    assert s.cell.srefs[-1].label == "R1"         # ref-des lives on the instance
+
+
+def test_generate_resistor_ignores_legacy_doc_layer_and_label_height():
+    s = _fresh_session()
+    save_resistor_geometry_rules(s.library, {
+        "overlap_a": 100.0, "pad_b": 300.0, "space_c": 50.0, "glaze_oversize": 0.0,
+        "resistor_layer": 10, "conductor_layer": 11, "glaze_layer": 12, "doc_layer": 13,
+    })
+    s.generate_resistor(0, 0, body_width=200.0, body_length=1000.0, ref_des="R1",
+                         doc_layer=13, label_height=100.0)
+    assert not any(isinstance(sh, Text) for sh in _device_shapes(s))
     assert s.cell.srefs[-1].label == "R1"
 
 
-def test_generate_resistor_ref_des_uses_the_refdes_annotation_layer_when_set():
-    # The design's one Reference Designator layer (Setup > Technology
-    # Properties > Ref-Des) wins over the legacy resistor_geometry_rules
-    # doc_layer -- the two settings were merged into one.
-    s = _fresh_session()
-    save_resistor_geometry_rules(s.library, {
-        "overlap_a": 100.0, "pad_b": 300.0, "space_c": 50.0, "glaze_oversize": 0.0,
-        "resistor_layer": 10, "conductor_layer": 11, "glaze_layer": 12, "doc_layer": 13,
-    })
-    save_refdes_annotation_layer(s.library, 40)
-    s.generate_resistor(0, 0, body_width=200.0, body_length=1000.0, ref_des="R1")
-    label = next(sh for sh in _device_shapes(s) if isinstance(sh, Text))
-    assert label.layer == 40
-
-
-def test_generate_resistor_ref_des_falls_back_to_doc_layer_without_annotation_layer():
-    s = _fresh_session()
-    save_resistor_geometry_rules(s.library, {
-        "overlap_a": 100.0, "pad_b": 300.0, "space_c": 50.0, "glaze_oversize": 0.0,
-        "resistor_layer": 10, "conductor_layer": 11, "glaze_layer": 12, "doc_layer": 13,
-    })
-    save_refdes_annotation_layer(s.library, -1)   # "(none)"
-    s.generate_resistor(0, 0, body_width=200.0, body_length=1000.0, ref_des="R1")
-    label = next(sh for sh in _device_shapes(s) if isinstance(sh, Text))
-    assert label.layer == 13
-
-
-def test_generate_resistor_without_ref_des_adds_no_label():
+def test_generate_resistor_without_ref_des_leaves_the_instance_label_empty():
     s = _fresh_session()
     save_resistor_geometry_rules(s.library, {
         "overlap_a": 100.0, "pad_b": 300.0, "space_c": 50.0,
@@ -345,42 +327,21 @@ def test_generate_resistor_without_ref_des_adds_no_label():
     })
     s.generate_resistor(0, 0, body_width=200.0, body_length=1000.0)
     assert not any(isinstance(sh, Text) for sh in _device_shapes(s))
+    assert s.cell.srefs[-1].label == ""
 
 
-def test_generate_resistor_label_is_roughly_centred_on_the_ink_body():
-    s = _fresh_session()
-    save_resistor_geometry_rules(s.library, {
-        "overlap_a": 100.0, "pad_b": 300.0, "space_c": 50.0,
-        "resistor_layer": 10, "conductor_layer": 11, "glaze_layer": 12, "doc_layer": 13,
-    })
-    s.generate_resistor(500, -200, body_width=200.0, body_length=1000.0,
-                         ref_des="R7", label_height=100.0)
-    shapes = _device_shapes(s)
-    label = next(sh for sh in shapes if isinstance(sh, Text))
-    lx0, ly0, lx1, ly1 = label.bbox()
-    cx, cy = (lx0 + lx1) / 2, (ly0 + ly1) / 2
-    # The label is drawn centred at the device cell's own local origin
-    # (0, 0) -- the Sref placement carries the (500, -200) offset.
-    assert abs(cx - 0) < 50
-    assert abs(cy - 0) < 50
-
-
-def test_resgen_ref_option_adds_a_label():
+def test_resgen_ref_option_sets_the_instance_label():
     from hlayout.gui.commands import CommandInterpreter
     from hlayout.scripting import ScriptConsole
     s = _fresh_session()
     save_resistor_geometry_rules(s.library, {
         "overlap_a": 50.0, "pad_b": 100.0, "space_c": 20.0,
-        "resistor_layer": 0, "conductor_layer": 1, "glaze_layer": 2, "doc_layer": 3,
+        "resistor_layer": 0, "conductor_layer": 1, "glaze_layer": 2,
     })
     interp = CommandInterpreter(s, ScriptConsole(s))
     out = interp.run("RESGEN 0,0 100 400 ref=R5")
     assert "generated resistor" in out
-    shapes = _device_shapes(s)
-    labels = [sh for sh in shapes if isinstance(sh, Text)]
-    assert len(labels) == 1
-    assert labels[0].text == "R5"
-    assert labels[0].layer == 3
+    assert not any(isinstance(sh, Text) for sh in _device_shapes(s))
     assert s.cell.srefs[-1].label == "R5"
 
 

@@ -48,7 +48,6 @@ from ..io.techfile import (
     load_bond_rules,
     load_dielectric_rules,
     load_drc_rules,
-    load_refdes_annotation_layer,
     load_resistor_geometry_rules,
     load_route_rules,
     load_thin_film_rules,
@@ -754,14 +753,13 @@ class Session:
         picks which layer the ink is drawn on via this design's saved
         per-ink layer map (hlayout.io.techfile.resistor_ink_layer());
         pass ``resistor_layer`` explicitly to bypass that lookup
-        entirely. ``ref_des``, if given (e.g. "R1"), is drawn as a Text
-        shape on ``doc_layer`` -- the layer this design assigns to
-        ref-designators -- centred on the ink body and sized
-        ``label_height`` (default: proportional to body_width). It is
-        also stored on the placed Sref's label for netlist extraction,
-        but the canvas does not additionally float that label over the
-        part (it would duplicate the on-layer Text), so the ref-des
-        appears only on ``doc_layer``.
+        entirely. ``ref_des``, if given (e.g. "R1"), is stored on the
+        placed Sref's ``label`` -- the same per-instance ref designator
+        every other placed part carries: the canvas floats it at the
+        instance centre (draggable, gated by the ref-des annotation
+        layer's visibility) and netlist extraction reads it. Nothing is
+        baked into the device cell. ``doc_layer``/``label_height`` are
+        accepted for backward compatibility but ignored.
 
         ``keepout_layer``/``keepout_oversize`` add a DIELECTRIC KEEP-OUT
         rectangle spanning the gap *between the two conductor terminals*
@@ -773,7 +771,7 @@ class Session:
         keep-out layer of -1 (the default) draws nothing.
 
         Any of overlap_a/pad_b/space_c/glaze_oversize/keepout_oversize/
-        conductor_layer/glaze_layer/doc_layer/keepout_layer left as None
+        conductor_layer/glaze_layer/keepout_layer left as None
         falls back to this design's saved Setup > Resistor Geometry
         Rules... (Library.tech_params, via
         hlayout.io.techfile.load_resistor_geometry_rules()).
@@ -792,16 +790,11 @@ class Session:
         r_layer = resistor_layer if resistor_layer is not None else resistor_ink_layer(rules, ink_rsh)
         c_layer = conductor_layer if conductor_layer is not None else rules["conductor_layer"]
         g_layer = glaze_layer if glaze_layer is not None else rules["glaze_layer"]
-        if doc_layer is not None:
-            doc_layer_resolved = doc_layer
-        else:
-            # The ref-des documentation layer is the design's ONE
-            # Reference Designator layer (Setup > Technology Properties >
-            # Ref-Des). Fall back to the legacy resistor_geometry_rules
-            # "doc_layer" for technology files written before the two
-            # settings were merged into one.
-            _anno = load_refdes_annotation_layer(self.library)
-            doc_layer_resolved = _anno if _anno is not None and _anno >= 0 else rules["doc_layer"]
+        # `doc_layer`/`label_height` are accepted for backward
+        # compatibility but no longer used: the ref-des is now the same
+        # per-instance floating annotation every other placed part gets
+        # (SRef.label, drawn at the instance centre, draggable), not a
+        # baked Text shape on a layer.
         k_layer = keepout_layer if keepout_layer is not None else rules["keepout_layer"]
         e = float(keepout_oversize) if keepout_oversize is not None else float(rules["keepout_oversize"])
 
@@ -826,34 +819,12 @@ class Session:
                 # (body_length long, full pad width), grown by E.
                 self.rect(int(k_layer), -(half_l + e), -(pad_half_w + e),
                           half_l + e, pad_half_w + e)
-            if ref_des:
-                height = float(label_height) if label_height is not None else max(1.0, body_width * 0.4)
-                # The ref-des is drawn as a real Text shape on doc_layer
-                # (the layer this design assigns to ref-designators) and
-                # nowhere else: the canvas suppresses its usual floating
-                # per-instance SRef.label annotation when the referenced
-                # cell already carries that exact string as geometry
-                # (see Canvas._refdes_baked_shape), so "R1" shows once,
-                # on its assigned layer -- and instead gives that baked
-                # Text a drag handle so it can be repositioned for this
-                # one resistor from the top canvas. SRef.label is still
-                # set below purely as the field netlist extraction reads.
-                # Text origin is its bottom-left corner (see Text.bbox()'s
-                # 0.6*height-per-character estimate) -- offset by half the
-                # estimated label footprint so it reads centred on the
-                # cell origin.
-                label_w = height * 0.6 * max(len(str(ref_des)), 1)
-                self.text(doc_layer_resolved, (-label_w / 2, -height / 2),
-                          str(ref_des), height=height)
             self.use_cell(parent_cell_name)
-            # Setting the placed instance's own label (in addition to the
-            # documentation-only ref-des Text baked on doc_layer above)
-            # keeps SRef.label -- the field netlist extraction reads as
-            # the ref designator -- consistent for every resistor placed
-            # this way, without requiring a separate Edit Selected...
-            # step afterward. The canvas won't also float this label,
-            # since doc_layer already carries it (Canvas.
-            # _refdes_baked_into_cell).
+            # The ref-des is the placed instance's own SRef.label -- the
+            # same per-instance floating annotation every other placed
+            # part gets: drawn at the instance centre, draggable, gated by
+            # the ref-des annotation layer's visibility, and read by
+            # netlist extraction. Nothing is baked into the device cell.
             self.sref(device_name, (x, y), rotation=rotation, label=str(ref_des) if ref_des else "")
         return device_name
 
@@ -878,7 +849,8 @@ class Session:
         rules = load_thin_film_rules(self.library)
         r_layer = resistor_layer if resistor_layer is not None else rules["resistor_layer"]
         p_layer = pad_layer if pad_layer is not None else rules["pad_layer"]
-        doc_layer_resolved = doc_layer if doc_layer is not None else rules["doc_layer"]
+        # doc_layer/label_height accepted for compatibility, unused: the
+        # ref-des is the placed instance's SRef.label (see generate_resistor).
 
         geo = generate_serpentine_geometry(sol)
         all_polys = geo["link_polys"] + [geo["bridge_poly"]] + geo["serpentine_polys"]
@@ -911,10 +883,6 @@ class Session:
             # Two-terminal part -- auto-number pads same as generate_resistor().
             self.rect(p_layer, min_x - pad_len, -pad_width / 2, min_x + overlap, pad_width / 2, pin="1")
             self.rect(p_layer, max_x - overlap, -pad_width / 2, max_x + pad_len, pad_width / 2, pin="2")
-            if ref_des:
-                height = float(label_height) if label_height is not None else max(1.0, sol.trace_width * 0.8)
-                label_w = height * 0.6 * max(len(str(ref_des)), 1)
-                self.text(doc_layer_resolved, (-label_w / 2, max_y + height), str(ref_des), height=height)
             self.use_cell(parent_cell_name)
             self.sref(device_name, (x, y), rotation=rotation, label=str(ref_des) if ref_des else "")
         return device_name
@@ -939,7 +907,8 @@ class Session:
         rules = load_thin_film_rules(self.library)
         r_layer = resistor_layer if resistor_layer is not None else rules["resistor_layer"]
         p_layer = pad_layer if pad_layer is not None else rules["pad_layer"]
-        doc_layer_resolved = doc_layer if doc_layer is not None else rules["doc_layer"]
+        # doc_layer/label_height accepted for compatibility, unused (see
+        # generate_resistor).
 
         # Figure 5's "Artwork Overlap" minimum -- see the matching
         # comment in generate_serpentine_resistor() above.
@@ -958,11 +927,6 @@ class Session:
             # (pad_a is the lower-X pad, see generate_top_hat_geometry()).
             self.polygon(p_layer, geo["pad_a_points"], pin="1")
             self.polygon(p_layer, geo["pad_b_points"], pin="2")
-            if ref_des:
-                height = float(label_height) if label_height is not None else max(1.0, sol.bar_width * 0.6)
-                label_w = height * 0.6 * max(len(str(ref_des)), 1)
-                self.text(doc_layer_resolved, (-label_w / 2, sol.pad_width / 2 + height),
-                          str(ref_des), height=height)
             self.use_cell(parent_cell_name)
             self.sref(device_name, (x, y), rotation=rotation, label=str(ref_des) if ref_des else "")
         return device_name

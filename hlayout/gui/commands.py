@@ -181,27 +181,27 @@ Thick-film resistor generation (Tools > Thick-Film Resistor Designer... sizes
 a resistor; this draws it):
     RESGEN <x,y> <body_width> <body_length> [rotation=<deg>] [ink=<rsh>]
            [ref=<designator>] [a=<dbu>] [b=<dbu>] [c=<dbu>] [d=<dbu>]
-           [rlayer=<n|name>] [clayer=<n|name>] [glayer=<n|name>] [dlayer=<n|name>]
+           [rlayer=<n|name>] [clayer=<n|name>] [glayer=<n|name>] [kolayer=<n|name>]
                                        build a resistor -- ink body + glaze overprint +
-                                       its two end conductor pads (+ a ref-des label
-                                       if ref= is given) -- as its own new cell, and
-                                       place one instance (Sref) of it centred at x,y;
-                                       body_width/body_length usually come from a sized
-                                       Resistor's body_width/selected.body_length;
-                                       ink=<rsh> looks up the ink layer by sheet
-                                       resistance in the technology file's per-ink
-                                       layer map (Tools > Thick-Film Resistor
-                                       Designer... > Design Rules...); rlayer
-                                       overrides that lookup entirely; ref=<name>
-                                       (e.g. "R1") labels the resistor, centred on
-                                       the ink body, on the documentation layer
-                                       (dlayer, or Setup > Resistor Geometry
-                                       Rules... 's default); a/b/c/d/clayer/glayer
-                                       default to Setup > Resistor Geometry
-                                       Rules... (the technology file) when omitted
-                                       -- see that dialog for what A (overlap),
-                                       B (pad length), C (side space), and D
-                                       (glaze oversize, on all 4 sides) mean
+                                       its two end conductor pads -- as its own new
+                                       cell, and place one instance (Sref) of it
+                                       centred at x,y; body_width/body_length usually
+                                       come from a sized Resistor's
+                                       body_width/selected.body_length; ink=<rsh>
+                                       looks up the ink layer by sheet resistance in
+                                       the technology file's per-ink layer map
+                                       (Tools > Thick-Film Resistor Designer... >
+                                       Design Rules...); rlayer overrides that lookup
+                                       entirely; ref=<name> (e.g. "R1") is set as the
+                                       placed instance's ref designator -- the canvas
+                                       floats it at the instance centre, draggable,
+                                       same as any other part (no baked Text);
+                                       a/b/c/d/clayer/glayer default to Setup >
+                                       Resistor Geometry Rules... (the technology
+                                       file) when omitted -- see that dialog for what
+                                       A (overlap), B (pad length), C (side space),
+                                       and D (glaze oversize, on all 4 sides) mean.
+                                       dlayer= is still accepted but ignored.
 
 Layer-based mask operations (resize/boolean, like a GDSII CAM system's
 Size/AND/OR deck operators -- any Path on an input layer is converted
@@ -897,7 +897,7 @@ class CommandInterpreter:
         usage = ("usage: RESGEN <x,y> <body_width> <body_length> [rotation=<deg>] "
                  "[ink=<rsh>] [ref=<designator>] [a=<dbu>] [b=<dbu>] [c=<dbu>] "
                  "[d=<dbu>] [e=<dbu>] [rlayer=<n|name>] [clayer=<n|name>] "
-                 "[glayer=<n|name>] [dlayer=<n|name>] [kolayer=<n|name>]")
+                 "[glayer=<n|name>] [kolayer=<n|name>] [dlayer=<n|name> (ignored)]")
         if len(args) < 3:
             raise CommandError(usage)
         origin = _parse_point(args[0])
