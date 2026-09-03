@@ -220,15 +220,16 @@ class SRef:
     replacement for any Text shape inside the referenced cell -- so a
     cell's own built-in ref-des placeholder (e.g. "C" baked into a
     library part) keeps showing regardless of what label an instance
-    is given. It's drawn near the instance origin and follows the
-    instance when it's moved, since it's rendered relative to
-    ref.origin on every redraw rather than being a separate freestanding
-    shape. `label_height` is its on-screen text size in pixels
+    is given. It's drawn at the instance's bounding-box centre (plus
+    `label_offset`) and follows the instance when it's moved, since it's
+    re-derived every redraw rather than being a separate freestanding
+    shape; dragging it on the canvas updates `label_offset`, not the
+    instance. `label_height` is its on-screen text size in pixels
     (independent of zoom, like the Measure tool's distance label), user-
-    adjustable per instance. Persisted through GDSII round-trips as a
-    GDS element property (see io/gdsio.py's SREF_LABEL_PROPATTR /
-    SREF_LABEL_HEIGHT_PROPATTR) since GDSII SREF elements have no native
-    text field of their own."""
+    adjustable per instance. Persisted through GDSII round-trips as GDS
+    element properties (see io/gdsio.py's SREF_LABEL_PROPATTR /
+    SREF_LABEL_HEIGHT_PROPATTR / SREF_LABEL_OFFSET_PROPATTR) since GDSII
+    SREF elements have no native text field of their own."""
 
     cell_name: str
     origin: Point
@@ -237,10 +238,17 @@ class SRef:
     x_reflection: bool = False
     label: str = ""
     label_height: int = 14  # on-screen px, independent of zoom
+    #: DBU (dx, dy) shift of the floated label from its default anchor --
+    #: the instance's bounding-box centre. Lets the ref-des be dragged
+    #: clear of the part it names without moving the part. Persisted as a
+    #: GDS element property (io/gdsio.py SREF_LABEL_OFFSET_PROPATTR).
+    label_offset: Point = (0, 0)
 
     def __post_init__(self):
         x, y = self.origin
         self.origin = (int(round(x)), int(round(y)))
+        lx, ly = self.label_offset
+        self.label_offset = (int(round(lx)), int(round(ly)))
         if self.magnification <= 0:
             raise GeometryError("sref magnification must be positive")
         if self.label_height <= 0:

@@ -783,6 +783,8 @@ class LayoutCanvas(tk.Canvas):
             item = self._pick_item_at(e.x, e.y)
             if item is not None:
                 kind, shape = self._item_to_shape[item]
+                if kind in ("sref_label", "sref_reftext"):
+                    kind = "sref"   # edit the instance (Label text lives there)
                 _open_edit_dialog(self, kind, shape, on_done=self._after_edit,
                                    checkpoint=self.checkpoint)
             return
@@ -907,6 +909,31 @@ class LayoutCanvas(tk.Canvas):
 
         kind, shape = self._item_to_shape[item]
         self._marquee_start_mouse = None
+
+        if kind == "sref_label":
+            # Dragging the floated ref-des moves it relative to the part
+            # (updates ref.label_offset), not the part itself.
+            self.selected_multi = []
+            self._group_drag = False
+            self.selected = ("sref_label", shape)
+            self._drag_start_mouse = self.to_dbu(e.x, e.y)
+            self._drag_snapshot = tuple(shape.label_offset)
+            self.redraw()
+            return
+        if kind == "sref_reftext":
+            # Dragging the baked ref-des Text handle translates that Text
+            # inside the instance's own cell.
+            baked = self._refdes_baked_shape(shape)
+            if baked is None:
+                return
+            self.selected_multi = []
+            self._group_drag = False
+            self.selected = ("sref_reftext", shape)
+            self._drag_start_mouse = self.to_dbu(e.x, e.y)
+            self._drag_snapshot = tuple(baked.origin)
+            self.redraw()
+            return
+
         if self.selected_multi and (kind, shape) in self.selected_multi:
             # Clicked on a member of the current window-selection: keep
             # the whole group selected and drag it together.
@@ -949,7 +976,18 @@ class LayoutCanvas(tk.Canvas):
             self._drag_checkpointed = True
 
         kind = self.selected[0]
-        if kind == "vertex":
+        if kind == "sref_label":
+            _, ref = self.selected
+            ox, oy = self._drag_snapshot
+            ref.label_offset = (int(round(ox + dx)), int(round(oy + dy)))
+        elif kind == "sref_reftext":
+            _, ref = self.selected
+            baked = self._refdes_baked_shape(ref)
+            if baked is not None:
+                ldx, ldy = self._parent_delta_to_local(ref, dx, dy)
+                ox, oy = self._drag_snapshot
+                baked.origin = (int(round(ox + ldx)), int(round(oy + ldy)))
+        elif kind == "vertex":
             _, shape, idx = self.selected
             ox, oy = self._drag_snapshot[idx]
             pts = list(shape.points)
@@ -1311,6 +1349,19 @@ class LayoutCanvas(tk.Canvas):
                 self.checkpoint()
                 cell.arefs.remove(shape)
             self.selected = None
+        elif kind in ("sref_label", "sref_reftext"):
+            # Delete on a ref-des selection clears the ref designator
+            # (and any baked Text for it), not the instance.
+            _, ref = self.selected
+            self.checkpoint()
+            if kind == "sref_reftext":
+                child = self.library.cells.get(ref.cell_name)
+                if child is not None:
+                    child.shapes = [sh for sh in child.shapes
+                                    if not (isinstance(sh, Text) and sh.text == ref.label)]
+            ref.label = ""
+            ref.label_offset = (0, 0)
+            self.selected = None
         self.redraw()
         self._after_edit()
 
@@ -1543,7 +1594,18 @@ class LayoutCanvas(tk.Canvas):
             return False
         self.checkpoint()
         kind = self.selected[0]
-        if kind == "vertex":
+        if kind == "sref_label":
+            _, ref = self.selected
+            ox, oy = ref.label_offset
+            ref.label_offset = (int(round(ox + dx)), int(round(oy + dy)))
+        elif kind == "sref_reftext":
+            _, ref = self.selected
+            baked = self._refdes_baked_shape(ref)
+            if baked is not None:
+                ldx, ldy = self._parent_delta_to_local(ref, dx, dy)
+                ox, oy = baked.origin
+                baked.origin = (int(round(ox + ldx)), int(round(oy + ldy)))
+        elif kind == "vertex":
             _, shape, idx = self.selected
             px, py = shape.points[idx]
             pts = list(shape.points)
@@ -1591,7 +1653,7 @@ class LayoutCanvas(tk.Canvas):
         if self.selected is None:
             return False
         kind = self.selected[0]
-        if kind in ("vertex", "edge"):
+        if kind in ("vertex", "edge", "sref_label", "sref_reftext"):
             self.on_mode_status("select a whole shape or cell instance to rotate")
             return False
         self.checkpoint()
@@ -1641,7 +1703,7 @@ class LayoutCanvas(tk.Canvas):
         if self.selected is None:
             return False
         kind = self.selected[0]
-        if kind in ("vertex", "edge"):
+        if kind in ("vertex", "edge", "sref_label", "sref_reftext"):
             self.on_mode_status("select a whole shape or cell instance to copy")
             return False
         self.checkpoint()
@@ -2195,40 +2257,49 @@ class LayoutCanvas(tk.Canvas):
                                             outline=handle_color, fill="",
                                             width=2 if highlight else 1)
             self._item_to_shape[handle] = ("sref", ref)
-            if (ref.label and getattr(self, "_refdes_anno_visible", True)
-                    and not self._refdes_baked_into_cell(ref)):
-                # Per-instance label (e.g. a reference designator, see
-                # SRef.label) -- drawn from ref.origin every redraw, so
-                # it always tracks the instance's current position/
-                # rotation/mirror without being a separate shape the
-                # user has to remember to move themselves. This is a
-                # separate annotation, NOT a replacement for a mere
-                # ref-des *placeholder* baked into the referenced cell
-                # (a library part's "C"): that keeps showing alongside
-                # this. It IS suppressed, though, when the referenced
-                # cell already carries this exact label as a real Text
-                # shape on its own layer (see _refdes_baked_into_cell)
-                # -- e.g. a resistor from Session.generate_resistor(),
-                # whose ref-des must live only on its assigned ref-des
-                # layer, not float here on no layer as a duplicate.
-                # Fixed on-screen size in px
-                # (ref.label_height, user-editable -- not scaled by
-                # zoom), like the Measure tool's distance label, so it
-                # stays legible at any zoom. A backing rectangle (same
-                # trick as the Measure tool's label) keeps it readable
-                # over whatever's underneath it, including the
-                # referenced cell's own overlapping ref-des text.
-                label_color = self.SELECTED_COLOR if highlight else "#ffdd55"
-                label_item = self.create_text(hx, hy - 10, text=ref.label, fill=label_color,
-                                               font=self._get_font(ref.label_height), anchor="s")
-                bbox = self.bbox(label_item)
-                if bbox:
-                    x0b, y0b, x1b, y1b = bbox
-                    backing = self.create_rectangle(x0b - 2, y0b - 1, x1b + 2, y1b + 1,
-                                                     fill="#0d1117", outline=label_color)
-                    self.tag_raise(label_item)
-                    self._item_to_shape[backing] = ("sref", ref)
-                self._item_to_shape[label_item] = ("sref", ref)
+            if ref.label and getattr(self, "_refdes_anno_visible", True):
+                baked = self._refdes_baked_shape(ref)
+                if baked is None:
+                    # Per-instance floating ref-des (SRef.label) -- drawn
+                    # every redraw at the instance's bbox CENTRE plus
+                    # ref.label_offset, so it tracks the part and can be
+                    # dragged clear of it without moving the part
+                    # (kind "sref_label"). Fixed on-screen px size
+                    # (ref.label_height, not zoom-scaled) with a backing
+                    # rectangle, same as the Measure tool's label.
+                    ax, ay = self._sref_label_anchor(ref)
+                    lx, ly = self.to_px(ax, ay)
+                    label_color = self.SELECTED_COLOR if highlight else "#ffdd55"
+                    label_item = self.create_text(lx, ly, text=ref.label, fill=label_color,
+                                                   font=self._get_font(ref.label_height),
+                                                   anchor="center")
+                    bbox = self.bbox(label_item)
+                    if bbox:
+                        x0b, y0b, x1b, y1b = bbox
+                        backing = self.create_rectangle(x0b - 2, y0b - 1, x1b + 2, y1b + 1,
+                                                         fill="#0d1117", outline=label_color)
+                        self.tag_raise(label_item)
+                        self._item_to_shape[backing] = ("sref_label", ref)
+                    self._item_to_shape[label_item] = ("sref_label", ref)
+                else:
+                    # The ref-des is a real Text shape baked on its
+                    # assigned layer inside the instance's own cell
+                    # (Session.generate_resistor()). Draw a drag handle
+                    # over it (kind "sref_reftext") so it can be
+                    # repositioned for this one instance without entering
+                    # the cell -- dragging translates the Text's origin
+                    # in that cell.
+                    tf = self._sref_transform(ref)
+                    tx0, ty0, tx1, ty1 = baked.bbox()
+                    corners = [tf((tx0, ty0)), tf((tx1, ty0)), tf((tx1, ty1)), tf((tx0, ty1))]
+                    xs = [self.to_px(*c)[0] for c in corners]
+                    ys = [self.to_px(*c)[1] for c in corners]
+                    hx0, hy0, hx1, hy1 = min(xs), min(ys), max(xs), max(ys)
+                    hcol = self.SELECTED_COLOR if highlight else "#ffdd55"
+                    hitem = self.create_rectangle(hx0 - 2, hy0 - 2, hx1 + 2, hy1 + 2,
+                                                   outline=hcol, dash=(2, 2),
+                                                   width=2 if highlight else 1)
+                    self._item_to_shape[hitem] = ("sref_reftext", ref)
         for aref in cell.arefs:
             highlight = (aref is selected_aref) or (id(aref) in multi_aref_ids)
             self._draw_aref(aref, depth, highlight=highlight)
@@ -2261,20 +2332,41 @@ class LayoutCanvas(tk.Canvas):
                 pass
         return any(layer.visible for layer in self.library.layers)
 
-    def _refdes_baked_into_cell(self, ref: SRef) -> bool:
-        """True when the cell `ref` points at already carries this
-        instance's label as a real Text shape (on whatever layer it
-        assigns to ref-designators). When it does, drawing the
-        per-instance floating annotation too would put the same ref-des
-        on-screen a second time on no layer at all -- so it's
-        suppressed and the ref-des shows only on its assigned layer.
-        A cell that only bakes a prefix *placeholder* ("C" for "C1")
-        has no exact-match Text, so its floating "C1" still shows."""
+    def _refdes_baked_shape(self, ref: SRef):
+        """The real Text shape inside `ref`'s cell that carries this
+        instance's exact label (its ref-des baked on the assigned layer,
+        as Session.generate_resistor() does), or None. When it exists the
+        per-instance floating annotation is suppressed -- the ref-des
+        shows only on its assigned layer -- and the baked Text gets a
+        drag handle instead (kind "sref_reftext"). A cell that only bakes
+        a prefix *placeholder* ("C" for "C1") has no exact-match Text, so
+        its floating "C1" still shows."""
+        if not ref.label:
+            return None
         child = self.library.cells.get(ref.cell_name)
         if child is None:
-            return False
-        return any(isinstance(sh, Text) and sh.text == ref.label
-                   for sh in child.shapes)
+            return None
+        for sh in child.shapes:
+            if isinstance(sh, Text) and sh.text == ref.label:
+                return sh
+        return None
+
+    def _refdes_baked_into_cell(self, ref: SRef) -> bool:
+        return self._refdes_baked_shape(ref) is not None
+
+    def _sref_label_anchor(self, ref: SRef):
+        """Default DBU position of `ref`'s floated label: the centre of
+        the instance's bounding box, shifted by ref.label_offset. Falls
+        back to the instance origin if the cell's bbox can't be taken."""
+        box = self._cell_bbox_safe(ref.cell_name)
+        if box is not None:
+            from ..core.library import _transform_bbox
+            x1, y1, x2, y2 = _transform_bbox(box, ref)
+            cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+        else:
+            cx, cy = ref.origin
+        ox, oy = ref.label_offset
+        return (cx + ox, cy + oy)
 
     def _draw_aref(self, ref: "ARef", depth, highlight=False):
         """Draw every array position by delegating to _draw_sref() with a
@@ -2286,7 +2378,11 @@ class LayoutCanvas(tk.Canvas):
                              magnification=ref.magnification, x_reflection=ref.x_reflection)
             self._draw_sref(instance, depth, highlight=highlight)
 
-    def _draw_sref(self, ref: SRef, depth, highlight=False):
+    @staticmethod
+    def _sref_transform(ref: SRef):
+        """Return a function mapping a point in `ref`'s cell to the
+        parent cell's coordinates (mirror, then scale, then rotate, then
+        translate -- GDSII SREF order)."""
         theta = math.radians(ref.rotation)
         cos_t, sin_t = math.cos(theta), math.sin(theta)
         mag = ref.magnification
@@ -2298,9 +2394,25 @@ class LayoutCanvas(tk.Canvas):
                 y = -y
             x *= mag
             y *= mag
-            xr = x * cos_t - y * sin_t
-            yr = x * sin_t + y * cos_t
-            return (xr + ox, yr + oy)
+            return (x * cos_t - y * sin_t + ox, x * sin_t + y * cos_t + oy)
+
+        return transform
+
+    @staticmethod
+    def _parent_delta_to_local(ref: SRef, dx, dy):
+        """Convert a translation in the parent cell to the equivalent
+        translation inside `ref`'s cell (inverse of the SREF linear
+        part: un-rotate, un-scale, un-mirror)."""
+        theta = math.radians(ref.rotation)
+        c, s = math.cos(theta), math.sin(theta)
+        ux = (dx * c + dy * s) / ref.magnification
+        uy = (-dx * s + dy * c) / ref.magnification
+        if ref.x_reflection:
+            uy = -uy
+        return ux, uy
+
+    def _draw_sref(self, ref: SRef, depth, highlight=False):
+        transform = self._sref_transform(ref)
 
         if ref.cell_name not in self.library.cells:
             return
@@ -2457,7 +2569,7 @@ class LayoutCanvas(tk.Canvas):
                 _, shape = self.selected
                 if kind == "shape" and shape not in cell.shapes:
                     self.selected = None
-                elif kind == "sref" and shape not in cell.srefs:
+                elif kind in ("sref", "sref_label", "sref_reftext") and shape not in cell.srefs:
                     self.selected = None
                 elif kind == "aref" and shape not in cell.arefs:
                     self.selected = None
@@ -2481,6 +2593,21 @@ class LayoutCanvas(tk.Canvas):
         """Dashed bounding-box highlight for a whole shape or sref
         selection -- shared by the single-selection and window-selected
         (multi) cases in _draw_selection_highlight()."""
+        if kind in ("sref_label", "sref_reftext"):
+            # highlight just the ref-des label, not the whole instance
+            if kind == "sref_label":
+                ax, ay = self._sref_label_anchor(shape)
+            else:
+                baked = self._refdes_baked_shape(shape)
+                if baked is None:
+                    return
+                tf = self._sref_transform(shape)
+                bx0, by0, bx1, by1 = baked.bbox()
+                ax, ay = tf(((bx0 + bx1) / 2.0, (by0 + by1) / 2.0))
+            px, py = self.to_px(ax, ay)
+            self.create_rectangle(px - 16, py - 10, px + 16, py + 10,
+                                   outline="#ffcc00", dash=(3, 2), width=2, tags="selection")
+            return
         if kind == "sref":
             box = self._cell_bbox_safe(shape.cell_name)
             if box is not None:
@@ -2580,6 +2707,12 @@ def describe_selection(canvas) -> str:
         _, shape, (i, j) = sel
         return (f"{type(shape).__name__} edge #{i}-{j}\n"
                 f"  (of) {_describe_one('shape', shape, library)}")
+    if kind in ("sref_label", "sref_reftext"):
+        _, ref = sel
+        where = ("baked Text (moves inside the cell)" if kind == "sref_reftext"
+                 else f"floated at centre, offset={ref.label_offset}")
+        return (f"Ref-des {ref.label!r} -- {where}\n"
+                f"  (of) {_describe_one('sref', ref, library)}")
     _, shape = sel
     return _describe_one(kind, shape, library)
 
@@ -2859,6 +2992,8 @@ def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
         # for any ref-des Text baked into the referenced cell itself.
         add_field("Label", shape.label)
         add_field("Label Size (px)", shape.label_height)
+        add_field("Label Offset X (DBU)", shape.label_offset[0])
+        add_field("Label Offset Y (DBU)", shape.label_offset[1])
         add_field("X", shape.origin[0])
         add_field("Y", shape.origin[1])
         add_field("Rotation (deg)", shape.rotation)
@@ -2936,6 +3071,10 @@ def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
                 if label_height <= 0:
                     raise ValueError("label size must be positive")
                 shape.label_height = label_height
+                shape.label_offset = (
+                    int(round(float(entries["Label Offset X (DBU)"].get()))),
+                    int(round(float(entries["Label Offset Y (DBU)"].get()))),
+                )
                 shape.origin = (int(round(float(entries["X"].get()))),
                                  int(round(float(entries["Y"].get()))))
                 shape.rotation = float(entries["Rotation (deg)"].get())

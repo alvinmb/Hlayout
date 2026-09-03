@@ -833,9 +833,11 @@ class Session:
                 # nowhere else: the canvas suppresses its usual floating
                 # per-instance SRef.label annotation when the referenced
                 # cell already carries that exact string as geometry
-                # (see Canvas._refdes_baked_into_cell), so "R1" shows
-                # once, on its assigned layer. SRef.label is still set
-                # below purely as the field netlist extraction reads.
+                # (see Canvas._refdes_baked_shape), so "R1" shows once,
+                # on its assigned layer -- and instead gives that baked
+                # Text a drag handle so it can be repositioned for this
+                # one resistor from the top canvas. SRef.label is still
+                # set below purely as the field netlist extraction reads.
                 # Text origin is its bottom-left corner (see Text.bbox()'s
                 # 0.6*height-per-character estimate) -- offset by half the
                 # estimated label footprint so it reads centred on the

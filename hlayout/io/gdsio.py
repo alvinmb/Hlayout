@@ -45,6 +45,8 @@ TEXT_BASE_HEIGHT = 10  # DBU; magnification 1.0 <=> this text height
 # in the unreserved range; not used for anything else in this codebase.
 SREF_LABEL_PROPATTR = 126
 SREF_LABEL_HEIGHT_PROPATTR = 125
+# "dx,dy" DBU shift of the floated label from the instance centre.
+SREF_LABEL_OFFSET_PROPATTR = 122
 
 # Same idea, for Rectangle.pin / Polygon.pin -- a pad's pin number/name.
 # GDSII boundaries have no native "pin" field either, so this rides
@@ -110,6 +112,9 @@ def save_gds(library: Library, path: str) -> None:
             if ref.label:
                 gref.set_gds_property(SREF_LABEL_PROPATTR, ref.label)
                 gref.set_gds_property(SREF_LABEL_HEIGHT_PROPATTR, str(ref.label_height))
+                lx, ly = ref.label_offset
+                if lx or ly:
+                    gref.set_gds_property(SREF_LABEL_OFFSET_PROPATTR, f"{int(lx)},{int(ly)}")
             gcell.add(gref)
 
         for ref in cell.arefs:
@@ -227,6 +232,14 @@ def load_gds(path: str, library_name: Optional[str] = None) -> Library:
                     label_height = int(label_height_raw) if label_height_raw else 14
                 except ValueError:
                     label_height = 14
+                offset_raw = (ref.get_gds_property(SREF_LABEL_OFFSET_PROPATTR) or "").rstrip("\x00")
+                label_offset = (0, 0)
+                if offset_raw and "," in offset_raw:
+                    try:
+                        lx, ly = offset_raw.split(",", 1)
+                        label_offset = (int(lx), int(ly))
+                    except ValueError:
+                        label_offset = (0, 0)
                 cell.srefs.append(SRef(
                     cell_name=ref.cell_name,
                     origin=ref.origin,
@@ -235,6 +248,7 @@ def load_gds(path: str, library_name: Optional[str] = None) -> Library:
                     x_reflection=ref.x_reflection,
                     label=label,
                     label_height=label_height,
+                    label_offset=label_offset,
                 ))
 
     top = gdslib.top_level()

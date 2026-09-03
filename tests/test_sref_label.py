@@ -82,6 +82,7 @@ def test_label_round_trips_through_gds(tmp_path):
     a = top.add_sref("PART", (0, 0))
     a.label = "C1"
     a.label_height = 22
+    a.label_offset = (250, -400)
     b = top.add_sref("PART", (2000, 0))  # no label
     lib.top_cell_name = "TOP"
 
@@ -92,8 +93,56 @@ def test_label_round_trips_through_gds(tmp_path):
     refs = sorted(reloaded.cells["TOP"].srefs, key=lambda r: r.origin[0])
     assert refs[0].label == "C1"
     assert refs[0].label_height == 22
+    assert refs[0].label_offset == (250, -400)
     assert refs[1].label == ""
     assert refs[1].label_height == 14  # default, unset on this instance
+    assert refs[1].label_offset == (0, 0)
+
+
+def test_label_offset_defaults_zero_and_rounds():
+    from hlayout.core.shapes import SRef
+    r = SRef(cell_name="P", origin=(0, 0))
+    assert r.label_offset == (0, 0)
+    r2 = SRef(cell_name="P", origin=(0, 0), label="U1", label_offset=(12.6, -3.2))
+    assert r2.label_offset == (13, -3)
+
+
+def test_float_label_anchor_is_the_instance_centre_plus_offset():
+    app, top, a, b = _make_app_with_two_instances()
+    try:
+        a.label = "U1"
+        # PART is a 100x100 rect at its cell origin, so the instance's
+        # bbox centre is origin + (50, 50).
+        ax, ay = app.canvas._sref_label_anchor(a)
+        assert (ax, ay) == (a.origin[0] + 50, a.origin[1] + 50)
+        a.label_offset = (300, -200)
+        ax, ay = app.canvas._sref_label_anchor(a)
+        assert (ax, ay) == (a.origin[0] + 50 + 300, a.origin[1] + 50 - 200)
+    finally:
+        app.destroy()
+
+
+def test_dragging_the_float_label_moves_only_the_label():
+    import types as _t
+    app, top, a, b = _make_app_with_two_instances()
+    try:
+        a.label = "U1"
+        app.canvas.snap_enabled = False
+        app.canvas.redraw()
+        app.update()
+        item = next(i for i, (k, o) in app.canvas._item_to_shape.items()
+                    if k == "sref_label" and o is a)
+        bb = app.canvas.bbox(item)
+        cx, cy = int((bb[0] + bb[2]) // 2), int((bb[1] + bb[3]) // 2)
+        app.canvas._select_click(_t.SimpleNamespace(x=cx, y=cy))
+        assert app.canvas.selected[0] == "sref_label"
+        sx, sy = app.canvas._drag_start_mouse
+        mx, my = app.canvas.to_px(sx + 4000, sy - 3000)
+        app.canvas._on_drag_motion(_t.SimpleNamespace(x=int(mx), y=int(my)))
+        assert a.label_offset != (0, 0)
+        assert a.origin == (0, 0)          # the instance itself did not move
+    finally:
+        app.destroy()
 
 
 def test_edit_dialog_saves_label_and_it_survives_a_move():
@@ -143,8 +192,9 @@ def test_edit_dialog_has_label_and_label_size_fields():
 
             walk(win)
             # add_field() order for kind == "sref": Label, Label Size (px),
-            # X, Y, Rotation, Magnification, Mirror
-            assert len(entries) == 7
+            # Label Offset X, Label Offset Y, X, Y, Rotation, Magnification,
+            # Mirror
+            assert len(entries) == 9
             entries[0].delete(0, "end")
             entries[0].insert(0, "IC1")
             entries[1].delete(0, "end")
