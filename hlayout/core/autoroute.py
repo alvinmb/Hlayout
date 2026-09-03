@@ -25,36 +25,58 @@ import heapq
 MAX_NODES = 400_000
 
 
-def rasterize_blocked(obstacles, x0, y0, grid, nx, ny):
-    """Return an ``nx x ny`` list-of-lists of bool: ``blocked[i][j]`` is
-    True when the grid point ``(x0 + i*grid, y0 + j*grid)`` lies inside
-    ``obstacles`` (any shapely geometry; an empty geometry blocks
-    nothing)."""
+def _rasterize(geom, x0, y0, grid, nx, ny):
+    """``nx x ny`` bool grid: True where ``(x0 + i*grid, y0 + j*grid)``
+    falls inside ``geom`` (any shapely geometry). ``None`` if ``geom`` is
+    empty/None."""
+    if geom is None or geom.is_empty:
+        return None
     from shapely.geometry import Point
     from shapely.prepared import prep
 
-    blocked = [[False] * ny for _ in range(nx)]
-    if obstacles is None or obstacles.is_empty:
-        return blocked
-    pobs = prep(obstacles)
+    pg = prep(geom)
+    mask = [[False] * ny for _ in range(nx)]
     for i in range(nx):
         px = x0 + i * grid
+        col = mask[i]
+        for j in range(ny):
+            if pg.intersects(Point(px, y0 + j * grid)):
+                col[j] = True
+    return mask
+
+
+def rasterize_blocked(obstacles, x0, y0, grid, nx, ny, keepin=None):
+    """Return ``(blocked, keepin_mask)``. ``blocked[i][j]`` is True when
+    the grid point ``(x0 + i*grid, y0 + j*grid)`` lies inside
+    ``obstacles`` (any shapely geometry; an empty geometry blocks
+    nothing) OR, when ``keepin`` is given, lies OUTSIDE ``keepin`` -- the
+    route-boundary keep-in region the trace must stay within.
+    ``keepin_mask`` is the rasterised keep-in region (True = inside), or
+    ``None`` when no boundary was given, so the caller can keep
+    clear_disc() from punching endpoint holes through the boundary."""
+    obs = _rasterize(obstacles, x0, y0, grid, nx, ny)
+    kin = _rasterize(keepin, x0, y0, grid, nx, ny)
+    blocked = [[False] * ny for _ in range(nx)]
+    for i in range(nx):
         col = blocked[i]
         for j in range(ny):
-            if pobs.intersects(Point(px, y0 + j * grid)):
+            if (obs is not None and obs[i][j]) or (kin is not None and not kin[i][j]):
                 col[j] = True
-    return blocked
+    return blocked, kin
 
 
-def clear_disc(blocked, ci, cj, radius_cells):
+def clear_disc(blocked, ci, cj, radius_cells, keepin_mask=None):
     """Force every node within ``radius_cells`` (Chebyshev) of
     ``(ci, cj)`` walkable -- used on the two endpoints so a pin that
-    sits on its own copper is still reachable."""
+    sits on its own copper is still reachable. When ``keepin_mask`` is
+    given, a node is only cleared if it is inside the route boundary, so
+    the endpoint hole never pokes the trace outside it."""
     nx, ny = len(blocked), len(blocked[0])
     r = max(0, int(radius_cells))
     for i in range(max(0, ci - r), min(nx, ci + r + 1)):
         for j in range(max(0, cj - r), min(ny, cj + r + 1)):
-            blocked[i][j] = False
+            if keepin_mask is None or keepin_mask[i][j]:
+                blocked[i][j] = False
 
 
 _DIRS = ((1, 0), (-1, 0), (0, 1), (0, -1))
@@ -132,14 +154,16 @@ def _collapse(points):
 
 
 def route(start_xy, goal_xy, obstacles, grid, x0, y0, nx, ny,
-          endpoint_clear_cells=1, turn_penalty=2):
+          endpoint_clear_cells=1, turn_penalty=2, keepin=None):
     """Full grid route in DBU coordinates.
 
     ``start_xy`` / ``goal_xy`` are DBU points; they are snapped to the
     nearest grid node of the lattice anchored at ``(x0, y0)`` with pitch
     ``grid`` and ``nx x ny`` nodes. ``obstacles`` is a shapely geometry
-    already grown by the trace's half-width + clearance. Returns a list
-    of DBU ``(x, y)`` vertices (collinear runs collapsed, endpoints
+    already grown by the trace's half-width + clearance. ``keepin``, if
+    given, is a shapely region (already shrunk by the trace half-width)
+    the trace must stay entirely within -- a route boundary. Returns a
+    list of DBU ``(x, y)`` vertices (collinear runs collapsed, endpoints
     forced to the exact input points), or ``None`` if unroutable.
     Raises ``ValueError`` if ``nx * ny`` exceeds :data:`MAX_NODES`."""
     if nx * ny > MAX_NODES:
@@ -153,11 +177,12 @@ def route(start_xy, goal_xy, obstacles, grid, x0, y0, nx, ny,
         j = min(max(round((y - y0) / grid), 0), ny - 1)
         return i, j
 
-    blocked = rasterize_blocked(obstacles, x0, y0, grid, nx, ny)
+    blocked, keepin_mask = rasterize_blocked(obstacles, x0, y0, grid, nx, ny,
+                                             keepin=keepin)
     si, sj = snap(*start_xy)
     gi, gj = snap(*goal_xy)
-    clear_disc(blocked, si, sj, endpoint_clear_cells)
-    clear_disc(blocked, gi, gj, endpoint_clear_cells)
+    clear_disc(blocked, si, sj, endpoint_clear_cells, keepin_mask)
+    clear_disc(blocked, gi, gj, endpoint_clear_cells, keepin_mask)
 
     node_path = astar(blocked, (si, sj), (gi, gj), turn_penalty=turn_penalty)
     if node_path is None:

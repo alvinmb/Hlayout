@@ -516,7 +516,7 @@
     }
   ],
   "params": {
-    "route_rules": "{\"layer_a\": 3, \"layer_b\": 5, \"via_cell\": \"VIA_Layer3_to_Layer5\"}",
+    "route_rules": "{\"layer_a\": 3, \"layer_b\": 5, \"via_cell\": \"VIA_Layer3_to_Layer5\", \"boundary_layer\": 57}",
     "resistor_geometry_rules": "{\"overlap_a\": 300, \"pad_b\": 500, \"space_c\": 200, \"glaze_oversize\": 300, \"keepout_oversize\": 100, \"resistor_layer\": 30, \"conductor_layer\": 3, \"glaze_layer\": 19, \"doc_layer\": 62, \"keepout_layer\": 4, \"ink_layers\": {\"10\": 8, \"30\": 9, \"100\": 10, \"300\": 11, \"1000\": 12, \"3000\": 13, \"10000\": 14, \"30000\": 15, \"100000\": 16, \"300000\": 17, \"1000000\": 18}}",
     "resistor_design_rules": "{\"aim_pct\": 75.0, \"ar_min\": 0.25, \"ar_max\": 4.0, \"available_inks\": [10, 30, 100, 300, 1000, 3000, 10000, 30000, 100000, 300000, 1000000]}",
     "refdes_annotation_layer": "62",

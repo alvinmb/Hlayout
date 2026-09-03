@@ -403,6 +403,10 @@ DEFAULT_ROUTE_RULES = {
     "layer_a": 0,
     "layer_b": 1,
     "via_cell": "",
+    # Auto-Route keep-in boundary: the trace from AUTOROUTE / Edit >
+    # Auto-Route Two Pins must stay inside the geometry on this layer.
+    # -1 = no boundary (route anywhere).
+    "boundary_layer": -1,
 }
 
 

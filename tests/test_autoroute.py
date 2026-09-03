@@ -157,6 +157,62 @@ def test_auto_route_accepts_bare_points():
     assert path.points[0] == (0, 0) and path.points[-1] == (2000, 0)
 
 
+# --- route boundary (keep-in) --------------------------------------
+
+def test_auto_route_stays_inside_the_boundary_layer():
+    s = Session.new("ARB")
+    s.new_cell("TOP")
+    s.rect(57, 0, -500, 5000, 700)                 # keep-in region on L57
+    pa = s.rect(3, 100, 0, 300, 200, pin="1")
+    pb = s.rect(3, 4600, 0, 4800, 200, pin="2")
+    s.rect(3, 1500, -600, 1700, 300)               # blocker; the gap is at the top
+    s.clear_undo_history()
+
+    path = s.auto_route(pa, pb, layer=3, grid=100, width=40,
+                        boundary_layer=57, clearance=20)
+    ys = [y for _x, y in path.points]
+    assert max(ys) <= 700 - 20 + 1                 # inside the width/2-inset top
+    assert min(ys) >= -500 + 20 - 1               # inside the inset bottom
+    assert len(path.points) > 2                    # detoured to the gap
+
+
+def test_auto_route_fails_when_the_only_detour_leaves_the_boundary():
+    s = Session.new("ARB2")
+    s.new_cell("TOP")
+    s.rect(57, 0, -200, 5000, 400)                 # thin keep-in band
+    qa = s.rect(3, 100, 0, 300, 200, pin="1")
+    qb = s.rect(3, 4600, 0, 4800, 200, pin="2")
+    s.rect(3, 2000, -300, 2200, 500)              # full-height blocker across the band
+    s.clear_undo_history()
+    with pytest.raises(LayoutError, match="boundary"):
+        s.auto_route(qa, qb, layer=3, grid=50, width=20, boundary_layer=57)
+
+
+def test_auto_route_boundary_comes_from_route_rules():
+    from hlayout.io.techfile import save_route_rules
+    s = Session.new("ARB3")
+    s.new_cell("TOP")
+    save_route_rules(s.library, {"layer_a": 3, "layer_b": 5, "via_cell": "",
+                                 "boundary_layer": 57})
+    s.rect(57, -100, -100, 3000, 300)             # boundary that does NOT cover (0,900)
+    s.clear_undo_history()
+    # second point is outside the boundary -> rejected, without passing
+    # boundary_layer= explicitly
+    with pytest.raises(LayoutError, match="outside the route boundary"):
+        s.auto_route((100, 100), (100, 900), layer=3, grid=50, width=20)
+
+
+def test_auto_route_no_boundary_is_unrestricted():
+    s = Session.new("ARB4")
+    s.new_cell("TOP")
+    s.rect(3, 100, 0, 300, 200, pin="1")
+    s.rect(3, 4600, 0, 4800, 200, pin="2")
+    s.clear_undo_history()
+    # no L57 geometry, boundary_layer not set -> routes freely
+    path = s.auto_route((200, 100), (4700, 100), layer=3, grid=100, width=40)
+    assert path.points[0] == (200, 100) and path.points[-1] == (4700, 100)
+
+
 # --- command bar -------------------------------------------------
 
 def test_autoroute_command_draws_a_trace():

@@ -1244,6 +1244,22 @@ class App(tk.Tk):
             foreground="#555", justify="left",
         ).grid(row=3, column=0, columnspan=3, sticky="w", padx=4)
 
+        _BND_NONE = "(none - route anywhere)"
+        rr = load_route_rules(self.session.library)
+        bnd = int(rr.get("boundary_layer", -1))
+        ttk.Label(form, text="Auto-Route boundary layer:").grid(
+            row=4, column=0, sticky="e", padx=4, pady=(10, 4))
+        boundary_var = tk.StringVar(
+            value=self._layer_label(bnd) if bnd >= 0 else _BND_NONE)
+        ttk.Combobox(form, textvariable=boundary_var, width=22, state="readonly",
+                     values=[_BND_NONE] + self._layer_choices()).grid(
+            row=4, column=1, sticky="w", padx=4, pady=(10, 4))
+        ttk.Label(form,
+                  text="AUTOROUTE / Edit > Auto-Route Two Pins keeps the trace\n"
+                       "inside this layer's geometry.",
+                  foreground="#555", justify="left").grid(
+            row=5, column=0, columnspan=3, sticky="w", padx=4)
+
         def apply():
             try:
                 a = self._resolve_layer_field(layer_a_var.get())
@@ -1256,6 +1272,12 @@ class App(tk.Tk):
             if via_cell and via_cell not in via_cell_choices:
                 return (f"No cell named {via_cell!r} in this design or any "
                         f"attached library -- use \"New Via Cell…\" to build one.")
+            btext = boundary_var.get().strip()
+            try:
+                boundary = (-1 if btext == _BND_NONE or not btext
+                            else self._resolve_layer_field(btext))
+            except LayoutError as e:
+                return str(e)
 
             self.route_layer_a_var.set(self._layer_label(a))
             self.route_layer_b_var.set(self._layer_label(b))
@@ -1263,6 +1285,7 @@ class App(tk.Tk):
             self._on_route_opts_change()
             save_route_rules(self.session.library, {
                 "layer_a": a, "layer_b": b, "via_cell": via_cell,
+                "boundary_layer": boundary,
             })
             if via_cell:
                 self.status.set(

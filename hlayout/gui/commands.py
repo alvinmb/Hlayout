@@ -1274,11 +1274,14 @@ class CommandInterpreter:
     def _cmd_autoroute(self, args):
         usage = (
             "usage: AUTOROUTE <x1,y1> <x2,y2> [layer=<n|name>] [grid=<dbu>] "
-            "[width=<dbu>] [clearance=<dbu>] [margin=<dbu>] [cell=<name>]\n"
+            "[width=<dbu>] [clearance=<dbu>] [margin=<dbu>] [boundary=<n|name>] "
+            "[cell=<name>]\n"
             "  routes a clear orthogonal trace between the two points on the\n"
             "  routing layer (default: Route Layers layer_a), dodging every\n"
             "  other shape on that layer. grid/width default to the canvas's\n"
-            "  current grid spacing and path width."
+            "  current grid spacing and path width. boundary=<layer> (or the\n"
+            "  Route Layers boundary_layer) keeps the trace inside that layer's\n"
+            "  geometry."
         )
         if len(args) < 2:
             raise CommandError(usage)
@@ -1303,6 +1306,8 @@ class CommandInterpreter:
                 kwargs["clearance"] = float(v)
             elif k == "margin":
                 kwargs["margin"] = float(v)
+            elif k == "boundary":
+                kwargs["boundary_layer"] = v
             elif k == "cell":
                 kwargs["cell_name"] = v
             else:

@@ -1712,10 +1712,16 @@ class Session:
 
     def auto_route(self, a, b, layer=None, grid: int = 100, width: int = 20,
                    clearance: Optional[float] = None, margin: Optional[float] = None,
-                   cell_name: Optional[str] = None):
+                   boundary_layer=None, cell_name: Optional[str] = None):
         """Automatically route a clear orthogonal trace between two
         points on one conductor layer, dodging every other piece of
         copper already on that layer.
+
+        ``boundary_layer`` (default: the Route Layers rule's
+        ``boundary_layer``, -1 = none): if set, the trace must stay
+        entirely inside the geometry on that layer -- a route keep-in
+        boundary. The boundary is shrunk by ``width / 2`` before the
+        check, and the search area is clipped to it.
 
         ``a`` / ``b`` are each either an ``(x, y)`` DBU point or a
         pin-bearing shape (Rectangle/Polygon) -- for a shape, its bbox
@@ -1743,10 +1749,15 @@ class Session:
             raise LayoutError("no current cell; call new_cell()/use_cell() first")
         cell = self.library.get_cell(name)
         resolve = self.library.layers.resolve
+        rr = load_route_rules(self.library)
         if layer is not None:
             r_layer = resolve(layer)
         else:
-            r_layer = int(load_route_rules(self.library)["layer_a"])
+            r_layer = int(rr["layer_a"])
+        if boundary_layer is not None:
+            b_layer = resolve(boundary_layer)
+        else:
+            b_layer = int(rr.get("boundary_layer", -1))
         grid = int(grid)
         width = int(width)
         if grid <= 0:
@@ -1763,6 +1774,7 @@ class Session:
         (ax, ay), sa = _endpoint(a)
         (bx, by), sb = _endpoint(b)
 
+        from shapely.geometry import Point as _spoint
         from shapely.geometry import box as _sbox
         from shapely.ops import unary_union
 
@@ -1789,22 +1801,52 @@ class Session:
         if not obstacles.is_empty and inflate > 0:
             obstacles = obstacles.buffer(inflate, join_style="mitre", mitre_limit=5.0)
 
+        # Route keep-in boundary: the trace must stay inside the geometry
+        # on b_layer, shrunk by the trace half-width so its edge stays in.
+        keepin = None
+        if b_layer is not None and b_layer >= 0:
+            keepin = layer_to_shapely_flattened(self.library, cell, b_layer)
+            if keepin.is_empty:
+                keepin = None
+            else:
+                if width > 0:
+                    keepin = keepin.buffer(-width / 2.0, join_style="mitre", mitre_limit=5.0)
+                if keepin.is_empty:
+                    raise LayoutError(
+                        f"the route boundary on layer {b_layer} is narrower than the "
+                        f"trace width {width} -- nothing left after the keep-in inset"
+                    )
+                for pn, (px, py) in (("first", (ax, ay)), ("second", (bx, by))):
+                    if not keepin.buffer(1.0).contains(_spoint(px, py)):
+                        raise LayoutError(
+                            f"the {pn} pin ({int(px)}, {int(py)}) is outside the route "
+                            f"boundary on layer {b_layer}"
+                        )
+
         x0 = min(ax, bx) - mrg
         y0 = min(ay, by) - mrg
         x1 = max(ax, bx) + mrg
         y1 = max(ay, by) + mrg
+        if keepin is not None:
+            # clip the search area to the boundary's extent (+1 grid) --
+            # the trace can't leave it, and this keeps the node count down
+            kx0, ky0, kx1, ky1 = keepin.bounds
+            x0, y0 = max(x0, kx0 - grid), max(y0, ky0 - grid)
+            x1, y1 = min(x1, kx1 + grid), min(y1, ky1 + grid)
         nx = int((x1 - x0) // grid) + 1
         ny = int((y1 - y0) // grid) + 1
 
         try:
             pts = _ar.route((ax, ay), (bx, by), obstacles, grid,
-                            int(round(x0)), int(round(y0)), nx, ny)
+                            int(round(x0)), int(round(y0)), nx, ny, keepin=keepin)
         except ValueError as exc:
             raise LayoutError(str(exc))
         if pts is None:
+            within = (f" within the layer-{b_layer} route boundary"
+                      if keepin is not None else "")
             raise LayoutError(
                 f"no clear route on layer {r_layer} between {(int(ax), int(ay))} "
-                f"and {(int(bx), int(by))} at grid {grid} / width {width} "
+                f"and {(int(bx), int(by))}{within} at grid {grid} / width {width} "
                 f"(try a coarser grid, a narrower trace, or a larger margin)"
             )
         return self.path(r_layer, pts, width, cap="round")

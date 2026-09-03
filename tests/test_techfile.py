@@ -203,10 +203,17 @@ def test_load_route_rules_returns_defaults_when_absent():
 
 def test_route_rules_round_trip_through_tech_params():
     lib = Library("DEMO")
-    custom = {"layer_a": 2, "layer_b": 5, "via_cell": "VIA_Layer2_to_Layer5"}
+    custom = {"layer_a": 2, "layer_b": 5, "via_cell": "VIA_Layer2_to_Layer5",
+              "boundary_layer": 57}
     save_route_rules(lib, custom)
     assert lib.tech_params
     assert load_route_rules(lib) == custom
+
+
+def test_route_rules_boundary_layer_defaults_when_absent():
+    lib = Library("DEMO")
+    save_route_rules(lib, {"layer_a": 2, "layer_b": 5, "via_cell": "V"})
+    assert load_route_rules(lib)["boundary_layer"] == -1
 
 
 def test_route_rules_survive_a_full_techfile_save_and_load(tmp_path):
