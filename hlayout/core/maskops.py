@@ -55,12 +55,14 @@ BOOLEAN_MASK_OPS = ("AND", "OR", "NOT", "XOR")
 try:
     from shapely.geometry import LineString
     from shapely.geometry import Polygon as _ShapelyPolygon
+    from shapely.geometry import box as _box
     from shapely.ops import transform as _shapely_transform
     from shapely.ops import unary_union
     _SHAPELY_IMPORT_ERROR = None
 except ImportError as _exc:  # pragma: no cover - exercised only without shapely installed
     LineString = None
     _ShapelyPolygon = None
+    _box = None
     unary_union = None
     _shapely_transform = None
     _SHAPELY_IMPORT_ERROR = _exc
@@ -152,7 +154,8 @@ def _transform_geom(geom, point_transform):
     return _shapely_transform(lambda x, y, z=None: point_transform((x, y)), geom)
 
 
-def layer_geoms_flattened(library, cell, layer, point_transform=None, _depth=0) -> list:
+def layer_geoms_flattened(library, cell, layer, point_transform=None, _depth=0,
+                          datatype=None) -> list:
     """Return the individual (NOT unioned) shapely geometries for every
     shape on `layer` in `cell`, descending into every placed cell
     instance (Sref), recursively, and applying each instance's own
@@ -178,6 +181,8 @@ def layer_geoms_flattened(library, cell, layer, point_transform=None, _depth=0) 
     for shape in cell.shapes:
         if shape.layer != layer:
             continue
+        if datatype is not None and getattr(shape, "datatype", 0) != datatype:
+            continue
         g = shape_to_shapely(shape)
         if g is None or g.is_empty:
             continue
@@ -189,16 +194,18 @@ def layer_geoms_flattened(library, cell, layer, point_transform=None, _depth=0) 
             continue
         child = library.cells[ref.cell_name]
         combined = _compose_transforms(point_transform, _sref_point_transform(ref))
-        geoms.extend(layer_geoms_flattened(library, child, layer, combined, _depth + 1))
+        geoms.extend(layer_geoms_flattened(library, child, layer, combined,
+                                            _depth + 1, datatype=datatype))
     return geoms
 
 
-def layer_to_shapely_flattened(library, cell, layer, point_transform=None):
+def layer_to_shapely_flattened(library, cell, layer, point_transform=None, datatype=None):
     """Union of layer_geoms_flattened() -- see that function for what
     "flattened" means here. Returns an empty shapely Polygon if there's
-    nothing on this layer anywhere in the cell's hierarchy."""
+    nothing on this layer anywhere in the cell's hierarchy.
+    ``datatype``, if given, restricts to shapes with that GDS datatype."""
     _require_shapely()
-    geoms = layer_geoms_flattened(library, cell, layer, point_transform)
+    geoms = layer_geoms_flattened(library, cell, layer, point_transform, datatype=datatype)
     if not geoms:
         return _ShapelyPolygon()
     return unary_union(geoms)
@@ -277,6 +284,47 @@ def _close_holes(poly) -> List[Tuple[int, int]]:
         bridge = [ring[ri]] + hole_reordered + [hole_reordered[0], ring[ri]]
         ring = ring[:ri] + bridge + ring[ri + 1:]
     return [(int(round(x)), int(round(y))) for x, y in ring]
+
+
+def fracture_polygons(geom, max_points: int = MAX_POLY_POINTS, _depth: int = 0):
+    """Break a shapely Polygon/MultiPolygon (possibly with many holes,
+    or a single very high-vertex boundary) into a list of HOLE-FREE
+    shapely Polygons, each with at most ``max_points`` exterior
+    vertices, by recursively quartering its bounding box and
+    intersecting.
+
+    This is the standard way to get a big/holed boolean result -- a
+    ground pour, or a dielectric fill opened up around every via --
+    past ``shapely_to_polygons()``'s hard vertex limit (and GDSII's
+    lack of a hole primitive) without simplifying the geometry: every
+    output edge lies exactly on an input edge or a cut line.
+    """
+    _require_shapely()
+    if geom is None or geom.is_empty:
+        return []
+    if geom.geom_type in ("MultiPolygon", "GeometryCollection"):
+        out = []
+        for g in geom.geoms:
+            if g.geom_type in ("Polygon", "MultiPolygon", "GeometryCollection"):
+                out.extend(fracture_polygons(g, max_points, _depth))
+        return out
+    if geom.geom_type != "Polygon" or geom.area == 0:
+        return []
+    # hole-free and small enough -> take it as-is
+    if not geom.interiors and len(geom.exterior.coords) - 1 <= max_points:
+        return [geom]
+    if _depth >= 24:
+        # pathological input -- fall back to a hole-bridged single ring
+        return [geom]
+    x0, y0, x1, y1 = geom.bounds
+    mx, my = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+    out = []
+    for qx0, qy0, qx1, qy1 in ((x0, y0, mx, my), (mx, y0, x1, my),
+                                (x0, my, mx, y1), (mx, my, x1, y1)):
+        piece = geom.intersection(_box(qx0, qy0, qx1, qy1))
+        if not piece.is_empty:
+            out.extend(fracture_polygons(piece, max_points, _depth + 1))
+    return out
 
 
 def shapely_to_polygons(geom, layer: int, datatype: int = 0) -> List[Polygon]:

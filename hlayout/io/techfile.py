@@ -213,6 +213,16 @@ def save_resistor_design_rules(library: Library, rules: dict) -> None:
 #                      long edges), not just matching the ink's own
 #                      footprint. Glaze size = (body_width + 2*D) x
 #                      (body_length + 2*A + 2*D).
+#   E (keepout_oversize) -- a DIELECTRIC KEEP-OUT rectangle drawn BETWEEN
+#                      THE TWO CONDUCTOR TERMINALS (x within the
+#                      body_length gap that separates the pads), on
+#                      "keepout_layer", grown by E on all four sides.
+#                      It marks where the inter-layer dielectric must be
+#                      cleared so the printed resistor ink fires on a
+#                      bare surface -- subtract this layer from the
+#                      dielectric. Keep-out size = (body_width + 2*C +
+#                      2*E) x (body_length + 2*E). "keepout_layer" = -1
+#                      (the default) disables it -- nothing is drawn.
 #
 # Also stored here: which layers the resistor ink, the conductor pads,
 # the resistor glaze overprint, and the resistor's reference-designator
@@ -233,8 +243,9 @@ def save_resistor_design_rules(library: Library, rules: dict) -> None:
 # named layers -- see Setup > Resistor Geometry Rules... and "Place in
 # Layout..."'s own per-placement override); "glaze_layer" is the single
 # layer the protective resistor-glaze overprint is drawn on; "doc_layer"
-# is the documentation/silkscreen-style layer the resistor's reference
-# designator (e.g. "R1") is labelled on, centred on the ink body -- see
+# is the DOCUMENTATION layer -- not a fab/silkscreen output -- that the
+# resistor's reference designator (e.g. "R1") is labelled on, centred on
+# the ink body. It is the only place the ref-des appears. See
 # Session.generate_resistor()'s ref_des parameter.
 
 RESISTOR_GEOMETRY_KEY = "resistor_geometry_rules"
@@ -246,10 +257,12 @@ DEFAULT_RESISTOR_GEOMETRY = {
     "pad_b": 500,
     "space_c": 200,
     "glaze_oversize": 50,
+    "keepout_oversize": 0,
     "resistor_layer": 30,
     "conductor_layer": 31,
     "glaze_layer": 32,
     "doc_layer": 33,
+    "keepout_layer": -1,   # -1 = no dielectric keep-out drawn
     "ink_layers": {},
 }
 
@@ -418,6 +431,167 @@ def save_route_rules(library: Library, rules: dict) -> None:
     doesn't have to re-enter it in a later session."""
     payload = {k: rules[k] for k in DEFAULT_ROUTE_RULES if k in rules}
     library.tech_params[ROUTE_RULES_KEY] = json.dumps(payload)
+
+
+# --- Per-instance ref-designator annotation layer -------------------------
+#
+# The canvas draws each placed instance's SRef.label (e.g. "U1") as a
+# small floating ref-des annotation at the instance origin. On its own
+# that annotation belongs to no layer, so it stays on screen even with
+# every layer switched off. This setting ties it to ONE layer's
+# visibility -- normally the same documentation layer a resistor's
+# ref-des Text is drawn on -- so all ref-designators show/hide together.
+# Stored as a bare layer number (same one-blob-per-tech_params-entry
+# persistence as everything else here); -1, the default, means "not tied
+# to a specific layer" -- the canvas then still shows the annotation,
+# except when every layer is hidden ("All Off"), where it's dropped too
+# so the canvas actually goes blank.
+
+REFDES_ANNOTATION_LAYER_KEY = "refdes_annotation_layer"
+
+
+def load_refdes_annotation_layer(library: Library) -> int:
+    """Layer number the per-instance ref-des annotation is tied to, or
+    -1 if it isn't tied to any layer (always shown). See
+    REFDES_ANNOTATION_LAYER_KEY above."""
+    raw = library.tech_params.get(REFDES_ANNOTATION_LAYER_KEY)
+    if raw in (None, ""):
+        return -1
+    try:
+        return int(json.loads(raw))
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return -1
+
+
+def save_refdes_annotation_layer(library: Library, layer: int) -> None:
+    """Write the ref-des annotation layer into library.tech_params so it
+    round-trips with the technology file / sidecar. Pass -1 to clear it
+    (annotation always shown)."""
+    library.tech_params[REFDES_ANNOTATION_LAYER_KEY] = json.dumps(int(layer))
+
+
+# --- Dielectric fill rules -----------------------------------------------
+#
+# Tools > Generate Dielectric Fill... (Session.generate_dielectric())
+# turns whatever is drawn on "layer" at datatype 0 into a filled sheet
+# with holes: the largest shape that encloses the rest is the fill
+# boundary (or the design bbox + "margin" if none), and every other
+# datatype-0 shape inside it -- a via window stamped by drop_via, a
+# resistor keep-out, a hand-drawn exclusion rect -- is a hole, grown by
+# "clearance". So vias/keep-outs need NO dedicated layer: draw them on
+# the dielectric layer and they're auto-detected. "keepout_layers" is an
+# optional extra for cross-layer exclusion zones. The fill is written at
+# datatype 1. Same one-JSON-blob-per-tech_params-entry persistence as
+# the other rule sets. layer = -1 means "not set yet".
+
+DIELECTRIC_RULES_KEY = "dielectric_rules"
+
+DEFAULT_DIELECTRIC_RULES = {
+    "layer": -1,
+    "margin": 1000,
+    "clearance": 150,
+    "keepout_layers": [],
+}
+
+
+def load_dielectric_rules(library: Library) -> dict:
+    """Read the Dielectric Fill rules from library.tech_params. Always
+    returns a complete dict (falling back to DEFAULT_DIELECTRIC_RULES
+    key by key); keepout_layers is always a list of ints."""
+    rules = dict(DEFAULT_DIELECTRIC_RULES)
+    rules["keepout_layers"] = []
+    raw = library.tech_params.get(DIELECTRIC_RULES_KEY)
+    if not raw:
+        return rules
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return rules
+    if isinstance(data, dict):
+        for k in ("layer", "margin", "clearance"):
+            if k in data:
+                try:
+                    rules[k] = int(data[k])
+                except (TypeError, ValueError):
+                    pass
+        kl = data.get("keepout_layers")
+        if isinstance(kl, list):
+            out = []
+            for v in kl:
+                try:
+                    out.append(int(v))
+                except (TypeError, ValueError):
+                    pass
+            rules["keepout_layers"] = out
+    return rules
+
+
+def save_dielectric_rules(library: Library, rules: dict) -> None:
+    """Write the Dielectric Fill rules into library.tech_params so
+    Setup > Save Technology File... / TECH SAVE and the per-design
+    .hlaux sidecar capture them."""
+    payload = {
+        "layer": int(rules.get("layer", -1)),
+        "margin": int(rules.get("margin", DEFAULT_DIELECTRIC_RULES["margin"])),
+        "clearance": int(rules.get("clearance", DEFAULT_DIELECTRIC_RULES["clearance"])),
+        "keepout_layers": [int(v) for v in rules.get("keepout_layers", [])],
+    }
+    library.tech_params[DIELECTRIC_RULES_KEY] = json.dumps(payload)
+
+
+# --- Wire-bond rules ---------------------------------------------------------
+#
+# The BOND command / Session.wire_bond() draw a chip-and-wire assembly
+# wire bond -- a Path on "layer" with a small ball/stitch footprint of
+# side "pad" at each end -- to connect a chip-die pin to a conductor
+# pad, a conductor pad to a package pin, or two conductor pads as a
+# jumper. The bond layer is treated as a conductor by
+# Session.extract_netlist()/NETLIST RUN (folded in automatically), so a
+# net's connectivity is reported right through the bond to the die pin.
+# Same one-JSON-blob-per-tech_params-entry persistence as the rest.
+# layer = -1 means "not configured -- BOND has nowhere to draw".
+
+BOND_RULES_KEY = "bond_rules"
+
+DEFAULT_BOND_RULES = {
+    "layer": -1,
+    "width": 30,        # DBU -- a ~25 um / 1 mil bond wire
+    "pad": 100,         # DBU -- ball/stitch bond footprint diameter at each end
+    "min_length": 300,  # DBU -- shortest span a bonder can reliably loop
+    "max_length": 5000, # DBU -- longest unsupported span before sag/shorting
+}
+
+_BOND_RULE_KEYS = ("layer", "width", "pad", "min_length", "max_length")
+
+
+def load_bond_rules(library: Library) -> dict:
+    """Read the wire-bond rules from library.tech_params. Always returns
+    a complete dict (falling back to DEFAULT_BOND_RULES key by key)."""
+    rules = dict(DEFAULT_BOND_RULES)
+    raw = library.tech_params.get(BOND_RULES_KEY)
+    if not raw:
+        return rules
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return rules
+    if isinstance(data, dict):
+        for k in _BOND_RULE_KEYS:
+            if k in data:
+                try:
+                    rules[k] = int(data[k])
+                except (TypeError, ValueError):
+                    pass
+    return rules
+
+
+def save_bond_rules(library: Library, rules: dict) -> None:
+    """Write the wire-bond rules into library.tech_params so
+    Setup > Save Technology File... / TECH SAVE and the per-design
+    .hlaux sidecar capture them."""
+    library.tech_params[BOND_RULES_KEY] = json.dumps({
+        k: int(rules.get(k, DEFAULT_BOND_RULES[k])) for k in _BOND_RULE_KEYS
+    })
 
 
 # --- Design Rule Check (DRC) rules ------------------------------------------

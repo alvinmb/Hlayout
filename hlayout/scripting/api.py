@@ -21,6 +21,7 @@ Example
 """
 
 import copy
+import math
 from contextlib import contextmanager
 from typing import Callable, List, Optional, Union
 
@@ -31,6 +32,8 @@ from ..core.shapes import Polygon, Rectangle
 from ..core.maskops import (
     MASK_OPS,
     boolean_op,
+    fracture_polygons,
+    layer_geoms_flattened,
     layer_to_shapely,
     layer_to_shapely_flattened,
     shapely_to_polygons,
@@ -42,13 +45,34 @@ from ..io.gerberio import write_gerber_layers
 from ..io.sidecar import load_design, save_design
 from ..io.techfile import (
     load_and_apply_techfile,
+    load_bond_rules,
+    load_dielectric_rules,
     load_drc_rules,
+    load_refdes_annotation_layer,
     load_resistor_geometry_rules,
+    load_route_rules,
     load_thin_film_rules,
     resistor_ink_layer,
     save_techfile,
 )
 from ..core.thinfilm import generate_serpentine_geometry, generate_top_hat_geometry
+
+
+def _segments_cross(p1, p2, p3, p4) -> bool:
+    """True only when segment p1-p2 and segment p3-p4 PROPERLY cross --
+    i.e. each segment strictly straddles the other's line. Segments that
+    merely share an endpoint, touch at a T, or lie collinear are NOT a
+    crossing (a wire bond is allowed to share a landing pad with
+    another). Integer/float DBU coordinates."""
+    def orient(a, b, c):
+        return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+    d1 = orient(p3, p4, p1)
+    d2 = orient(p3, p4, p2)
+    d3 = orient(p1, p2, p3)
+    d4 = orient(p1, p2, p4)
+    return ((d1 > 0) != (d2 > 0)) and ((d3 > 0) != (d4 > 0)) \
+        and d1 != 0 and d2 != 0 and d3 != 0 and d4 != 0
 
 
 class Session:
@@ -687,6 +711,7 @@ class Session:
                            ink_rsh=None, ref_des=None, overlap_a=None, pad_b=None,
                            space_c=None, glaze_oversize=None, resistor_layer=None,
                            conductor_layer=None, glaze_layer=None, doc_layer=None,
+                           keepout_layer=None, keepout_oversize=None,
                            label_height=None, cell_name=None) -> str:
         """Build a complete thick-film resistor structure -- the resistor
         ink body, its protective glaze overprint, its two end conductor
@@ -729,14 +754,29 @@ class Session:
         picks which layer the ink is drawn on via this design's saved
         per-ink layer map (hlayout.io.techfile.resistor_ink_layer());
         pass ``resistor_layer`` explicitly to bypass that lookup
-        entirely. ``ref_des``, if given (e.g. "R1"), is centred on the
-        ink body as a Text shape on ``doc_layer`` -- a documentation/
-        silkscreen-style layer, not electrical geometry -- sized
-        ``label_height`` (default: proportional to body_width). Any of
-        overlap_a/pad_b/space_c/glaze_oversize/conductor_layer/
-        glaze_layer/doc_layer left as None falls back to this design's
-        saved Setup > Resistor Geometry Rules... (Library.tech_params,
-        via hlayout.io.techfile.load_resistor_geometry_rules()).
+        entirely. ``ref_des``, if given (e.g. "R1"), is drawn as a Text
+        shape on ``doc_layer`` -- the layer this design assigns to
+        ref-designators -- centred on the ink body and sized
+        ``label_height`` (default: proportional to body_width). It is
+        also stored on the placed Sref's label for netlist extraction,
+        but the canvas does not additionally float that label over the
+        part (it would duplicate the on-layer Text), so the ref-des
+        appears only on ``doc_layer``.
+
+        ``keepout_layer``/``keepout_oversize`` add a DIELECTRIC KEEP-OUT
+        rectangle spanning the gap *between the two conductor terminals*
+        (x within body_length, y at the full pad width), grown by
+        ``keepout_oversize`` (E) on all four sides -- size = (body_width
+        + 2*C + 2*E) x (body_length + 2*E). It marks where the
+        inter-layer dielectric must be cleared so the printed ink fires
+        on a bare surface (subtract this layer from the dielectric). A
+        keep-out layer of -1 (the default) draws nothing.
+
+        Any of overlap_a/pad_b/space_c/glaze_oversize/keepout_oversize/
+        conductor_layer/glaze_layer/doc_layer/keepout_layer left as None
+        falls back to this design's saved Setup > Resistor Geometry
+        Rules... (Library.tech_params, via
+        hlayout.io.techfile.load_resistor_geometry_rules()).
 
         Building the device cell and placing its Sref are both part of
         a single undo step."""
@@ -752,7 +792,18 @@ class Session:
         r_layer = resistor_layer if resistor_layer is not None else resistor_ink_layer(rules, ink_rsh)
         c_layer = conductor_layer if conductor_layer is not None else rules["conductor_layer"]
         g_layer = glaze_layer if glaze_layer is not None else rules["glaze_layer"]
-        doc_layer_resolved = doc_layer if doc_layer is not None else rules["doc_layer"]
+        if doc_layer is not None:
+            doc_layer_resolved = doc_layer
+        else:
+            # The ref-des documentation layer is the design's ONE
+            # Reference Designator layer (Setup > Technology Properties >
+            # Ref-Des). Fall back to the legacy resistor_geometry_rules
+            # "doc_layer" for technology files written before the two
+            # settings were merged into one.
+            _anno = load_refdes_annotation_layer(self.library)
+            doc_layer_resolved = _anno if _anno is not None and _anno >= 0 else rules["doc_layer"]
+        k_layer = keepout_layer if keepout_layer is not None else rules["keepout_layer"]
+        e = float(keepout_oversize) if keepout_oversize is not None else float(rules["keepout_oversize"])
 
         half_l = body_length / 2.0
         half_w = body_width / 2.0
@@ -770,23 +821,37 @@ class Session:
             # numbers a 2-pad footprint: lower X is pin "1".
             self.rect(c_layer, -(half_l + a + b), -pad_half_w, -half_l, pad_half_w, pin="1")
             self.rect(c_layer, half_l, -pad_half_w, half_l + a + b, pad_half_w, pin="2")
+            if k_layer is not None and int(k_layer) >= 0:
+                # dielectric keep-out: the gap between the two terminals
+                # (body_length long, full pad width), grown by E.
+                self.rect(int(k_layer), -(half_l + e), -(pad_half_w + e),
+                          half_l + e, pad_half_w + e)
             if ref_des:
                 height = float(label_height) if label_height is not None else max(1.0, body_width * 0.4)
+                # The ref-des is drawn as a real Text shape on doc_layer
+                # (the layer this design assigns to ref-designators) and
+                # nowhere else: the canvas suppresses its usual floating
+                # per-instance SRef.label annotation when the referenced
+                # cell already carries that exact string as geometry
+                # (see Canvas._refdes_baked_into_cell), so "R1" shows
+                # once, on its assigned layer. SRef.label is still set
+                # below purely as the field netlist extraction reads.
                 # Text origin is its bottom-left corner (see Text.bbox()'s
                 # 0.6*height-per-character estimate) -- offset by half the
-                # estimated label footprint so it reads centred within
-                # the cell (and therefore on the resistor once placed)
-                # rather than starting at the cell's own origin.
+                # estimated label footprint so it reads centred on the
+                # cell origin.
                 label_w = height * 0.6 * max(len(str(ref_des)), 1)
                 self.text(doc_layer_resolved, (-label_w / 2, -height / 2),
                           str(ref_des), height=height)
             self.use_cell(parent_cell_name)
-            # Setting the placed instance's own label (not just the
-            # silkscreen Text baked into the device cell above) keeps
-            # SRef.label -- the field netlist extraction reads as the
-            # ref designator -- consistent for every resistor placed
+            # Setting the placed instance's own label (in addition to the
+            # documentation-only ref-des Text baked on doc_layer above)
+            # keeps SRef.label -- the field netlist extraction reads as
+            # the ref designator -- consistent for every resistor placed
             # this way, without requiring a separate Edit Selected...
-            # step afterward.
+            # step afterward. The canvas won't also float this label,
+            # since doc_layer already carries it (Canvas.
+            # _refdes_baked_into_cell).
             self.sref(device_name, (x, y), rotation=rotation, label=str(ref_des) if ref_des else "")
         return device_name
 
@@ -934,7 +999,22 @@ class Session:
         # open view windows -- sees the restored state immediately,
         # without needing to be individually re-pointed at a new object.
         self.library.name = snapshot.name
-        self.library.layers = snapshot.layers
+        # Restore each layer's style INTO the existing Layer objects
+        # rather than swapping the whole LayerTable: the GUI layer panel
+        # binds its per-row fill/colour/visibility callbacks to specific
+        # Layer instances, and a wholesale swap would orphan them -- the
+        # panel would still *show* the restored state (sync() re-reads by
+        # number) but toggling a row afterwards would write to a dead
+        # object and nothing on the canvas would change.
+        for n in range(len(snapshot.layers)):
+            src = snapshot.layers[n]
+            dst = self.library.layers[n]
+            dst.name = src.name
+            dst.color = src.color
+            dst.stipple = src.stipple
+            dst.fill = src.fill
+            dst.visible = src.visible
+            dst.selectable = src.selectable
         self.library.cells = snapshot.cells
         self.library.top_cell_name = snapshot.top_cell_name
         self.library.tech_params = snapshot.tech_params
@@ -1323,6 +1403,151 @@ class Session:
                 results.append((step, written))
         return results
 
+    #: GDS datatype the generated dielectric FILL polygons are written on.
+    #: Everything a user (or drop_via / generate_resistor) draws on the
+    #: dielectric layer stays at datatype 0 and is treated as input --
+    #: the outer boundary, plus every via window / keep-out rectangle
+    #: inside it. generate_dielectric() reads datatype 0 and (re)writes
+    #: datatype 1; clear_dielectric() removes only datatype 1.
+    DIELECTRIC_FILL_DATATYPE = 1
+
+    def generate_dielectric(self, layer=None, keepout_layers=None,
+                             clearance=None, margin=None,
+                             cell_name: Optional[str] = None) -> int:
+        """Turn the dielectric layer's INPUT geometry into a filled sheet
+        with holes -- the parametric equivalent of hand-running Tools >
+        Mask Operations... ``boundary NOT holes``, auto-fractured so it
+        never hits the 200-point-per-polygon limit.
+
+        Everything already drawn on ``layer`` at GDS datatype 0 is the
+        input, and needs no separate "keep-out layer":
+
+        * the single LARGEST shape that encloses all the others is the
+          fill BOUNDARY (draw one rectangle around your circuit). If no
+          shape encloses the rest, the boundary falls back to the
+          design's bounding box grown by ``margin``.
+        * every OTHER datatype-0 shape inside it -- a via window stamped
+          by drop_via(dielectric_layer=...), a resistor's
+          between-terminals keep-out, a hand-drawn exclusion rectangle,
+          anything -- is a hole, grown by ``clearance`` before it's cut.
+
+        ``keepout_layers`` is an optional extra: other layers whose
+        geometry should also be punched out (for cross-layer exclusion
+        zones). The filled result is written at datatype
+        ``DIELECTRIC_FILL_DATATYPE`` (1); any previous fill there is
+        cleared first, so this re-runs cleanly after the layout changes
+        and never eats its own inputs. Parameters fall back to Setup >
+        Dielectric Fill Rules... Returns the polygon count. One undo step.
+        """
+        from shapely.geometry import box as _box
+        from shapely.ops import unary_union
+
+        name = cell_name or self.current_cell_name
+        if name is None:
+            raise LayoutError("no current cell; call new_cell()/use_cell() first")
+
+        rules = load_dielectric_rules(self.library)
+        resolve = self.library.layers.resolve
+        r_layer = resolve(layer) if layer is not None else int(rules["layer"])
+        if r_layer is None or r_layer < 0:
+            raise LayoutError(
+                "no dielectric layer set -- pass layer=... or configure "
+                "Setup > Dielectric Fill Rules..."
+            )
+        clr = float(clearance) if clearance is not None else float(rules["clearance"])
+        mrg = float(margin) if margin is not None else float(rules["margin"])
+        kl_src = keepout_layers if keepout_layers is not None else rules["keepout_layers"]
+        keepout_nums = [resolve(k) for k in kl_src]
+
+        cell = self.library.get_cell(name)
+
+        # datatype-0 input geometry already on the dielectric layer
+        inputs = layer_geoms_flattened(self.library, cell, r_layer, datatype=0)
+        boundary = None
+        holes = list(inputs)
+        if inputs:
+            biggest = max(inputs, key=lambda g: g.area)
+            rest = [g for g in inputs if g is not biggest]
+            if not rest or biggest.buffer(1.0).contains(unary_union(rest)):
+                boundary, holes = biggest, rest
+
+        if boundary is not None:
+            fill = boundary
+        else:
+            bbox = self.library.cell_bbox(name)
+            if bbox is None:
+                raise LayoutError(f"cell {name!r} is empty -- nothing to cover")
+            x0, y0, x1, y1 = bbox
+            fill = _box(x0 - mrg, y0 - mrg, x1 + mrg, y1 + mrg)
+
+        opening_geoms = list(holes)
+        for src in keepout_nums:
+            if src is None or src < 0 or src == r_layer:
+                continue
+            g = layer_to_shapely_flattened(self.library, cell, src)
+            if not g.is_empty:
+                opening_geoms.append(g)
+
+        result = fill
+        if opening_geoms:
+            merged = unary_union(opening_geoms)
+            if clr:
+                merged = size_geometry(merged, clr)
+            result = fill.difference(merged)
+
+        dt = self.DIELECTRIC_FILL_DATATYPE
+        with self._batch():
+            self.clear_dielectric(layer=r_layer, cell_name=name)
+            written = 0
+            for poly in fracture_polygons(result):
+                pts = list(poly.exterior.coords)[:-1]
+                if len(pts) >= 3:
+                    cell.add_polygon(r_layer, [(int(round(px)), int(round(py)))
+                                               for px, py in pts], datatype=dt)
+                    written += 1
+        self._notify()
+        return written
+
+    def clear_dielectric(self, layer=None, cell_name: Optional[str] = None,
+                          all_datatypes: bool = False) -> int:
+        """Remove the generated dielectric FILL (shapes on ``layer`` at
+        datatype ``DIELECTRIC_FILL_DATATYPE``) in the target cell, so
+        Generate Dielectric Fill can be re-run -- the boundary and
+        keep-out inputs it was built from (datatype 0) are left in
+        place. Pass ``all_datatypes=True`` to wipe the layer entirely,
+        inputs included. ``layer`` defaults to the saved Setup >
+        Dielectric Fill Rules... layer. Returns how many shapes were
+        removed. One undo step (a no-op checkpoint when called from
+        generate_dielectric's own batch)."""
+        name = cell_name or self.current_cell_name
+        if name is None:
+            raise LayoutError("no current cell; call new_cell()/use_cell() first")
+        resolve = self.library.layers.resolve
+        if layer is not None:
+            r_layer = resolve(layer)
+        else:
+            r_layer = int(load_dielectric_rules(self.library)["layer"])
+        if r_layer is None or r_layer < 0:
+            raise LayoutError(
+                "no dielectric layer set -- pass layer=... or configure "
+                "Setup > Dielectric Fill Rules..."
+            )
+        dt = self.DIELECTRIC_FILL_DATATYPE
+        cell = self.library.get_cell(name)
+
+        def _is_fill(s):
+            if s.layer != r_layer:
+                return False
+            return all_datatypes or getattr(s, "datatype", 0) == dt
+
+        keep = [s for s in cell.shapes if not _is_fill(s)]
+        removed = len(cell.shapes) - len(keep)
+        if removed:
+            self._checkpoint()   # a no-op when called inside generate_dielectric's batch
+            cell.shapes = keep
+            self._notify()
+        return removed
+
     def run_drc(self, rules=None, cell_names: Optional[List[str]] = None,
                 error_layer=None) -> List["DrcViolation"]:
         """Run Design Rule Check (DRC) rules -- MIN_WIDTH, MIN_AREA,
@@ -1392,7 +1617,200 @@ class Session:
         self._notify()
         return violations
 
-    def extract_netlist(self, conductor_layers, cell_name: Optional[str] = None) -> List["Net"]:
+    def wire_bond(self, points, layer=None, width=None, pad=None,
+                  min_length=None, max_length=None,
+                  cell_name: Optional[str] = None):
+        """Draw a chip-and-wire assembly WIRE BOND between two points --
+        the jumper that ties a bare-die pad to a thick/thin-film
+        conductor pad, a conductor pad to a package pin, or one
+        conductor pad to another.
+
+        `points` is exactly two (x, y) DBU coordinates: the ball end and
+        the stitch end. The bond is drawn on the bond layer as a round
+        ball of diameter `pad` at each end joined by a `width`-wide
+        round-capped Path -- an ``O------O`` figure -- so it visibly
+        reads as a bond wire and, because that layer is folded into
+        extract_netlist()/NETLIST RUN automatically, it electrically
+        bridges whatever pads its two ends overlap. Connectivity is then
+        reported straight through the bond to the die pin.
+
+        The span (centre-to-centre distance) must lie between the bond
+        rules' ``min_length`` and ``max_length`` -- a bonder can neither
+        loop an arbitrarily short wire nor throw an unsupported one so
+        long it sags or shorts. The new bond also may not CROSS any wire
+        bond already in the cell (bond wires are bare gold in one plane
+        -- crossed wires short); sharing a pad/endpoint is fine, only a
+        proper X crossing is rejected.
+
+        `layer`/`width`/`pad`/`min_length`/`max_length` default to
+        Setup > Wire Bond Rules... (load_bond_rules). Raises LayoutError
+        on a bad layer, wrong point count, out-of-range length, or a
+        crossing. One undo step.
+        """
+        name = cell_name or self.current_cell_name
+        if name is None:
+            raise LayoutError("no current cell; call new_cell()/use_cell() first")
+
+        rules = load_bond_rules(self.library)
+        resolve = self.library.layers.resolve
+        r_layer = resolve(layer) if layer is not None else int(rules["layer"])
+        if r_layer is None or r_layer < 0:
+            raise LayoutError(
+                "no wire-bond layer set -- pass layer=... or configure "
+                "Setup > Wire Bond Rules..."
+            )
+        w = int(width) if width is not None else int(rules["width"])
+        p = int(pad) if pad is not None else int(rules["pad"])
+        lo = float(min_length) if min_length is not None else float(rules["min_length"])
+        hi = float(max_length) if max_length is not None else float(rules["max_length"])
+
+        pts = [(int(round(x)), int(round(y))) for x, y in points]
+        if len(pts) != 2:
+            raise LayoutError(
+                f"a wire bond needs exactly two endpoints, got {len(pts)}"
+            )
+        (x1, y1), (x2, y2) = pts
+        span = math.hypot(x2 - x1, y2 - y1)
+        if span < lo:
+            raise LayoutError(
+                f"wire bond span {span:.0f} DBU is shorter than the "
+                f"minimum {lo:.0f} (Setup > Wire Bond Rules...)"
+            )
+        if span > hi:
+            raise LayoutError(
+                f"wire bond span {span:.0f} DBU is longer than the "
+                f"maximum {hi:.0f} (Setup > Wire Bond Rules...)"
+            )
+
+        cell = self.library.get_cell(name)
+        for a, b in self._existing_bond_segments(cell, r_layer):
+            if _segments_cross((x1, y1), (x2, y2), a, b):
+                raise LayoutError(
+                    "that wire bond would cross an existing bond wire "
+                    "-- bond wires share one plane and can't cross"
+                )
+
+        with self._batch():
+            r = max(1, p // 2)
+            cell.add_circle(r_layer, (x1, y1), r, segments=16)
+            cell.add_circle(r_layer, (x2, y2), r, segments=16)
+            cell.add_path(r_layer, [(x1, y1), (x2, y2)], max(1, w), cap="round")
+        self._notify()
+        return cell.shapes[-1]
+
+    @staticmethod
+    def _existing_bond_segments(cell, layer):
+        """Yield (p0, p1) endpoint pairs for every wire-bond Path already
+        on `layer` in `cell` -- the two-point round-capped Paths
+        wire_bond() draws."""
+        from ..core.shapes import Path
+
+        for s in cell.shapes:
+            if isinstance(s, Path) and s.layer == layer and len(s.points) >= 2:
+                for i in range(len(s.points) - 1):
+                    yield (tuple(s.points[i]), tuple(s.points[i + 1]))
+
+    def auto_route(self, a, b, layer=None, grid: int = 100, width: int = 20,
+                   clearance: Optional[float] = None, margin: Optional[float] = None,
+                   cell_name: Optional[str] = None):
+        """Automatically route a clear orthogonal trace between two
+        points on one conductor layer, dodging every other piece of
+        copper already on that layer.
+
+        ``a`` / ``b`` are each either an ``(x, y)`` DBU point or a
+        pin-bearing shape (Rectangle/Polygon) -- for a shape, its bbox
+        centre is the endpoint and its own copper is excluded from the
+        obstacle set so a trace can land on it. ``layer`` defaults to
+        the Route Layers rule's ``layer_a`` (the "1st routing
+        conductor"). ``grid`` is the routing lattice pitch (pass the
+        canvas's current grid), ``width`` the trace width (pass the
+        canvas's current path width). Obstacles are grown by
+        ``width / 2 + clearance`` (``clearance`` defaults to one grid
+        step) so the finished trace keeps clear of its neighbours.
+        ``margin`` (default: 12 grid steps) is how far past the two
+        endpoints the search area extends.
+
+        Draws the result as a round-capped Path on ``layer`` in one undo
+        step and returns it. Raises ``LayoutError`` if the two points
+        can't be connected with a clear trace at this grid/width, or if
+        the search grid would be too large (use a coarser grid). Needs
+        shapely."""
+        from ..core import autoroute as _ar
+        from ..core.maskops import shape_to_shapely
+
+        name = cell_name or self.current_cell_name
+        if name is None:
+            raise LayoutError("no current cell; call new_cell()/use_cell() first")
+        cell = self.library.get_cell(name)
+        resolve = self.library.layers.resolve
+        if layer is not None:
+            r_layer = resolve(layer)
+        else:
+            r_layer = int(load_route_rules(self.library)["layer_a"])
+        grid = int(grid)
+        width = int(width)
+        if grid <= 0:
+            raise LayoutError("routing grid must be positive")
+        clr = float(clearance) if clearance is not None else float(grid)
+        mrg = float(margin) if margin is not None else 12.0 * grid
+
+        def _endpoint(v):
+            if isinstance(v, (Rectangle, Polygon)):
+                x0, y0, x1, y1 = v.bbox()
+                return ((x0 + x1) / 2.0, (y0 + y1) / 2.0), v
+            return (float(v[0]), float(v[1])), None
+
+        (ax, ay), sa = _endpoint(a)
+        (bx, by), sb = _endpoint(b)
+
+        from shapely.geometry import box as _sbox
+        from shapely.ops import unary_union
+
+        obstacles = layer_to_shapely_flattened(self.library, cell, r_layer)
+        inflate = width / 2.0 + clr
+        # Clear a landing zone around each endpoint so the routed
+        # centre-line can actually start/finish there: the pad the trace
+        # lands on is itself copper on this layer (and, for bare-point
+        # endpoints, we've no shape to exclude by identity), so without
+        # this the buffered obstacle set seals the endpoint off.
+        halo = inflate + 2.0 * grid
+        landing = [
+            _sbox(ax - halo, ay - halo, ax + halo, ay + halo),
+            _sbox(bx - halo, by - halo, bx + halo, by + halo),
+        ]
+        # Also drop the two selected pin shapes' own copper entirely.
+        for s in (sa, sb):
+            if s is not None:
+                g = shape_to_shapely(s)
+                if g is not None and not g.is_empty:
+                    landing.append(g)
+        if not obstacles.is_empty:
+            obstacles = obstacles.difference(unary_union(landing))
+        if not obstacles.is_empty and inflate > 0:
+            obstacles = obstacles.buffer(inflate, join_style="mitre", mitre_limit=5.0)
+
+        x0 = min(ax, bx) - mrg
+        y0 = min(ay, by) - mrg
+        x1 = max(ax, bx) + mrg
+        y1 = max(ay, by) + mrg
+        nx = int((x1 - x0) // grid) + 1
+        ny = int((y1 - y0) // grid) + 1
+
+        try:
+            pts = _ar.route((ax, ay), (bx, by), obstacles, grid,
+                            int(round(x0)), int(round(y0)), nx, ny)
+        except ValueError as exc:
+            raise LayoutError(str(exc))
+        if pts is None:
+            raise LayoutError(
+                f"no clear route on layer {r_layer} between {(int(ax), int(ay))} "
+                f"and {(int(bx), int(by))} at grid {grid} / width {width} "
+                f"(try a coarser grid, a narrower trace, or a larger margin)"
+            )
+        return self.path(r_layer, pts, width, cap="round")
+
+    def extract_netlist(self, conductor_layers, cell_name: Optional[str] = None,
+                        include_bonds: bool = True) -> List["Net"]:
         """Extract the electrical netlist of `cell_name` (default: the
         current cell), as seen across `conductor_layers` -- an iterable
         of layer numbers or names (each resolved the same way every
@@ -1415,11 +1833,22 @@ class Session:
         designator yet). A pin whose own shape isn't on any of
         `conductor_layers` is reported in one final Net(id="UNASSIGNED")
         rather than silently dropped -- see extract_netlist()'s own
-        docstring. Requires the shapely package (see mask_op())."""
+        docstring. Requires the shapely package (see mask_op()).
+
+        `include_bonds` (default True): if Setup > Wire Bond Rules... has
+        a bond layer configured, it's added to `conductor_layers`
+        automatically so every WIRE BOND (wire_bond()/BOND) is treated
+        as conductor and its net is reported straight through to the
+        die pin it lands on. Pass include_bonds=False to see only the
+        conductor layers you named."""
         from ..core.netlist import extract_netlist as _extract_netlist
 
         cell = self.library.get_cell(cell_name) if cell_name else self.cell
         resolved = [self.library.layers.resolve(l) for l in conductor_layers]
+        if include_bonds:
+            b_layer = int(load_bond_rules(self.library)["layer"])
+            if b_layer >= 0 and b_layer not in resolved:
+                resolved.append(b_layer)
         return _extract_netlist(self.library, cell, resolved)
 
     def export_netlist_csv(self, nets: List["Net"], path: str) -> None:

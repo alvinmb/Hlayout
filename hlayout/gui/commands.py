@@ -90,13 +90,19 @@ white so it's clear what's selected):
                                        errors if they're on different layers or
                                        don't actually touch/overlap; see also
                                        MASKOP OR for unioning a whole layer instead
-    MAKECELL <name> <x,y>             turn the current selection into a new named
-                                       cell (moves the selected shapes/instances
+    MAKECELL <name> <x,y>            turn the current selection into a new named
+      [replace=1 | revision=1]        cell (moves the selected shapes/instances
                                        into it, re-based so x,y becomes the new
                                        cell's local origin), then places a fresh
                                        instance of it at x,y so nothing visually
                                        moves -- draw/place geometry, select it,
-                                       MAKECELL, and it's a reusable library cell
+                                       MAKECELL, and it's a reusable library cell.
+                                       On a name clash: replace=1 rebuilds the
+                                       existing cell in place (its instances keep
+                                       working and switch to the new geometry);
+                                       revision=1 saves under the next free
+                                       <name>_N instead, leaving the old cell and
+                                       its instances untouched
 
 Undo/redo (covers every edit, however it was made -- command bar,
 mouse-driven select/move/rotate/edit/delete, or a script):
@@ -253,9 +259,53 @@ requires the shapely package; also available as Tools > DRC...):
                                        violation count broken down by rule; also
                                        available as Session.run_drc()
 
+Dielectric Fill (Tools > Generate Dielectric Fill...; requires shapely):
+    DIELECTRIC [layer=<n>] [clearance=<dbu>] [margin=<dbu>] [keepout=<n>[,<n>...]]
+        [cell=<name>]                   fill the dielectric layer from its own
+                                       datatype-0 geometry -- the enclosing shape is
+                                       the boundary, every other shape inside it (a
+                                       via window, a resistor keep-out, a hand-drawn
+                                       box) is a hole grown by clearance; result is
+                                       written at datatype 1
+    DIELECTRIC CLEAR [layer=<n>] [all=1] [cell=<name>]
+                                       remove the generated fill (datatype 1) so it
+                                       can be regenerated; all=1 wipes the layer,
+                                       inputs included; also Session.generate_dielectric()
+                                       / clear_dielectric()
+
+Wire bonds (Setup > Wire Bond Rules...; chip-and-wire assembly jumpers):
+    BOND <x1,y1> <x2,y2> [layer=<n|name>] [width=<dbu>] [pad=<dbu>] [min=<dbu>]
+        [max=<dbu>] [cell=<name>]       draw a wire bond -- an O------O figure (a ball
+                                       of diameter pad at each end joined by a
+                                       width-wide round path) -- on the bond layer,
+                                       tying a bare-die pad to a conductor pad, a
+                                       conductor pad to a package pin, or two
+                                       conductor pads (a jumper). The span must lie
+                                       within min/max and must not cross an existing
+                                       bond (crossed bare wires short). layer/width/
+                                       pad/min/max default to Setup > Wire Bond
+                                       Rules...; also Session.wire_bond()
+
+Automatic routing (requires the shapely package; also the two-click
+Edit > Auto-Route Two Pins tool):
+    AUTOROUTE <x1,y1> <x2,y2> [layer=<n|name>] [grid=<dbu>] [width=<dbu>]
+        [clearance=<dbu>] [margin=<dbu>] [cell=<name>]
+                                       route a clear orthogonal trace between the two
+                                       points on the routing layer (default: Route
+                                       Layers layer_a -- the 1st routing conductor),
+                                       A*-searching a grid so it dodges every other
+                                       shape on that layer; obstacles are grown by
+                                       width/2 + clearance (clearance defaults to one
+                                       grid step) so the finished copper stays clear.
+                                       grid/width default to the canvas's current grid
+                                       spacing and path width. Draws a round-capped
+                                       Path in one undo step; errors if the two points
+                                       can't be joined at this grid/width. Also
+                                       Session.auto_route()
+
 Netlist Extraction (requires the shapely package; also available as
 Tools > Extract Netlist...):
-    NETLIST RUN <layer1> [layer2 ...] [cell=<name>] [export=<path.csv>]
+    NETLIST RUN <layer1> [layer2 ...] [cell=<name>] [export=<path.csv>] [bonds=0|1]
                                        extract the netlist across the given conductor
                                        layer(s) of the current cell (or cell=<name>),
                                        descending into every placed cell instance
@@ -263,8 +313,11 @@ Tools > Extract Netlist...):
                                        are identified as RefDes.Pin from Rectangle.pin/
                                        Polygon.pin and the placing Sref's Label (Edit
                                        Selected... "Label", or PAD/RESGEN's built-in
-                                       auto-numbering); export=<path.csv> also writes
-                                       a net,ref_des,pin CSV; also available as
+                                       auto-numbering); the Wire Bond Rules... bond
+                                       layer is folded in automatically so bonds carry
+                                       connectivity through to the die pin (bonds=0 to
+                                       opt out); export=<path.csv> also writes a
+                                       net,ref_des,pin CSV; also available as
                                        Session.extract_netlist()/export_netlist_csv()
 
 Scripting:
@@ -626,14 +679,36 @@ class CommandInterpreter:
     def _cmd_makecell(self, args):
         if self.view is None:
             raise CommandError("MAKECELL requires an attached view")
-        if len(args) != 2:
-            raise CommandError("usage: MAKECELL <new cell name> <origin x,y>")
-        name, origin_text = args
+        usage = "usage: MAKECELL <new cell name> <origin x,y> [replace=1 | revision=1]"
+        positional, replace, revision = [], False, False
+        for a in args:
+            k = a.lower()
+            if k.startswith("replace="):
+                replace = k[len("replace="):] in ("1", "true", "yes")
+            elif k.startswith("revision="):
+                revision = k[len("revision="):] in ("1", "true", "yes")
+            else:
+                positional.append(a)
+        if len(positional) != 2:
+            raise CommandError(usage)
+        if replace and revision:
+            raise CommandError("MAKECELL: use replace=1 OR revision=1, not both")
+        name, origin_text = positional
         origin = _parse_point(origin_text)
-        if not self.view.create_cell_from_selection(name, origin):
+        verb = "created"
+        if revision and name in self.session.library.cells:
+            name = self.session.library._unique_cell_name(name)
+            verb = "saved"
+        try:
+            ok = self.view.create_cell_from_selection(name, origin, replace=replace)
+        except LayoutError as e:
+            raise CommandError(str(e))
+        if not ok:
             raise CommandError("nothing suitable selected to make a cell from -- select a "
                                 "whole shape or cell instance (not a single vertex/edge) first")
-        return f"cell {name!r} created from the selection"
+        if replace:
+            verb = "replaced"
+        return f"cell {name!r} {verb} from the selection"
 
     # --- undo/redo --------------------------------------------------------
     def _cmd_undo(self, args):
@@ -819,8 +894,8 @@ class CommandInterpreter:
     def _cmd_resgen(self, args):
         usage = ("usage: RESGEN <x,y> <body_width> <body_length> [rotation=<deg>] "
                  "[ink=<rsh>] [ref=<designator>] [a=<dbu>] [b=<dbu>] [c=<dbu>] "
-                 "[d=<dbu>] [rlayer=<n|name>] [clayer=<n|name>] [glayer=<n|name>] "
-                 "[dlayer=<n|name>]")
+                 "[d=<dbu>] [e=<dbu>] [rlayer=<n|name>] [clayer=<n|name>] "
+                 "[glayer=<n|name>] [dlayer=<n|name>] [kolayer=<n|name>]")
         if len(args) < 3:
             raise CommandError(usage)
         origin = _parse_point(args[0])
@@ -850,6 +925,8 @@ class CommandInterpreter:
                 kwargs["space_c"] = float(v)
             elif k == "d":
                 kwargs["glaze_oversize"] = float(v)
+            elif k == "e":
+                kwargs["keepout_oversize"] = float(v)
             elif k == "rlayer":
                 kwargs["resistor_layer"] = self.session.library.layers.resolve(v)
             elif k == "clayer":
@@ -858,6 +935,8 @@ class CommandInterpreter:
                 kwargs["glaze_layer"] = self.session.library.layers.resolve(v)
             elif k == "dlayer":
                 kwargs["doc_layer"] = self.session.library.layers.resolve(v)
+            elif k == "kolayer":
+                kwargs["keepout_layer"] = self.session.library.layers.resolve(v)
             else:
                 raise CommandError(f"unknown RESGEN option {k!r}")
         device_name = self.session.generate_resistor(
@@ -1008,22 +1087,27 @@ class CommandInterpreter:
         raise CommandError(usage)
 
     def _cmd_netlist(self, args):
-        usage = "usage: NETLIST RUN <layer1> [layer2 ...] [cell=<name>] [export=<path.csv>]"
+        usage = ("usage: NETLIST RUN <layer1> [layer2 ...] [cell=<name>] "
+                 "[export=<path.csv>] [bonds=0|1]")
         if not args or args[0].upper() != "RUN":
             raise CommandError(usage)
         cell_name = None
         export_path = None
+        include_bonds = True
         layers = []
         for a in args[1:]:
             if a.lower().startswith("cell="):
                 cell_name = a.split("=", 1)[1]
             elif a.lower().startswith("export="):
                 export_path = a.split("=", 1)[1]
+            elif a.lower().startswith("bonds="):
+                include_bonds = a.split("=", 1)[1] not in ("0", "false", "no")
             else:
                 layers.append(a)
         if not layers:
             raise CommandError(f"{usage}\n(at least one conductor layer is required)")
-        nets = self.session.extract_netlist(layers, cell_name=cell_name)
+        nets = self.session.extract_netlist(layers, cell_name=cell_name,
+                                            include_bonds=include_bonds)
         if export_path:
             self.session.export_netlist_csv(nets, export_path)
         lines = [f"netlist: {len(nets)} net(s)"]
@@ -1102,6 +1186,132 @@ class CommandInterpreter:
             return f"set shape {index} pin={pin!r}"
 
         raise CommandError(usage)
+
+    def _cmd_dielectric(self, args):
+        usage = (
+            "usage: DIELECTRIC [layer=<n>] [clearance=<dbu>] [margin=<dbu>] "
+            "[keepout=<n>[,<n>...]] [cell=<name>]     -- generate the fill\n"
+            "       DIELECTRIC CLEAR [layer=<n>] [all=1] [cell=<name>]      -- remove it\n"
+            "  (draws the fill from datatype-0 geometry on the dielectric layer:\n"
+            "   the enclosing shape is the boundary, everything else is a hole)"
+        )
+        if args and args[0].upper() in ("CLEAR", "REMOVE"):
+            kwargs = {}
+            for a in args[1:]:
+                if "=" not in a:
+                    raise CommandError(usage)
+                k, v = a.split("=", 1)
+                k = k.lower()
+                if k == "layer":
+                    kwargs["layer"] = v
+                elif k == "cell":
+                    kwargs["cell_name"] = v
+                elif k == "all":
+                    kwargs["all_datatypes"] = v not in ("0", "false", "no")
+                else:
+                    raise CommandError(f"unknown DIELECTRIC CLEAR option {k!r}")
+            removed = self.session.clear_dielectric(**kwargs)
+            return f"removed {removed} dielectric polygon(s)"
+
+        kwargs = {}
+        for a in args:
+            if "=" not in a:
+                raise CommandError(usage)
+            k, v = a.split("=", 1)
+            k = k.lower()
+            if k == "layer":
+                kwargs["layer"] = v
+            elif k == "clearance":
+                kwargs["clearance"] = float(v)
+            elif k == "margin":
+                kwargs["margin"] = float(v)
+            elif k == "keepout":
+                kwargs["keepout_layers"] = [t for t in v.split(",") if t]
+            elif k == "cell":
+                kwargs["cell_name"] = v
+            else:
+                raise CommandError(f"unknown DIELECTRIC option {k!r}")
+        written = self.session.generate_dielectric(**kwargs)
+        return f"dielectric fill: {written} polygon(s) written"
+
+    def _cmd_bond(self, args):
+        usage = (
+            "usage: BOND <x1,y1> <x2,y2> [layer=<n|name>] [width=<dbu>] "
+            "[pad=<dbu>] [min=<dbu>] [max=<dbu>] [cell=<name>]\n"
+            "  draws a wire bond (O------O) between two pads on the bond layer;\n"
+            "  span must be within min/max and must not cross an existing bond.\n"
+            "  Bond layer/defaults come from Setup > Wire Bond Rules..."
+        )
+        if len(args) < 2:
+            raise CommandError(usage)
+        p1 = _parse_point(args[0])
+        p2 = _parse_point(args[1])
+        kwargs = {}
+        for a in args[2:]:
+            if "=" not in a:
+                raise CommandError(usage)
+            k, v = a.split("=", 1)
+            k = k.lower()
+            if k == "layer":
+                kwargs["layer"] = v
+            elif k == "width":
+                kwargs["width"] = int(float(v))
+            elif k == "pad":
+                kwargs["pad"] = int(float(v))
+            elif k == "min":
+                kwargs["min_length"] = float(v)
+            elif k == "max":
+                kwargs["max_length"] = float(v)
+            elif k == "cell":
+                kwargs["cell_name"] = v
+            else:
+                raise CommandError(f"unknown BOND option {k!r}")
+        self.session.wire_bond([p1, p2], **kwargs)
+        import math as _m
+        span = _m.hypot(p2[0] - p1[0], p2[1] - p1[1])
+        return f"wire bond {p1} -> {p2}  (span {span:.0f} DBU)"
+
+    def _cmd_autoroute(self, args):
+        usage = (
+            "usage: AUTOROUTE <x1,y1> <x2,y2> [layer=<n|name>] [grid=<dbu>] "
+            "[width=<dbu>] [clearance=<dbu>] [margin=<dbu>] [cell=<name>]\n"
+            "  routes a clear orthogonal trace between the two points on the\n"
+            "  routing layer (default: Route Layers layer_a), dodging every\n"
+            "  other shape on that layer. grid/width default to the canvas's\n"
+            "  current grid spacing and path width."
+        )
+        if len(args) < 2:
+            raise CommandError(usage)
+        p1 = _parse_point(args[0])
+        p2 = _parse_point(args[1])
+        kwargs = {}
+        if self.view is not None:
+            kwargs["grid"] = int(self.view.grid_dbu)
+            kwargs["width"] = int(self.view.path_width)
+        for a in args[2:]:
+            if "=" not in a:
+                raise CommandError(usage)
+            k, v = a.split("=", 1)
+            k = k.lower()
+            if k == "layer":
+                kwargs["layer"] = v
+            elif k == "grid":
+                kwargs["grid"] = int(float(v))
+            elif k == "width":
+                kwargs["width"] = int(float(v))
+            elif k == "clearance":
+                kwargs["clearance"] = float(v)
+            elif k == "margin":
+                kwargs["margin"] = float(v)
+            elif k == "cell":
+                kwargs["cell_name"] = v
+            else:
+                raise CommandError(f"unknown AUTOROUTE option {k!r}")
+        if "grid" not in kwargs:
+            raise CommandError(f"{usage}\n(no canvas attached -- pass grid= and width=)")
+        path = self.session.auto_route(p1, p2, **kwargs)
+        return (f"auto-routed {p1} -> {p2}: {len(path.points)}-point trace on "
+                f"layer {path.layer}")
 
     def _cmd_via(self, args):
         usage = ("usage: VIA <layer1> <layer2> [shape=square|round] [size=<dbu>] "
