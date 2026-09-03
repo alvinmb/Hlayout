@@ -1,0 +1,541 @@
+{
+  "format": "hlayout-sidecar",
+  "version": 1,
+  "technology": {
+    "format": "hlayout-tech",
+    "version": 1,
+    "layers": [
+      {
+        "number": 0,
+        "name": "Backside Pad",
+        "color": "#e6194b",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 1,
+        "name": "Frontsde Pad",
+        "color": "#3cb44b",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 2,
+        "name": "Top Edge Pad",
+        "color": "#ffe119",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 3,
+        "name": "1st Routing Conductor",
+        "color": "#4363d8",
+        "stipple": 3,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 4,
+        "name": "Routing Dielectric",
+        "color": "#f58231",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 5,
+        "name": "2nd Routing Conductor",
+        "color": "#911eb4",
+        "stipple": 5,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 6,
+        "name": "L6",
+        "color": "#46f0f0",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 7,
+        "name": "Dielectric Keepout",
+        "color": "#f032e6",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 8,
+        "name": "10 Ohms RES",
+        "color": "#bcf60c",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 9,
+        "name": "30 Ohms RES",
+        "color": "#fabebe",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 10,
+        "name": "100 Ohms RES",
+        "color": "#008080",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 11,
+        "name": "300 Ohms RES",
+        "color": "#e6beff",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 12,
+        "name": "1K Ohms RES",
+        "color": "#9a6324",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 13,
+        "name": "3K Ohms RES",
+        "color": "#fffac8",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 14,
+        "name": "10K Ohms RES",
+        "color": "#800000",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 15,
+        "name": "30K Ohms RES",
+        "color": "#aaffc3",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 16,
+        "name": "100K Ohms RES",
+        "color": "#e6194b",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 17,
+        "name": "300K Ohms RES",
+        "color": "#3cb44b",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 18,
+        "name": "1M Ohms RES",
+        "color": "#ffe119",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 19,
+        "name": "Resister Glaze",
+        "color": "#4363d8",
+        "stipple": 3,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 20,
+        "name": "Epoxy",
+        "color": "#f58231",
+        "stipple": 2,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 21,
+        "name": "L21",
+        "color": "#911eb4",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 22,
+        "name": "L22",
+        "color": "#46f0f0",
+        "stipple": 4,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 23,
+        "name": "L23",
+        "color": "#f032e6",
+        "stipple": 5,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 24,
+        "name": "L24",
+        "color": "#bcf60c",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 25,
+        "name": "L25",
+        "color": "#fabebe",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 26,
+        "name": "L26",
+        "color": "#008080",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 27,
+        "name": "L27",
+        "color": "#e6beff",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 28,
+        "name": "L28",
+        "color": "#9a6324",
+        "stipple": 1,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 29,
+        "name": "L29",
+        "color": "#fffac8",
+        "stipple": 2,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 30,
+        "name": "L30",
+        "color": "#800000",
+        "stipple": 3,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 31,
+        "name": "L31",
+        "color": "#aaffc3",
+        "stipple": 4,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 32,
+        "name": "L32",
+        "color": "#e6194b",
+        "stipple": 5,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 33,
+        "name": "L33",
+        "color": "#3cb44b",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 34,
+        "name": "L34",
+        "color": "#ffe119",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 35,
+        "name": "L35",
+        "color": "#4363d8",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 36,
+        "name": "L36",
+        "color": "#f58231",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 37,
+        "name": "L37",
+        "color": "#911eb4",
+        "stipple": 1,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 38,
+        "name": "L38",
+        "color": "#46f0f0",
+        "stipple": 2,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 39,
+        "name": "L39",
+        "color": "#f032e6",
+        "stipple": 3,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 40,
+        "name": "L40",
+        "color": "#bcf60c",
+        "stipple": 4,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 41,
+        "name": "L41",
+        "color": "#fabebe",
+        "stipple": 5,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 42,
+        "name": "L42",
+        "color": "#008080",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 43,
+        "name": "L43",
+        "color": "#e6beff",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 44,
+        "name": "L44",
+        "color": "#9a6324",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 45,
+        "name": "L45",
+        "color": "#fffac8",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 46,
+        "name": "L46",
+        "color": "#800000",
+        "stipple": 1,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 47,
+        "name": "L47",
+        "color": "#aaffc3",
+        "stipple": 2,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 48,
+        "name": "L48",
+        "color": "#e6194b",
+        "stipple": 3,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 49,
+        "name": "L49",
+        "color": "#3cb44b",
+        "stipple": 4,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 50,
+        "name": "L50",
+        "color": "#ffe119",
+        "stipple": 5,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 51,
+        "name": "L51",
+        "color": "#4363d8",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 52,
+        "name": "L52",
+        "color": "#f58231",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 53,
+        "name": "L53",
+        "color": "#911eb4",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 54,
+        "name": "L54",
+        "color": "#46f0f0",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 55,
+        "name": "L55",
+        "color": "#f032e6",
+        "stipple": 1,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 56,
+        "name": "L56",
+        "color": "#bcf60c",
+        "stipple": 2,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 57,
+        "name": "L57",
+        "color": "#fabebe",
+        "stipple": 3,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 58,
+        "name": "Chip_Pads",
+        "color": "#ffffff",
+        "stipple": 4,
+        "fill": false,
+        "visible": true
+      },
+      {
+        "number": 59,
+        "name": "Chip_wire_Bond",
+        "color": "#ffffff",
+        "stipple": 5,
+        "fill": false,
+        "visible": true
+      },
+      {
+        "number": 60,
+        "name": "Header_wire_Bond",
+        "color": "#ffff00",
+        "stipple": 6,
+        "fill": false,
+        "visible": true
+      },
+      {
+        "number": 61,
+        "name": "Document 1",
+        "color": "#ffffff",
+        "stipple": 7,
+        "fill": false,
+        "visible": true
+      },
+      {
+        "number": 62,
+        "name": "RefDes",
+        "color": "#800000",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 63,
+        "name": "Dimention  2",
+        "color": "#aaffc3",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      }
+    ],
+    "params": {
+      "route_rules": "{\"layer_a\": 3, \"layer_b\": 5, \"via_cell\": \"VIA_Layer3_to_Layer5\"}",
+      "resistor_geometry_rules": "{\"overlap_a\": 300, \"pad_b\": 500, \"space_c\": 200, \"glaze_oversize\": 300, \"keepout_oversize\": 100, \"resistor_layer\": 30, \"conductor_layer\": 3, \"glaze_layer\": 19, \"doc_layer\": 62, \"keepout_layer\": 4, \"ink_layers\": {\"10\": 8, \"30\": 9, \"100\": 10, \"300\": 11, \"1000\": 12, \"3000\": 13, \"10000\": 14, \"30000\": 15, \"100000\": 18, \"300000\": 17}}",
+      "resistor_design_rules": "{\"aim_pct\": 75.0, \"ar_min\": 0.25, \"ar_max\": 4.0, \"available_inks\": [10, 30, 100, 300, 1000, 3000, 10000, 30000, 100000, 300000, 1000000]}",
+      "refdes_annotation_layer": "62",
+      "dielectric_rules": "{\"layer\": 4, \"margin\": 1000, \"clearance\": 150, \"keepout_layers\": []}"
+    }
+  },
+  "attached_libraries": [
+    {
+      "name": "LIB",
+      "source_path": "C:/dev/HLayout/lIBRARYS/sot_packages.gds",
+      "gds_base64": "AAYAAgJYABwBAgB+AAkAAQAMABYAEwB+AAkAAQAMABYAEwAIAgZMSUIAABQDBT5BiTdLxqfwOUS4L6CbWlQAHAUCAH4ACQABAAwAFgATAH4ACQABAAwAFgATAA4GBlNPVF9TT1QyMwAABAcAABwFAgB+AAkAAQAMABYAEwB+AAkAAQAMABYAEwAOBgZTT1RfU09UMzIzAAQHAAAcBQIAfgAJAAEADAAWABMAfgAJAAEADAAWABMADgYGU09UX1NPVDQxNgAEBwAAHAUCAH4ACQABAAwAFgATAH4ACQABAAwAFgATAA4GBlNPVF9TT1Q1MjMABAcAABwFAgB+AAkAAQAMABYAEwB+AAkAAQAMABYAEwAOBgZTT1RfU09UNzIzAAQHAAAcBQIAfgAJAAEADAAWABMAfgAJAAEADAAWABMADgYGU09UX1NPVDE0MwAEBwAAHAUCAH4ACQABAAwAFgATAH4ACQABAAwAFgATAA4GBlNPVF9TT1QzNDMABAcAABwFAgB+AAkAAQAMABYAEwB+AAkAAQAMABYAEwAQBgZTT1RfU09UMjNfNQAABAcAABwFAgB+AAkAAQAMABYAEwB+AAkAAQAMABYAEwAOBgZTT1RfU09UMzUzAAQHAAAcBQIAfgAJAAEADAAWABMAfgAJAAEADAAWABMADgYGU09UX1NPVDU1MwAEBwAAHAUCAH4ACQABAAwAFgATAH4ACQABAAwAFgATABAGBlNPVF9TT1QyM182AAAEBwAAHAUCAH4ACQABAAwAFgATAH4ACQABAAwAFgATAA4GBlNPVF9TT1QzNjMABAcAABwFAgB+AAkAAQAMABYAEwB+AAkAAQAMABYAEwAOBgZTT1RfU09UNTYzAAQHAAAcBQIAfgAJAAEADAAWABMAfgAJAAEADAAWABMADgYGU09UX1NPVDg5AAAEBwAAHAUCAH4ACQABAAwAFgATAH4ACQABAAwAFgATAA4GBlNPVF9TT1QyMjMABAcAABwFAgB+AAkAAQAMABYAEwB+AAkAAQAMABYAEwAMBgZTT1RfU09UOAAEBwAAHAUCAH4ACQABAAwAFgATAH4ACQABAAwAFgATAA4GBlNPVF9TT1QxNgAABAcAABwFAgB+AAkAAQAMABYAEwB+AAkAAQAMABYAEwAOBgZTT1RfU09UMjAAAAQHAAAcBQIAfgAJAAEADAAWABMAfgAJAAEADAAWABMADgYGU09UX1NPVDI0AAAEBwAAHAUCAH4ACQABAAwAFgATAH4ACQABAAwAFgATABAGBlNPVF9MSUJSQVJZAAAECgAADhIGU09UX1NPVDIzAAAMEAMAIM5wAAAAAAAEEQAABAoAAA4SBlNPVF9TT1QzMjMADBADAGPx8AAAAAAABBEAAAQKAAAOEgZTT1RfU09UNDE2AAwQAwCcBWgAAAAAAAQRAAAECgAADhIGU09UX1NPVDUyMwAMEAMAzsGwAAAAAAAEEQAABAoAAA4SBlNPVF9TT1Q3MjMADBADAPyIcAAAAAAABBEAAAQKAAAOEgZTT1RfU09UMTQzAAwQAwE3R4AAAAAAAAQRAAAECgAADhIGU09UX1NPVDM0MwAMEAMBemsAAAAAAAAEEQAABAoAABASBlNPVF9TT1QyM181AAAMEAMBu0SQAAAAAAAEEQAABAoAAA4SBlNPVF9TT1QzNTMADBADAfqXgAAAAAAABBEAAAQKAAAOEgZTT1RfU09UNTUzAAwQAwIv/2AAAAAAAAQRAAAECgAAEBIGU09UX1NPVDIzXzYAAAwQAwJsRRAAAAAAAAQRAAAECgAADhIGU09UX1NPVDM2MwAMEAMCq5gAAAAAAAAEEQAABAoAAA4SBlNPVF9TT1Q1NjMADBADAuD/4AAAAAAABBEAAAQKAAAOEgZTT1RfU09UODkAAAwQAwMzZaAAAAAAAAQRAAAECgAADhIGU09UX1NPVDIyMwAMEAMDuaygAAAAAAAEEQAABAoAAAwSBlNPVF9TT1Q4AAwQAwQ9qbAAAAAAAAQRAAAECgAADhIGU09UX1NPVDE2AAAMEAMEq4awAAAAAAAEEQAABAoAAA4SBlNPVF9TT1QyMAAADBADBSil8AAAAAAABBEAAAQKAAAOEgZTT1RfU09UMjQAAAwQAwW1B3AAAAAAAAQRAAAEBwAABAQA"
+    },
+    {
+      "name": "chip_wire",
+      "source_path": "C:/dev/HLayout/hlayout/examples/chip_wire.gds",
+      "gds_base64": "AAYAAgJYABwBAgB+AAkAAQAMABYAFAB+AAkAAQAMABYAFAAOAgZjaGlwX3dpcmUAABQDBT5BiTdLxqfwOUS4L6CbWlQAHAUCAH4ACQABAAwAFgAUAH4ACQABAAwAFgAUAAgGBlRPUAAABAgAAAYNAgA6AAYOAgAAACwQAwGb/MD/DWKgAazFoP8NYqABrMWg/x4rgAGb/MD/HiuAAZv8wP8NYqAABBEAAAQKAAAOEgZjaGlwX3Bpbl8xAAwQAwGfCgD/Gx5AAAQRAAAEBwAAHAUCAH4ACQABAAwAFgAUAH4ACQABAAwAFgAUAA4GBmNoaXBfcGluXzEABAgAAAYNAgA6AAYOAgAAACwQA//+eWD//nlgAAGGoP/+eWAAAYagAAGGoP/+eWAAAYag//55YP/+eWAABBEAAAQHAAAcBQIAfgAJAAEADAAWABQAfgAJAAEADAAWABQADAYGQ0FQXzAyMDEABAgAAAYNAgAUAAYOAgAAACwQA//88sD//PLAAAVXMP/88sAABVcwAAehIP/88sAAB6Eg//zywP/88sAABisCAHwABiwGMQAABBEAAAQIAAAGDQIAFAAGDgIAAAAsEAMAA9CQ//zywAAMNQD//PLAAAw1AAAHoSAAA9CQAAehIAAD0JD//PLAAAYrAgB8AAYsBjIAAAQRAAAECQAABg0CAD0ABg4CAAAABiECAAAACA8DAADDUAAsEAMAAAAAAAAAAAAJJ8AAAAAAAAknwAAEk+AAAAAAAAST4AAAAAAAAAAAAAQRAAAEBwAAHAUCAH4ACQABAAwAFgAUAH4ACQABAAwAFgAUAAwGBkNBUF8wNDAyAAQIAAAGDQIAFAAGDgIAAAAsEAP//PLA//zywAAG3dD//PLAAAbd0AAKrmD//PLAAAquYP/88sD//PLAAAYrAgB8AAYsBjEAAAQRAAAECAAABg0CABQABg4CAAAALBADAAhkcP/88sAAEk+A//zywAAST4AACq5gAAhkcAAKrmAACGRw//zywAAGKwIAfAAGLAYyAAAEEQAABAkAAAYNAgA9AAYOAgAAAAYhAgAAAAgPAwAAw1AALBADAAAAAAAAAAAAD0JAAAAAAAAPQkAAB6EgAAAAAAAHoSAAAAAAAAAAAAAEEQAABAcAABwFAgB+AAkAAQAMABYAFAB+AAkAAQAMABYAFAAMBgZDQVBfMDYwMwAECAAABg0CABQABg4CAAAALBAD//zywP/88sAACSfA//zywAAJJ8AAD0JA//zywAAPQkD//PLA//zywAAGKwIAfAAGLAYxAAAEEQAABAgAAAYNAgAUAAYOAgAAACwQAwAPQkD//PLAABt3QP/88sAAG3dAAA9CQAAPQkAAD0JAAA9CQP/88sAABisCAHwABiwGMgAABBEAAAQJAAAGDQIAPQAGDgIAAAAGIQIAAAAIDwMAAMNQACwQAwAAAAAAAAAAABhqAAAAAAAAGGoAAAw1AAAAAAAADDUAAAAAAAAAAAAABBEAAAQHAAAcBQIAfgAJAAEADAAWABQAfgAJAAEADAAWABQADAYGQ0FQXzA4MDUABAgAAAYNAgAUAAYOAgAAACwQA//88sD//PLAAAquYP/88sAACq5gABYgEP/88sAAFiAQ//zywP/88sAABisCAHwABiwGMQAABBEAAAQIAAAGDQIAFAAGDgIAAAAsEAMAE9Yg//zywAAhkcD//PLAACGRwAAWIBAAE9YgABYgEAAT1iD//PLAAAYrAgB8AAYsBjIAAAQRAAAECQAABg0CAD0ABg4CAAAABiECAAAACA8DAADDUAAsEAMAAAAAAAAAAAAehIAAAAAAAB6EgAATEtAAAAAAABMS0AAAAAAAAAAAAAQRAAAEBwAAHAUCAH4ACQABAAwAFgAUAH4ACQABAAwAFgAUAAwGBkNBUF8xMjA2AAQIAAAGDQIAFAAGDgIAAAAsEAP//PLA//zywAAMNQD//PLAAAw1AAAbd0D//PLAABt3QP/88sD//PLAAAYrAgB8AAYsBjEAAAQRAAAECAAABg0CABQABg4CAAAALBADACSfAP/88sAAM+FA//zywAAz4UAAG3dAACSfAAAbd0AAJJ8A//zywAAGKwIAfAAGLAYyAAAEEQAABAkAAAYNAgA9AAYOAgAAAAYhAgAAAAgPAwAAw1AALBADAAAAAAAAAAAAMNQAAAAAAAAw1AAAGGoAAAAAAAAYagAAAAAAAAAAAAAEEQAABAcAABwFAgB+AAkAAQAMABYAFAB+AAkAAQAMABYAFAAMBgZDQVBfMTIxMAAECAAABg0CABQABg4CAAAALBAD//zywP/88sAADDUA//zywAAMNQAAKTLg//zywAApMuD//PLA//zywAAGKwIAfAAGLAYxAAAEEQAABAgAAAYNAgAUAAYOAgAAACwQAwAknwD//PLAADPhQP/88sAAM+FAACky4AAknwAAKTLgACSfAP/88sAABisCAHwABiwGMgAABBEAAAQJAAAGDQIAPQAGDgIAAAAGIQIAAAAIDwMAAMNQACwQAwAAAAAAAAAAADDUAAAAAAAAMNQAACYloAAAAAAAJiWgAAAAAAAAAAAABBEAAAQHAAAcBQIAfgAJAAEADAAWABQAfgAJAAEADAAWABQADAYGQ0FQXzE4MTIABAgAAAYNAgAUAAYOAgAAACwQA//88sD//PLAAAw1AP/88sAADDUAADPhQP/88sAAM+FA//zywP/88sAABisCAHwABiwGMQAABBEAAAQIAAAGDQIAFAAGDgIAAAAsEAMAOHUg//zywABHt2D//PLAAEe3YAAz4UAAOHUgADPhQAA4dSD//PLAAAYrAgB8AAYsBjIAAAQRAAAECQAABg0CAD0ABg4CAAAABiECAAAACA8DAADDUAAsEAMAAAAAAAAAAABEqiAAAAAAAESqIAAw1AAAAAAAADDUAAAAAAAAAAAAAAQRAAAEBwAAHAUCAH4ACQABAAwAFgAUAH4ACQABAAwAFgAUAAwGBkNBUF8yMDEwAAQIAAAGDQIAFAAGDgIAAAAsEAP//PLA//zywAAMNQD//PLAAAw1AAApMuD//PLAACky4P/88sD//PLAAAYrAgB8AAYsBjEAAAQRAAAECAAABg0CABQABg4CAAAALBADAEAWQP/88sAAT1iA//zywABPWIAAKTLgAEAWQAApMuAAQBZA//zywAAGKwIAfAAGLAYyAAAEEQAABAkAAAYNAgA9AAYOAgAAAAYhAgAAAAgPAwAAw1AALBADAAAAAAAAAAAATEtAAAAAAABMS0AAJiWgAAAAAAAmJaAAAAAAAAAAAAAEEQAABAcAABwFAgB+AAkAAQAMABYAFAB+AAkAAQAMABYAFAAMBgZDQVBfMjUxMgAECAAABg0CABQABg4CAAAALBAD//zywP/88sAADDUA//zywAAMNQAAM+FA//zywAAz4UD//PLA//zywAAGKwIAfAAGLAYxAAAEEQAABAgAAAYNAgAUAAYOAgAAACwQAwBVcwD//PLAAGS1QP/88sAAZLVAADPhQABVcwAAM+FAAFVzAP/88sAABisCAHwABiwGMgAABBEAAAQJAAAGDQIAPQAGDgIAAAAGIQIAAAAIDwMAAMNQACwQAwAAAAAAAAAAAGGoAAAAAAAAYagAADDUAAAAAAAAMNQAAAAAAAAAAAAABBEAAAQHAAAEBAA="
+    }
+  ]
+}

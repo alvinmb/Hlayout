@@ -1,0 +1,536 @@
+{
+  "format": "hlayout-sidecar",
+  "version": 1,
+  "technology": {
+    "format": "hlayout-tech",
+    "version": 1,
+    "layers": [
+      {
+        "number": 0,
+        "name": "Backside Pad",
+        "color": "#e6194b",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 1,
+        "name": "Frontsde Pad",
+        "color": "#3cb44b",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 2,
+        "name": "Top Edge Pad",
+        "color": "#ffe119",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 3,
+        "name": "1st Routing Conductor",
+        "color": "#4363d8",
+        "stipple": 3,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 4,
+        "name": "Routing Dielectric",
+        "color": "#f58231",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 5,
+        "name": "2nd Routing Conductor",
+        "color": "#911eb4",
+        "stipple": 5,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 6,
+        "name": "L6",
+        "color": "#46f0f0",
+        "stipple": 6,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 7,
+        "name": "Dielectric Keepout",
+        "color": "#f032e6",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 8,
+        "name": "10 Ohms RES",
+        "color": "#bcf60c",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 9,
+        "name": "30 Ohms RES",
+        "color": "#fabebe",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 10,
+        "name": "100 Ohms RES",
+        "color": "#008080",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 11,
+        "name": "300 Ohms RES",
+        "color": "#e6beff",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 12,
+        "name": "1K Ohms RES",
+        "color": "#9a6324",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 13,
+        "name": "3K Ohms RES",
+        "color": "#fffac8",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 14,
+        "name": "10K Ohms RES",
+        "color": "#800000",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 15,
+        "name": "30K Ohms RES",
+        "color": "#aaffc3",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 16,
+        "name": "100K Ohms RES",
+        "color": "#e6194b",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 17,
+        "name": "300K Ohms RES",
+        "color": "#3cb44b",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 18,
+        "name": "1M Ohms RES",
+        "color": "#ffe119",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 19,
+        "name": "Resister Glaze",
+        "color": "#4363d8",
+        "stipple": 3,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 20,
+        "name": "L20",
+        "color": "#f58231",
+        "stipple": 2,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 21,
+        "name": "L21",
+        "color": "#911eb4",
+        "stipple": 6,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 22,
+        "name": "L22",
+        "color": "#46f0f0",
+        "stipple": 4,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 23,
+        "name": "L23",
+        "color": "#f032e6",
+        "stipple": 5,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 24,
+        "name": "L24",
+        "color": "#bcf60c",
+        "stipple": 6,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 25,
+        "name": "L25",
+        "color": "#fabebe",
+        "stipple": 8,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 26,
+        "name": "L26",
+        "color": "#008080",
+        "stipple": 8,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 27,
+        "name": "L27",
+        "color": "#e6beff",
+        "stipple": 0,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 28,
+        "name": "L28",
+        "color": "#9a6324",
+        "stipple": 1,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 29,
+        "name": "L29",
+        "color": "#fffac8",
+        "stipple": 2,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 30,
+        "name": "L30",
+        "color": "#800000",
+        "stipple": 3,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 31,
+        "name": "L31",
+        "color": "#aaffc3",
+        "stipple": 4,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 32,
+        "name": "L32",
+        "color": "#e6194b",
+        "stipple": 5,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 33,
+        "name": "L33",
+        "color": "#3cb44b",
+        "stipple": 6,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 34,
+        "name": "L34",
+        "color": "#ffe119",
+        "stipple": 7,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 35,
+        "name": "L35",
+        "color": "#4363d8",
+        "stipple": 8,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 36,
+        "name": "L36",
+        "color": "#f58231",
+        "stipple": 0,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 37,
+        "name": "L37",
+        "color": "#911eb4",
+        "stipple": 1,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 38,
+        "name": "L38",
+        "color": "#46f0f0",
+        "stipple": 2,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 39,
+        "name": "L39",
+        "color": "#f032e6",
+        "stipple": 3,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 40,
+        "name": "L40",
+        "color": "#bcf60c",
+        "stipple": 4,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 41,
+        "name": "L41",
+        "color": "#fabebe",
+        "stipple": 5,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 42,
+        "name": "L42",
+        "color": "#008080",
+        "stipple": 6,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 43,
+        "name": "L43",
+        "color": "#e6beff",
+        "stipple": 7,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 44,
+        "name": "L44",
+        "color": "#9a6324",
+        "stipple": 8,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 45,
+        "name": "L45",
+        "color": "#fffac8",
+        "stipple": 0,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 46,
+        "name": "L46",
+        "color": "#800000",
+        "stipple": 1,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 47,
+        "name": "L47",
+        "color": "#aaffc3",
+        "stipple": 2,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 48,
+        "name": "L48",
+        "color": "#e6194b",
+        "stipple": 3,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 49,
+        "name": "L49",
+        "color": "#3cb44b",
+        "stipple": 4,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 50,
+        "name": "L50",
+        "color": "#ffe119",
+        "stipple": 5,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 51,
+        "name": "L51",
+        "color": "#4363d8",
+        "stipple": 6,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 52,
+        "name": "L52",
+        "color": "#f58231",
+        "stipple": 7,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 53,
+        "name": "L53",
+        "color": "#911eb4",
+        "stipple": 8,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 54,
+        "name": "L54",
+        "color": "#46f0f0",
+        "stipple": 0,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 55,
+        "name": "L55",
+        "color": "#f032e6",
+        "stipple": 1,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 56,
+        "name": "L56",
+        "color": "#bcf60c",
+        "stipple": 2,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 57,
+        "name": "L57",
+        "color": "#fabebe",
+        "stipple": 3,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 58,
+        "name": "L58",
+        "color": "#008080",
+        "stipple": 4,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 59,
+        "name": "L59",
+        "color": "#e6beff",
+        "stipple": 5,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 60,
+        "name": "L60",
+        "color": "#9a6324",
+        "stipple": 6,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 61,
+        "name": "Document 1",
+        "color": "#fffac8",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 62,
+        "name": "RefDes",
+        "color": "#800000",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 63,
+        "name": "Dimention  2",
+        "color": "#aaffc3",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      }
+    ],
+    "params": {
+      "route_rules": "{\"layer_a\": 3, \"layer_b\": 5, \"via_cell\": \"VIA_Layer3_to_Layer5\"}",
+      "resistor_geometry_rules": "{\"overlap_a\": 300, \"pad_b\": 500, \"space_c\": 200, \"glaze_oversize\": 300, \"keepout_oversize\": 100, \"resistor_layer\": 30, \"conductor_layer\": 3, \"glaze_layer\": 19, \"doc_layer\": 62, \"keepout_layer\": 4, \"ink_layers\": {\"10\": 8, \"30\": 9, \"100\": 10, \"300\": 11, \"1000\": 12, \"3000\": 13, \"10000\": 14, \"30000\": 15, \"100000\": 18, \"300000\": 17}}",
+      "resistor_design_rules": "{\"aim_pct\": 75.0, \"ar_min\": 0.25, \"ar_max\": 4.0, \"available_inks\": [10, 30, 100, 300, 1000, 3000, 10000, 30000, 100000, 300000, 1000000]}",
+      "refdes_annotation_layer": "62",
+      "dielectric_rules": "{\"layer\": 4, \"margin\": 1000, \"clearance\": 150, \"keepout_layers\": []}"
+    }
+  },
+  "attached_libraries": [
+    {
+      "name": "SMD_LIBRARY",
+      "source_path": "C:\\dev\\HLayout\\docs\\smd_library.gds",
+      "gds_base64": "AAYAAgJYABwBAgB+AAgAHgASACUALAB+AAgAHgASACUALAAQAgZTTURfTElCUkFSWQAAFAMFPkGJN0vGp/A5RLgvoJtaVAAcBQIAfgAIAB4AEgAlACwAfgAIAB4AEgAlACwACgYGUl8wMjAxAAQIAAAGDQIAAwAGDgIAAAAsEAP/+2wg//22EP/9thD//bYQ//22EAACSfD/+2wgAAJJ8P/7bCD//bYQAAYrAgB8AAYsBjEAAAQRAAAECAAABg0CAAMABg4CAAAALBADAAJJ8P/9thAABJPg//22EAAEk+AAAknwAAJJ8AACSfAAAknw//22EAAGKwIAfAAGLAYyAAAEEQAABAkAAAYNAgA9AAYOAgAAAAYhAgAAAAgPAwABhqAALBAD//tsIP/9thAABJPg//22EAAEk+AAAknw//tsIAACSfD/+2wg//22EAAEEQAABAcAABwFAgB+AAgAHgASACUALAB+AAgAHgASACUALAAKBgZDXzAyMDEABAgAAAYNAgADAAYOAgAAACwQA//7bCD//bYQ//22EP/9thD//bYQAAJJ8P/7bCAAAknw//tsIP/9thAABisCAHwABiwGMQAABBEAAAQIAAAGDQIAAwAGDgIAAAAsEAMAAknw//22EAAEk+D//bYQAAST4AACSfAAAknwAAJJ8AACSfD//bYQAAYrAgB8AAYsBjIAAAQRAAAECQAABg0CAD0ABg4CAAAABiECAAAACA8DAAGGoAAsEAP/+2wg//22EAAEk+D//bYQAAST4AACSfD/+2wgAAJJ8P/7bCD//bYQAAQRAAAEBwAAHAUCAH4ACAAeABIAJQAsAH4ACAAeABIAJQAsAAoGBlJfMDQwMgAECAAABg0CAAMABg4CAAAALBAD//he4P/8L3D//C9w//wvcP/8L3AAA9CQ//he4AAD0JD/+F7g//wvcAAGKwIAfAAGLAYxAAAEEQAABAgAAAYNAgADAAYOAgAAACwQAwAD0JD//C9wAAehIP/8L3AAB6EgAAPQkAAD0JAAA9CQAAPQkP/8L3AABisCAHwABiwGMgAABBEAAAQIAAAGDQIAFgAGDgIAAAAsEAMABVcwAAJJ8AAGGoAAAknwAAYagP/9thAABVcw//22EAAFVzAAAknwAAQRAAAECAAABg0CABYABg4CAAAALBAD//nlgAACSfD/+qjQAAJJ8P/6qND//bYQ//nlgP/9thD/+eWAAAJJ8AAEEQAABAkAAAYNAgA9AAYOAgAAAAYhAgAAAAgPAwABhqAALBAD//he4P/8L3AAB6Eg//wvcAAHoSAAA9CQ//he4AAD0JD/+F7g//wvcAAEEQAABAcAABwFAgB+AAgAHgASACUALAB+AAgAHgASACUALAAKBgZDXzA0MDIABAgAAAYNAgADAAYOAgAAACwQA//4XuD//C9w//wvcP/8L3D//C9wAAPQkP/4XuAAA9CQ//he4P/8L3AABisCAHwABiwGMQAABBEAAAQIAAAGDQIAAwAGDgIAAAAsEAMAA9CQ//wvcAAHoSD//C9wAAehIAAD0JAAA9CQAAPQkAAD0JD//C9wAAYrAgB8AAYsBjIAAAQRAAAECAAABg0CABYABg4CAAAALBADAAVXMAACSfAABhqAAAJJ8AAGGoD//bYQAAVXMP/9thAABVcwAAJJ8AAEEQAABAgAAAYNAgAWAAYOAgAAACwQA//55YAAAknw//qo0AACSfD/+qjQ//22EP/55YD//bYQ//nlgAACSfAABBEAAAQJAAAGDQIAPQAGDgIAAAAGIQIAAAAIDwMAAYagACwQA//4XuD//C9wAAehIP/8L3AAB6EgAAPQkP/4XuAAA9CQ//he4P/8L3AABBEAAAQHAAAcBQIAfgAIAB4AEgAlACwAfgAIAB4AEgAlACwACgYGUl8wNjAzAAQIAAAGDQIAAwAGDgIAAAAsEAP/88sA//nlgP/55YD/+eWA//nlgAAGGoD/88sAAAYagP/zywD/+eWAAAYrAgB8AAYsBjEAAAQRAAAECAAABg0CAAMABg4CAAAALBADAAYagP/55YAADDUA//nlgAAMNQAABhqAAAYagAAGGoAABhqA//nlgAAGKwIAfAAGLAYyAAAEEQAABAgAAAYNAgAWAAYOAgAAACwQAwAHoSAABJPgAAquYAAEk+AACq5g//tsIAAHoSD/+2wgAAehIAAEk+AABBEAAAQIAAAGDQIAFgAGDgIAAAAsEAP/9VGgAAST4P/4XuAABJPg//he4P/7bCD/9VGg//tsIP/1UaAABJPgAAQRAAAECQAABg0CAD0ABg4CAAAABiECAAAACA8DAAGGoAAsEAP/88sA//nlgAAMNQD/+eWAAAw1AAAGGoD/88sAAAYagP/zywD/+eWAAAQRAAAEBwAAHAUCAH4ACAAeABIAJQAsAH4ACAAeABIAJQAsAAoGBkNfMDYwMwAECAAABg0CAAMABg4CAAAALBAD//PLAP/55YD/+eWA//nlgP/55YAABhqA//PLAAAGGoD/88sA//nlgAAGKwIAfAAGLAYxAAAEEQAABAgAAAYNAgADAAYOAgAAACwQAwAGGoD/+eWAAAw1AP/55YAADDUAAAYagAAGGoAABhqAAAYagP/55YAABisCAHwABiwGMgAABBEAAAQIAAAGDQIAFgAGDgIAAAAsEAMAB6EgAAST4AAKrmAABJPgAAquYP/7bCAAB6Eg//tsIAAHoSAABJPgAAQRAAAECAAABg0CABYABg4CAAAALBAD//VRoAAEk+D/+F7gAAST4P/4XuD/+2wg//VRoP/7bCD/9VGgAAST4AAEEQAABAkAAAYNAgA9AAYOAgAAAAYhAgAAAAgPAwABhqAALBAD//PLAP/55YAADDUA//nlgAAMNQAABhqA//PLAAAGGoD/88sA//nlgAAEEQAABAcAABwFAgB+AAgAHgASACUALAB+AAgAHgASACUALAAKBgZSXzA4MDUABAgAAAYNAgADAAYOAgAAACwQA//wvcD/9naY//he4P/2dpj/+F7gAAmJaP/wvcAACYlo//C9wP/2dpgABisCAHwABiwGMQAABBEAAAQIAAAGDQIAAwAGDgIAAAAsEAMAB6Eg//Z2mAAPQkD/9naYAA9CQAAJiWgAB6EgAAmJaAAHoSD/9naYAAYrAgB8AAYsBjIAAAQRAAAECAAABg0CABYABg4CAAAALBADAAknwAAIAsgADbugAAgCyAANu6D/9/04AAknwP/3/TgACSfAAAgCyAAEEQAABAgAAAYNAgAWAAYOAgAAACwQA//yRGAACALI//bYQAAIAsj/9thA//f9OP/yRGD/9/04//JEYAAIAsgABBEAAAQJAAAGDQIAPQAGDgIAAAAGIQIAAAAIDwMAAYagACwQA//wvcD/9naYAA9CQP/2dpgAD0JAAAmJaP/wvcAACYlo//C9wP/2dpgABBEAAAQHAAAcBQIAfgAIAB4AEgAlACwAfgAIAB4AEgAlACwACgYGQ18wODA1AAQIAAAGDQIAAwAGDgIAAAAsEAP/8L3A//Z2mP/4XuD/9naY//he4AAJiWj/8L3A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"
+    }
+  ]
+}

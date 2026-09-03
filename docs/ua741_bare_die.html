@@ -1,0 +1,467 @@
+<title>µA741 Bare Die</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+  :root{
+    --ground:#f6f7f9;
+    --panel:#ffffff;
+    --panel-2:#eef0f4;
+    --ink:#1a1f2b;
+    --ink-soft:#3c4453;
+    --muted:#6a7382;
+    --line:#d6dae1;
+    --line-soft:#e6e9ee;
+    --accent:#b1712b;
+    --accent-soft:#f0e2d0;
+    --accent-ink:#7a4c17;
+    --caution:#9d372f;
+    --caution-soft:#f3e0dd;
+    --pad:#c98a44;
+    --die:#e9ecf1;
+    --die-core:#dfe3ea;
+    --shadow:0 1px 2px rgba(20,26,40,.05),0 8px 24px rgba(20,26,40,.06);
+    --radius:10px;
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --ground:#0e1116;
+      --panel:#161b22;
+      --panel-2:#1c222b;
+      --ink:#e9edf3;
+      --ink-soft:#c2c9d4;
+      --muted:#8b95a4;
+      --line:#2b323c;
+      --line-soft:#232a33;
+      --accent:#dd9a54;
+      --accent-soft:#33261a;
+      --accent-ink:#e7b177;
+      --caution:#e07a70;
+      --caution-soft:#2e1c1a;
+      --pad:#d99a54;
+      --die:#1e2530;
+      --die-core:#232b36;
+      --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0e1116;
+    --panel:#161b22;
+    --panel-2:#1c222b;
+    --ink:#e9edf3;
+    --ink-soft:#c2c9d4;
+    --muted:#8b95a4;
+    --line:#2b323c;
+    --line-soft:#232a33;
+    --accent:#dd9a54;
+    --accent-soft:#33261a;
+    --accent-ink:#e7b177;
+    --caution:#e07a70;
+    --caution-soft:#2e1c1a;
+    --pad:#d99a54;
+    --die:#1e2530;
+    --die-core:#232b36;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.35);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0;
+    background:var(--ground);
+    color:var(--ink);
+    font-family:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    font-size:15px;
+    line-height:1.62;
+    -webkit-font-smoothing:antialiased;
+  }
+  .sheet{
+    max-width:812px;
+    margin:0 auto;
+    padding:56px 32px 72px;
+  }
+
+  .eyebrow{
+    font-family:"IBM Plex Mono",monospace;
+    font-size:11.5px;
+    letter-spacing:.18em;
+    text-transform:uppercase;
+    color:var(--accent-ink);
+    margin:0 0 14px;
+  }
+  h1{
+    font-family:"IBM Plex Serif",Georgia,serif;
+    font-weight:600;
+    font-size:44px;
+    line-height:1.05;
+    letter-spacing:-.01em;
+    margin:0 0 8px;
+    text-wrap:balance;
+  }
+  .lede{
+    font-size:16px;
+    color:var(--ink-soft);
+    max-width:62ch;
+    margin:0 0 18px;
+  }
+  .provenance{
+    font-family:"IBM Plex Mono",monospace;
+    font-size:12px;
+    color:var(--muted);
+    margin:0;
+    padding-top:14px;
+    border-top:1px solid var(--line);
+  }
+
+  .facts{
+    list-style:none;
+    margin:26px 0 0;
+    padding:0;
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(148px,1fr));
+    gap:1px;
+    background:var(--line);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    overflow:hidden;
+  }
+  .facts li{
+    background:var(--panel);
+    padding:14px 16px;
+  }
+  .facts dt{
+    font-family:"IBM Plex Mono",monospace;
+    font-size:10.5px;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--muted);
+    margin:0 0 4px;
+  }
+  .facts dd{
+    margin:0;
+    font-size:14px;
+    font-weight:500;
+    font-variant-numeric:tabular-nums;
+  }
+
+  section{margin-top:52px}
+  .sec-head{
+    display:flex;
+    align-items:baseline;
+    gap:12px;
+    margin:0 0 20px;
+    padding-bottom:10px;
+    border-bottom:1px solid var(--line);
+  }
+  .sec-num{
+    font-family:"IBM Plex Mono",monospace;
+    font-size:13px;
+    color:var(--accent-ink);
+    font-weight:500;
+  }
+  h2{
+    font-family:"IBM Plex Serif",Georgia,serif;
+    font-weight:500;
+    font-size:22px;
+    margin:0;
+    letter-spacing:-.005em;
+  }
+
+  figure{margin:0}
+  .diagram{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:20px 12px 12px;
+    box-shadow:var(--shadow);
+  }
+  .diagram svg{display:block;width:100%;height:auto}
+  figcaption{
+    font-family:"IBM Plex Mono",monospace;
+    font-size:12px;
+    color:var(--muted);
+    margin-top:12px;
+    padding-left:4px;
+  }
+
+  .table-wrap{
+    overflow-x:auto;
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    background:var(--panel);
+  }
+  table{
+    width:100%;
+    border-collapse:collapse;
+    font-size:13.5px;
+  }
+  thead th{
+    background:var(--panel-2);
+    font-family:"IBM Plex Mono",monospace;
+    font-size:10.5px;
+    letter-spacing:.12em;
+    text-transform:uppercase;
+    color:var(--muted);
+    text-align:left;
+    padding:11px 16px;
+    border-bottom:1px solid var(--line);
+    white-space:nowrap;
+  }
+  tbody td{
+    padding:11px 16px;
+    border-bottom:1px solid var(--line-soft);
+    vertical-align:top;
+  }
+  tbody tr:last-child td{border-bottom:none}
+  td.sym,td.num,td.val{
+    font-family:"IBM Plex Mono",monospace;
+    font-variant-numeric:tabular-nums;
+    white-space:nowrap;
+  }
+  td.num{color:var(--accent-ink);font-weight:500;width:44px}
+  .nc td{color:var(--muted)}
+  .pad-yes{color:var(--accent-ink)}
+  .pad-no{color:var(--muted)}
+
+  .callout{
+    margin-top:16px;
+    display:flex;
+    gap:12px;
+    padding:13px 16px;
+    background:var(--caution-soft);
+    border:1px solid var(--caution);
+    border-radius:var(--radius);
+    font-size:13px;
+    color:var(--caution);
+  }
+  .callout b{font-weight:600}
+
+  ul.notes{
+    margin:0;
+    padding:0;
+    list-style:none;
+  }
+  ul.notes li{
+    padding:12px 0 12px 22px;
+    border-bottom:1px solid var(--line-soft);
+    position:relative;
+    font-size:14px;
+  }
+  ul.notes li:last-child{border-bottom:none}
+  ul.notes li::before{
+    content:"";
+    position:absolute;
+    left:2px;top:19px;
+    width:7px;height:7px;
+    background:var(--accent);
+    border-radius:2px;
+  }
+  ul.notes b{font-weight:600}
+
+  .model code{
+    font-family:"IBM Plex Mono",monospace;
+    font-size:12.5px;
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    border-radius:6px;
+    padding:2px 6px;
+  }
+  .model pre{
+    margin:14px 0 0;
+    overflow-x:auto;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:14px 16px;
+    font-family:"IBM Plex Mono",monospace;
+    font-size:12.5px;
+    line-height:1.6;
+    color:var(--ink-soft);
+  }
+
+  footer{
+    margin-top:56px;
+    padding-top:18px;
+    border-top:1px solid var(--line);
+    font-size:12.5px;
+    color:var(--muted);
+    font-family:"IBM Plex Mono",monospace;
+    line-height:1.8;
+  }
+  footer a{color:var(--accent-ink)}
+  footer a:focus-visible,.model a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+
+  @media (max-width:560px){
+    .sheet{padding:40px 20px 56px}
+    h1{font-size:34px}
+  }
+</style>
+
+<div class="sheet">
+
+  <header>
+    <p class="eyebrow">Operational amplifier · bare die</p>
+    <h1>µA741</h1>
+    <p class="lede">General-purpose internally-compensated bipolar op-amp, supplied as an unpackaged die for hybrid and chip-and-wire assembly. Seven aluminium bond pads in standard 8-pin order.</p>
+    <p class="provenance">Reference sheet compiled from public data — not a manufacturer document. Values are for the µA741C grade unless noted.</p>
+  </header>
+
+  <ul class="facts">
+    <li><dt>Package</dt><dd>Bare die (chip)</dd></li>
+    <li><dt>Topology</dt><dd>BJT, 2-stage</dd></li>
+    <li><dt>Compensation</dt><dd>Internal, 30 pF</dd></li>
+    <li><dt>Supply</dt><dd>±5 to ±18 V</dd></li>
+    <li><dt>Die size</dt><dd>≈1.1 × 1.1 mm</dd></li>
+    <li><dt>Bond pads</dt><dd>7 × Al, ~100 µm</dd></li>
+  </ul>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">1</span><h2>Pin configuration</h2></div>
+    <figure>
+      <div class="diagram">
+        <svg viewBox="0 0 640 330" role="img" xmlns="http://www.w3.org/2000/svg" font-family="'IBM Plex Mono', monospace">
+          <title>µA741 bare die bond-pad layout</title>
+          <desc>Square die with four bond pads down the left edge — pin 1 offset null, pin 2 inverting input, pin 3 non-inverting input, pin 4 negative supply — and three down the right edge — pin 7 positive supply, pin 6 output, pin 5 offset null. A dot marks the pin-1 corner. Pin 8 is a no-connect with no pad.</desc>
+
+          <rect x="230" y="52" width="200" height="200" rx="7" fill="var(--die)" stroke="var(--line)" stroke-width="1.5"/>
+          <rect x="250" y="72" width="160" height="160" rx="4" fill="var(--die-core)" stroke="var(--line)" stroke-width="1"/>
+          <text x="330" y="156" text-anchor="middle" font-size="11" fill="var(--muted)">op-amp cell</text>
+          <circle cx="241" cy="63" r="3.4" fill="var(--accent)"/>
+
+          <g fill="var(--pad)" stroke="var(--accent-ink)" stroke-width="1">
+            <rect x="222" y="76"  width="16" height="16" rx="2"/>
+            <rect x="222" y="120" width="16" height="16" rx="2"/>
+            <rect x="222" y="164" width="16" height="16" rx="2"/>
+            <rect x="222" y="220" width="16" height="16" rx="2"/>
+            <rect x="422" y="76"  width="16" height="16" rx="2"/>
+            <rect x="422" y="128" width="16" height="16" rx="2"/>
+            <rect x="422" y="220" width="16" height="16" rx="2"/>
+          </g>
+
+          <g font-size="13" fill="var(--ink)">
+            <text x="208" y="88"  text-anchor="end">1 · offset null</text>
+            <text x="208" y="132" text-anchor="end">2 · IN−</text>
+            <text x="208" y="176" text-anchor="end">3 · IN+</text>
+            <text x="208" y="232" text-anchor="end">4 · VCC−</text>
+            <text x="452" y="88"  text-anchor="start">7 · VCC+</text>
+            <text x="452" y="140" text-anchor="start">6 · OUT</text>
+            <text x="452" y="232" text-anchor="start">5 · offset null</text>
+          </g>
+
+          <g stroke="var(--muted)" stroke-width="1" fill="var(--muted)" font-size="11">
+            <line x1="230" y1="282" x2="430" y2="282"/>
+            <line x1="230" y1="276" x2="230" y2="288"/>
+            <line x1="430" y1="276" x2="430" y2="288"/>
+            <text x="330" y="304" text-anchor="middle" stroke="none">1100 µm die edge</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption>Die drawn to the µA741 bonding-pad arrangement. Backside metallisation is electrically VCC−. TI die ≈ 1.1 × 1.1 mm; National (LM741) die ≈ 1.1 × 0.8 mm.</figcaption>
+    </figure>
+
+    <div class="table-wrap" style="margin-top:22px">
+      <table>
+        <thead>
+          <tr><th>Pin</th><th>Symbol</th><th>Function</th><th>Pad on die</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="num">1</td><td class="sym">NC1 / OFFSET</td><td>Offset-null (external trim pot wiper to VCC−)</td><td class="pad-yes">Yes</td></tr>
+          <tr><td class="num">2</td><td class="sym">IN−</td><td>Inverting input</td><td class="pad-yes">Yes</td></tr>
+          <tr><td class="num">3</td><td class="sym">IN+</td><td>Non-inverting input</td><td class="pad-yes">Yes</td></tr>
+          <tr><td class="num">4</td><td class="sym">VCC−</td><td>Negative supply — also the substrate / die backside</td><td class="pad-yes">Yes</td></tr>
+          <tr><td class="num">5</td><td class="sym">NC2 / OFFSET</td><td>Offset-null (external trim pot end)</td><td class="pad-yes">Yes</td></tr>
+          <tr><td class="num">6</td><td class="sym">OUT</td><td>Output</td><td class="pad-yes">Yes</td></tr>
+          <tr><td class="num">7</td><td class="sym">VCC+</td><td>Positive supply</td><td class="pad-yes">Yes</td></tr>
+          <tr class="nc"><td class="num">8</td><td class="sym">NC</td><td>No internal connection</td><td class="pad-no">None</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">2</span><h2>Die &amp; assembly data</h2></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Parameter</th><th>Value</th><th>Note</th></tr></thead>
+        <tbody>
+          <tr><td>Die size</td><td class="val">1.1 × 1.1 mm</td><td>TI; ≈ 43 × 43 mil. National LM741 ≈ 1.1 × 0.8 mm</td></tr>
+          <tr><td>Die thickness</td><td class="val">≈ 0.38 mm</td><td>15 mil typical</td></tr>
+          <tr><td>Bond-pad size</td><td class="val">≈ 0.10 × 0.10 mm</td><td>4 × 4 mil minimum, doped aluminium</td></tr>
+          <tr><td>Metallisation</td><td class="val">Aluminium</td><td>Single layer</td></tr>
+          <tr><td>Backside potential</td><td class="val">VCC−</td><td>Conductive substrate — isolate from V+ nets</td></tr>
+          <tr><td>Die attach</td><td class="val">Epoxy / Au-Si</td><td>Silver-filled conductive epoxy, or gold-silicon eutectic preform</td></tr>
+          <tr><td>Wire bond</td><td class="val">Al or Au</td><td>Thermocompression or ultrasonic</td></tr>
+          <tr><td>Storage temp</td><td class="val">−65 to +150 °C</td><td>Handle under ESD control</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">3</span><h2>Absolute maximum ratings</h2></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Rating</th><th>µA741C</th><th>µA741 (mil)</th></tr></thead>
+        <tbody>
+          <tr><td>Supply voltage, VCC+ to VCC−</td><td class="val">±18 V</td><td class="val">±22 V</td></tr>
+          <tr><td>Differential input voltage</td><td class="val">±30 V</td><td class="val">±30 V</td></tr>
+          <tr><td>Input voltage (either input)</td><td class="val">±15 V</td><td class="val">±15 V</td></tr>
+          <tr><td>Output short-circuit duration</td><td class="val">Indefinite</td><td class="val">Indefinite</td></tr>
+          <tr><td>Power dissipation (die)</td><td class="val">500 mW</td><td class="val">500 mW</td></tr>
+          <tr><td>Operating free-air temp</td><td class="val">0 to +70 °C</td><td class="val">−55 to +125 °C</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout"><b>Caution</b><span>Stresses beyond these ratings may cause permanent damage. Input voltage rating applies only for supplies below ±15 V; keep |Vin| ≤ VCC.</span></div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">4</span><h2>Electrical characteristics</h2></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Parameter</th><th>Min</th><th>Typ</th><th>Max</th><th>Unit</th></tr></thead>
+        <tbody>
+          <tr><td>Input offset voltage</td><td class="val">—</td><td class="val">1</td><td class="val">6</td><td class="val">mV</td></tr>
+          <tr><td>Input offset current</td><td class="val">—</td><td class="val">20</td><td class="val">200</td><td class="val">nA</td></tr>
+          <tr><td>Input bias current</td><td class="val">—</td><td class="val">80</td><td class="val">500</td><td class="val">nA</td></tr>
+          <tr><td>Input resistance</td><td class="val">0.3</td><td class="val">2</td><td class="val">—</td><td class="val">MΩ</td></tr>
+          <tr><td>Large-signal voltage gain</td><td class="val">20</td><td class="val">200</td><td class="val">—</td><td class="val">V/mV</td></tr>
+          <tr><td>Common-mode rejection ratio</td><td class="val">70</td><td class="val">90</td><td class="val">—</td><td class="val">dB</td></tr>
+          <tr><td>Slew rate (unity gain)</td><td class="val">—</td><td class="val">0.5</td><td class="val">—</td><td class="val">V/µs</td></tr>
+          <tr><td>Gain–bandwidth product</td><td class="val">—</td><td class="val">1</td><td class="val">—</td><td class="val">MHz</td></tr>
+          <tr><td>Output short-circuit current</td><td class="val">—</td><td class="val">25</td><td class="val">—</td><td class="val">mA</td></tr>
+          <tr><td>Supply current (no load)</td><td class="val">—</td><td class="val">1.7</td><td class="val">2.8</td><td class="val">mA</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <figcaption style="margin-top:12px">µA741C, VCC = ±15 V, TA = 25 °C. Consult the source datasheet for full test conditions and over-temperature limits.</figcaption>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">5</span><h2>Assembly notes</h2></div>
+    <ul class="notes">
+      <li><b>Substrate is live.</b> The die backside sits at VCC−. Mount on a VCC− island, or on an isolated pad kept clear of positive-rail copper.</li>
+      <li><b>Offset trim.</b> Wire a 10 kΩ pot across pads 1 and 5 with the wiper to VCC−; omit if the application tolerates the untrimmed offset.</li>
+      <li><b>Bond order.</b> Pads follow the 8-pin DIP sequence — 1→4 down the left edge, 7→5 down the right — which keeps bond wires short and non-crossing on a standard footprint.</li>
+      <li><b>Handling.</b> Bare die has no package protection: work under ESD control, in a controlled-atmosphere or nitrogen environment, and glob-top or lid the cavity after bonding.</li>
+    </ul>
+  </section>
+
+  <section class="model">
+    <div class="sec-head"><span class="sec-num">6</span><h2>Modelling in HLayout</h2></div>
+    <p>Build a device cell for the die — a ~1.1 mm body outline plus seven pads on the land layer, each tagged <code>pin="1"</code>…<code>pin="7"</code> at the edge coordinates above — then place it like any attached part and route to the pads.</p>
+    <pre>c = lib.new_cell("UA741_DIE")
+c.add_path(OUTLINE, square(1100), width=20)          # 1.1 mm die edge
+c.add_rectangle(LAND, -640, 380, -540, 480, pin="1") # left column, pin 1
+# ... pads 2,3,4 down -x ; pads 7,6,5 down +x
+s.place_cell("UA741_DIE", (x, y))</pre>
+  </section>
+
+  <footer>
+    Sources — µA741 datasheet (Texas Instruments SLOS094 / Fairchild original); die photographs and dimensions:
+    <a href="https://www.tinytransistors.net/2020/11/03/the-741-op-amp/">tinytransistors.net</a>,
+    <a href="https://components101.com/ics/ua741-op-amp-pinout-datasheet">components101.com</a>.<br>
+    Compiled reference · figures are original artwork · verify against the manufacturer datasheet before fabrication.
+  </footer>
+
+</div>

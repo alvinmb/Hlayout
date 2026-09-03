@@ -1,0 +1,324 @@
+<title>Twin-T Notch Filter (µA741)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+  :root{
+    --ground:#f6f7f9;
+    --panel:#ffffff;
+    --panel-2:#eef0f4;
+    --ink:#1a1f2b;
+    --ink-soft:#3c4453;
+    --muted:#6a7382;
+    --line:#d6dae1;
+    --line-soft:#e6e9ee;
+    --accent:#b1712b;
+    --accent-soft:#f0e2d0;
+    --accent-ink:#7a4c17;
+    --caution:#9d372f;
+    --caution-soft:#f3e0dd;
+    --wire:#5b6472;
+    --part:#c98a44;
+    --panel-svg:#fbfcfd;
+    --radius:10px;
+    --shadow:0 1px 2px rgba(20,26,40,.05),0 8px 24px rgba(20,26,40,.06);
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --ground:#0e1116; --panel:#161b22; --panel-2:#1c222b;
+      --ink:#e9edf3; --ink-soft:#c2c9d4; --muted:#8b95a4;
+      --line:#2b323c; --line-soft:#232a33;
+      --accent:#dd9a54; --accent-soft:#33261a; --accent-ink:#e7b177;
+      --caution:#e07a70; --caution-soft:#2e1c1a;
+      --wire:#8b95a4; --part:#d99a54; --panel-svg:#12171e;
+      --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0e1116; --panel:#161b22; --panel-2:#1c222b;
+    --ink:#e9edf3; --ink-soft:#c2c9d4; --muted:#8b95a4;
+    --line:#2b323c; --line-soft:#232a33;
+    --accent:#dd9a54; --accent-soft:#33261a; --accent-ink:#e7b177;
+    --caution:#e07a70; --caution-soft:#2e1c1a;
+    --wire:#8b95a4; --part:#d99a54; --panel-svg:#12171e;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.35);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0;background:var(--ground);color:var(--ink);
+    font-family:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    font-size:15px;line-height:1.62;-webkit-font-smoothing:antialiased;
+  }
+  .sheet{max-width:812px;margin:0 auto;padding:56px 32px 72px}
+
+  .eyebrow{
+    font-family:"IBM Plex Mono",monospace;font-size:11.5px;letter-spacing:.18em;
+    text-transform:uppercase;color:var(--accent-ink);margin:0 0 14px;
+  }
+  h1{
+    font-family:"IBM Plex Serif",Georgia,serif;font-weight:600;font-size:40px;
+    line-height:1.08;letter-spacing:-.01em;margin:0 0 8px;text-wrap:balance;
+  }
+  .lede{font-size:16px;color:var(--ink-soft);max-width:64ch;margin:0 0 18px}
+  .provenance{
+    font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--muted);
+    margin:0;padding-top:14px;border-top:1px solid var(--line);
+  }
+
+  .facts{
+    list-style:none;margin:26px 0 0;padding:0;display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;
+    background:var(--line);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
+  }
+  .facts li{background:var(--panel);padding:14px 16px}
+  .facts dt{
+    font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--muted);margin:0 0 4px;
+  }
+  .facts dd{margin:0;font-size:14px;font-weight:500;font-variant-numeric:tabular-nums}
+
+  section{margin-top:52px}
+  .sec-head{
+    display:flex;align-items:baseline;gap:12px;margin:0 0 20px;
+    padding-bottom:10px;border-bottom:1px solid var(--line);
+  }
+  .sec-num{font-family:"IBM Plex Mono",monospace;font-size:13px;color:var(--accent-ink);font-weight:500}
+  h2{font-family:"IBM Plex Serif",Georgia,serif;font-weight:500;font-size:22px;margin:0;letter-spacing:-.005em}
+
+  figure{margin:0}
+  .diagram{
+    background:var(--panel-svg);border:1px solid var(--line);border-radius:var(--radius);
+    padding:18px 14px 10px;box-shadow:var(--shadow);
+  }
+  .diagram svg{display:block;width:100%;height:auto}
+  figcaption{
+    font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--muted);
+    margin-top:12px;padding-left:4px;
+  }
+
+  .eq{
+    margin-top:6px;display:grid;gap:1px;background:var(--line);
+    border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
+  }
+  .eq div{
+    background:var(--panel);padding:14px 18px;display:flex;
+    justify-content:space-between;align-items:baseline;gap:20px;flex-wrap:wrap;
+  }
+  .eq .expr{font-family:"IBM Plex Mono",monospace;font-size:14.5px;font-weight:500;color:var(--ink)}
+  .eq .expr b{color:var(--accent-ink);font-weight:600}
+  .eq .desc{font-size:13px;color:var(--muted);text-align:right}
+
+  .table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel)}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  thead th{
+    background:var(--panel-2);font-family:"IBM Plex Mono",monospace;font-size:10.5px;
+    letter-spacing:.12em;text-transform:uppercase;color:var(--muted);text-align:left;
+    padding:11px 16px;border-bottom:1px solid var(--line);white-space:nowrap;
+  }
+  tbody td{padding:11px 16px;border-bottom:1px solid var(--line-soft);vertical-align:top}
+  tbody tr:last-child td{border-bottom:none}
+  td.val{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;white-space:nowrap}
+  td.des td:first-child,td.des{color:var(--ink)}
+  .ref td:first-child{font-family:"IBM Plex Mono",monospace;color:var(--accent-ink);font-weight:500;width:56px}
+
+  .callout{
+    margin-top:16px;display:flex;gap:12px;padding:13px 16px;background:var(--caution-soft);
+    border:1px solid var(--caution);border-radius:var(--radius);font-size:13px;color:var(--caution);
+  }
+  .callout b{font-weight:600}
+
+  ul.notes{margin:0;padding:0;list-style:none}
+  ul.notes li{padding:12px 0 12px 22px;border-bottom:1px solid var(--line-soft);position:relative;font-size:14px}
+  ul.notes li:last-child{border-bottom:none}
+  ul.notes li::before{content:"";position:absolute;left:2px;top:19px;width:7px;height:7px;background:var(--accent);border-radius:2px}
+  ul.notes b{font-weight:600}
+  ul.notes code,.body code{
+    font-family:"IBM Plex Mono",monospace;font-size:12.5px;background:var(--panel-2);
+    border:1px solid var(--line);border-radius:5px;padding:1px 5px;
+  }
+  .body{font-size:14px;color:var(--ink-soft)}
+
+  footer{
+    margin-top:56px;padding-top:18px;border-top:1px solid var(--line);
+    font-size:12.5px;color:var(--muted);font-family:"IBM Plex Mono",monospace;line-height:1.8;
+  }
+  footer a{color:var(--accent-ink)}
+  footer a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+
+  @media (max-width:560px){.sheet{padding:40px 20px 56px}h1{font-size:31px}}
+</style>
+
+<div class="sheet">
+
+  <header>
+    <p class="eyebrow">Application circuit · band-stop filter</p>
+    <h1>Twin-T notch filter — µA741</h1>
+    <p class="lede">A twin-T RC network placed ahead of a µA741 voltage follower. The network nulls one frequency; the op-amp buffers it and, in the adjustable-Q version, bootstraps the null to sharpen it.</p>
+    <p class="provenance">Reference sheet compiled from public application notes — verify component values and tolerances against your own bench measurement.</p>
+  </header>
+
+  <ul class="facts">
+    <li><dt>Type</dt><dd>Band-stop (notch)</dd></li>
+    <li><dt>Network</dt><dd>Passive twin-T RC</dd></li>
+    <li><dt>Active part</dt><dd>1 × µA741</dd></li>
+    <li><dt>Notch freq.</dt><dd>1 / (2πRC)</dd></li>
+    <li><dt>Q (buffered)</dt><dd>≈ 0.25 fixed</dd></li>
+    <li><dt>Q (bootstrapped)</dt><dd>1 / [4(1 − k)]</dd></li>
+  </ul>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">1</span><h2>Circuit</h2></div>
+    <figure>
+      <div class="diagram">
+        <svg viewBox="0 0 680 366" role="img" xmlns="http://www.w3.org/2000/svg" font-family="'IBM Plex Mono', monospace">
+          <title>Twin-T notch filter built around a µA741 voltage follower</title>
+          <desc>The input splits into two parallel RC arms between the input and node A. The upper arm is a low-pass T: two resistors R in series with a capacitor 2C from their junction to ground. The lower arm is a high-pass T: two capacitors C in series with a resistor R over 2 from their junction to ground. Node A drives the non-inverting input of a µA741 wired as a unity-gain follower; its output is the notch output and also feeds back to the inverting input.</desc>
+
+          <g stroke="var(--wire)" stroke-width="1.6" fill="none" stroke-linecap="round">
+            <line x1="48" y1="200" x2="86" y2="200"/>
+            <line x1="86" y1="150" x2="86" y2="250"/>
+
+            <line x1="86" y1="150" x2="110" y2="150"/>
+            <line x1="154" y1="150" x2="254" y2="150"/>
+            <line x1="298" y1="150" x2="366" y2="150"/>
+            <line x1="230" y1="150" x2="230" y2="180"/>
+            <line x1="230" y1="192" x2="230" y2="214"/>
+
+            <line x1="86" y1="250" x2="124" y2="250"/>
+            <line x1="142" y1="250" x2="250" y2="250"/>
+            <line x1="268" y1="250" x2="366" y2="250"/>
+            <line x1="230" y1="250" x2="230" y2="278"/>
+            <line x1="230" y1="312" x2="230" y2="332"/>
+
+            <line x1="366" y1="150" x2="366" y2="250"/>
+            <line x1="366" y1="200" x2="404" y2="200"/>
+            <line x1="404" y1="200" x2="404" y2="180"/>
+            <line x1="404" y1="180" x2="440" y2="180"/>
+
+            <line x1="548" y1="200" x2="612" y2="200"/>
+            <line x1="584" y1="200" x2="584" y2="286"/>
+            <line x1="584" y1="286" x2="410" y2="286"/>
+            <line x1="410" y1="286" x2="410" y2="220"/>
+            <line x1="410" y1="220" x2="440" y2="220"/>
+
+            <line x1="488" y1="177" x2="488" y2="150"/>
+            <line x1="488" y1="223" x2="488" y2="270"/>
+          </g>
+
+          <circle cx="44" cy="200" r="4" fill="var(--wire)"/>
+          <circle cx="612" cy="200" r="4" fill="var(--wire)"/>
+          <circle cx="230" cy="150" r="3" fill="var(--wire)"/>
+          <circle cx="230" cy="250" r="3" fill="var(--wire)"/>
+          <circle cx="366" cy="200" r="3" fill="var(--accent-ink)"/>
+          <circle cx="584" cy="200" r="3" fill="var(--wire)"/>
+
+          <g stroke="var(--wire)" stroke-width="1.4" fill="none" stroke-linecap="round">
+            <line x1="220" y1="214" x2="240" y2="214"/>
+            <line x1="224" y1="218" x2="236" y2="218"/>
+            <line x1="227" y1="222" x2="233" y2="222"/>
+            <line x1="220" y1="332" x2="240" y2="332"/>
+            <line x1="224" y1="336" x2="236" y2="336"/>
+            <line x1="227" y1="340" x2="233" y2="340"/>
+          </g>
+
+          <g fill="var(--part)" stroke="var(--accent-ink)" stroke-width="1.4">
+            <rect x="110" y="142" width="44" height="16" rx="2"/>
+            <rect x="254" y="142" width="44" height="16" rx="2"/>
+            <rect x="214" y="278" width="32" height="34" rx="2"/>
+          </g>
+          <g stroke="var(--accent-ink)" stroke-width="2.4" stroke-linecap="round">
+            <line x1="124" y1="240" x2="124" y2="260"/>
+            <line x1="142" y1="240" x2="142" y2="260"/>
+            <line x1="250" y1="240" x2="250" y2="260"/>
+            <line x1="268" y1="240" x2="268" y2="260"/>
+            <line x1="214" y1="180" x2="246" y2="180"/>
+            <line x1="214" y1="192" x2="246" y2="192"/>
+          </g>
+
+          <path d="M440 158 L440 242 L548 200 Z" fill="var(--panel)" stroke="var(--wire)" stroke-width="1.6"/>
+          <g stroke="var(--wire)" stroke-width="1.6" stroke-linecap="round">
+            <line x1="432" y1="180" x2="448" y2="180"/>
+            <line x1="440" y1="172" x2="440" y2="188"/>
+            <line x1="432" y1="220" x2="448" y2="220"/>
+          </g>
+
+          <g fill="var(--ink)" font-size="13">
+            <text x="132" y="136" text-anchor="middle">R</text>
+            <text x="276" y="136" text-anchor="middle">R</text>
+            <text x="252" y="190" text-anchor="start">2C</text>
+            <text x="133" y="280" text-anchor="middle">C</text>
+            <text x="259" y="280" text-anchor="middle">C</text>
+            <text x="252" y="300" text-anchor="start">R / 2</text>
+            <text x="486" y="204" text-anchor="middle" font-size="12" fill="var(--muted)">µA741</text>
+          </g>
+          <g fill="var(--muted)" font-size="11">
+            <text x="44" y="184" text-anchor="middle">IN</text>
+            <text x="612" y="184" text-anchor="middle">OUT</text>
+            <text x="374" y="197" text-anchor="start" fill="var(--accent-ink)">A</text>
+            <text x="495" y="146" text-anchor="start">V+ · pin 7</text>
+            <text x="495" y="280" text-anchor="start">V− · pin 4</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption>Upper arm: low-pass T (R – R, shunt 2C). Lower arm: high-pass T (C – C, shunt R/2). Node A → non-inverting input; output → inverting input (unity gain). For adjustable Q, return the two shunt legs to a fraction k of the output instead of ground.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">2</span><h2>Design equations</h2></div>
+    <div class="eq">
+      <div><span class="expr">f<sub>0</sub> = 1 / (2π <b>R</b> <b>C</b>)</span><span class="desc">notch (null) frequency</span></div>
+      <div><span class="expr">R1 = R2 = <b>R</b> &nbsp;·&nbsp; C1 = C2 = <b>C</b></span><span class="desc">the two series arms</span></div>
+      <div><span class="expr">C3 = 2<b>C</b> &nbsp;·&nbsp; R3 = <b>R</b> / 2</span><span class="desc">the two shunt legs</span></div>
+      <div><span class="expr">Q ≈ 0.25</span><span class="desc">passive twin-T, buffered only</span></div>
+      <div><span class="expr">Q = 1 / [ 4 (1 − <b>k</b>) ]</span><span class="desc">shunt legs bootstrapped by k·V<sub>out</sub></span></div>
+      <div><span class="expr">notch depth</span><span class="desc">set by component match, not by Q</span></div>
+    </div>
+    <p class="body" style="margin-top:16px">Pick <code>C</code> first (a value you can buy in 1&nbsp;% or better), then solve <code>R = 1 / (2π f<sub>0</sub> C)</code>. The shunt leg <code>R/2</code> and <code>2C</code> must track the arms to ~0.1&nbsp;% for a deep null — use two <code>R</code> in parallel for <code>R/2</code> and two <code>C</code> in parallel for <code>2C</code> so every element is the same part.</p>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">3</span><h2>Worked component values</h2></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Target f<sub>0</sub></th><th>C (C1, C2)</th><th>R (R1, R2)</th><th>R / 2 (R3)</th><th>2C (C3)</th></tr></thead>
+        <tbody>
+          <tr><td class="des">50 Hz mains hum</td><td class="val">4.7 nF</td><td class="val">680 kΩ</td><td class="val">340 kΩ</td><td class="val">9.4 nF</td></tr>
+          <tr><td class="des">60 Hz mains hum</td><td class="val">4.7 nF</td><td class="val">560 kΩ</td><td class="val">280 kΩ</td><td class="val">9.4 nF</td></tr>
+          <tr><td class="des">1 kHz audio</td><td class="val">10 nF</td><td class="val">15.9 kΩ</td><td class="val">7.96 kΩ</td><td class="val">20 nF</td></tr>
+          <tr><td class="des">3.4 kHz voice</td><td class="val">4.7 nF</td><td class="val">9.95 kΩ</td><td class="val">4.97 kΩ</td><td class="val">9.4 nF</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <figcaption style="margin-top:12px">Nearest E24 R values shown; trim R1/R2 for exact f<sub>0</sub>. Q ≈ 0.25 unbuffered → about a −20&nbsp;dB null one octave wide. Add the bootstrap for a sharper notch.</figcaption>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">4</span><h2>Adjustable-Q (bootstrapped) variant</h2></div>
+    <p class="body">Instead of grounding <code>C3</code> and <code>R3</code>, tie both to the wiper of a divider across the output — a fixed resistor to ground plus a pot to <code>V<sub>out</sub></code>, giving feedback fraction <code>k</code> (0 to &lt;1). Positive feedback around the twin-T raises Q to <code>1 / [4(1 − k)]</code>: k = 0 gives Q = 0.25, k = 0.9 gives Q = 2.5, k = 0.95 gives Q = 5. A second µA741 as an input buffer keeps the source impedance from detuning the network. Keep k below ~0.97 — the loop peaks and rings as it approaches oscillation.</p>
+    <div class="callout"><b>Note</b><span>The bootstrap moves the notch slightly and interacts with component tolerance. Set f<sub>0</sub> with the pot at minimum Q, then raise Q and re-check the null.</span></div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">5</span><h2>Build notes</h2></div>
+    <ul class="notes">
+      <li><b>Supplies.</b> Dual rail, ±5 to ±18 V (±15 V typical). Decouple pins 7 and 4 with 100 nF to ground at the socket.</li>
+      <li><b>Component match.</b> Null depth is set by how well R/2 and 2C track R and C. Use 1 % metal-film resistors and 1 % (C0G/NP0 or film) capacitors; parallel identical parts for the shunt legs.</li>
+      <li><b>Source and load.</b> Drive the twin-T from a low impedance (buffer the source) and take the output from the op-amp, which presents a high-impedance input to node A.</li>
+      <li><b>µA741 limits.</b> GBW ≈ 1 MHz, slew rate 0.5 V/µs — fine for mains-hum and audio notches, not for RF. Offset-null pins 1 and 5 (10 kΩ pot wiper to V−) if DC offset at the output matters.</li>
+      <li><b>Verify on the bench.</b> Sweep the input and confirm the null frequency and depth; twin-T circuits are sensitive enough that calculated values always need a trim.</li>
+    </ul>
+  </section>
+
+  <footer>
+    Sources —
+    <a href="https://www.electronics-notes.com/articles/analogue_circuits/operational-amplifier-op-amp/notch-filter-active-circuit.php">electronics-notes.com — op-amp notch filter</a>,
+    <a href="https://sound-au.com/articles/notch-filters.htm">sound-au.com — notch filters</a>,
+    <a href="https://www.electronics-tutorials.ws/filter/band-stop-filter.html">electronics-tutorials.ws — band-stop filter</a>,
+    <a href="https://www.ti.com/lit/an/sbfa012/sbfa012.pdf">TI SBFA012 — 60 Hz notch design</a>.<br>
+    Compiled reference · schematic is original artwork · confirm values by measurement before committing a board.
+  </footer>
+
+</div>
