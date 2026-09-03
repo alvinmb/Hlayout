@@ -289,7 +289,7 @@ Wire bonds (Setup > Wire Bond Rules...; chip-and-wire assembly jumpers):
 Automatic routing (requires the shapely package; also the two-click
 Edit > Auto-Route Two Pins tool):
     AUTOROUTE <x1,y1> <x2,y2> [layer=<n|name>] [grid=<dbu>] [width=<dbu>]
-        [clearance=<dbu>] [margin=<dbu>] [cell=<name>]
+        [clearance=<dbu>] [margin=<dbu>] [boundary=<n|name>] [cell=<name>]
                                        route a clear orthogonal trace between the two
                                        points on the routing layer (default: Route
                                        Layers layer_a -- the 1st routing conductor),
@@ -298,7 +298,9 @@ Edit > Auto-Route Two Pins tool):
                                        width/2 + clearance (clearance defaults to one
                                        grid step) so the finished copper stays clear.
                                        grid/width default to the canvas's current grid
-                                       spacing and path width. Draws a round-capped
+                                       spacing and path width. boundary=<layer> (or the
+                                       Route Layers boundary_layer) keeps the whole trace
+                                       inside that layer's geometry. Draws a round-capped
                                        Path in one undo step; errors if the two points
                                        can't be joined at this grid/width. Also
                                        Session.auto_route()
