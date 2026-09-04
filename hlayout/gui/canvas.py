@@ -2227,36 +2227,80 @@ class LayoutCanvas(tk.Canvas):
         multi_ref_ids = {id(s) for k, s in self.selected_multi if k == "sref"}
         multi_aref_ids = {id(s) for k, s in self.selected_multi if k == "aref"}
 
-        # Draw in ascending layer order (0-63) regardless of the order
-        # shapes were created/loaded in, so layer stacking on screen is
-        # always consistent -- e.g. a layer-0 ground plane never
-        # visually covers a layer-5 trace just because it happened to
-        # be added to the cell more recently. sorted() is stable, so
-        # shapes sharing a layer keep their original relative order.
-        for shape in sorted(cell.shapes, key=lambda s: s.layer):
-            layer = self.library.layers[shape.layer]
-            if not layer.visible:
-                continue
+        # --- pass 1: every piece of REAL geometry in the cell -- its own
+        # directly-drawn shapes, plus everything flattened through every
+        # placed sref/aref -- collected and then drawn in one ascending-
+        # layer order for the WHOLE cell. Within the same layer, entries
+        # are ALSO ordered largest-area first (smallest-area last, i.e.
+        # on top): a big same-layer fill/keep-out/board-outline shape
+        # (e.g. a Substrate rectangle covering the whole board) is
+        # visually and semantically background relative to the small
+        # specific features sharing its layer (a pad, a trace, a
+        # silkscreen mark) -- the small feature should stay visible and
+        # clickable over the big one, regardless of which was placed
+        # first. Ties (equal layer AND equal area) keep collection
+        # order -- direct shapes first, then instances in cell.srefs/
+        # arefs order -- same as the plain ascending-layer-only rule
+        # this replaces for equal-area content. Without pooling across
+        # instances at all, a large background/keep-out shape placed as
+        # a LATER instance visually and click-wise buried EARLIER
+        # instances' geometry purely because of insertion order,
+        # regardless of layer or size -- exactly backwards from
+        # "ascending layer order regardless of creation order", which
+        # direct shapes alone already honoured.
+        entries = []
+
+        def add(layer_num, area, fn):
+            entries.append((layer_num, area, fn))
+
+        for shape in cell.shapes:
             is_selected = (shape is selected_shape) or (id(shape) in multi_shape_ids)
-            item = self._draw_shape(shape, layer, selected=is_selected)
-            if item is not None:
-                self._item_to_shape[item] = ("shape", shape)
-            if (self.show_pin_numbers and isinstance(shape, (Polygon, Rectangle))
-                    and getattr(shape, "pin", "")):
-                self._draw_pin_label(shape)
+
+            def draw_direct(shape=shape, is_selected=is_selected):
+                layer = self.library.layers[shape.layer]
+                if not layer.visible:
+                    return
+                item = self._draw_shape(shape, layer, selected=is_selected)
+                if item is not None:
+                    self._item_to_shape[item] = ("shape", shape)
+                if (self.show_pin_numbers and isinstance(shape, (Polygon, Rectangle))
+                        and getattr(shape, "pin", "")):
+                    self._draw_pin_label(shape)
+
+            add(shape.layer, self._shape_area(shape), draw_direct)
+
         for ref in cell.srefs:
-            # Recursive draw with the ref's transform folded in (flattened
-            # rendering; good enough for the visual editor).
+            highlight = (ref is selected_ref) or (id(ref) in multi_ref_ids)
+            self._collect_sref(ref, depth, add, highlight=highlight)
+
+        for aref in cell.arefs:
+            highlight = (aref is selected_aref) or (id(aref) in multi_aref_ids)
+            for origin in aref.instance_origins():
+                instance = SRef(cell_name=aref.cell_name, origin=origin, rotation=aref.rotation,
+                                 magnification=aref.magnification, x_reflection=aref.x_reflection)
+                self._collect_sref(instance, depth, add, highlight=highlight,
+                                   click_target=("aref", aref))
+
+        entries.sort(key=lambda e: (e[0], -e[1]))   # stable: exact ties keep collection order
+        for _layer_num, _area, fn in entries:
+            fn()
+
+        # --- pass 2: chrome -- hit-regions, selection handles, ref-des
+        # labels -- always drawn LAST so none of it is ever buried under
+        # any real geometry, from any instance, however the cells were
+        # ordered.
+        for ref in cell.srefs:
             highlight = (ref is selected_ref) or (id(ref) in multi_ref_ids)
             # An invisible hit-region covering the instance's WHOLE
-            # bounding box, drawn *underneath* its real geometry (created
-            # first, so any actual shape on top still wins the pick where
-            # they overlap). Without this, a part whose footprint is
-            # mostly unfilled outline/silkscreen with only small pads
-            # (e.g. an SMD capacitor -- two small pads and a hollow body
-            # outline, unlike a resistor's ink that fills the whole
-            # footprint) had no click target at all in the empty middle
-            # of its own outline.
+            # bounding box (created after ALL real geometry, then pushed
+            # to the very bottom of the canvas stack) so it can never
+            # outrank a real shape -- from this instance or any other --
+            # that happens to overlap the same pixel. Without this, a
+            # part whose footprint is mostly unfilled outline/silkscreen
+            # with only small pads (e.g. an SMD capacitor -- two small
+            # pads and a hollow body outline, unlike a resistor's ink
+            # that fills the whole footprint) had no click target at all
+            # in the empty middle of its own outline.
             box = self._cell_bbox_safe(ref.cell_name)
             if box is not None:
                 from ..core.library import _transform_bbox
@@ -2264,13 +2308,8 @@ class LayoutCanvas(tk.Canvas):
                 p0 = self.to_px(x1, y1)
                 p1 = self.to_px(x2, y2)
                 hit = self.create_rectangle(*p0, *p1, outline="", fill="")
-                # Push it to the very bottom of the whole canvas stack so
-                # it can never outrank a real shape -- from THIS instance
-                # or any other -- that happens to overlap the same pixel;
-                # it only catches a click that lands on nothing else.
                 self.tag_lower(hit)
                 self._item_to_shape[hit] = ("sref", ref)
-            self._draw_sref(ref, depth, highlight=highlight)
             # A small selectable handle at the instance origin, since the
             # instance itself has no single canvas item of its own.
             hx, hy = self.to_px(*ref.origin)
@@ -2324,7 +2363,6 @@ class LayoutCanvas(tk.Canvas):
                     self._item_to_shape[hitem] = ("sref_reftext", ref)
         for aref in cell.arefs:
             highlight = (aref is selected_aref) or (id(aref) in multi_aref_ids)
-            self._draw_aref(aref, depth, highlight=highlight)
             # One selectable handle at the array's own origin (position
             # 0,0 of the grid) -- the whole ARef is one selection/move/
             # rotate/delete/smash unit, not per-instance.
@@ -2390,15 +2428,18 @@ class LayoutCanvas(tk.Canvas):
         ox, oy = ref.label_offset
         return (cx + ox, cy + oy)
 
-    def _draw_aref(self, ref: "ARef", depth, highlight=False):
-        """Draw every array position by delegating to _draw_sref() with a
-        synthetic per-instance SRef -- reuses the exact same recursive
-        flatten/transform logic an ordinary cell instance uses, just
-        called once per array position."""
-        for origin in ref.instance_origins():
-            instance = SRef(cell_name=ref.cell_name, origin=origin, rotation=ref.rotation,
-                             magnification=ref.magnification, x_reflection=ref.x_reflection)
-            self._draw_sref(instance, depth, highlight=highlight)
+    @staticmethod
+    def _shape_area(shape):
+        """A shape's local bounding-box area, used only to break ties
+        between two pieces of geometry sharing the same layer number --
+        see _draw_cell. Never fails the draw itself: an unexpected shape
+        without a usable bbox sorts as area 0 (smallest -- drawn last,
+        i.e. on top), the safest default."""
+        try:
+            x1, y1, x2, y2 = shape.bbox()
+            return abs(x2 - x1) * abs(y2 - y1)
+        except Exception:
+            return 0
 
     @staticmethod
     def _sref_transform(ref: SRef):
@@ -2433,35 +2474,51 @@ class LayoutCanvas(tk.Canvas):
             uy = -uy
         return ux, uy
 
-    def _draw_sref(self, ref: SRef, depth, highlight=False):
+    def _collect_sref(self, ref: SRef, depth, add, highlight=False, click_target=None):
+        """Collect (layer, draw_fn) entries for every real shape flattened
+        through `ref`'s cell (recursively through any nested srefs)
+        instead of drawing them immediately -- so the caller can pool
+        them with entries from every other instance and the cell's own
+        direct shapes, and draw the WHOLE cell in one globally
+        layer-sorted pass (see _draw_cell). `click_target` is the
+        ("sref"|"aref", obj) pair stored in _item_to_shape for every
+        collected shape; defaults to this instance itself, but a caller
+        flattening one array position of an ARef passes the ARef's own
+        ("aref", aref) pair instead, so clicking any position's geometry
+        selects the whole array, not a throwaway per-position SRef."""
+        if depth > 64:
+            return
+        target = click_target if click_target is not None else ("sref", ref)
         transform = self._sref_transform(ref)
-
         if ref.cell_name not in self.library.cells:
             return
         child = self.library.cells[ref.cell_name]
-        for shape in sorted(child.shapes, key=lambda s: s.layer):
-            layer = self.library.layers[shape.layer]
-            if not layer.visible:
-                continue
-            item = self._draw_shape(shape, layer, transform=transform, selected=highlight)
-            # Register every bit of the instance's own drawn geometry
-            # (not just the small origin handle) as a click target for
-            # the instance itself -- so clicking anywhere on a placed
-            # part's visible body (e.g. a resistor's ink/pads) selects
-            # and can drag the whole instance, the way clicking a
-            # directly-drawn shape already does.
-            if item is not None:
-                self._item_to_shape[item] = ("sref", ref)
+        for shape in child.shapes:
+            def draw_nested(shape=shape, transform=transform, target=target):
+                layer = self.library.layers[shape.layer]
+                if not layer.visible:
+                    return
+                item = self._draw_shape(shape, layer, transform=transform, selected=highlight)
+                # Register every bit of the instance's own drawn geometry
+                # (not just the small origin handle) as a click target for
+                # the instance itself -- so clicking anywhere on a placed
+                # part's visible body (e.g. a resistor's ink/pads) selects
+                # and can drag the whole instance, the way clicking a
+                # directly-drawn shape already does.
+                if item is not None:
+                    self._item_to_shape[item] = target
+            add(shape.layer, self._shape_area(shape), draw_nested)
         for sub in child.srefs:
-            # compose transforms by drawing the nested sref through a
-            # temporary shim shape list (simple recursive flatten);
-            # top_ref is the OUTER placed instance -- clicking anything
-            # inside a nested sub-instance still selects/drags that
-            # outer instance, since the nested one isn't independently
-            # placed in the current cell.
-            self._draw_nested_sref(sub, transform, depth + 1, highlight=highlight, top_ref=ref)
+            # top_ref/click_target stays fixed at the OUTER placed
+            # instance (or ARef) through the whole nested chain --
+            # clicking anything inside a nested sub-instance still
+            # selects/drags that outer instance, since the nested one
+            # isn't independently placed in the current cell.
+            self._collect_nested_sref(sub, transform, depth + 1, add, highlight=highlight,
+                                       click_target=target)
 
-    def _draw_nested_sref(self, ref: SRef, parent_transform, depth, highlight=False, top_ref=None):
+    def _collect_nested_sref(self, ref: SRef, parent_transform, depth, add, highlight=False,
+                              click_target=None):
         if depth > 64:
             return
         theta = math.radians(ref.rotation)
@@ -2469,7 +2526,8 @@ class LayoutCanvas(tk.Canvas):
         mag = ref.magnification
         ox, oy = ref.origin
 
-        def transform(pt):
+        def transform(pt, ref=ref, cos_t=cos_t, sin_t=sin_t, mag=mag, ox=ox, oy=oy,
+                       parent_transform=parent_transform):
             x, y = pt
             if ref.x_reflection:
                 y = -y
@@ -2481,17 +2539,20 @@ class LayoutCanvas(tk.Canvas):
 
         if ref.cell_name not in self.library.cells:
             return
-        click_ref = top_ref if top_ref is not None else ref
+        target = click_target
         child = self.library.cells[ref.cell_name]
-        for shape in sorted(child.shapes, key=lambda s: s.layer):
-            layer = self.library.layers[shape.layer]
-            if not layer.visible:
-                continue
-            item = self._draw_shape(shape, layer, transform=transform, selected=highlight)
-            if item is not None:
-                self._item_to_shape[item] = ("sref", click_ref)
+        for shape in child.shapes:
+            def draw_nested(shape=shape, transform=transform, target=target):
+                layer = self.library.layers[shape.layer]
+                if not layer.visible:
+                    return
+                item = self._draw_shape(shape, layer, transform=transform, selected=highlight)
+                if item is not None:
+                    self._item_to_shape[item] = target
+            add(shape.layer, self._shape_area(shape), draw_nested)
         for sub in child.srefs:
-            self._draw_nested_sref(sub, transform, depth + 1, highlight=highlight, top_ref=click_ref)
+            self._collect_nested_sref(sub, transform, depth + 1, add, highlight=highlight,
+                                       click_target=target)
 
     def _draw_shape(self, shape, layer, transform=None, selected=False):
         t = transform or (lambda p: p)

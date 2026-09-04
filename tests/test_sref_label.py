@@ -443,3 +443,59 @@ def test_clicking_a_placed_parts_empty_margin_still_selects_it():
         assert app.canvas.selected == ("sref", a)
     finally:
         app.destroy()
+
+
+def test_a_background_instance_placed_between_two_others_cannot_bury_them():
+    # Regression for a real layout: a large board-outline/keep-out
+    # instance (e.g. "Substrate") sitting in cell.srefs BETWEEN two
+    # component instances -- and sharing their conductor layer -- used
+    # to visually and click-wise bury only the ones placed BEFORE it in
+    # that list (the ones placed after stayed selectable), since drawing
+    # walked cell.srefs in raw list order per instance instead of
+    # pooling every instance's geometry into one globally layer-sorted
+    # pass. Even after pooling by layer, a big same-layer background
+    # shape still needs to lose the *same-layer* tie to the small real
+    # features sharing that layer -- otherwise it keeps burying every
+    # component regardless of list position, just via the tie-break
+    # instead of raw order. _draw_cell breaks same-layer ties by area
+    # (smaller drawn last, i.e. on top) specifically so this can't
+    # happen no matter where the background instance sits in the list.
+    import types
+    from hlayout.gui.app import App
+
+    lib = Library("BGTEST")
+    pad = lib.new_cell("PAD")
+    pad.add_rectangle(5, 0, 0, 200, 200)          # small, on layer 5
+    board = lib.new_cell("BOARD")
+    board.add_rectangle(5, 0, 0, 20000, 20000)    # huge, SAME layer 5
+    top = lib.new_cell("TOP")
+    a = top.add_sref("PAD", (1000, 1000))
+    b = top.add_sref("PAD", (5000, 1000))
+    bg = top.add_sref("BOARD", (0, 0))            # placed between b and c
+    c = top.add_sref("PAD", (9000, 1000))
+    assert list(top.srefs) == [a, b, bg, c]
+
+    try:
+        app = App(lib)
+    except tk.TclError as e:
+        pytest.skip(f"no display available: {e}")
+    try:
+        app.update()
+        app._refresh_cell_list()
+        app.cell_var.set("TOP")
+        app.session.use_cell("TOP")
+        app.canvas.set_cell("TOP")
+        app.canvas.fit_view()
+        app.canvas.snap_enabled = False
+        app.canvas.redraw()
+        app.update()
+
+        for name, ref, (ox, oy) in (("C1", a, (1000, 1000)), ("C2", b, (5000, 1000)),
+                                     ("C3", c, (9000, 1000))):
+            px, py = app.canvas.to_px(ox + 100, oy + 100)   # centre of the 200x200 pad
+            app.canvas._select_click(types.SimpleNamespace(x=int(px), y=int(py)))
+            assert app.canvas.selected == ("sref", ref), (
+                f"clicking {name}'s real pad selected {app.canvas.selected!r} instead"
+            )
+    finally:
+        app.destroy()
