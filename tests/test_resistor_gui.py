@@ -78,6 +78,57 @@ def test_resistor_list_persists_across_reopening_the_designer():
         app.destroy()
 
 
+def test_resistor_list_survives_save_then_reopen_via_the_file_menu(tmp_path):
+    from unittest import mock
+    from hlayout.gui.resistor_designer import open_resistor_designer
+
+    app = _make_app()
+    try:
+        win = open_resistor_designer(app)
+        _seed(win)
+        win.res_table.select_row(0)
+        app.update()
+        win._on_solution_chosen(0)
+
+        path = str(tmp_path / "rd.gds")
+        app.current_path = path
+        app.save_gds()
+
+        # File > Open GDS the same design, with the designer left open --
+        # the stale window (bound to the now-discarded library) must be
+        # torn down so the next open reloads from the reopened design.
+        assert win.winfo_exists()
+        with mock.patch("hlayout.gui.app.filedialog.askopenfilename", return_value=path):
+            app.open_gds()
+        assert not win.winfo_exists()
+        assert getattr(app, "_resistor_designer_window", None) is None
+
+        win2 = open_resistor_designer(app)
+        app.update()
+        assert [r.ref_des for r in win2.resistors] == ["R1", "R2", "R3"]
+        assert win2.resistors[0].selected is not None
+    finally:
+        app.destroy()
+
+
+def test_new_design_closes_the_open_resistor_designer(tmp_path):
+    from hlayout.gui.resistor_designer import open_resistor_designer
+
+    app = _make_app()
+    try:
+        win = open_resistor_designer(app)
+        _seed(win)
+        assert win.winfo_exists()
+        app.new_library()
+        assert not win.winfo_exists()
+        # a fresh designer against the new (empty) design opens empty
+        win2 = open_resistor_designer(app)
+        app.update()
+        assert win2.resistors == []
+    finally:
+        app.destroy()
+
+
 def test_show_resistor_geometry_dialog_saves_rules_on_return():
     # show_resistor_geometry_dialog() just creates a non-modal-to-Python
     # Toplevel and returns immediately (same pattern as

@@ -2152,7 +2152,28 @@ class App(tk.Tk):
         self.canvas.fit_view()
 
     # --- file operations --------------------------------------------------
+    def _close_library_bound_tool_windows(self):
+        """Tear down the singleton tool windows that capture the current
+        design's Library in their constructor (Resistor/Thin-Film
+        Designer, DRC, Mask-Op Batch, Gerber/DXF Export Sets). Called
+        when the session's library is replaced (New / Open GDS) so the
+        next open rebuilds them against -- and, for the Resistor
+        Designer, reloads its saved list from -- the new design rather
+        than silently operating on the discarded one."""
+        for attr in ("_resistor_designer_window", "_thin_film_designer_window",
+                     "_drc_window", "_maskop_batch_window",
+                     "_gerber_batch_window", "_dxf_batch_window"):
+            win = getattr(self, attr, None)
+            if win is not None:
+                try:
+                    if win.winfo_exists():
+                        win.destroy()
+                except Exception:
+                    pass
+                setattr(self, attr, None)
+
     def new_library(self):
+        self._close_library_bound_tool_windows()
         self.session.library = self._default_library()
         self.session.current_cell_name = self.session.library.top_cell_name
         # A brand new document -- any libraries attached to the design
@@ -2182,6 +2203,7 @@ class App(tk.Tk):
         except Exception as e:
             dialogs.show_error("Open failed", str(e), parent=self)
             return
+        self._close_library_bound_tool_windows()
         lib = loaded.library
         self.session.library = lib
         self.session.attached_libraries = loaded.attached_libraries
