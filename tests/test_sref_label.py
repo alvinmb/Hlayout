@@ -386,3 +386,60 @@ def test_clicking_the_instances_body_selects_and_drags_the_whole_sref():
         assert b.origin == (5000, 0)   # the other instance is untouched
     finally:
         app.destroy()
+
+
+def test_clicking_a_placed_parts_empty_margin_still_selects_it():
+    # A part whose footprint is mostly unfilled outline/silkscreen with
+    # only small pads at each end (an SMD capacitor -- unlike a
+    # resistor, whose ink fills nearly the whole footprint) used to have
+    # no click target at all in the empty middle of its own outline.
+    # Every instance now gets an invisible full-bbox hit rectangle,
+    # pushed to the bottom of the stack so a real shape -- from this
+    # instance or any other, however the bounding boxes overlap -- still
+    # wins the pick wherever one actually exists.
+    import types
+    from hlayout.gui.app import App
+
+    lib = Library("CAPTEST")
+    cap = lib.new_cell("CAP")
+    cap.add_rectangle(20, 0, -200, 600, 200, pin="1")       # pad1: 0..600
+    cap.add_rectangle(20, 1700, -200, 2100, 200, pin="2")   # pad2: 1700..2100
+    cap.add_path(61, [(-500, -300), (2500, -300), (2500, 300), (-500, 300), (-500, -300)],
+                 width=50)
+    top = lib.new_cell("TOP")
+    # A alone: its own empty margin (between/around the pads) is the
+    # "no fill here" case. B sits close enough that its bounding box
+    # (and hit rectangle) overlaps A's real pad2, without B's own real
+    # pads reaching that far -- B's pad1 is 500..1100, pad2 is 2200..2600.
+    a = top.add_sref("CAP", (0, 0), label="C1")
+    b = top.add_sref("CAP", (500, 0), label="C2")
+    try:
+        app = App(lib)
+    except tk.TclError as e:
+        pytest.skip(f"no display available: {e}")
+    try:
+        app.update()
+        app._refresh_cell_list()
+        app.cell_var.set("TOP")
+        app.session.use_cell("TOP")
+        app.canvas.set_cell("TOP")
+        app.canvas.fit_view()
+        app.canvas.snap_enabled = False
+        app.canvas.redraw()
+        app.update()
+
+        # Click in A's outline margin to the left of its pads (world
+        # x=-200, inside A's -500..2500 outline but left of pad1's 0..600
+        # -- and outside B's 0..3000 bounding box entirely, so this can
+        # only be A's hit rectangle). No fill there before this fix.
+        px, py = app.canvas.to_px(-200, 0)
+        app.canvas._select_click(types.SimpleNamespace(x=int(px), y=int(py)))
+        assert app.canvas.selected == ("sref", a)
+
+        # A's real pad2 (world 1700..2100) still beats B's overlapping
+        # -but-lowered hit-rect there (B's own real pads don't reach it).
+        px2, py2 = app.canvas.to_px(1900, 0)
+        app.canvas._select_click(types.SimpleNamespace(x=int(px2), y=int(py2)))
+        assert app.canvas.selected == ("sref", a)
+    finally:
+        app.destroy()

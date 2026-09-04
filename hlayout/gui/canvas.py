@@ -2248,6 +2248,28 @@ class LayoutCanvas(tk.Canvas):
             # Recursive draw with the ref's transform folded in (flattened
             # rendering; good enough for the visual editor).
             highlight = (ref is selected_ref) or (id(ref) in multi_ref_ids)
+            # An invisible hit-region covering the instance's WHOLE
+            # bounding box, drawn *underneath* its real geometry (created
+            # first, so any actual shape on top still wins the pick where
+            # they overlap). Without this, a part whose footprint is
+            # mostly unfilled outline/silkscreen with only small pads
+            # (e.g. an SMD capacitor -- two small pads and a hollow body
+            # outline, unlike a resistor's ink that fills the whole
+            # footprint) had no click target at all in the empty middle
+            # of its own outline.
+            box = self._cell_bbox_safe(ref.cell_name)
+            if box is not None:
+                from ..core.library import _transform_bbox
+                x1, y1, x2, y2 = _transform_bbox(box, ref)
+                p0 = self.to_px(x1, y1)
+                p1 = self.to_px(x2, y2)
+                hit = self.create_rectangle(*p0, *p1, outline="", fill="")
+                # Push it to the very bottom of the whole canvas stack so
+                # it can never outrank a real shape -- from THIS instance
+                # or any other -- that happens to overlap the same pixel;
+                # it only catches a click that lands on nothing else.
+                self.tag_lower(hit)
+                self._item_to_shape[hit] = ("sref", ref)
             self._draw_sref(ref, depth, highlight=highlight)
             # A small selectable handle at the instance origin, since the
             # instance itself has no single canvas item of its own.
