@@ -1008,6 +1008,18 @@ class ResistorDesignerWindow(tk.Toplevel):
         self._build()
         self._load_resistors()
         self._refresh_all()
+        # Persist on close too, belt-and-braces -- every list change
+        # already saves via _refresh_all()/_refresh_row(), but this
+        # guarantees the last state is stored even if some path missed
+        # one, then hands the close back to Tk.
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _on_close(self):
+        try:
+            self._save_resistors()
+        except Exception:
+            pass
+        self.destroy()
 
     # -- persistence of the working resistor list -------------------------
     def _load_resistors(self):
