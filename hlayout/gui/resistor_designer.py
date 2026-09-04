@@ -46,8 +46,10 @@ from ..core.errors import LayoutError
 from ..io.techfile import (
     load_resistor_design_rules,
     load_resistor_geometry_rules,
+    load_resistor_list,
     save_resistor_design_rules,
     save_resistor_geometry_rules,
+    save_resistor_list,
 )
 from ..core.units import dbu_to_mm, mm_to_dbu
 
@@ -1004,7 +1006,40 @@ class ResistorDesignerWindow(tk.Toplevel):
         self._next_place_x = 0.0
         self._next_place_y = 0.0
         self._build()
+        self._load_resistors()
         self._refresh_all()
+
+    # -- persistence of the working resistor list -------------------------
+    def _load_resistors(self):
+        """Rebuild the resistor list from what was saved with the design
+        (hlayout.io.techfile.load_resistor_list) -- so closing the window
+        or the app and coming back doesn't lose the work. Solutions are
+        recomputed here from the current design rules; the previously
+        chosen ink is re-selected by sheet resistance."""
+        for d in load_resistor_list(self.library):
+            width = d["body_width"] or float(width_for_power(d["power_mw"]))
+            res = Resistor(ref_des=d["ref_des"], value=d["value"],
+                           tolerance=d["tolerance"], power_mw=d["power_mw"],
+                           body_width=width)
+            res.compute_solutions(self.rules)
+            if d["selected_ink"] is not None:
+                for i, sol in enumerate(res.solutions):
+                    if sol.ink_rsh == d["selected_ink"]:
+                        res.selected_idx = i
+                        break
+            self.resistors.append(res)
+
+    def _save_resistors(self):
+        """Persist the current resistor list into the design's technology
+        data (Library.tech_params) so it travels with File > Save GDS /
+        Setup > Save Technology File... Called after every change to the
+        list."""
+        save_resistor_list(self.library, [
+            {"ref_des": r.ref_des, "value": r.value, "tolerance": r.tolerance,
+             "power_mw": r.power_mw, "body_width": r.body_width,
+             "selected_ink": (r.selected.ink_rsh if r.selected else None)}
+            for r in self.resistors
+        ])
 
     # -- UI ----------------------------------------------------------------
     def _build(self):
@@ -1072,11 +1107,13 @@ class ResistorDesignerWindow(tk.Toplevel):
         self.res_table.populate(self.resistors, self.rules)
         self.summary_panel.refresh(self.resistors, self.rules)
         self._update_status()
+        self._save_resistors()
 
     def _refresh_row(self, row):
         self.res_table.refresh_row(row, self.resistors[row], self.rules)
         self.summary_panel.refresh(self.resistors, self.rules)
         self._update_status()
+        self._save_resistors()
 
     def _update_status(self):
         n = len(self.resistors)

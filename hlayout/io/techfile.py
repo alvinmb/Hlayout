@@ -177,6 +177,69 @@ def save_resistor_design_rules(library: Library, rules: dict) -> None:
     library.tech_params[RESISTOR_RULES_KEY] = json.dumps(payload)
 
 
+# --- The resistor designer's working RESISTOR LIST -------------------------
+#
+# The rows in Tools > Thick-Film Resistor Designer... (ref-des, value,
+# tolerance, power, chosen body width, and which ink solution was
+# picked). Stored here so the list survives closing the window / the app
+# -- it travels with the design in the .hlaux sidecar (File > Save GDS)
+# and Setup > Save Technology File... / TECH SAVE, the same as the
+# design rules above. Solutions are recomputed from the design rules on
+# load; only the chosen ink's sheet resistance is persisted, so the
+# selection is re-applied even if the available-ink list changes.
+
+RESISTOR_LIST_KEY = "resistor_list"
+
+
+def load_resistor_list(library: Library) -> list:
+    """Read the saved resistor-designer rows. Returns a list of dicts
+    (ref_des, value, tolerance, power_mw, body_width, selected_ink);
+    an empty list when nothing is saved or the entry is malformed."""
+    raw = library.tech_params.get(RESISTOR_LIST_KEY)
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(data, list):
+        return []
+    out = []
+    for d in data:
+        if not isinstance(d, dict):
+            continue
+        try:
+            sel = d.get("selected_ink")
+            out.append({
+                "ref_des": str(d.get("ref_des", "")),
+                "value": float(d["value"]),
+                "tolerance": str(d.get("tolerance", "5%")),
+                "power_mw": float(d.get("power_mw", 0.0)),
+                "body_width": float(d.get("body_width", 0.0)),
+                "selected_ink": (float(sel) if sel is not None else None),
+            })
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def save_resistor_list(library: Library, rows) -> None:
+    """Write the resistor-designer rows into library.tech_params. `rows`
+    is an iterable of dicts with the keys load_resistor_list() returns."""
+    payload = []
+    for r in rows:
+        sel = r.get("selected_ink")
+        payload.append({
+            "ref_des": str(r.get("ref_des", "")),
+            "value": float(r["value"]),
+            "tolerance": str(r.get("tolerance", "5%")),
+            "power_mw": float(r.get("power_mw", 0.0)),
+            "body_width": float(r.get("body_width", 0.0)),
+            "selected_ink": (float(sel) if sel is not None else None),
+        })
+    library.tech_params[RESISTOR_LIST_KEY] = json.dumps(payload)
+
+
 # --- Thick-film resistor GEOMETRY rules (generating the actual shapes) -----
 #
 # Separate from RESISTOR_RULES_KEY above (which sizes a resistor -- picks

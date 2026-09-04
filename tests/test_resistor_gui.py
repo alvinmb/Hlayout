@@ -47,6 +47,37 @@ def _seed(win, specs=(("R1", 1000, "5%", 125.0), ("R2", 10000, "1%", 62.5),
     win._refresh_all()
 
 
+def test_resistor_list_persists_across_reopening_the_designer():
+    from hlayout.gui.resistor_designer import open_resistor_designer
+    from hlayout.io.techfile import load_resistor_list
+
+    app = _make_app()
+    try:
+        win = open_resistor_designer(app)
+        _seed(win)                                   # 3 resistors, sized
+        win.res_table.select_row(0)
+        app.update()
+        win._on_solution_chosen(0)                   # pick a solution for R1
+        picked_ink = win.resistors[0].selected.ink_rsh
+
+        # the list is now saved into the design's tech_params
+        saved = load_resistor_list(app.session.library)
+        assert [r["ref_des"] for r in saved] == ["R1", "R2", "R3"]
+        assert saved[0]["selected_ink"] == picked_ink
+
+        win.destroy()
+        app._resistor_designer_window = None         # force a fresh window
+
+        win2 = open_resistor_designer(app)
+        app.update()
+        assert [r.ref_des for r in win2.resistors] == ["R1", "R2", "R3"]
+        assert win2.resistors[0].value == 1000
+        assert win2.resistors[0].selected is not None
+        assert win2.resistors[0].selected.ink_rsh == picked_ink
+    finally:
+        app.destroy()
+
+
 def test_show_resistor_geometry_dialog_saves_rules_on_return():
     # show_resistor_geometry_dialog() just creates a non-modal-to-Python
     # Toplevel and returns immediately (same pattern as

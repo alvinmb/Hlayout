@@ -19,8 +19,10 @@ from hlayout.io.techfile import (
     load_route_rules,
     load_techfile,
     save_refdes_annotation_layer,
+    load_resistor_list,
     save_resistor_design_rules,
     save_resistor_geometry_rules,
+    save_resistor_list,
     save_route_rules,
     save_techfile,
     techfile_data,
@@ -133,6 +135,48 @@ def test_load_resistor_design_rules_tolerates_malformed_entry():
     lib = Library("DEMO")
     lib.tech_params["resistor_design_rules"] = "not valid json{{{"
     assert load_resistor_design_rules(lib) == DEFAULT_RESISTOR_RULES
+
+
+# --- the resistor designer's working list -------------------------------
+
+def test_resistor_list_defaults_empty_and_round_trips():
+    lib = Library("DEMO")
+    assert load_resistor_list(lib) == []
+
+    rows = [
+        {"ref_des": "R1", "value": 1000.0, "tolerance": "5%",
+         "power_mw": 125.0, "body_width": 1000.0, "selected_ink": 100.0},
+        {"ref_des": "R2", "value": 47000.0, "tolerance": "1%",
+         "power_mw": 62.5, "body_width": 625.0, "selected_ink": None},
+    ]
+    save_resistor_list(lib, rows)
+    assert load_resistor_list(lib) == rows
+
+
+def test_resistor_list_survives_a_full_techfile_save_and_load(tmp_path):
+    lib = Library("DEMO")
+    save_resistor_list(lib, [
+        {"ref_des": "R7", "value": 2200.0, "tolerance": "2%",
+         "power_mw": 375.0, "body_width": 1000.0, "selected_ink": 1000.0},
+    ])
+    path = str(tmp_path / "tech.json")
+    save_techfile(lib, path)
+
+    lib2 = Library("OTHER")
+    load_and_apply_techfile(lib2, path)
+    back = load_resistor_list(lib2)
+    assert len(back) == 1
+    assert back[0]["ref_des"] == "R7"
+    assert back[0]["value"] == 2200.0
+    assert back[0]["selected_ink"] == 1000.0
+
+
+def test_load_resistor_list_tolerates_malformed_entry():
+    lib = Library("DEMO")
+    lib.tech_params["resistor_list"] = "not valid json{{{"
+    assert load_resistor_list(lib) == []
+    lib.tech_params["resistor_list"] = "{}"          # valid JSON, but not a list
+    assert load_resistor_list(lib) == []
 
 
 def test_load_resistor_design_rules_fills_in_missing_keys_from_defaults():
