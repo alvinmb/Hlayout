@@ -350,3 +350,39 @@ def test_labeled_sref_draws_a_text_item_that_tracks_the_instance():
         assert pos_after != pos_before
     finally:
         app.destroy()
+
+
+def test_clicking_the_instances_body_selects_and_drags_the_whole_sref():
+    # Previously only the tiny origin handle was clickable for a placed
+    # cell instance -- clicking anywhere on its actual drawn geometry
+    # (e.g. a resistor's ink body, not just an 8x8px handle) did
+    # nothing. Every item _draw_sref()/_draw_nested_sref() draws for an
+    # instance is now registered as a ("sref", ref) click target too.
+    import types
+    app, top, a, b = _make_app_with_two_instances()
+    try:
+        app.canvas.snap_enabled = False
+        app.canvas.redraw()
+        app.update()
+        # find a canvas item belonging to instance `a`'s own drawn body
+        # (not the small origin handle, which is also "sref"/a but tiny)
+        body_items = [i for i, (k, o) in app.canvas._item_to_shape.items()
+                      if k == "sref" and o is a and app.canvas.type(i) != "rectangle"]
+        assert body_items, "instance body has no registered click target"
+        item = body_items[0]
+        bb = app.canvas.bbox(item)
+        # click a few px inside a corner of the body -- nowhere near the
+        # instance's origin handle (drawn at the instance origin) or,
+        # since `a` carries no label here, no ref-des annotation either.
+        px, py = bb[0] + 4, bb[1] + 4
+        app.canvas._select_click(types.SimpleNamespace(x=px, y=py))
+        assert app.canvas.selected == ("sref", a)
+
+        before = a.origin
+        sx, sy = app.canvas._drag_start_mouse
+        mx, my = app.canvas.to_px(sx + 500, sy + 300)
+        app.canvas._on_drag_motion(types.SimpleNamespace(x=int(mx), y=int(my)))
+        assert a.origin != before
+        assert b.origin == (5000, 0)   # the other instance is untouched
+    finally:
+        app.destroy()

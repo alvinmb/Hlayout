@@ -2421,13 +2421,25 @@ class LayoutCanvas(tk.Canvas):
             layer = self.library.layers[shape.layer]
             if not layer.visible:
                 continue
-            self._draw_shape(shape, layer, transform=transform, selected=highlight)
+            item = self._draw_shape(shape, layer, transform=transform, selected=highlight)
+            # Register every bit of the instance's own drawn geometry
+            # (not just the small origin handle) as a click target for
+            # the instance itself -- so clicking anywhere on a placed
+            # part's visible body (e.g. a resistor's ink/pads) selects
+            # and can drag the whole instance, the way clicking a
+            # directly-drawn shape already does.
+            if item is not None:
+                self._item_to_shape[item] = ("sref", ref)
         for sub in child.srefs:
             # compose transforms by drawing the nested sref through a
-            # temporary shim shape list (simple recursive flatten)
-            self._draw_nested_sref(sub, transform, depth + 1, highlight=highlight)
+            # temporary shim shape list (simple recursive flatten);
+            # top_ref is the OUTER placed instance -- clicking anything
+            # inside a nested sub-instance still selects/drags that
+            # outer instance, since the nested one isn't independently
+            # placed in the current cell.
+            self._draw_nested_sref(sub, transform, depth + 1, highlight=highlight, top_ref=ref)
 
-    def _draw_nested_sref(self, ref: SRef, parent_transform, depth, highlight=False):
+    def _draw_nested_sref(self, ref: SRef, parent_transform, depth, highlight=False, top_ref=None):
         if depth > 64:
             return
         theta = math.radians(ref.rotation)
@@ -2447,14 +2459,17 @@ class LayoutCanvas(tk.Canvas):
 
         if ref.cell_name not in self.library.cells:
             return
+        click_ref = top_ref if top_ref is not None else ref
         child = self.library.cells[ref.cell_name]
         for shape in sorted(child.shapes, key=lambda s: s.layer):
             layer = self.library.layers[shape.layer]
             if not layer.visible:
                 continue
-            self._draw_shape(shape, layer, transform=transform, selected=highlight)
+            item = self._draw_shape(shape, layer, transform=transform, selected=highlight)
+            if item is not None:
+                self._item_to_shape[item] = ("sref", click_ref)
         for sub in child.srefs:
-            self._draw_nested_sref(sub, transform, depth + 1, highlight=highlight)
+            self._draw_nested_sref(sub, transform, depth + 1, highlight=highlight, top_ref=click_ref)
 
     def _draw_shape(self, shape, layer, transform=None, selected=False):
         t = transform or (lambda p: p)
