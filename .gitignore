@@ -10,3 +10,8 @@ hlayout_project.zip
 /build/
 /dist/
 /dist-installers/
+
+# Output of the examples/ generator scripts -- regenerated on demand
+# (and by their tests); the scripts are the source of truth, not these.
+/examples/*.gds
+/examples/*.gds.hlaux
