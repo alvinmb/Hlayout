@@ -341,6 +341,23 @@ def _parse_point(tok: str):
     return (float(parts[0]), float(parts[1]))
 
 
+def _tokenize(line: str):
+    """Split a command line into tokens: whitespace-separated, quotes
+    (single or double) group and are stripped.
+
+    Unlike a plain ``shlex.split()``, backslash is NOT an escape
+    character -- so a Windows path like ``export=C:\\Users\\me\\x.csv``
+    survives intact instead of losing every ``\\U`` / ``\\m`` to escape
+    processing. Raises ``ValueError`` on an unbalanced quote, same as
+    ``shlex.split()``.
+    """
+    lex = shlex.shlex(line, posix=True)
+    lex.whitespace_split = True
+    lex.escape = ""          # backslash is a literal character, not an escape
+    lex.commenters = ""      # '#' is not a comment in a command line
+    return list(lex)
+
+
 class CommandInterpreter:
     def __init__(self, session, console, on_change: Optional[Callable[[], None]] = None, view=None):
         self.session = session
@@ -357,7 +374,7 @@ class CommandInterpreter:
         self.history.append(line)
         self._hist_index = len(self.history)
         try:
-            tokens = shlex.split(line)
+            tokens = _tokenize(line)
         except ValueError as e:
             return f"error: {e}"
         if not tokens:

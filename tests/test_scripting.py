@@ -6,7 +6,39 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import pytest
 
 from hlayout.scripting import Session, ScriptConsole
-from hlayout.gui.commands import CommandInterpreter
+from hlayout.gui.commands import CommandInterpreter, _tokenize
+
+
+def test_tokenize_keeps_windows_backslash_paths_intact():
+    # A plain shlex.split() runs POSIX-mode and eats backslashes as
+    # escapes, so a Windows path argument like export=C:\Users\me\x.csv
+    # came back as export=C:Usersmex.csv -- the command then wrote its
+    # output to a mangled relative path in the cwd.
+    toks = _tokenize(r"NETLIST RUN 3 export=C:\Users\me\Temp\out.csv")
+    assert toks == ["NETLIST", "RUN", "3", r"export=C:\Users\me\Temp\out.csv"]
+
+    # quotes still group and are stripped; both quote styles work
+    assert _tokenize(r'SAVE "C:\My Designs\board.gds"') == ["SAVE", r"C:\My Designs\board.gds"]
+    assert _tokenize("TEXT 3 0,0 'hello world'") == ["TEXT", "3", "0,0", "hello world"]
+
+    # an unbalanced quote still raises, same as shlex.split()
+    with pytest.raises(ValueError):
+        _tokenize('SAVE "unterminated')
+
+
+def test_gerber_command_accepts_a_windows_style_prefix(tmp_path):
+    from hlayout.core.units import mm_to_dbu
+    s = Session.new("DEMO")
+    s.new_cell("TOP")
+    s.rect(0, 0, 0, mm_to_dbu(1), mm_to_dbu(1))
+    interp = CommandInterpreter(s, ScriptConsole(s))
+    # force backslash separators regardless of the host os.sep
+    prefix = str(tmp_path / "board").replace("/", "\\")
+
+    out = interp.run(f"GERBER {prefix}")
+
+    assert "wrote 1 Gerber file(s)" in out
+    assert list(tmp_path.glob("board_L00_*.gbr"))
 
 
 def test_session_shortcuts():
