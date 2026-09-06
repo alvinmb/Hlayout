@@ -1338,13 +1338,25 @@ class LayoutCanvas(tk.Canvas):
             _, shape, idx = self.selected
             min_pts = 3 if isinstance(shape, Polygon) else 2
             if len(shape.points) <= min_pts:
-                self.on_mode_status(f"can't delete vertex: needs at least {min_pts} points")
-                return
-            self.checkpoint()
-            pts = list(shape.points)
-            del pts[idx]
-            shape.points = pts
-            self.selected = None
+                # The point can't be removed without breaking the shape's
+                # minimum -- but the user selected it and pressed Delete,
+                # so take that to mean "delete the whole thing" rather
+                # than doing nothing.
+                if shape not in cell.shapes:
+                    return
+                self.checkpoint()
+                cell.shapes.remove(shape)
+                self.selected = None
+                self.on_mode_status(
+                    f"deleted the whole {type(shape).__name__.lower()} "
+                    f"({len(shape.points)} points -- can't drop just one)"
+                )
+            else:
+                self.checkpoint()
+                pts = list(shape.points)
+                del pts[idx]
+                shape.points = pts
+                self.selected = None
         elif kind == "edge":
             _, shape, (i, j) = self.selected
             if not isinstance(shape, Path):
@@ -1367,21 +1379,27 @@ class LayoutCanvas(tk.Canvas):
             right = pts[j:]
             pieces = [p for p in (left, right) if len(p) >= 2]
             if not pieces:
-                self.on_mode_status("can't delete the only segment of a 2-point path "
-                                     "-- delete the whole path instead")
-                return
-            self.checkpoint()
-            new_shapes = [Path(layer=shape.layer, points=p, width=shape.width,
-                                cap=shape.cap, datatype=shape.datatype) for p in pieces]
-            if shape in cell.shapes:
+                # The path's only segment -- nothing survives removing it,
+                # so Delete on it removes the whole path.
+                if shape not in cell.shapes:
+                    return
+                self.checkpoint()
                 cell.shapes.remove(shape)
-            cell.shapes.extend(new_shapes)
-            if len(new_shapes) == 1:
-                self.selected = ("shape", new_shapes[0])
-            else:
                 self.selected = None
-                self.selected_multi = [("shape", s) for s in new_shapes]
-            self.on_mode_status(f"deleted segment -- path split into {len(new_shapes)} piece(s)")
+                self.on_mode_status("deleted the whole 2-point path")
+            else:
+                self.checkpoint()
+                new_shapes = [Path(layer=shape.layer, points=p, width=shape.width,
+                                    cap=shape.cap, datatype=shape.datatype) for p in pieces]
+                if shape in cell.shapes:
+                    cell.shapes.remove(shape)
+                cell.shapes.extend(new_shapes)
+                if len(new_shapes) == 1:
+                    self.selected = ("shape", new_shapes[0])
+                else:
+                    self.selected = None
+                    self.selected_multi = [("shape", s) for s in new_shapes]
+                self.on_mode_status(f"deleted segment -- path split into {len(new_shapes)} piece(s)")
         elif kind == "shape":
             _, shape = self.selected
             if shape in cell.shapes:

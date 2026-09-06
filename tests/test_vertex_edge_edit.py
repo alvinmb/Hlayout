@@ -93,7 +93,10 @@ def test_delete_vertex_removes_only_one_point():
         app.destroy()
 
 
-def test_delete_vertex_refuses_below_minimum():
+def test_delete_vertex_of_a_two_point_path_deletes_the_whole_path():
+    # A 2-point path can't give up a point, so Delete on a selected
+    # endpoint of one removes the whole path rather than doing nothing
+    # (which read as "Delete is broken").
     app, top = _make_app()
     try:
         path = top.add_path(1, [(0, 0), (1000, 1000)], width=200, cap="flush")
@@ -102,7 +105,22 @@ def test_delete_vertex_refuses_below_minimum():
         app.canvas._select_click(_ev(*v_px))
         assert app.canvas.selected[0] == "vertex"
         app.canvas.delete_selected()
-        assert len(path.points) == 2  # refused: a path needs >= 2 points
+        assert path not in top.shapes
+        assert app.canvas.selected is None
+    finally:
+        app.destroy()
+
+
+def test_delete_vertex_of_a_triangle_polygon_deletes_the_whole_polygon():
+    app, top = _make_app()
+    try:
+        poly = top.add_polygon(0, [(0, 0), (10000, 0), (5000, 8000)])
+        app.canvas.redraw()
+        v_px = app.canvas.to_px(0, 0)
+        app.canvas._select_click(_ev(*v_px))
+        assert app.canvas.selected[0] == "vertex"
+        app.canvas.delete_selected()
+        assert poly not in top.shapes       # 3 points -> can't drop one
     finally:
         app.destroy()
 
@@ -203,7 +221,10 @@ def test_delete_first_segment_trims_instead_of_leaving_a_sliver():
         app.destroy()
 
 
-def test_delete_segment_refuses_for_a_two_point_path():
+def test_delete_the_only_segment_of_a_two_point_path_deletes_the_path():
+    # Nothing survives removing a 2-point path's single segment, so
+    # Delete on that edge removes the whole path (it used to just print
+    # a status line and leave the path in place).
     app, top = _make_app()
     try:
         path = top.add_path(1, [(0, 0), (10000, 0)], width=300, cap="round")
@@ -214,8 +235,8 @@ def test_delete_segment_refuses_for_a_two_point_path():
         assert app.canvas.selected[0] == "edge"
 
         app.canvas.delete_selected()
-        assert path in top.shapes
-        assert path.points == [(0, 0), (10000, 0)]
+        assert path not in top.shapes
+        assert app.canvas.selected is None
     finally:
         app.destroy()
 
