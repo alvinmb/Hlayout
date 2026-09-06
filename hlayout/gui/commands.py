@@ -285,6 +285,14 @@ Wire bonds (Setup > Wire Bond Rules...; chip-and-wire assembly jumpers):
                                        bond (crossed bare wires short). layer/width/
                                        pad/min/max default to Setup > Wire Bond
                                        Rules...; also Session.wire_bond()
+    BOND MOVE <x,y> <dx,dy> [layer=<n|name>] [tol=<dbu>] [cell=<name>]
+                                       translate the wire bond nearest <x,y> by
+                                       (dx, dy) -- discs and connector together; the
+                                       new position still may not cross another bond.
+                                       Also Session.move_wire_bond()
+    BOND DELETE <x,y> [layer=<n|name>] [tol=<dbu>] [cell=<name>]
+                                       remove the wire bond nearest <x,y> (connector
+                                       + both discs). Also Session.delete_wire_bond()
 
 Automatic routing (requires the shapely package; also the two-click
 Edit > Auto-Route Two Pins tool):
@@ -1257,10 +1265,47 @@ class CommandInterpreter:
         usage = (
             "usage: BOND <x1,y1> <x2,y2> [layer=<n|name>] [width=<dbu>] "
             "[pad=<dbu>] [min=<dbu>] [max=<dbu>] [cell=<name>]\n"
-            "  draws a wire bond (O------O) between two pads on the bond layer;\n"
-            "  span must be within min/max and must not cross an existing bond.\n"
-            "  Bond layer/defaults come from Setup > Wire Bond Rules..."
+            "       BOND MOVE <x,y> <dx,dy> [layer=<n|name>] [tol=<dbu>] [cell=<name>]\n"
+            "       BOND DELETE <x,y> [layer=<n|name>] [tol=<dbu>] [cell=<name>]\n"
+            "  draws / moves / removes a wire bond (O------O) on the bond layer;\n"
+            "  a new/moved span must be within min/max and must not cross another.\n"
+            "  MOVE/DELETE pick the bond nearest <x,y>. Bond layer/defaults come\n"
+            "  from Setup > Wire Bond Rules..."
         )
+        if not args:
+            raise CommandError(usage)
+
+        sub = args[0].upper()
+        if sub in ("MOVE", "DELETE"):
+            rest = args[1:]
+            positional, kwargs = [], {}
+            for a in rest:
+                if "=" in a:
+                    k, v = a.split("=", 1)
+                    k = k.lower()
+                    if k == "layer":
+                        kwargs["layer"] = v
+                    elif k == "tol":
+                        kwargs["tol"] = float(v)
+                    elif k == "cell":
+                        kwargs["cell_name"] = v
+                    else:
+                        raise CommandError(f"unknown BOND {sub} option {k!r}")
+                else:
+                    positional.append(a)
+            if sub == "MOVE":
+                if len(positional) != 2:
+                    raise CommandError(usage)
+                px, py = _parse_point(positional[0])
+                dx, dy = _parse_point(positional[1])
+                n1, n2 = self.session.move_wire_bond((px, py), dx, dy, **kwargs)
+                return f"wire bond moved by {dx:g},{dy:g}  ->  {n1} - {n2}"
+            if len(positional) != 1:
+                raise CommandError(usage)
+            px, py = _parse_point(positional[0])
+            e1, e2 = self.session.delete_wire_bond((px, py), **kwargs)
+            return f"wire bond {e1} - {e2} removed"
+
         if len(args) < 2:
             raise CommandError(usage)
         p1 = _parse_point(args[0])

@@ -57,6 +57,19 @@ from ..io.techfile import (
 from ..core.thinfilm import generate_serpentine_geometry, generate_top_hat_geometry
 
 
+def _point_seg_dist(p, a, b) -> float:
+    """Shortest distance from point ``p`` to the segment ``a``-``b``
+    (all (x, y) in DBU)."""
+    (px, py), (ax, ay), (bx, by) = p, a, b
+    dx, dy = bx - ax, by - ay
+    seg2 = dx * dx + dy * dy
+    if seg2 < 1e-9:
+        return math.hypot(px - ax, py - ay)
+    t = ((px - ax) * dx + (py - ay) * dy) / seg2
+    t = max(0.0, min(1.0, t))
+    return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+
+
 def _segments_cross(p1, p2, p3, p4) -> bool:
     """True only when segment p1-p2 and segment p3-p4 PROPERLY cross --
     i.e. each segment strictly straddles the other's line. Segments that
@@ -1665,16 +1678,134 @@ class Session:
         return cell.shapes[-1]
 
     @staticmethod
-    def _existing_bond_segments(cell, layer):
+    def _existing_bond_segments(cell, layer, exclude=None):
         """Yield (p0, p1) endpoint pairs for every wire-bond Path already
         on `layer` in `cell` -- the two-point round-capped Paths
-        wire_bond() draws."""
+        wire_bond() draws. `exclude` is one Path object to skip (used by
+        move_wire_bond so a bond isn't tested against its own old
+        position)."""
         from ..core.shapes import Path
 
         for s in cell.shapes:
+            if s is exclude:
+                continue
             if isinstance(s, Path) and s.layer == layer and len(s.points) >= 2:
                 for i in range(len(s.points) - 1):
                     yield (tuple(s.points[i]), tuple(s.points[i + 1]))
+
+    def _resolve_bond_layer(self, layer):
+        rules = load_bond_rules(self.library)
+        r_layer = self.library.layers.resolve(layer) if layer is not None else int(rules["layer"])
+        if r_layer is None or r_layer < 0:
+            raise LayoutError(
+                "no wire-bond layer set -- pass layer=... or configure "
+                "Setup > Wire Bond Rules..."
+            )
+        return r_layer, rules
+
+    def find_wire_bond(self, point, layer=None, cell_name: Optional[str] = None,
+                       tol: Optional[float] = None):
+        """Locate the wire bond nearest ``point`` (an (x, y) DBU
+        coordinate) in the cell and return its component shapes as
+        ``(connector_path, [ball, ball])`` -- the two-point round-capped
+        Path plus the endpoint discs wire_bond() drew with it (the ball
+        list may be shorter if a disc is missing). Returns ``None`` when
+        nothing on the bond layer lies within ``tol`` (default: the bond
+        rules' pad diameter, min the width) of ``point``.
+
+        The match is by the connector Path: ``point`` need only be within
+        ``tol`` of the O------O line, so clicking anywhere along a bond
+        finds it.
+        """
+        from ..core.shapes import Path, Polygon
+
+        name = cell_name or self.current_cell_name
+        if name is None:
+            raise LayoutError("no current cell; call new_cell()/use_cell() first")
+        r_layer, rules = self._resolve_bond_layer(layer)
+        reach = float(tol) if tol is not None else float(max(int(rules["pad"]),
+                                                             int(rules["width"]), 1))
+        cell = self.library.get_cell(name)
+
+        best = None
+        best_d = reach
+        for s in cell.shapes:
+            if not (isinstance(s, Path) and s.layer == r_layer and len(s.points) == 2):
+                continue
+            d = _point_seg_dist(tuple(point), tuple(s.points[0]), tuple(s.points[1]))
+            if d <= best_d:
+                best_d = d
+                best = s
+        if best is None:
+            return None
+
+        ends = [tuple(best.points[0]), tuple(best.points[1])]
+        balls = []
+        for s in cell.shapes:
+            if not (isinstance(s, Polygon) and s.layer == r_layer):
+                continue
+            x1, y1, x2, y2 = s.bbox()
+            c = ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+            for e in ends:
+                if math.hypot(c[0] - e[0], c[1] - e[1]) <= 2.0:
+                    balls.append(s)
+                    break
+        return best, balls
+
+    def move_wire_bond(self, point, dx, dy, layer=None,
+                       cell_name: Optional[str] = None, tol: Optional[float] = None):
+        """Translate the wire bond nearest ``point`` by (``dx``, ``dy``)
+        DBU -- both endpoint discs and the connector move together. The
+        span is unchanged, so min/max length still hold; the new position
+        still may not CROSS another bond. Raises LayoutError if no bond
+        is near ``point`` or the move would cross one. One undo step."""
+        name = cell_name or self.current_cell_name
+        if name is None:
+            raise LayoutError("no current cell; call new_cell()/use_cell() first")
+        r_layer, _ = self._resolve_bond_layer(layer)
+        found = self.find_wire_bond(point, layer=r_layer, cell_name=name, tol=tol)
+        if found is None:
+            raise LayoutError(f"no wire bond near {tuple(point)} on layer {r_layer}")
+        path, balls = found
+        dx, dy = int(round(dx)), int(round(dy))
+
+        (x1, y1), (x2, y2) = path.points
+        n1, n2 = (x1 + dx, y1 + dy), (x2 + dx, y2 + dy)
+        cell = self.library.get_cell(name)
+        for a, b in self._existing_bond_segments(cell, r_layer, exclude=path):
+            if _segments_cross(n1, n2, a, b):
+                raise LayoutError(
+                    "moving that wire bond there would cross an existing "
+                    "bond wire -- bond wires share one plane and can't cross"
+                )
+
+        with self._batch():
+            path.points = [n1, n2]
+            for ball in balls:
+                ball.points = [(px + dx, py + dy) for px, py in ball.points]
+        self._notify()
+        return n1, n2
+
+    def delete_wire_bond(self, point, layer=None,
+                         cell_name: Optional[str] = None, tol: Optional[float] = None):
+        """Remove the wire bond nearest ``point`` -- its connector Path
+        and both endpoint discs. Raises LayoutError if no bond is near
+        ``point``. One undo step; returns the removed bond's endpoints."""
+        name = cell_name or self.current_cell_name
+        if name is None:
+            raise LayoutError("no current cell; call new_cell()/use_cell() first")
+        r_layer, _ = self._resolve_bond_layer(layer)
+        found = self.find_wire_bond(point, layer=r_layer, cell_name=name, tol=tol)
+        if found is None:
+            raise LayoutError(f"no wire bond near {tuple(point)} on layer {r_layer}")
+        path, balls = found
+        ends = (tuple(path.points[0]), tuple(path.points[1]))
+        doomed = {id(path), *(id(b) for b in balls)}
+        cell = self.library.get_cell(name)
+        with self._batch():
+            cell.shapes[:] = [s for s in cell.shapes if id(s) not in doomed]
+        self._notify()
+        return ends
 
     def auto_route(self, a, b, layer=None, grid: int = 100, width: int = 20,
                    clearance: Optional[float] = None, margin: Optional[float] = None,
