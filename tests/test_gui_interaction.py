@@ -60,6 +60,35 @@ def test_click_draw_rect_poly_path():
         app.destroy()
 
 
+def test_undo_while_drawing_a_path_drops_the_last_point_not_a_design_edit():
+    app = _make_app()
+    try:
+        app.session.rect(0, 0, 0, 10, 10)          # something already in the design
+        app.session.clear_undo_history()
+
+        app.mode_var.set("path")
+        app._on_mode_change()
+        app.canvas._on_click(_ev(100, 100))
+        app.canvas._on_click(_ev(150, 150))
+        app.canvas._on_click(_ev(200, 120))
+        assert len(app.canvas._pending_points) == 3
+
+        app._undo()                                 # Ctrl+Z / Edit > Undo
+        assert len(app.canvas._pending_points) == 2
+        assert len(app.session.cell.shapes) == 1    # the rect is untouched
+
+        app._undo()
+        app._undo()
+        assert app.canvas._pending_points == []
+        assert len(app.session.cell.shapes) == 1
+
+        # nothing pending now -> a real session undo
+        app._undo()
+        assert app.status.get() == "nothing to undo"
+    finally:
+        app.destroy()
+
+
 def test_select_drag_and_delete():
     app = _make_app()
     try:

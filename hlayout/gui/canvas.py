@@ -414,8 +414,8 @@ class LayoutCanvas(tk.Canvas):
                       "a box over empty space to window-select multiple",
             "zoomwin": "Zoom Window: drag a box around the area you want to see",
             "rect": "Rectangle: click first corner, then the opposite corner",
-            "poly": "Polygon: click each vertex, double-click/Enter to finish (Esc cancels, Backspace undoes a point)",
-            "path": "Path: click each point, double-click/Enter to finish (Esc cancels, Backspace undoes a point)",
+            "poly": "Polygon: click each vertex, double-click/Enter to finish (Esc cancels, Backspace/Undo drops the last point)",
+            "path": "Path: click each point, double-click/Enter to finish (Esc cancels, Backspace/Undo drops the last point)",
             "text": "Text: click the insertion point, then fill in the text",
             "sref": "Cell instance: click the placement point, then choose the cell "
                     "(placed unrotated -- rotate afterwards with R / Rotate)",
@@ -652,6 +652,27 @@ class LayoutCanvas(tk.Canvas):
         if self._pending_points:
             self._pending_points.pop()
             self._update_preview(*self._last_mouse_dbu)
+
+    def undo_draw_point(self) -> bool:
+        """If a segmented shape (Path/Polygon/Route) is being drawn and
+        has at least one point down, drop the last one and report True
+        -- so Undo (Ctrl+Z / Edit > Undo) backs a path off a segment at
+        a time while you're drawing it, the same as Backspace, instead
+        of running a full session undo. Returns False when there's
+        nothing pending, letting the caller fall through to the real
+        undo."""
+        if self.draw_mode in ("poly", "path", "route") and self._pending_points:
+            n = len(self._pending_points)
+            self._pending_points.pop()
+            self._update_preview(*self._last_mouse_dbu)
+            left = len(self._pending_points)
+            self.on_mode_status(
+                f"removed the last point ({left} left) -- "
+                f"click to add, double-click/Enter to finish"
+                if left else f"removed the last point -- click to start again"
+            )
+            return True
+        return False
 
     def finish_draw(self):
         if self.draw_mode == "poly":

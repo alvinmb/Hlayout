@@ -465,6 +465,11 @@ class App(tk.Tk):
 
     # --- undo/redo ---------------------------------------------------------
     def _undo(self):
+        # While a path/polygon/route is being drawn, Undo backs it off
+        # one point at a time (same as Backspace) rather than undoing
+        # whatever was in the design before the draw started.
+        if self.canvas.undo_draw_point():
+            return
         if not self.session.undo():
             self.status.set("nothing to undo")
             return
