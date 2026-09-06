@@ -289,10 +289,12 @@ Wire bonds (Setup > Wire Bond Rules...; chip-and-wire assembly jumpers):
                                        translate the wire bond nearest <x,y> by
                                        (dx, dy) -- discs and connector together; the
                                        new position still may not cross another bond.
-                                       Also Session.move_wire_bond()
+                                       Also Edit > Move Wire Bond and
+                                       Session.move_wire_bond()
     BOND DELETE <x,y> [layer=<n|name>] [tol=<dbu>] [cell=<name>]
                                        remove the wire bond nearest <x,y> (connector
-                                       + both discs). Also Session.delete_wire_bond()
+                                       + both discs). Also Edit > Delete Wire Bond
+                                       and Session.delete_wire_bond()
 
 Automatic routing (requires the shapely package; also the two-click
 Edit > Auto-Route Two Pins tool):

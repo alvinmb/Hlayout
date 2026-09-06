@@ -401,6 +401,8 @@ class App(tk.Tk):
         editm.add_command(label="Continue Path...", command=self._continue_path)
         editm.add_command(label="Number Pins...", command=self._number_pins)
         editm.add_command(label="Auto-Route Two Pins", command=self._auto_route_two_pins)
+        editm.add_command(label="Move Wire Bond", command=self._move_wire_bond_tool)
+        editm.add_command(label="Delete Wire Bond", command=self._delete_wire_bond_tool)
         editm.add_separator()
         editm.add_command(label="Rotate...", command=self._rotate_selected)
         editm.add_command(label="Copy...", command=self._copy_selected)
@@ -1996,6 +1998,20 @@ class App(tk.Tk):
             f"click two more pins, or Esc to stop"
         )
 
+    def _move_wire_bond_tool(self):
+        """Edit > Move Wire Bond: click on (or near) a bond wire, then
+        click where that point should go -- the whole O------O (both end
+        discs and the connector) is translated by that delta. The span
+        is unchanged and the bond still may not cross another. Stays
+        armed; Esc exits. See _on_canvas_commit()/Session.move_wire_bond()."""
+        self.canvas.start_move_bond()
+
+    def _delete_wire_bond_tool(self):
+        """Edit > Delete Wire Bond: click on (or near) a bond wire to
+        remove it -- connector and both end discs. Stays armed; Esc
+        exits. See _on_canvas_commit()/Session.delete_wire_bond()."""
+        self.canvas.start_delete_bond()
+
     def _continue_path(self):
         """Edit > Continue Path...: re-enter Path drawing pre-seeded
         with the selected Path's own points, so more points can be
@@ -2037,6 +2053,17 @@ class App(tk.Tk):
                 self.session.circle(layer, points[0], extra["radius"], segments=extra["segments"])
             elif mode == "wire_bond":
                 self.session.wire_bond(points)
+            elif mode == "del_bond":
+                e1, e2 = self.session.delete_wire_bond(points[0])
+                self.status.set(
+                    f"wire bond {e1} - {e2} removed -- click another, or Esc to stop"
+                )
+            elif mode == "move_bond":
+                (gx, gy), (dx_to, dy_to) = points
+                n1, n2 = self.session.move_wire_bond((gx, gy), dx_to - gx, dy_to - gy)
+                self.status.set(
+                    f"wire bond moved to {n1} - {n2} -- move another, or Esc to stop"
+                )
             elif mode == "text":
                 self.session.text(layer, points[0], extra["text"], height=extra["height"],
                                    font=extra["font"])
@@ -2064,7 +2091,9 @@ class App(tk.Tk):
                     x_reflection=extra["x_reflection"],
                 )
         except LayoutError as e:
-            dialogs.show_error("Could not add shape", str(e), parent=self)
+            title = {"del_bond": "Delete Wire Bond",
+                     "move_bond": "Move Wire Bond"}.get(mode, "Could not add shape")
+            dialogs.show_error(title, str(e), parent=self)
 
     def _placeable_cell_names(self):
         """Cell names offered by the Create > Cell Instance draw tool's

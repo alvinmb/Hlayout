@@ -86,7 +86,7 @@ class LayoutCanvas(tk.Canvas):
         self._font_cache = {}
 
         # --- interactive drawing state ---------------------------------
-        self.draw_mode = "select"  # select | rect | poly | path | text | sref | aref | circle | zoomwin | route | measure | pin_number | cell_origin | auto_route
+        self.draw_mode = "select"  # select | rect | poly | path | text | sref | aref | circle | zoomwin | route | measure | pin_number | cell_origin | auto_route | wire_bond | del_bond | move_bond
         # Create Cell from Selection: after the name is entered the tool
         # enters "cell_origin" mode -- the next canvas click is the point
         # that becomes the new cell's local (0, 0). The selection is
@@ -422,6 +422,8 @@ class LayoutCanvas(tk.Canvas):
             "pin_number": self._pin_number_hint(),
             "cell_origin": self._cell_origin_hint(),
             "wire_bond": self._wire_bond_hint(),
+            "del_bond": self._del_bond_hint(),
+            "move_bond": self._move_bond_hint(),
             "auto_route": self._auto_route_hint(),
         }
         return hints.get(self.draw_mode, "")
@@ -440,6 +442,18 @@ class LayoutCanvas(tk.Canvas):
                 "bond wire is drawn on the bond layer (Setup > Wire Bond "
                 "Rules...). Bonds can't cross and must be within min/max "
                 "length; Esc cancels the current one")
+
+    def _del_bond_hint(self):
+        return ("Delete Wire Bond: click on (or near) a bond wire to remove it "
+                "-- connector and both end discs. Stays armed; Esc stops")
+
+    def _move_bond_hint(self):
+        if not self._pending_points:
+            return ("Move Wire Bond: click on (or near) the bond wire to move, "
+                    "then click where that point should go. Esc stops")
+        return ("Move Wire Bond: bond grabbed -- now click the destination "
+                "point. The span can't change and the bond still can't cross "
+                "another. Esc stops")
 
     def _cell_origin_hint(self):
         return (f"Create Cell {self._pending_cell_name!r}: click the point to use as "
@@ -499,6 +513,15 @@ class LayoutCanvas(tk.Canvas):
             self.redraw()
             self.on_mode_status(self._mode_hint())
             self.on_draw_mode_changed("select")
+        if self.draw_mode in ("del_bond", "move_bond"):
+            # Esc stops the guided Delete/Move Wire Bond tools and returns
+            # to Select, same as auto_route above.
+            self.draw_mode = "select"
+            self.selected = None
+            self.selected_multi = []
+            self.redraw()
+            self.on_mode_status(self._mode_hint())
+            self.on_draw_mode_changed("select")
 
     def start_pin_numbering(self, start: str = "1"):
         """Edit > Number Pins...: enter the click-to-increment pin-
@@ -529,6 +552,18 @@ class LayoutCanvas(tk.Canvas):
         self.pin_number_next = increment_pin_str(self.pin_number_next)
         self.on_mode_status(self._pin_number_hint())
         self._after_edit()
+
+    def start_delete_bond(self):
+        """Edit > Delete Wire Bond: one click on (or near) a bond wire
+        removes it -- connector Path and both end discs -- via
+        on_commit("del_bond", ...). Stays armed; Esc exits to Select."""
+        self.set_mode("del_bond")
+
+    def start_move_bond(self):
+        """Edit > Move Wire Bond: click the bond wire to move, then click
+        the destination point; the bond is translated by that delta via
+        on_commit("move_bond", ...). Stays armed; Esc exits to Select."""
+        self.set_mode("move_bond")
 
     def start_auto_route(self):
         """Edit > Auto-Route Two Pins: enter the two-click auto-router.
@@ -777,6 +812,15 @@ class LayoutCanvas(tk.Canvas):
                 self._commit_wire_bond()
             else:
                 self._update_preview(*pt)
+        elif self.draw_mode == "del_bond":
+            self._pending_points = [pt]
+            self._commit_del_bond()
+        elif self.draw_mode == "move_bond":
+            self._pending_points.append(pt)
+            if len(self._pending_points) == 2:
+                self._commit_move_bond()
+            else:
+                self.on_mode_status(self._move_bond_hint())
 
     def _on_double_click(self, e):
         if self.draw_mode == "select":
@@ -1854,6 +1898,22 @@ class LayoutCanvas(tk.Canvas):
         if self.on_commit:
             self.on_commit("wire_bond", self.current_layer, [p0, p1], {})
         self.on_mode_status(self._wire_bond_hint())
+
+    def _commit_del_bond(self):
+        pt = self._pending_points[0]
+        self._pending_points = []
+        self.delete("preview")
+        if self.on_commit:
+            self.on_commit("del_bond", self.current_layer, [pt], {})
+        self.on_mode_status(self._del_bond_hint())
+
+    def _commit_move_bond(self):
+        grab, drop = self._pending_points
+        self._pending_points = []
+        self.delete("preview")
+        if self.on_commit:
+            self.on_commit("move_bond", self.current_layer, [grab, drop], {})
+        self.on_mode_status(self._move_bond_hint())
 
     def _commit_measure(self):
         (x0, y0), (x1, y1) = self._pending_points

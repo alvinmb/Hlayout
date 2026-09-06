@@ -270,3 +270,80 @@ def test_bond_move_and_delete_commands():
 def _bbox_centre(poly):
     x1, y1, x2, y2 = poly.bbox()
     return ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+
+
+# --- Edit menu guided tools ------------------------------------
+
+def _app_with_a_bond():
+    tk = pytest.importorskip("tkinter")
+    from hlayout.gui.app import App
+    lib = Library("T")
+    lib.new_cell("TOP")
+    try:
+        app = App(lib)
+    except tk.TclError as e:
+        pytest.skip(f"no display available: {e}")
+    app.update()
+    s = app.session
+    s.rect(3, 0, 0, 100, 100)
+    s.rect(3, 2000, 0, 2100, 100)
+    save_bond_rules(lib, {"layer": BOND, "width": 30, "pad": 100,
+                          "min_length": 200, "max_length": 4000})
+    s.wire_bond([(50, 50), (2050, 50)])
+    app.canvas.set_cell("TOP")
+    return app
+
+
+def test_edit_menu_has_move_and_delete_wire_bond_items():
+    tk = pytest.importorskip("tkinter")
+    app = _app_with_a_bond()
+    try:
+        for label, sub in app._top_menus:
+            if label == "Edit":
+                labels = [sub.entrycget(j, "label")
+                          for j in range(sub.index("end") + 1)
+                          if _entry_label(sub, j)]
+                assert "Move Wire Bond" in labels
+                assert "Delete Wire Bond" in labels
+                return
+        raise AssertionError("no Edit menu")
+    finally:
+        app.destroy()
+
+
+def _entry_label(sub, j):
+    import tkinter as tk
+    try:
+        sub.entrycget(j, "label")
+        return True
+    except tk.TclError:
+        return False
+
+
+def test_delete_wire_bond_tool_arms_and_removes_on_click():
+    app = _app_with_a_bond()
+    try:
+        s = app.session
+        app._delete_wire_bond_tool()
+        assert app.canvas.draw_mode == "del_bond"
+        app._on_canvas_commit("del_bond", 3, [(1000, 50)], {})
+        assert _bonds(s) == []
+        assert _polys(s) == []
+        assert app.canvas.draw_mode == "del_bond"     # stays armed
+        app.canvas.cancel_draw()
+        assert app.canvas.draw_mode == "select"        # Esc exits
+    finally:
+        app.destroy()
+
+
+def test_move_wire_bond_tool_translates_by_the_two_clicked_points():
+    app = _app_with_a_bond()
+    try:
+        s = app.session
+        app._move_wire_bond_tool()
+        assert app.canvas.draw_mode == "move_bond"
+        app._on_canvas_commit("move_bond", 3, [(1000, 50), (1000, 650)], {})
+        assert list(_bonds(s)[0].points) == [(50, 650), (2050, 650)]
+        assert len(_polys(s)) == 2
+    finally:
+        app.destroy()
