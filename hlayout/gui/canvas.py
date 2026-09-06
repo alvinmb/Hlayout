@@ -455,11 +455,12 @@ class LayoutCanvas(tk.Canvas):
 
     def _move_bond_hint(self):
         if not self._pending_points:
-            return ("Move Wire Bond: click on (or near) the bond wire to move, "
-                    "then click where that point should go. Esc stops")
-        return ("Move Wire Bond: bond grabbed -- now click the destination "
-                "point. The span can't change and the bond still can't cross "
-                "another. Esc stops")
+            return ("Move Wire Bond: click near the END of a bond wire you want "
+                    "to move (the closer end is picked), then click where that "
+                    "end should go -- the other end stays. Esc stops")
+        return ("Move Wire Bond: end grabbed -- now click its new position. The "
+                "new span must stay within min/max and the bond still can't "
+                "cross another. Esc stops")
 
     def _cell_origin_hint(self):
         return (f"Create Cell {self._pending_cell_name!r}: click the point to use as "

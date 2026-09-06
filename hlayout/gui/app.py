@@ -1995,11 +1995,12 @@ class App(tk.Tk):
         )
 
     def _move_wire_bond_tool(self):
-        """Edit > Move Wire Bond: click on (or near) a bond wire, then
-        click where that point should go -- the whole O------O (both end
-        discs and the connector) is translated by that delta. The span
-        is unchanged and the bond still may not cross another. Stays
-        armed; Esc exits. See _on_canvas_commit()/Session.move_wire_bond()."""
+        """Edit > Move Wire Bond: click near the END of a bond you want
+        to move (the closer end is picked), then click its new position
+        -- that end and its disc follow, the other end stays. The new
+        span must stay within min/max and the bond still may not cross
+        another. Stays armed; Esc exits. See _on_canvas_commit() /
+        Session.move_wire_bond()."""
         self.canvas.start_move_bond()
 
     def _delete_wire_bond_tool(self):
@@ -2055,10 +2056,11 @@ class App(tk.Tk):
                     f"wire bond {e1} - {e2} removed -- click another, or Esc to stop"
                 )
             elif mode == "move_bond":
-                (gx, gy), (dx_to, dy_to) = points
-                n1, n2 = self.session.move_wire_bond((gx, gy), dx_to - gx, dy_to - gy)
+                near, to = points
+                fixed, moved = self.session.move_wire_bond(near, to)
                 self.status.set(
-                    f"wire bond moved to {n1} - {n2} -- move another, or Esc to stop"
+                    f"wire bond end moved to {moved} (other end {fixed}) "
+                    f"-- move another, or Esc to stop"
                 )
             elif mode == "text":
                 self.session.text(layer, points[0], extra["text"], height=extra["height"],

@@ -285,11 +285,12 @@ Wire bonds (Setup > Wire Bond Rules...; chip-and-wire assembly jumpers):
                                        bond (crossed bare wires short). layer/width/
                                        pad/min/max default to Setup > Wire Bond
                                        Rules...; also Session.wire_bond()
-    BOND MOVE <x,y> <dx,dy> [layer=<n|name>] [tol=<dbu>] [cell=<name>]
-                                       translate the wire bond nearest <x,y> by
-                                       (dx, dy) -- discs and connector together; the
-                                       new position still may not cross another bond.
-                                       Also Edit > Move Wire Bond and
+    BOND MOVE <near_x,near_y> <to_x,to_y> [layer=<n|name>] [tol=<dbu>] [cell=<name>]
+                                       move ONE end of the wire bond nearest <near>
+                                       to <to> -- the end closer to <near> moves
+                                       (with its disc), the other stays; the new span
+                                       must be within min/max and must not cross
+                                       another bond. Also Edit > Move Wire Bond and
                                        Session.move_wire_bond()
     BOND DELETE <x,y> [layer=<n|name>] [tol=<dbu>] [cell=<name>]
                                        remove the wire bond nearest <x,y> (connector
@@ -1267,12 +1268,13 @@ class CommandInterpreter:
         usage = (
             "usage: BOND <x1,y1> <x2,y2> [layer=<n|name>] [width=<dbu>] "
             "[pad=<dbu>] [min=<dbu>] [max=<dbu>] [cell=<name>]\n"
-            "       BOND MOVE <x,y> <dx,dy> [layer=<n|name>] [tol=<dbu>] [cell=<name>]\n"
+            "       BOND MOVE <near_x,near_y> <to_x,to_y> [layer=<n|name>] [tol=<dbu>] [cell=<name>]\n"
             "       BOND DELETE <x,y> [layer=<n|name>] [tol=<dbu>] [cell=<name>]\n"
             "  draws / moves / removes a wire bond (O------O) on the bond layer;\n"
             "  a new/moved span must be within min/max and must not cross another.\n"
-            "  MOVE/DELETE pick the bond nearest <x,y>. Bond layer/defaults come\n"
-            "  from Setup > Wire Bond Rules..."
+            "  MOVE picks the bond nearest <near>, then moves the end closer to\n"
+            "  <near> to <to> (the other end stays). DELETE picks the bond nearest\n"
+            "  <x,y>. Bond layer/defaults come from Setup > Wire Bond Rules..."
         )
         if not args:
             raise CommandError(usage)
@@ -1298,10 +1300,10 @@ class CommandInterpreter:
             if sub == "MOVE":
                 if len(positional) != 2:
                     raise CommandError(usage)
-                px, py = _parse_point(positional[0])
-                dx, dy = _parse_point(positional[1])
-                n1, n2 = self.session.move_wire_bond((px, py), dx, dy, **kwargs)
-                return f"wire bond moved by {dx:g},{dy:g}  ->  {n1} - {n2}"
+                near = _parse_point(positional[0])
+                to = _parse_point(positional[1])
+                fixed, moved = self.session.move_wire_bond(near, to, **kwargs)
+                return f"wire bond end moved to {moved}  (other end {fixed})"
             if len(positional) != 1:
                 raise CommandError(usage)
             px, py = _parse_point(positional[0])

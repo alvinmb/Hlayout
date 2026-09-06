@@ -198,30 +198,54 @@ def test_find_wire_bond_matches_a_click_anywhere_along_it():
     assert s.find_wire_bond((1000, 5000)) is None
 
 
-def test_move_wire_bond_translates_discs_and_connector_together():
+def test_move_wire_bond_moves_only_the_grabbed_end():
     s = _design()
     s.wire_bond([(50, 50), (2050, 50)])
-    ball_centres_before = sorted(tuple(round(v) for v in _bbox_centre(p)) for p in _polys(s))
+    centres_before = {tuple(round(v) for v in _bbox_centre(p)) for p in _polys(s)}
 
-    n1, n2 = s.move_wire_bond((1000, 50), 0, 600)
-    assert (n1, n2) == ((50, 650), (2050, 650))
-    assert list(_bonds(s)[0].points) == [(50, 650), (2050, 650)]
-    ball_centres_after = sorted(tuple(round(v) for v in _bbox_centre(p)) for p in _polys(s))
-    assert ball_centres_after == sorted((cx, cy + 600) for cx, cy in ball_centres_before)
+    fixed, moved = s.move_wire_bond((50, 50), (50, 650))
+    assert fixed == (2050, 50)                    # the far end stayed put
+    assert moved == (50, 650)
+    assert set(map(tuple, _bonds(s)[0].points)) == {(50, 650), (2050, 50)}
+
+    centres_after = {tuple(round(v) for v in _bbox_centre(p)) for p in _polys(s)}
+    # one disc moved from (50, 50) to (50, 650); the other is unchanged
+    assert (2050, 50) in centres_after
+    assert (50, 650) in centres_after
+    assert (50, 50) not in centres_after
+    assert centres_before == {(50, 50), (2050, 50)}
+
+
+def test_move_wire_bond_picks_whichever_end_the_click_is_closer_to():
+    s = _design()
+    s.wire_bond([(50, 50), (2050, 50)])
+    fixed, moved = s.move_wire_bond((2050, 50), (2050, 700))   # grab the RIGHT end
+    assert fixed == (50, 50)
+    assert moved == (2050, 700)
+
+
+def test_move_wire_bond_rejects_a_new_span_out_of_range():
+    s = _design()                                # min 200, max 4000
+    s.wire_bond([(50, 50), (2050, 50)])
+    with pytest.raises(LayoutError, match="shorter than"):
+        s.move_wire_bond((50, 50), (2000, 50))   # 50 DBU from the fixed end
+    with pytest.raises(LayoutError, match="longer than"):
+        s.move_wire_bond((50, 50), (50, 6000))   # ~6500 DBU from the fixed end
+    assert list(_bonds(s)[0].points) == [(50, 50), (2050, 50)]   # unchanged
 
 
 def test_move_wire_bond_is_one_undo_step_and_rejects_a_crossing():
     s = _design()
-    s.wire_bond([(50, 50), (2050, 50)])          # the bond we move
-    s.wire_bond([(1000, 300), (1000, 1200)])     # a vertical bond to collide with
+    s.wire_bond([(50, 50), (2050, 50)])              # the bond we move
+    s.wire_bond([(1000, -1000), (1000, -200)])       # a vertical bond below it
     s.clear_undo_history()
 
     with pytest.raises(LayoutError, match="cross"):
-        s.move_wire_bond((1000, 50), 0, 400)     # would slide under the vertical one
-    assert list(_bonds(s)[0].points) == [(50, 50), (2050, 50)]  # unchanged
+        s.move_wire_bond((50, 50), (50, -700))       # left end swings down through it
+    assert list(_bonds(s)[0].points) == [(50, 50), (2050, 50)]   # unchanged
 
-    s.move_wire_bond((1000, 50), 0, -400)        # the other way is clear
-    assert list(_bonds(s)[0].points) == [(50, -350), (2050, -350)]
+    fixed, moved = s.move_wire_bond((50, 50), (50, 900))         # up is clear
+    assert (fixed, moved) == ((2050, 50), (50, 900))
     assert s.undo() is True
     assert list(_bonds(s)[0].points) == [(50, 50), (2050, 50)]
 
@@ -255,11 +279,11 @@ def test_bond_move_and_delete_commands():
     interp = CommandInterpreter(s, ScriptConsole(s))
     interp.run("BOND 50,50 2050,50")
 
-    out = interp.run("BOND MOVE 1000,50 0,600")
+    out = interp.run("BOND MOVE 50,50 50,650")
     assert "moved" in out.lower()
-    assert list(_bonds(s)[0].points) == [(50, 650), (2050, 650)]
+    assert set(map(tuple, _bonds(s)[0].points)) == {(50, 650), (2050, 50)}
 
-    out = interp.run("BOND DELETE 1000,650")
+    out = interp.run("BOND DELETE 1000,350")
     assert "removed" in out.lower()
     assert _bonds(s) == []
 
@@ -336,14 +360,16 @@ def test_delete_wire_bond_tool_arms_and_removes_on_click():
         app.destroy()
 
 
-def test_move_wire_bond_tool_translates_by_the_two_clicked_points():
-    app = _app_with_a_bond()
+def test_move_wire_bond_tool_moves_the_grabbed_end_only():
+    app = _app_with_a_bond()                       # bond is (50,50)-(2050,50)
     try:
         s = app.session
         app._move_wire_bond_tool()
         assert app.canvas.draw_mode == "move_bond"
-        app._on_canvas_commit("move_bond", 3, [(1000, 50), (1000, 650)], {})
-        assert list(_bonds(s)[0].points) == [(50, 650), (2050, 650)]
+        # first click near the left end, second click its new spot
+        app._on_canvas_commit("move_bond", 3, [(50, 50), (50, 650)], {})
+        assert set(map(tuple, _bonds(s)[0].points)) == {(50, 650), (2050, 50)}
         assert len(_polys(s)) == 2
+        assert app.canvas.draw_mode == "move_bond"    # stays armed
     finally:
         app.destroy()

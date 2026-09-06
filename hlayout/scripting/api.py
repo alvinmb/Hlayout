@@ -1752,39 +1752,68 @@ class Session:
                     break
         return best, balls
 
-    def move_wire_bond(self, point, dx, dy, layer=None,
+    def move_wire_bond(self, near, to, layer=None,
                        cell_name: Optional[str] = None, tol: Optional[float] = None):
-        """Translate the wire bond nearest ``point`` by (``dx``, ``dy``)
-        DBU -- both endpoint discs and the connector move together. The
-        span is unchanged, so min/max length still hold; the new position
-        still may not CROSS another bond. Raises LayoutError if no bond
-        is near ``point`` or the move would cross one. One undo step."""
+        """Move ONE end of the wire bond nearest ``near`` to the point
+        ``to``. ``near`` both picks the bond (by distance to its
+        O------O line) and chooses which end to move -- whichever
+        endpoint it is closer to; the other end stays put. The moved
+        end's disc follows.
+
+        The new span (fixed end to ``to``) must still lie within the
+        bond rules' ``min_length``/``max_length``, and the repositioned
+        bond still may not CROSS another. Raises LayoutError if no bond
+        is near ``near``, the new span is out of range, or the move would
+        cross a bond. One undo step; returns ``(fixed_end, new_end)``."""
         name = cell_name or self.current_cell_name
         if name is None:
             raise LayoutError("no current cell; call new_cell()/use_cell() first")
-        r_layer, _ = self._resolve_bond_layer(layer)
-        found = self.find_wire_bond(point, layer=r_layer, cell_name=name, tol=tol)
+        r_layer, rules = self._resolve_bond_layer(layer)
+        found = self.find_wire_bond(near, layer=r_layer, cell_name=name, tol=tol)
         if found is None:
-            raise LayoutError(f"no wire bond near {tuple(point)} on layer {r_layer}")
+            raise LayoutError(f"no wire bond near {tuple(near)} on layer {r_layer}")
         path, balls = found
-        dx, dy = int(round(dx)), int(round(dy))
 
-        (x1, y1), (x2, y2) = path.points
-        n1, n2 = (x1 + dx, y1 + dy), (x2 + dx, y2 + dy)
+        p0, p1 = tuple(path.points[0]), tuple(path.points[1])
+        nx, ny = float(near[0]), float(near[1])
+        grab_first = (math.hypot(nx - p0[0], ny - p0[1])
+                      <= math.hypot(nx - p1[0], ny - p1[1]))
+        moved_old = p0 if grab_first else p1
+        fixed = p1 if grab_first else p0
+        new_end = (int(round(to[0])), int(round(to[1])))
+
+        span = math.hypot(new_end[0] - fixed[0], new_end[1] - fixed[1])
+        lo, hi = float(rules["min_length"]), float(rules["max_length"])
+        if span < lo:
+            raise LayoutError(
+                f"the moved bond would span {span:.0f} DBU, shorter than the "
+                f"minimum {lo:.0f} (Setup > Wire Bond Rules...)"
+            )
+        if span > hi:
+            raise LayoutError(
+                f"the moved bond would span {span:.0f} DBU, longer than the "
+                f"maximum {hi:.0f} (Setup > Wire Bond Rules...)"
+            )
+
         cell = self.library.get_cell(name)
         for a, b in self._existing_bond_segments(cell, r_layer, exclude=path):
-            if _segments_cross(n1, n2, a, b):
+            if _segments_cross(fixed, new_end, a, b):
                 raise LayoutError(
-                    "moving that wire bond there would cross an existing "
-                    "bond wire -- bond wires share one plane and can't cross"
+                    "moving that end there would cross an existing bond wire "
+                    "-- bond wires share one plane and can't cross"
                 )
 
+        dx = new_end[0] - moved_old[0]
+        dy = new_end[1] - moved_old[1]
         with self._batch():
-            path.points = [n1, n2]
+            path.points = [new_end, fixed] if grab_first else [fixed, new_end]
             for ball in balls:
-                ball.points = [(px + dx, py + dy) for px, py in ball.points]
+                bx0, by0, bx1, by1 = ball.bbox()
+                c = ((bx0 + bx1) / 2.0, (by0 + by1) / 2.0)
+                if math.hypot(c[0] - moved_old[0], c[1] - moved_old[1]) <= 2.0:
+                    ball.points = [(px + dx, py + dy) for px, py in ball.points]
         self._notify()
-        return n1, n2
+        return fixed, new_end
 
     def delete_wire_bond(self, point, layer=None,
                          cell_name: Optional[str] = None, tol: Optional[float] = None):
