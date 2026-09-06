@@ -194,4 +194,11 @@ def route(start_xy, goal_xy, obstacles, grid, x0, y0, nx, ny,
     # dead-centre on each pad rather than on the nearest grid node.
     pts[0] = (int(round(start_xy[0])), int(round(start_xy[1])))
     pts[-1] = (int(round(goal_xy[0])), int(round(goal_xy[1])))
-    return _collapse(pts)
+    pts = _collapse(pts)
+    # start and goal snapped to the same node (or the caller passed one
+    # point twice): there is no trace to draw. Treat it as unroutable
+    # rather than returning a zero-length path that can't round-trip
+    # through GDS.
+    if len(pts) < 2 or len(set(pts)) < 2:
+        return None
+    return pts

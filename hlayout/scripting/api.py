@@ -1871,6 +1871,12 @@ class Session:
         (ax, ay), sa = _endpoint(a)
         (bx, by), sb = _endpoint(b)
 
+        if math.hypot(bx - ax, by - ay) < grid:
+            raise LayoutError(
+                "the two route endpoints are the same point (or closer "
+                f"than one grid step, {grid} DBU) -- nothing to route"
+            )
+
         from shapely.geometry import Point as _spoint
         from shapely.geometry import box as _sbox
         from shapely.ops import unary_union

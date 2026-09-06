@@ -22,6 +22,7 @@ does not natively distinguish these hlayout concepts):
 
 import math
 import os
+import warnings
 from typing import Optional
 
 import gdstk
@@ -148,6 +149,10 @@ def load_gds(path: str, library_name: Optional[str] = None) -> Library:
     gdslib = gdstk.read_gds(str(path), unit=UNIT)
     library = Library(name=library_name or gdslib.name or "HLIB")
 
+    #: (cell_name, layer, spine) for every path dropped on load because
+    #: its spine had fewer than 2 points -- see the paths loop below.
+    _skipped_degenerate_paths: list = []
+
     # Pass 1: create cells (empty) so srefs can resolve by name.
     for gcell in gdslib.cells:
         library.add_cell(Cell(name=gcell.name))
@@ -173,6 +178,13 @@ def load_gds(path: str, library_name: Optional[str] = None) -> Library:
             cap = _GDSTK_TO_CAP.get(ends, PathCap.FLUSH)
             layer = fp.layers[0] if fp.layers else 0
             datatype = fp.datatypes[0] if fp.datatypes else 0
+            # A path whose spine collapses to a single point (or none) is
+            # un-drawable junk -- gdstk drops coincident vertices, so a
+            # zero-length path written by an older build reads back this
+            # way. Skip it rather than failing the whole file to load.
+            if len(spine) < 2:
+                _skipped_degenerate_paths.append((gcell.name, layer, tuple(spine)))
+                continue
             cell.shapes.append(Path(layer=layer, points=spine, width=width, cap=cap, datatype=datatype))
 
         for label in gcell.labels:
@@ -256,4 +268,12 @@ def load_gds(path: str, library_name: Optional[str] = None) -> Library:
         library.top_cell_name = top[0].name
 
     library.check_no_cycles()
+
+    if _skipped_degenerate_paths:
+        detail = ", ".join(f"{c} (layer {ly})" for c, ly, _ in _skipped_degenerate_paths)
+        warnings.warn(
+            f"{os.path.basename(path)}: skipped {len(_skipped_degenerate_paths)} "
+            f"zero-length path(s) that could not be reconstructed: {detail}",
+            stacklevel=2,
+        )
     return library

@@ -47,6 +47,30 @@ def test_round_trip_all_primitives():
     assert ref.x_reflection is True
 
 
+def test_load_gds_skips_a_zero_length_path_instead_of_failing(tmp_path):
+    # A 2-point path whose points are identical passes Path's own
+    # validation (len >= 2) and writes fine, but gdstk drops coincident
+    # vertices, so its spine reads back as a single point. That used to
+    # raise GeometryError("path needs at least 2 points") and take the
+    # whole file down on open. It should now be skipped with a warning.
+    import warnings
+
+    lib = Library("DGN")
+    top = lib.new_cell("TOP")
+    top.add_rectangle(0, 0, 0, 100, 100)
+    top.add_path(3, [(500, 500), (500, 500)], width=20, cap="round")
+
+    path = str(tmp_path / "degen.gds")
+    save_gds(lib, path)
+
+    with pytest.warns(UserWarning, match=r"zero-length path"):
+        lib2 = load_gds(path)
+
+    top2 = lib2.cells["TOP"]
+    assert not any(type(s).__name__ == "Path" for s in top2.shapes)
+    assert len(top2.shapes) == 1          # the rectangle still loaded
+
+
 def test_load_gds_missing_file_raises_clean_layout_error(tmp_path):
     # A missing/wrong path used to surface as gdstk's own native-code
     # stderr print ("[GDSTK] Unable to open GDSII file for input.")

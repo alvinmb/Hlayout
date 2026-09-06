@@ -149,6 +149,25 @@ def test_auto_route_raises_when_no_clear_path_exists():
         s.auto_route(pa, pb, layer=3, grid=50, width=20)
 
 
+def test_auto_route_rejects_two_endpoints_at_the_same_point():
+    # Picking the same pin twice (or two points closer than one grid
+    # step) used to write a zero-length 2-point path -- which passes
+    # Path's own validation but then can't round-trip through GDS,
+    # breaking the file on the next open. It must fail cleanly instead.
+    s, pa, pb = _design()
+    with pytest.raises(LayoutError, match="same point"):
+        s.auto_route((100, 100), (100, 100), layer=3, grid=100, width=40)
+    with pytest.raises(LayoutError, match="same point"):
+        s.auto_route((100, 100), (150, 100), layer=3, grid=100, width=40)
+    assert not any(type(sh).__name__ == "Path" for sh in s.cell.shapes)
+
+
+def test_route_returns_none_for_a_degenerate_result():
+    # start and goal snap to the same node -> no trace, not a 1-point path
+    assert route((0, 0), (0, 0), None, 100, 0, 0, 5, 5) is None
+    assert route((10, 10), (40, 10), None, 100, 0, 0, 5, 5) is None
+
+
 def test_auto_route_accepts_bare_points():
     s = Session.new("AR3")
     s.new_cell("TOP")
