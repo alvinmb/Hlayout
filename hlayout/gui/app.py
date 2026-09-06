@@ -155,7 +155,11 @@ class App(tk.Tk):
         self._update_properties_panel()
         self.canvas.on_route_via = self._on_route_via
         self.canvas.on_auto_route = self._on_auto_route
+        self.canvas.on_chip_pin = self._on_chip_pin
+        self.canvas.on_chip_pins_done = self._on_chip_pins_done
+        self.canvas.on_chip_pins_cancel = self._on_chip_pins_cancel
         self.canvas.on_draw_mode_changed = lambda mode: self.mode_var.set(mode)
+        self._chip_wizard = None
         self._on_route_opts_change()
 
         self.interp = CommandInterpreter(
@@ -428,6 +432,7 @@ class App(tk.Tk):
         )
         toolsm.add_command(label="Via Wizard...", command=self.show_via_wizard)
         toolsm.add_command(label="Pad Wizard...", command=self.show_pad_wizard)
+        toolsm.add_command(label="Chip Wizard...", command=self.show_chip_wizard)
         toolsm.add_command(label="Mask Operations...", command=self.show_mask_op_dialog)
         toolsm.add_command(label="Mask Operation Batch...", command=lambda: open_maskop_batch_window(self))
         toolsm.add_command(label="DRC...", command=lambda: open_drc_window(self))
@@ -3209,6 +3214,220 @@ class App(tk.Tk):
         ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=6)
 
         win.bind("<Escape>", lambda e: win.destroy())
+
+    def show_chip_wizard(self):
+        """Tools > Chip Wizard...: build a bare-die / chip footprint
+        interactively. Enter the body size, the epoxy die-attach pad
+        size + layer, the chip-graphics (outline) layer and the pin
+        count; the wizard drops the body outline, then you click once
+        per die pin to place its epoxy pad (auto-numbered 1..N). When
+        the last pin is placed the finished cell is copied into the
+        first attached reference library and its .gds saved. Backed by
+        Session.create_chip_cell() + Session.export_cell_to_library()."""
+        if not self.session.attached_libraries:
+            dialogs.show_info(
+                "Chip Wizard",
+                "No library is attached yet. Use Setup > Attach Library... to "
+                "attach the GDSII file the finished chip cell should be saved "
+                "into, then try the Chip Wizard again.",
+                parent=self,
+            )
+            return
+
+        win = tk.Toplevel(self)
+        win.title("Chip Wizard")
+        win.transient(self)
+        win.grab_set()
+        win.resizable(False, False)
+
+        libs = self.session.list_attached_libraries()
+        ttk.Label(
+            win,
+            text="Build a bare-die chip footprint. Enter the sizes and layers "
+                 "below; then click once per die pin to drop its epoxy pad "
+                 f"(numbered 1..N). The finished cell is saved into "
+                 f"{libs[0]['name']!r} ({libs[0]['path']}).",
+            wraplength=400, justify="left",
+        ).pack(anchor="w", padx=12, pady=(12, 8))
+
+        form = ttk.Frame(win)
+        form.pack(padx=12, fill="x")
+
+        def layer_choices():
+            return [f"{n} ({self.session.library.layers[n].name})"
+                    for n in range(len(self.session.library.layers))]
+        choices = layer_choices()
+
+        row = 0
+        ttk.Label(form, text="Cell name:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        name_var = tk.StringVar(value="")
+        ttk.Entry(form, textvariable=name_var, width=22).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+
+        ttk.Label(form, text="Chip length (mm, X):").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        length_var = tk.DoubleVar(value=dbu_to_mm(mm_to_dbu(2.0)))
+        ttk.Spinbox(form, from_=0.001, to=500.0, increment=0.001, width=10,
+                    textvariable=length_var).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+
+        ttk.Label(form, text="Chip width (mm, Y):").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        width_var = tk.DoubleVar(value=dbu_to_mm(mm_to_dbu(2.0)))
+        ttk.Spinbox(form, from_=0.001, to=500.0, increment=0.001, width=10,
+                    textvariable=width_var).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+
+        ttk.Label(form, text="Epoxy pad size (mm, square):").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        epoxy_var = tk.DoubleVar(value=dbu_to_mm(mm_to_dbu(0.15)))
+        ttk.Spinbox(form, from_=0.001, to=100.0, increment=0.001, width=10,
+                    textvariable=epoxy_var).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+
+        ttk.Label(form, text="Epoxy pad layer:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        epoxy_layer_var = tk.StringVar(value=choices[0])
+        ttk.Combobox(form, textvariable=epoxy_layer_var, width=20, state="readonly",
+                     values=choices).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+
+        ttk.Label(form, text="Chip graphics layer:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        gfx_layer_var = tk.StringVar(value=choices[1] if len(choices) > 1 else choices[0])
+        ttk.Combobox(form, textvariable=gfx_layer_var, width=20, state="readonly",
+                     values=choices).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+
+        ttk.Label(form, text="Number of pins:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        pins_var = tk.IntVar(value=4)
+        ttk.Spinbox(form, from_=1, to=1000, width=10,
+                    textvariable=pins_var).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+
+        error_var = tk.StringVar(value="")
+        ttk.Label(win, textvariable=error_var, foreground="red", wraplength=400,
+                  justify="left").pack(anchor="w", padx=12)
+
+        def start_and_close():
+            name = name_var.get().strip()
+            if not name:
+                error_var.set("Cell name is required.")
+                return
+            try:
+                length = mm_to_dbu(float(length_var.get()))
+                width = mm_to_dbu(float(width_var.get()))
+                epoxy = mm_to_dbu(float(epoxy_var.get()))
+            except (tk.TclError, ValueError):
+                error_var.set("Length, width, and epoxy pad size must be numbers.")
+                return
+            n_pins = int(pins_var.get())
+            if n_pins < 1:
+                error_var.set("Number of pins must be at least 1.")
+                return
+            e_layer = int(epoxy_layer_var.get().split(" ", 1)[0])
+            g_layer = int(gfx_layer_var.get().split(" ", 1)[0])
+
+            def do_create(overwrite):
+                return self.session.create_chip_cell(
+                    name, length, width, g_layer, overwrite=overwrite)
+
+            try:
+                do_create(overwrite=False)
+            except LayoutError as e:
+                if "already exists" in str(e):
+                    if not dialogs.ask_yes_no(
+                        "Chip Wizard",
+                        f"A cell named {name!r} already exists in this design. "
+                        "Replace it and start over?",
+                        parent=self,
+                    ):
+                        return
+                    try:
+                        do_create(overwrite=True)
+                    except LayoutError as e2:
+                        error_var.set(str(e2))
+                        return
+                else:
+                    error_var.set(str(e))
+                    return
+
+            self._chip_wizard = {
+                "name": name, "epoxy_size": epoxy, "epoxy_layer": e_layer,
+                "total": n_pins, "placed": 0,
+            }
+            self.session.use_cell(name)
+            self.canvas.set_cell(name)
+            self.cell_var.set(name)
+            self.canvas.fit_view()
+            self.refresh_all()
+            self.canvas.start_chip_pins(n_pins)
+            self.status.set(f"Chip Wizard: click where pin 1 of {n_pins} goes")
+            win.destroy()
+
+        btn_row = ttk.Frame(win)
+        btn_row.pack(pady=(6, 12))
+        ttk.Button(btn_row, text="Start Placing Pins", command=start_and_close).pack(side="left", padx=6)
+        ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=6)
+        win.bind("<Escape>", lambda e: win.destroy())
+
+    def _on_chip_pin(self, point, pin_no):
+        """canvas.on_chip_pin: drop epoxy pad `pin_no` for the chip being
+        built, centred on the clicked point."""
+        w = self._chip_wizard
+        if w is None:
+            return
+        half = w["epoxy_size"] / 2.0
+        x, y = point
+        try:
+            self.session.use_cell(w["name"])
+            self.session.rect(w["epoxy_layer"], x - half, y - half, x + half, y + half,
+                              pin=str(pin_no))
+        except LayoutError as e:
+            dialogs.show_error("Chip Wizard", str(e), parent=self)
+            return
+        w["placed"] = pin_no
+        self.refresh_all()
+        nxt = pin_no + 1
+        if nxt <= w["total"]:
+            self.status.set(f"Chip Wizard: placed pin {pin_no} -- click where pin "
+                            f"{nxt} of {w['total']} goes")
+
+    def _on_chip_pins_done(self):
+        """canvas.on_chip_pins_done: the last pin is placed -- copy the
+        finished chip cell into the first attached library and save it."""
+        w = self._chip_wizard
+        if w is None:
+            return
+        name = w["name"]
+        try:
+            lib_name, path = self.session.export_cell_to_library(name, index=0, overwrite=False)
+        except LayoutError as e:
+            if "already exists" in str(e) and dialogs.ask_yes_no(
+                "Chip Wizard",
+                f"A cell named {name!r} already exists in the attached library. "
+                "Replace it?",
+                parent=self,
+            ):
+                try:
+                    lib_name, path = self.session.export_cell_to_library(
+                        name, index=0, overwrite=True)
+                except LayoutError as e2:
+                    dialogs.show_error("Chip Wizard", str(e2), parent=self)
+                    self._chip_wizard = None
+                    return
+            else:
+                dialogs.show_error("Chip Wizard", str(e), parent=self)
+                self._chip_wizard = None
+                return
+        self._chip_wizard = None
+        self.refresh_all()
+        self.status.set(f"Chip Wizard: {name!r} ({w['total']} pins) saved to {path}")
+
+    def _on_chip_pins_cancel(self):
+        """canvas.on_chip_pins_cancel: Esc bailed out mid-placement."""
+        w = self._chip_wizard
+        self._chip_wizard = None
+        if w is not None:
+            self.status.set(
+                f"Chip Wizard cancelled -- {w['name']!r} left in the design "
+                f"({w['placed']}/{w['total']} pins placed), not exported"
+            )
 
     def show_attached_libraries(self):
         """Setup > Attached Libraries...: view every reference library

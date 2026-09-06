@@ -587,6 +587,87 @@ class Session:
         self._notify()
         return name, path, pad_count
 
+    def create_chip_cell(self, name: str, length: float, width: float,
+                         graphics_layer, *, outline_width: Optional[float] = None,
+                         overwrite: bool = False):
+        """Start a bare-die / chip footprint cell in the CURRENT design:
+        a body outline only -- a closed rectangular Path of
+        ``length`` x ``width`` DBU, centred on the origin, on
+        ``graphics_layer``. Epoxy die-attach pads are added afterwards
+        (rect(..., pin="N") on the epoxy layer, one per die pin); once
+        the pinout is complete, export_cell_to_library() copies the
+        finished cell into an attached reference library. Backs Tools >
+        Chip Wizard....
+
+        ``outline_width`` (DBU) defaults to 2% of the shorter body edge,
+        min 1. ``graphics_layer`` accepts a number or an existing layer
+        name. Raises LayoutError on a non-positive size, or if ``name``
+        is already a cell here and ``overwrite`` is false. One undo
+        step; the new cell becomes the current cell."""
+        name = (name or "").strip()
+        if not name:
+            raise LayoutError("a cell name is required")
+        if length <= 0 or width <= 0:
+            raise LayoutError("chip length and width must be positive")
+        g_layer = self.library.layers.resolve(graphics_layer)
+        if name in self.library.cells:
+            if not overwrite:
+                raise LayoutError(
+                    f"{name!r} already exists in this design; pass overwrite=True to replace it"
+                )
+            self.library.delete_cell(name)
+
+        hl, hw = length / 2.0, width / 2.0
+        ow = int(outline_width) if outline_width else max(1, int(round(min(length, width) * 0.02)))
+
+        with self._batch():
+            cell = self.library.new_cell(name)
+            self.current_cell_name = name
+            cell.add_path(
+                g_layer,
+                [(-hl, -hw), (hl, -hw), (hl, hw), (-hl, hw), (-hl, -hw)],
+                max(1, ow), cap="flush",
+            )
+        self._notify()
+        return name
+
+    def export_cell_to_library(self, cell_name: str, index: int = 0,
+                               overwrite: bool = False):
+        """Copy ``cell_name`` -- and its Sref dependency closure -- from
+        the current design into attached reference library ``index``
+        (default 0, the first attached), then save that library's .gds
+        file in place. The finished part is then available to every
+        design that attaches this library. Returns
+        ``(name_in_library, path)``.
+
+        Raises LayoutError if no library is attached at ``index``, the
+        cell isn't in the current design, or a different cell of that
+        name already lives in the target library and ``overwrite`` is
+        false."""
+        if not self.attached_libraries:
+            raise LayoutError(
+                "no attached library -- attach one first (Setup > Attach Library...)"
+            )
+        if index < 0 or index >= len(self.attached_libraries):
+            raise LayoutError(f"no attached library at index {index}")
+        if cell_name not in self.library.cells:
+            raise LayoutError(f"no cell named {cell_name!r} in the current design")
+
+        lib = self.attached_libraries[index]
+        if cell_name in lib.cells:
+            if not overwrite:
+                raise LayoutError(
+                    f"{cell_name!r} already exists in the attached library; "
+                    "pass overwrite=True to replace it"
+                )
+            lib.delete_cell(cell_name)
+
+        local_name = lib.import_cell_closure(self.library, cell_name)
+        path = self._attached_paths[index]
+        save_gds(lib, path)
+        self._notify()
+        return local_name, path
+
     def _resolve_source(self, source: Union[str, int, None]) -> Library:
         if source in ("current", None):
             return self.library

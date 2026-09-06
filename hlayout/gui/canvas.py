@@ -86,7 +86,7 @@ class LayoutCanvas(tk.Canvas):
         self._font_cache = {}
 
         # --- interactive drawing state ---------------------------------
-        self.draw_mode = "select"  # select | rect | poly | path | text | sref | aref | circle | zoomwin | route | measure | pin_number | cell_origin | auto_route | wire_bond | del_bond | move_bond
+        self.draw_mode = "select"  # select | rect | poly | path | text | sref | aref | circle | zoomwin | route | measure | pin_number | cell_origin | auto_route | wire_bond | del_bond | move_bond | chip_pins
         # Create Cell from Selection: after the name is entered the tool
         # enters "cell_origin" mode -- the next canvas click is the point
         # that becomes the new cell's local (0, 0). The selection is
@@ -132,6 +132,16 @@ class LayoutCanvas(tk.Canvas):
         # (x, y) DBU point. No-op so a bare LayoutCanvas still works.
         self.on_auto_route = lambda a, b: None
         self._auto_route_a = None
+        # Chip Wizard pin placement (Tools > Chip Wizard...): each click
+        # drops one epoxy die-attach pad; on_chip_pin(point, pin_no) is
+        # fired per click, on_chip_pins_done() after the last pin,
+        # on_chip_pins_cancel() if Esc bails out first. No-ops so a bare
+        # LayoutCanvas still works.
+        self.on_chip_pin = lambda point, pin_no: None
+        self.on_chip_pins_done = lambda: None
+        self.on_chip_pins_cancel = lambda: None
+        self._chip_pin_next = 0
+        self._chip_pin_total = 0
         self.snap_enabled = True
         self.snap_dbu = self.grid_dbu  # snap to the current grid spacing by default
         # Orthogonal/45-degree routing constraint -- Path and Route
@@ -431,6 +441,7 @@ class LayoutCanvas(tk.Canvas):
             "del_bond": self._del_bond_hint(),
             "move_bond": self._move_bond_hint(),
             "auto_route": self._auto_route_hint(),
+            "chip_pins": self._chip_pins_hint(),
         }
         return hints.get(self.draw_mode, "")
 
@@ -529,6 +540,19 @@ class LayoutCanvas(tk.Canvas):
             self.redraw()
             self.on_mode_status(self._mode_hint())
             self.on_draw_mode_changed("select")
+        if self.draw_mode == "chip_pins":
+            # Esc bails out of the Chip Wizard's pin-placement pass. The
+            # half-built cell is left in the design (nothing is exported).
+            self.draw_mode = "select"
+            self.selected = None
+            self.selected_multi = []
+            self._chip_pin_next = 0
+            self._chip_pin_total = 0
+            self.redraw()
+            self.on_mode_status(self._mode_hint())
+            self.on_draw_mode_changed("select")
+            # last -- so its "cancelled" status message stays on screen
+            self.on_chip_pins_cancel()
 
     def start_pin_numbering(self, start: str = "1"):
         """Edit > Number Pins...: enter the click-to-increment pin-
@@ -559,6 +583,43 @@ class LayoutCanvas(tk.Canvas):
         self.pin_number_next = increment_pin_str(self.pin_number_next)
         self.on_mode_status(self._pin_number_hint())
         self._after_edit()
+
+    def start_chip_pins(self, total: int):
+        """Tools > Chip Wizard...: after the body outline is placed,
+        enter click-to-place-a-pin mode. Each click drops epoxy pad
+        `_chip_pin_next` (via on_chip_pin) and advances; after pin
+        `total` the cell is finished (on_chip_pins_done) and the tool
+        exits to Select. Esc first (cancel_draw()) bails out
+        (on_chip_pins_cancel)."""
+        self._chip_pin_total = int(total)
+        self._chip_pin_next = 1
+        self.set_mode("chip_pins")
+
+    def _chip_pins_hint(self):
+        if self._chip_pin_next <= self._chip_pin_total:
+            return (f"Chip Wizard: click where pin {self._chip_pin_next} of "
+                    f"{self._chip_pin_total} goes (an epoxy pad is dropped there). "
+                    f"Esc cancels -- the half-built cell is left in the design.")
+        return "Chip Wizard: done."
+
+    def _chip_pin_click(self, e):
+        x, y = self.to_dbu(e.x, e.y)
+        pt = self._next_draw_point(x, y)
+        pin_no = self._chip_pin_next
+        self.on_chip_pin(pt, pin_no)
+        self._chip_pin_next += 1
+        if self._chip_pin_next > self._chip_pin_total:
+            self.draw_mode = "select"
+            self.selected = None
+            self.selected_multi = []
+            self.redraw()
+            self.on_draw_mode_changed("select")
+            # last -- so its "saved to ..." status message is the one
+            # left on screen, not the generic Select hint
+            self.on_chip_pins_done()
+        else:
+            self.redraw()
+            self.on_mode_status(self._chip_pins_hint())
 
     def start_delete_bond(self):
         """Edit > Delete Wire Bond: one click on (or near) a bond wire
@@ -794,6 +855,9 @@ class LayoutCanvas(tk.Canvas):
             return
         if self.draw_mode == "auto_route":
             self._auto_route_click(e)
+            return
+        if self.draw_mode == "chip_pins":
+            self._chip_pin_click(e)
             return
         if self.draw_mode == "cell_origin":
             self._cell_origin_click(e)

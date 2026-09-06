@@ -530,6 +530,12 @@ const DATA = [
   {name:"create_pad_cell()", syntax:"s.create_pad_cell(name, conductor_layer, paste_layer, length, width, margin, *, rows=1, cols=1, pitch_x=None, pitch_y=None, index=None, overwrite=False)",
    desc:"Create a rectangular pad cell (conductor + undersized solder-paste rectangle) inside an attached library; <code>rows</code>&times;<code>cols</code> lays out a centred grid. Returns <code>(cell_name, path, pad_count)</code>. A genuine 2-pad grid (rows&times;cols == 2) is auto-numbered pin &ldquo;1&rdquo;/&ldquo;2&rdquo; (lower X, then lower Y, is &ldquo;1&rdquo;); any other pad count is left unnumbered &mdash; see <code>set_pin()</code>/Edit &gt; Number Pins&hellip;.",
    example:'name, path, n = s.create_pad_cell(\n    "SOT23_PAD", conductor_layer=1, paste_layer=5,\n    length=1200, width=600, margin=50,\n)'},
+  {name:"create_chip_cell()", syntax:"s.create_chip_cell(name, length, width, graphics_layer, *, outline_width=None, overwrite=False) -> name",
+   desc:"Start a bare-die / chip footprint cell in the CURRENT design: just a body outline &mdash; a closed rectangular Path of <code>length</code>&times;<code>width</code> DBU centred on the origin, on <code>graphics_layer</code>. Add one epoxy die-attach pad per pin afterwards (<code>s.rect(&hellip;, pin=\"N\")</code>), then <code>export_cell_to_library()</code> to publish it. One undo step; the new cell becomes current. Backs Tools &gt; Chip Wizard&hellip;.",
+   example:'s.create_chip_cell("DIE_8P", 3000, 2000, graphics_layer=62)'},
+  {name:"export_cell_to_library()", syntax:"s.export_cell_to_library(cell_name, index=0, overwrite=False) -> (name, path)",
+   desc:"Copy <code>cell_name</code> and its Sref dependency closure from the current design into attached reference library <code>index</code> (default 0, the first attached) and save that library's .gds in place, so every design that attaches it gets the part. Raises if nothing is attached at <code>index</code>, the cell isn't in the design, or the name is taken (unless <code>overwrite</code>).",
+   example:'name, path = s.export_cell_to_library("DIE_8P")'},
 ]},
 
 {group:"python", groupLabel:"Python API", cat:"Pin Numbering", items:[
