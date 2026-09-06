@@ -3325,7 +3325,7 @@ class App(tk.Tk):
 
             def do_create(overwrite):
                 return self.session.create_chip_cell(
-                    name, length, width, g_layer, overwrite=overwrite)
+                    name, length, width, g_layer, epoxy, e_layer, overwrite=overwrite)
 
             try:
                 do_create(overwrite=False)
@@ -3347,10 +3347,7 @@ class App(tk.Tk):
                     error_var.set(str(e))
                     return
 
-            self._chip_wizard = {
-                "name": name, "epoxy_size": epoxy, "epoxy_layer": e_layer,
-                "total": n_pins, "placed": 0,
-            }
+            self._chip_wizard = {"name": name, "total": n_pins, "placed": 0}
             self.session.use_cell(name)
             self.canvas.set_cell(name)
             self.cell_var.set(name)
@@ -3367,17 +3364,18 @@ class App(tk.Tk):
         win.bind("<Escape>", lambda e: win.destroy())
 
     def _on_chip_pin(self, point, pin_no):
-        """canvas.on_chip_pin: drop epoxy pad `pin_no` for the chip being
-        built, centred on the clicked point."""
+        """canvas.on_chip_pin: place a die-pin instance for the chip
+        being built, centred on the clicked point -- pin 1 uses the
+        `chip_pin1` cell (has the pin-1 mark), every other pin uses
+        `chip_pin`. The instance's Label carries the pin number."""
         w = self._chip_wizard
         if w is None:
             return
-        half = w["epoxy_size"] / 2.0
-        x, y = point
+        cell_name = (self.session.CHIP_PIN1_CELL if pin_no == 1
+                     else self.session.CHIP_PIN_CELL)
         try:
             self.session.use_cell(w["name"])
-            self.session.rect(w["epoxy_layer"], x - half, y - half, x + half, y + half,
-                              pin=str(pin_no))
+            self.session.sref(cell_name, point, label=str(pin_no))
         except LayoutError as e:
             dialogs.show_error("Chip Wizard", str(e), parent=self)
             return

@@ -587,29 +587,46 @@ class Session:
         self._notify()
         return name, path, pad_count
 
+    #: Names of the two die-pin device cells the Chip Wizard places --
+    #: pin 1 uses PIN1, every other pin uses PIN. Built on demand by
+    #: create_chip_cell() and shared across chips.
+    CHIP_PIN_CELL = "chip_pin"
+    CHIP_PIN1_CELL = "chip_pin1"
+
     def create_chip_cell(self, name: str, length: float, width: float,
-                         graphics_layer, *, outline_width: Optional[float] = None,
+                         graphics_layer, epoxy_size: float, epoxy_layer, *,
+                         outline_width: Optional[float] = None,
                          overwrite: bool = False):
         """Start a bare-die / chip footprint cell in the CURRENT design:
-        a body outline only -- a closed rectangular Path of
-        ``length`` x ``width`` DBU, centred on the origin, on
-        ``graphics_layer``. Epoxy die-attach pads are added afterwards
-        (rect(..., pin="N") on the epoxy layer, one per die pin); once
-        the pinout is complete, export_cell_to_library() copies the
-        finished cell into an attached reference library. Backs Tools >
-        Chip Wizard....
+        a body outline -- a closed rectangular Path of ``length`` x
+        ``width`` DBU, centred on the origin, on ``graphics_layer``.
 
-        ``outline_width`` (DBU) defaults to 2% of the shorter body edge,
-        min 1. ``graphics_layer`` accepts a number or an existing layer
-        name. Raises LayoutError on a non-positive size, or if ``name``
-        is already a cell here and ``overwrite`` is false. One undo
-        step; the new cell becomes the current cell."""
+        Also ensures the two die-pin device cells exist (created once,
+        then shared): ``chip_pin`` -- a single ``epoxy_size`` square
+        epoxy die-attach pad (``pin="1"``) on ``epoxy_layer`` -- and
+        ``chip_pin1`` -- the same pad plus a small pin-1 index mark on
+        ``graphics_layer``. The Chip Wizard then places one
+        ``chip_pin1`` instance for pin 1 and one ``chip_pin`` instance
+        per remaining pin; export_cell_to_library() carries all three
+        cells into the attached library together.
+
+        If ``chip_pin``/``chip_pin1`` already exist they are reused
+        as-is (a different ``epoxy_size`` here won't resize them --
+        delete them first to rebuild). ``graphics_layer``/``epoxy_layer``
+        accept a number or an existing layer name. ``outline_width``
+        (DBU) defaults to 2% of the shorter body edge, min 1. Raises
+        LayoutError on a non-positive size, or if ``name`` is already a
+        cell here and ``overwrite`` is false. One undo step; the new
+        cell becomes the current cell."""
         name = (name or "").strip()
         if not name:
             raise LayoutError("a cell name is required")
         if length <= 0 or width <= 0:
             raise LayoutError("chip length and width must be positive")
+        if epoxy_size <= 0:
+            raise LayoutError("epoxy pad size must be positive")
         g_layer = self.library.layers.resolve(graphics_layer)
+        e_layer = self.library.layers.resolve(epoxy_layer)
         if name in self.library.cells:
             if not overwrite:
                 raise LayoutError(
@@ -619,8 +636,20 @@ class Session:
 
         hl, hw = length / 2.0, width / 2.0
         ow = int(outline_width) if outline_width else max(1, int(round(min(length, width) * 0.02)))
+        ph = epoxy_size / 2.0
+        mark = epoxy_size / 3.0
 
         with self._batch():
+            if self.CHIP_PIN_CELL not in self.library.cells:
+                pc = self.library.new_cell(self.CHIP_PIN_CELL)
+                pc.add_rectangle(e_layer, -ph, -ph, ph, ph, pin="1")
+            if self.CHIP_PIN1_CELL not in self.library.cells:
+                p1 = self.library.new_cell(self.CHIP_PIN1_CELL)
+                p1.add_rectangle(e_layer, -ph, -ph, ph, ph, pin="1")
+                # pin-1 index mark: a small square just off the top-left
+                # corner of the pad, on the graphics layer.
+                p1.add_rectangle(g_layer, -ph - mark, ph, -ph, ph + mark)
+
             cell = self.library.new_cell(name)
             self.current_cell_name = name
             cell.add_path(
