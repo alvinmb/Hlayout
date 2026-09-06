@@ -657,6 +657,13 @@ class Session:
                 [(-hl, -hw), (hl, -hw), (hl, hw), (-hl, hw), (-hl, -hw)],
                 max(1, ow), cap="flush",
             )
+            # the chip outline and the epoxy pads have just been drawn on
+            # these two layers -- make sure they're actually visible.
+            for n in (g_layer, e_layer):
+                try:
+                    self.library.layers.set_style(n, visible=True)
+                except (KeyError, IndexError):
+                    pass
         self._notify()
         return name
 

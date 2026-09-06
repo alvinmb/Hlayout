@@ -56,6 +56,16 @@ def test_create_chip_cell_lays_a_centred_body_outline_and_builds_the_pin_cells()
     assert {sh.layer for sh in pin1} == {58, 60}
 
 
+def test_create_chip_cell_makes_the_outline_and_epoxy_layers_visible():
+    s = Session.new("D")
+    s.new_cell("TOP")
+    s.set_layer_style(60, visible=False)
+    s.set_layer_style(58, visible=False)
+    s.create_chip_cell("CHIP", 1000, 1000, graphics_layer=60, epoxy_size=100, epoxy_layer=58)
+    assert s.library.layers[60].visible is True
+    assert s.library.layers[58].visible is True
+
+
 def test_create_chip_cell_reuses_existing_pin_cells():
     s = Session.new("D")
     s.new_cell("TOP")
@@ -202,13 +212,48 @@ def test_chip_wizard_places_pin1_with_chip_pin1_and_the_rest_with_chip_pin(tmp_p
         app.destroy()
 
 
-def test_chip_wizard_esc_leaves_the_half_built_cell_and_exports_nothing(tmp_path):
+def test_chip_wizard_uses_a_0p1mm_grid_for_pins_then_restores_it(tmp_path):
+    from hlayout.core.units import mm_to_dbu
     app, apath = _app(tmp_path)
     try:
+        app.canvas.set_grid_spacing(mm_to_dbu(0.5))     # some other grid first
+        grid_before = int(app.canvas.grid_dbu)
+
+        app.session.create_chip_cell("CHIP3", 3000, 2000, 62, 150, 58)
+        app._chip_wizard = {"name": "CHIP3", "total": 3, "placed": 0,
+                            "prev_grid": grid_before}
+        app.session.use_cell("CHIP3")
+        app.canvas.set_cell("CHIP3")
+        app.canvas.set_grid_spacing(mm_to_dbu(0.1))
+        app.canvas.fit_view()
+        app.canvas.start_chip_pins(3)
+
+        assert int(app.canvas.grid_dbu) == 100
+        assert int(app.canvas.snap_dbu) == 100
+
+        def _click(wx, wy):
+            px, py = app.canvas.to_px(wx, wy)
+            app.canvas._on_click(types.SimpleNamespace(x=int(px), y=int(py)))
+
+        for wx, wy in [(-1000, -800), (1000, -800), (0, 800)]:
+            _click(wx, wy)
+
+        assert int(app.canvas.grid_dbu) == grid_before   # restored after the last pin
+    finally:
+        app.destroy()
+
+
+def test_chip_wizard_esc_leaves_the_half_built_cell_and_exports_nothing(tmp_path):
+    from hlayout.core.units import mm_to_dbu
+    app, apath = _app(tmp_path)
+    try:
+        grid_before = int(app.canvas.grid_dbu)
         app.session.create_chip_cell("CHIP2", 1000, 1000, 62, 100, 58)
-        app._chip_wizard = {"name": "CHIP2", "total": 4, "placed": 0}
+        app._chip_wizard = {"name": "CHIP2", "total": 4, "placed": 0,
+                            "prev_grid": grid_before}
         app.session.use_cell("CHIP2")
         app.canvas.set_cell("CHIP2")
+        app.canvas.set_grid_spacing(mm_to_dbu(0.1))
         app.canvas.fit_view()
         app.canvas.start_chip_pins(4)
 
@@ -219,6 +264,7 @@ def test_chip_wizard_esc_leaves_the_half_built_cell_and_exports_nothing(tmp_path
         assert app.canvas.draw_mode == "select"
         assert app._chip_wizard is None
         assert "cancelled" in app.status.get().lower()
+        assert int(app.canvas.grid_dbu) == grid_before   # grid restored on Esc too
         assert "CHIP2" in app.session.library.cells
         assert "CHIP2" not in load_gds(apath).cells
     finally:

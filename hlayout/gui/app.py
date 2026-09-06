@@ -3347,14 +3347,21 @@ class App(tk.Tk):
                     error_var.set(str(e))
                     return
 
-            self._chip_wizard = {"name": name, "total": n_pins, "placed": 0}
+            self._chip_wizard = {
+                "name": name, "total": n_pins, "placed": 0,
+                "prev_grid": int(self.canvas.grid_dbu),
+            }
             self.session.use_cell(name)
             self.canvas.set_cell(name)
             self.cell_var.set(name)
+            # pin placement snaps to a 0.1 mm grid
+            self.canvas.set_grid_spacing(mm_to_dbu(0.1))
+            self._refresh_grid_spacing_var()
             self.canvas.fit_view()
             self.refresh_all()
             self.canvas.start_chip_pins(n_pins)
-            self.status.set(f"Chip Wizard: click where pin 1 of {n_pins} goes")
+            self.status.set(f"Chip Wizard: click where pin 1 of {n_pins} goes "
+                            f"(grid 0.1 mm)")
             win.destroy()
 
         btn_row = ttk.Frame(win)
@@ -3386,12 +3393,22 @@ class App(tk.Tk):
             self.status.set(f"Chip Wizard: placed pin {pin_no} -- click where pin "
                             f"{nxt} of {w['total']} goes")
 
+    def _restore_chip_grid(self, w):
+        prev = (w or {}).get("prev_grid")
+        if prev:
+            try:
+                self.canvas.set_grid_spacing(prev)
+                self._refresh_grid_spacing_var()
+            except Exception:
+                pass
+
     def _on_chip_pins_done(self):
         """canvas.on_chip_pins_done: the last pin is placed -- copy the
         finished chip cell into the first attached library and save it."""
         w = self._chip_wizard
         if w is None:
             return
+        self._restore_chip_grid(w)
         name = w["name"]
         try:
             lib_name, path = self.session.export_cell_to_library(name, index=0, overwrite=False)
@@ -3421,6 +3438,7 @@ class App(tk.Tk):
         """canvas.on_chip_pins_cancel: Esc bailed out mid-placement."""
         w = self._chip_wizard
         self._chip_wizard = None
+        self._restore_chip_grid(w)
         if w is not None:
             self.status.set(
                 f"Chip Wizard cancelled -- {w['name']!r} left in the design "
