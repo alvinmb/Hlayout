@@ -108,6 +108,27 @@ def test_export_cell_to_library_carries_the_pin_cells_along(tmp_path):
     assert len(reloaded.cells["CHIP"].srefs) == 2
 
 
+def test_exporting_a_second_chip_reuses_the_pin_cells_not_duplicates_them(tmp_path):
+    s, apath = _session_with_attached_lib(tmp_path)
+    s.create_chip_cell("CHIP_A", 1000, 1000, 60, 150, 58)
+    s.use_cell("CHIP_A")
+    s.sref(PIN1, (-300, -300), label="1")
+    s.sref(PIN, (300, 300), label="2")
+    s.export_cell_to_library("CHIP_A", index=0)
+
+    s.create_chip_cell("CHIP_B", 2000, 2000, 60, 150, 58)
+    s.use_cell("CHIP_B")
+    s.sref(PIN1, (-500, -500), label="1")
+    s.sref(PIN, (500, 500), label="2")
+    s.export_cell_to_library("CHIP_B", index=0)
+
+    cells = sorted(load_gds(apath).cells)
+    assert "chip_pin_1" not in cells and "chip_pin1_1" not in cells
+    reloaded = load_gds(apath)
+    assert [r.cell_name for r in reloaded.cells["CHIP_B"].srefs] == [PIN1, PIN]
+    assert [r.label for r in reloaded.cells["CHIP_B"].srefs] == ["1", "2"]
+
+
 def test_export_cell_to_library_needs_overwrite_for_a_name_clash(tmp_path):
     s, apath = _session_with_attached_lib(tmp_path)
     s.create_chip_cell("CHIP", 1000, 1000, 60, 150, 58)

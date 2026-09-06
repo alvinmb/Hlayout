@@ -2,7 +2,7 @@
 
 import copy
 import math
-from typing import Dict, Optional
+from typing import Dict, Iterable, Optional
 
 from .cell import Cell
 from .errors import BoundsError, CellError
@@ -188,7 +188,8 @@ class Library:
             i += 1
         return f"{base}_{i}"
 
-    def import_cell_closure(self, source: "Library", root_name: str) -> str:
+    def import_cell_closure(self, source: "Library", root_name: str,
+                            reuse_names: Optional[Iterable[str]] = None) -> str:
         """Copy ``root_name`` and everything it (transitively) references
         via Srefs from ``source`` into this library. GDSII Srefs need
         their target cell defined in the same file, so placing an
@@ -201,15 +202,28 @@ class Library:
         a different cell here, in which case the import uses a
         suffixed, non-colliding name (``root_name_1``, etc) instead of
         clobbering the existing cell.
+
+        ``reuse_names`` is a set of *shared sub-cell* names that, when
+        one already exists in this library, should be referenced in
+        place rather than copied in under a fresh suffixed name — e.g.
+        the Chip Wizard's ``chip_pin`` / ``chip_pin1`` primitives, so
+        re-exporting a second chip into the same library doesn't pile up
+        ``chip_pin_1``, ``chip_pin_2`` … duplicates. The root cell
+        itself is never reused this way.
         """
         if root_name not in source.cells:
             raise CellError(f"no such cell {root_name!r} in source library")
 
+        reuse = {n for n in (reuse_names or ()) if n in self.cells}
         name_map: Dict[str, str] = {}
 
         def visit(name: str) -> str:
             if name in name_map:
                 return name_map[name]
+            if name in reuse and name != root_name:
+                # point at the copy already in this library
+                name_map[name] = name
+                return name
             new_name = self._unique_cell_name(name)
             name_map[name] = new_name
             # Reserve the name before recursing into children so shared

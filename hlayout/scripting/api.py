@@ -661,7 +661,7 @@ class Session:
         return name
 
     def export_cell_to_library(self, cell_name: str, index: int = 0,
-                               overwrite: bool = False):
+                               overwrite: bool = False, reuse_shared: bool = True):
         """Copy ``cell_name`` -- and its Sref dependency closure -- from
         the current design into attached reference library ``index``
         (default 0, the first attached), then save that library's .gds
@@ -669,10 +669,18 @@ class Session:
         design that attaches this library. Returns
         ``(name_in_library, path)``.
 
+        With ``reuse_shared`` (the default), any sub-cell of the closure
+        whose name already exists in the target library is referenced in
+        place instead of copied in under a fresh suffixed name -- so
+        re-exporting a part that shares a primitive (the Chip Wizard's
+        ``chip_pin``/``chip_pin1``, a common pad cell, ...) doesn't pile
+        up ``name_1``, ``name_2`` duplicates. It assumes a same-named
+        sub-cell already there is the same primitive; pass
+        ``reuse_shared=False`` to force fresh copies of everything.
+
         Raises LayoutError if no library is attached at ``index``, the
-        cell isn't in the current design, or a different cell of that
-        name already lives in the target library and ``overwrite`` is
-        false."""
+        cell isn't in the current design, or a cell of that name already
+        lives in the target library and ``overwrite`` is false."""
         if not self.attached_libraries:
             raise LayoutError(
                 "no attached library -- attach one first (Setup > Attach Library...)"
@@ -691,11 +699,29 @@ class Session:
                 )
             lib.delete_cell(cell_name)
 
-        local_name = lib.import_cell_closure(self.library, cell_name)
+        reuse = None
+        if reuse_shared:
+            reuse = [n for n in self._cell_closure_names(cell_name) if n != cell_name]
+        local_name = lib.import_cell_closure(self.library, cell_name, reuse_names=reuse)
         path = self._attached_paths[index]
         save_gds(lib, path)
         self._notify()
         return local_name, path
+
+    def _cell_closure_names(self, root: str):
+        """Every cell name reachable from ``root`` in the current design
+        via Srefs/Arefs, ``root`` included."""
+        seen = set()
+        stack = [root]
+        while stack:
+            name = stack.pop()
+            if name in seen or name not in self.library.cells:
+                continue
+            seen.add(name)
+            c = self.library.cells[name]
+            for ref in list(c.srefs) + list(c.arefs):
+                stack.append(ref.cell_name)
+        return seen
 
     def _resolve_source(self, source: Union[str, int, None]) -> Library:
         if source in ("current", None):
