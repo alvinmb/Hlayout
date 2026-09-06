@@ -241,6 +241,12 @@ class LayoutCanvas(tk.Canvas):
         self.bind("<BackSpace>", lambda e: self._undo_point())
         self.bind("<space>", self._route_drop_via)
         self.bind("<Delete>", lambda e: self.delete_selected())
+        # R: rotate the selection 90 deg CCW, repeatable -- the quick
+        # equivalent of Edit > Rotate 90 deg (no dialog). Bound on the
+        # canvas so it only fires when the canvas has focus, never while
+        # typing in the command bar.
+        self.bind("<r>", lambda e: self.rotate_selected(90))
+        self.bind("<R>", lambda e: self.rotate_selected(90))
         self.focus_set()
 
     # --- coordinate transforms -----------------------------------------

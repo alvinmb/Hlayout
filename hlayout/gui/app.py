@@ -404,7 +404,7 @@ class App(tk.Tk):
         editm.add_command(label="Move Wire Bond", command=self._move_wire_bond_tool)
         editm.add_command(label="Delete Wire Bond", command=self._delete_wire_bond_tool)
         editm.add_separator()
-        editm.add_command(label="Rotate...", command=self._rotate_selected)
+        editm.add_command(label="Rotate 90°", command=self._rotate_selected, accelerator="R")
         editm.add_command(label="Copy...", command=self._copy_selected)
         editm.add_command(label="Smash Selected to SRefs", command=self._smash_selected)
         editm.add_command(label="Merge Selected...", command=self._merge_selected)
@@ -503,21 +503,17 @@ class App(tk.Tk):
                                    parent=self)
 
     def _rotate_selected(self):
+        """Edit > Rotate 90 deg: turn the selection 90 deg counter-
+        clockwise about its centroid. No dialog -- click again (or press
+        R) to keep turning; four clicks is a full turn. For an arbitrary
+        angle, use the ROTATE <degrees> command."""
         if self.canvas.selected is None and not self.canvas.selected_multi:
             dialogs.show_info("Rotate", "Nothing is selected. Switch to Select mode, click the "
                                "shape or cell instance to rotate (it turns white), or drag a "
                                "box over empty space to window-select several, then try again.",
                                parent=self)
             return
-        text = simpledialog.askstring("Rotate", "Rotate by degrees (counter-clockwise):", parent=self)
-        if not text:
-            return
-        try:
-            angle = float(text)
-        except ValueError:
-            dialogs.show_error("Rotate", f"expected a number of degrees, got {text!r}", parent=self)
-            return
-        if not self.canvas.rotate_selected(angle):
+        if not self.canvas.rotate_selected(90):
             dialogs.show_info("Rotate", "That selection can't be rotated directly -- "
                                "select a whole shape or cell instance (not a single vertex/edge).",
                                parent=self)
@@ -946,7 +942,7 @@ class App(tk.Tk):
                 ("Insert Vertex on Edge", self._insert_vertex_on_edge),
                 ("Continue Path...", self._continue_path),
                 ("Number Pins...", self._number_pins),
-                ("Rotate...", self._rotate_selected),
+                ("Rotate 90°", self._rotate_selected),
                 ("Copy...", self._copy_selected),
                 ("Smash to SRefs", self._smash_selected),
                 ("Merge Selected...", self._merge_selected),

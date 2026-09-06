@@ -1004,17 +1004,41 @@ def test_editorial_menu_has_rotate_and_copy_but_no_move_dialog():
     # The Edit > Move... (x,y) dialog was removed in favour of purely
     # mouse-driven repositioning (drag to move, including a window/
     # marquee multi-selection) -- see LayoutCanvas's window-select
-    # support. Rotate.../Copy... remain as dialogs since "rotate by N
-    # degrees" and "copy offset by dx,dy" aren't naturally mouse-only
-    # gestures the way a move is.
+    # support. Rotate is now a no-dialog "Rotate 90 deg" (click again /
+    # press R to keep turning); Copy... stays a dialog since "offset by
+    # dx,dy" isn't a natural mouse-only gesture.
     app = _make_app()
     try:
         labels = _submenu_labels(app, "Edit")
         assert "Move..." not in labels
-        assert "Rotate..." in labels
+        assert "Rotate..." not in labels
+        assert "Rotate 90°" in labels
         assert "Copy..." in labels
         assert "Properties" in labels
         assert "Auto-Route Two Pins" in labels
+    finally:
+        app.destroy()
+
+
+def test_rotate_menu_item_turns_the_selection_90_without_a_dialog(monkeypatch):
+    from hlayout.gui import app as app_module
+    app = _make_app()
+    try:
+        app.session.new_cell("PART")
+        app.session.rect(0, 0, 0, 10, 10)
+        app.session.current_cell_name = "TOP"
+        app.canvas.set_cell("TOP")
+        ref = app.session.sref("PART", (100, 100))
+        app.canvas.selected = ("sref", ref)
+
+        def _boom(*a, **k):
+            raise AssertionError("Rotate must not open a dialog")
+        monkeypatch.setattr(app_module.simpledialog, "askstring", _boom)
+
+        app._rotate_selected()
+        assert ref.rotation == 90.0
+        app._rotate_selected()
+        assert ref.rotation == 180.0
     finally:
         app.destroy()
 
