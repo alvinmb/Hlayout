@@ -362,8 +362,6 @@ class App(tk.Tk):
         viewm.add_separator()
         viewm.add_radiobutton(label="Zoom Window", value="zoomwin", variable=self.mode_var,
                                command=self._on_mode_change, accelerator="W")
-        viewm.add_radiobutton(label="Measure", value="measure", variable=self.mode_var,
-                               command=self._on_mode_change, accelerator="M")
         viewm.add_separator()
         viewm.add_command(label="New View Window", command=self.new_view_window)
 
@@ -382,6 +380,7 @@ class App(tk.Tk):
         createm.add_radiobutton(label="Wire Bond", value="wire_bond", variable=self.mode_var,
                                  command=self._on_mode_change)
         createm.add_separator()
+        createm.add_command(label="Create Cell from Selection...", command=self._create_cell_from_selection)
         createm.add_command(label="Find && Place Cell...", command=self.find_and_place_cell)
 
         # --- Edit: selecting/editing/removing existing geometry -----------
@@ -392,6 +391,8 @@ class App(tk.Tk):
         editm.add_separator()
         editm.add_radiobutton(label="Select", value="select", variable=self.mode_var,
                                command=self._on_mode_change)
+        editm.add_radiobutton(label="Measure", value="measure", variable=self.mode_var,
+                               command=self._on_mode_change, accelerator="M")
         editm.add_separator()
         editm.add_command(label="Edit Selected...", command=self._edit_selected)
         editm.add_command(label="Delete Selected", command=self._delete_selected)
@@ -405,7 +406,6 @@ class App(tk.Tk):
         editm.add_command(label="Copy...", command=self._copy_selected)
         editm.add_command(label="Smash Selected to SRefs", command=self._smash_selected)
         editm.add_command(label="Merge Selected...", command=self._merge_selected)
-        editm.add_command(label="Create Cell from Selection...", command=self._create_cell_from_selection)
         editm.add_separator()
         editm.add_command(label="Properties", command=self._show_properties_tab)
 
@@ -592,7 +592,7 @@ class App(tk.Tk):
         self.status.set("merged selected shapes into one polygon")
 
     def _create_cell_from_selection(self):
-        """Edit > Create Cell from Selection...: the classic Calma GDSII
+        """Create > Create Cell from Selection...: the classic Calma GDSII
         workflow -- draw or place geometry, window-select it, "make
         cell", give it a name, pick an origin, and the graphics become
         a new reusable library cell (a bondpad or SMD land pattern is
