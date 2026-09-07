@@ -8,7 +8,7 @@ import pytest
 
 from hlayout.core.errors import LayoutError
 from hlayout.core.library import Library
-from hlayout.core.shapes import Path, Rectangle
+from hlayout.core.shapes import Path
 from hlayout.io.gdsio import load_gds, save_gds
 from hlayout.scripting import Session
 
@@ -16,11 +16,22 @@ PIN = Session.CHIP_PIN_CELL       # "chip_pin"
 PIN1 = Session.CHIP_PIN1_CELL     # "chip_pin1"
 
 
-def _session_with_attached_lib(tmp_path):
-    att = Library("PARTS")
-    att.new_cell("DUMMY")
+def _parts_library(path):
+    """A parts library with the two die-pin cells the wizard needs:
+    chip_pin -- one 1.8 mm epoxy pad on layer 58; chip_pin1 -- the same
+    plus a pin-1 mark on layer 60."""
+    lib = Library("PARTS")
+    pc = lib.new_cell(PIN)
+    pc.add_rectangle(58, -900, -900, 900, 900, pin="1")
+    p1 = lib.new_cell(PIN1)
+    p1.add_rectangle(58, -900, -900, 900, 900, pin="1")
+    p1.add_rectangle(60, -900, 900, -600, 1200)
+    save_gds(lib, path)
+
+
+def _session_with_parts(tmp_path):
     apath = str(tmp_path / "parts.gds")
-    save_gds(att, apath)
+    _parts_library(apath)
     s = Session.new("DESIGN")
     s.new_cell("TOP")
     s.attach_library(apath)
@@ -29,11 +40,10 @@ def _session_with_attached_lib(tmp_path):
 
 # --- Session.create_chip_cell ------------------------------------------------
 
-def test_create_chip_cell_lays_a_centred_body_outline_and_builds_the_pin_cells():
+def test_create_chip_cell_lays_a_centred_body_outline_only():
     s = Session.new("D")
     s.new_cell("TOP")
-    name = s.create_chip_cell("CHIP", 2000, 1000, graphics_layer=60,
-                              epoxy_size=150, epoxy_layer=58)
+    name = s.create_chip_cell("CHIP", 2000, 1000, graphics_layer=60)
     assert name == "CHIP"
     assert s.current_cell_name == "CHIP"
 
@@ -47,46 +57,27 @@ def test_create_chip_cell_lays_a_centred_body_outline_and_builds_the_pin_cells()
     assert (min(ys), max(ys)) == (-500, 500)
     assert outline.points[0] == outline.points[-1]
 
-    # the two die-pin device cells now exist
-    assert PIN in s.library.cells and PIN1 in s.library.cells
-    pin = s.library.cells[PIN].shapes
-    assert len(pin) == 1 and pin[0].layer == 58 and pin[0].pin == "1"
-    pin1 = s.library.cells[PIN1].shapes
-    assert len(pin1) == 2                     # pad + pin-1 index mark
-    assert {sh.layer for sh in pin1} == {58, 60}
+    # the wizard does NOT build the pin cells -- they come from the library
+    assert PIN not in s.library.cells and PIN1 not in s.library.cells
 
 
-def test_create_chip_cell_makes_the_outline_and_epoxy_layers_visible():
+def test_create_chip_cell_makes_the_outline_layer_visible():
     s = Session.new("D")
     s.new_cell("TOP")
     s.set_layer_style(60, visible=False)
-    s.set_layer_style(58, visible=False)
-    s.create_chip_cell("CHIP", 1000, 1000, graphics_layer=60, epoxy_size=100, epoxy_layer=58)
+    s.create_chip_cell("CHIP", 1000, 1000, graphics_layer=60)
     assert s.library.layers[60].visible is True
-    assert s.library.layers[58].visible is True
-
-
-def test_create_chip_cell_reuses_existing_pin_cells():
-    s = Session.new("D")
-    s.new_cell("TOP")
-    s.create_chip_cell("CHIP_A", 2000, 2000, 60, 150, 58)
-    pin_obj = s.library.cells[PIN]
-    s.create_chip_cell("CHIP_B", 3000, 1000, 60, 999, 58)   # different epoxy size
-    assert s.library.cells[PIN] is pin_obj                  # not rebuilt
-    assert s.library.cells[PIN].shapes[0].bbox() == (-75, -75, 75, 75)
 
 
 def test_create_chip_cell_rejects_bad_size_and_name_clash():
     s = Session.new("D")
     s.new_cell("TOP")
     with pytest.raises(LayoutError, match="positive"):
-        s.create_chip_cell("X", 0, 100, 1, 10, 2)
-    with pytest.raises(LayoutError, match="epoxy"):
-        s.create_chip_cell("X", 100, 100, 1, 0, 2)
-    s.create_chip_cell("CHIP", 100, 100, 1, 10, 2)
+        s.create_chip_cell("X", 0, 100, 1)
+    s.create_chip_cell("CHIP", 100, 100, 1)
     with pytest.raises(LayoutError, match="already exists"):
-        s.create_chip_cell("CHIP", 200, 200, 1, 10, 2)
-    s.create_chip_cell("CHIP", 200, 200, 1, 10, 2, overwrite=True)
+        s.create_chip_cell("CHIP", 200, 200, 1)
+    s.create_chip_cell("CHIP", 200, 200, 1, overwrite=True)
     assert max(p[0] for p in s.library.cells["CHIP"].shapes[0].points) == 100
 
 
@@ -94,66 +85,42 @@ def test_create_chip_cell_is_one_undo_step():
     s = Session.new("D")
     s.new_cell("TOP")
     s.clear_undo_history()
-    s.create_chip_cell("CHIP", 100, 100, 1, 10, 2)
-    assert {"CHIP", PIN, PIN1} <= set(s.library.cells)
+    s.create_chip_cell("CHIP", 100, 100, 1)
+    assert "CHIP" in s.library.cells
     assert s.undo() is True
-    assert not ({"CHIP", PIN, PIN1} & set(s.library.cells))   # all gone together
+    assert "CHIP" not in s.library.cells
+
+
+def test_show_layers_of_cell_unhides_every_layer_it_draws_on():
+    s = Session.new("D")
+    s.new_cell(PIN1)
+    s.rect(58, -10, -10, 10, 10)
+    s.rect(60, -12, 10, -8, 14)
+    s.set_layer_style(58, visible=False)
+    s.set_layer_style(60, visible=False)
+    s.show_layers_of_cell(PIN1)
+    assert s.library.layers[58].visible and s.library.layers[60].visible
 
 
 # --- Session.export_cell_to_library ---------------------------------------------
 
-def test_export_cell_to_library_carries_the_pin_cells_along(tmp_path):
-    s, apath = _session_with_attached_lib(tmp_path)
-    s.create_chip_cell("CHIP", 1000, 1000, 60, 150, 58)
+def test_export_carries_the_placed_pin_cells_and_keeps_their_labels(tmp_path):
+    s, apath = _session_with_parts(tmp_path)
+    s.create_chip_cell("CHIP", 1000, 1000, 60)
     s.use_cell("CHIP")
-    s.sref(PIN1, (-300, -300), label="1")
-    s.sref(PIN, (300, -300), label="2")
+    s.place_cell(PIN1, (-300, -300), label="1")
+    s.place_cell(PIN, (300, -300), label="2")
 
     name, path = s.export_cell_to_library("CHIP", index=0)
     assert (name, path) == ("CHIP", apath)
 
     reloaded = load_gds(apath)
-    # the chip plus its two referenced pin cells all landed in the lib
     assert {"CHIP", PIN, PIN1} <= set(reloaded.cells)
-    assert len(reloaded.cells["CHIP"].srefs) == 2
-
-
-def test_exporting_a_second_chip_reuses_the_pin_cells_not_duplicates_them(tmp_path):
-    s, apath = _session_with_attached_lib(tmp_path)
-    s.create_chip_cell("CHIP_A", 1000, 1000, 60, 150, 58)
-    s.use_cell("CHIP_A")
-    s.sref(PIN1, (-300, -300), label="1")
-    s.sref(PIN, (300, 300), label="2")
-    s.export_cell_to_library("CHIP_A", index=0)
-
-    s.create_chip_cell("CHIP_B", 2000, 2000, 60, 150, 58)
-    s.use_cell("CHIP_B")
-    s.sref(PIN1, (-500, -500), label="1")
-    s.sref(PIN, (500, 500), label="2")
-    s.export_cell_to_library("CHIP_B", index=0)
-
-    cells = sorted(load_gds(apath).cells)
-    assert "chip_pin_1" not in cells and "chip_pin1_1" not in cells
-    reloaded = load_gds(apath)
-    assert [r.cell_name for r in reloaded.cells["CHIP_B"].srefs] == [PIN1, PIN]
-    assert [r.label for r in reloaded.cells["CHIP_B"].srefs] == ["1", "2"]
-
-
-def test_export_cell_to_library_needs_overwrite_for_a_name_clash(tmp_path):
-    s, apath = _session_with_attached_lib(tmp_path)
-    s.create_chip_cell("CHIP", 1000, 1000, 60, 150, 58)
-    s.export_cell_to_library("CHIP", index=0)
-    with pytest.raises(LayoutError, match="already exists"):
-        s.export_cell_to_library("CHIP", index=0)
-    s.export_cell_to_library("CHIP", index=0, overwrite=True)
-
-
-def test_export_cell_to_library_errors_without_an_attached_lib():
-    s = Session.new("D")
-    s.new_cell("TOP")
-    s.create_chip_cell("CHIP", 100, 100, 1, 10, 2)
-    with pytest.raises(LayoutError, match="no attached library"):
-        s.export_cell_to_library("CHIP", index=0)
+    refs = reloaded.cells["CHIP"].srefs
+    assert [r.cell_name for r in refs] == [PIN1, PIN]
+    assert [r.label for r in refs] == ["1", "2"]
+    # the library still has exactly one chip_pin / chip_pin1 -- not copies
+    assert "chip_pin_1" not in reloaded.cells and "chip_pin1_1" not in reloaded.cells
 
 
 # --- the Tools > Chip Wizard GUI flow -----------------------------------------
@@ -163,10 +130,8 @@ tk = pytest.importorskip("tkinter")
 
 def _app(tmp_path):
     from hlayout.gui.app import App
-    att = Library("PARTS")
-    att.new_cell("DUMMY")
     apath = str(tmp_path / "parts.gds")
-    save_gds(att, apath)
+    _parts_library(apath)
     lib = Library("DESIGN")
     lib.new_cell("TOP")
     try:
@@ -179,15 +144,44 @@ def _app(tmp_path):
     return app, apath
 
 
-def test_chip_wizard_places_pin1_with_chip_pin1_and_the_rest_with_chip_pin(tmp_path):
+def _start(app, name, pins):
+    app.session.create_chip_cell(name, 3000, 2000, 62)
+    app._chip_wizard = {"name": name, "total": pins, "placed": 0,
+                        "prev_grid": int(app.canvas.grid_dbu)}
+    app.session.use_cell(name)
+    app.canvas.set_cell(name)
+    from hlayout.core.units import mm_to_dbu
+    app.canvas.set_grid_spacing(mm_to_dbu(0.1))
+    app.canvas.fit_view()
+    app.canvas.start_chip_pins(pins)
+
+
+def test_chip_wizard_missing_pin_cells_is_reported(tmp_path, monkeypatch):
+    from hlayout.gui.app import App
+    lib = Library("DESIGN")
+    lib.new_cell("TOP")
+    empty = str(tmp_path / "empty.gds")
+    e = Library("E"); e.new_cell("D"); save_gds(e, empty)
+    try:
+        app = App(lib)
+    except tk.TclError as ex:
+        pytest.skip(f"no display available: {ex}")
+    try:
+        app.update()
+        app.session.attach_library(empty)
+        seen = {}
+        monkeypatch.setattr("hlayout.gui.dialogs.show_info",
+                            lambda title, msg, **k: seen.update(title=title, msg=msg))
+        app.show_chip_wizard()
+        assert "chip_pin" in seen["msg"]
+    finally:
+        app.destroy()
+
+
+def test_chip_wizard_places_pin1_from_chip_pin1_and_the_rest_from_chip_pin(tmp_path):
     app, apath = _app(tmp_path)
     try:
-        app.session.create_chip_cell("CHIP4", 3000, 2000, 62, 150, 58)
-        app._chip_wizard = {"name": "CHIP4", "total": 4, "placed": 0}
-        app.session.use_cell("CHIP4")
-        app.canvas.set_cell("CHIP4")
-        app.canvas.fit_view()
-        app.canvas.start_chip_pins(4)
+        _start(app, "CHIP4", 4)
         assert app.canvas.draw_mode == "chip_pins"
 
         def _click(wx, wy):
@@ -201,13 +195,16 @@ def test_chip_wizard_places_pin1_with_chip_pin1_and_the_rest_with_chip_pin(tmp_p
         assert app._chip_wizard is None
 
         reloaded = load_gds(apath)
-        chip = reloaded.cells["CHIP4"]
-        refs = chip.srefs
+        refs = reloaded.cells["CHIP4"].srefs
         assert len(refs) == 4
         assert refs[0].cell_name == PIN1 and refs[0].label == "1"
         assert [r.cell_name for r in refs[1:]] == [PIN, PIN, PIN]
         assert [r.label for r in refs] == ["1", "2", "3", "4"]
+        # pin cells were reused from the library, not re-copied
+        assert "chip_pin_1" not in reloaded.cells
         assert "saved to" in app.status.get()
+        # the epoxy-pad layer (58) is now visible
+        assert app.session.library.layers[58].visible is True
     finally:
         app.destroy()
 
@@ -216,18 +213,9 @@ def test_chip_wizard_uses_a_0p1mm_grid_for_pins_then_restores_it(tmp_path):
     from hlayout.core.units import mm_to_dbu
     app, apath = _app(tmp_path)
     try:
-        app.canvas.set_grid_spacing(mm_to_dbu(0.5))     # some other grid first
+        app.canvas.set_grid_spacing(mm_to_dbu(0.5))
         grid_before = int(app.canvas.grid_dbu)
-
-        app.session.create_chip_cell("CHIP3", 3000, 2000, 62, 150, 58)
-        app._chip_wizard = {"name": "CHIP3", "total": 3, "placed": 0,
-                            "prev_grid": grid_before}
-        app.session.use_cell("CHIP3")
-        app.canvas.set_cell("CHIP3")
-        app.canvas.set_grid_spacing(mm_to_dbu(0.1))
-        app.canvas.fit_view()
-        app.canvas.start_chip_pins(3)
-
+        _start(app, "CHIP3", 3)
         assert int(app.canvas.grid_dbu) == 100
         assert int(app.canvas.snap_dbu) == 100
 
@@ -238,24 +226,16 @@ def test_chip_wizard_uses_a_0p1mm_grid_for_pins_then_restores_it(tmp_path):
         for wx, wy in [(-1000, -800), (1000, -800), (0, 800)]:
             _click(wx, wy)
 
-        assert int(app.canvas.grid_dbu) == grid_before   # restored after the last pin
+        assert int(app.canvas.grid_dbu) == grid_before
     finally:
         app.destroy()
 
 
 def test_chip_wizard_esc_leaves_the_half_built_cell_and_exports_nothing(tmp_path):
-    from hlayout.core.units import mm_to_dbu
     app, apath = _app(tmp_path)
     try:
         grid_before = int(app.canvas.grid_dbu)
-        app.session.create_chip_cell("CHIP2", 1000, 1000, 62, 100, 58)
-        app._chip_wizard = {"name": "CHIP2", "total": 4, "placed": 0,
-                            "prev_grid": grid_before}
-        app.session.use_cell("CHIP2")
-        app.canvas.set_cell("CHIP2")
-        app.canvas.set_grid_spacing(mm_to_dbu(0.1))
-        app.canvas.fit_view()
-        app.canvas.start_chip_pins(4)
+        _start(app, "CHIP2", 4)
 
         px, py = app.canvas.to_px(-300, -300)
         app.canvas._on_click(types.SimpleNamespace(x=int(px), y=int(py)))
@@ -264,7 +244,7 @@ def test_chip_wizard_esc_leaves_the_half_built_cell_and_exports_nothing(tmp_path
         assert app.canvas.draw_mode == "select"
         assert app._chip_wizard is None
         assert "cancelled" in app.status.get().lower()
-        assert int(app.canvas.grid_dbu) == grid_before   # grid restored on Esc too
+        assert int(app.canvas.grid_dbu) == grid_before
         assert "CHIP2" in app.session.library.cells
         assert "CHIP2" not in load_gds(apath).cells
     finally:

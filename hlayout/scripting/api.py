@@ -588,45 +588,39 @@ class Session:
         return name, path, pad_count
 
     #: Names of the two die-pin device cells the Chip Wizard places --
-    #: pin 1 uses PIN1, every other pin uses PIN. Built on demand by
-    #: create_chip_cell() and shared across chips.
+    #: pin 1 uses CHIP_PIN1_CELL, every other pin uses CHIP_PIN_CELL.
+    #: These are the user's own cells, taken from the attached parts
+    #: library (or the current design); the wizard does not build them.
     CHIP_PIN_CELL = "chip_pin"
     CHIP_PIN1_CELL = "chip_pin1"
 
     def create_chip_cell(self, name: str, length: float, width: float,
-                         graphics_layer, epoxy_size: float, epoxy_layer, *,
-                         outline_width: Optional[float] = None,
+                         graphics_layer, *, outline_width: Optional[float] = None,
                          overwrite: bool = False):
         """Start a bare-die / chip footprint cell in the CURRENT design:
-        a body outline -- a closed rectangular Path of ``length`` x
-        ``width`` DBU, centred on the origin, on ``graphics_layer``.
+        a body outline only -- a closed rectangular Path of ``length`` x
+        ``width`` DBU, centred on the origin, on ``graphics_layer`` --
+        which is forced visible.
 
-        Also ensures the two die-pin device cells exist (created once,
-        then shared): ``chip_pin`` -- a single ``epoxy_size`` square
-        epoxy die-attach pad (``pin="1"``) on ``epoxy_layer`` -- and
-        ``chip_pin1`` -- the same pad plus a small pin-1 index mark on
-        ``graphics_layer``. The Chip Wizard then places one
-        ``chip_pin1`` instance for pin 1 and one ``chip_pin`` instance
-        per remaining pin; export_cell_to_library() carries all three
-        cells into the attached library together.
+        The die pins themselves are instances of the ``chip_pin`` /
+        ``chip_pin1`` cells (which you provide, e.g. in the attached
+        parts library): the Chip Wizard places one ``chip_pin1`` for
+        pin 1 and one ``chip_pin`` per remaining pin, then
+        export_cell_to_library() carries the chip and those two pin
+        cells into the library together (reusing the copies already
+        there).
 
-        If ``chip_pin``/``chip_pin1`` already exist they are reused
-        as-is (a different ``epoxy_size`` here won't resize them --
-        delete them first to rebuild). ``graphics_layer``/``epoxy_layer``
-        accept a number or an existing layer name. ``outline_width``
-        (DBU) defaults to 2% of the shorter body edge, min 1. Raises
-        LayoutError on a non-positive size, or if ``name`` is already a
-        cell here and ``overwrite`` is false. One undo step; the new
-        cell becomes the current cell."""
+        ``graphics_layer`` accepts a number or an existing layer name.
+        ``outline_width`` (DBU) defaults to 2% of the shorter body edge,
+        min 1. Raises LayoutError on a non-positive size, or if ``name``
+        is already a cell here and ``overwrite`` is false. One undo
+        step; the new cell becomes the current cell."""
         name = (name or "").strip()
         if not name:
             raise LayoutError("a cell name is required")
         if length <= 0 or width <= 0:
             raise LayoutError("chip length and width must be positive")
-        if epoxy_size <= 0:
-            raise LayoutError("epoxy pad size must be positive")
         g_layer = self.library.layers.resolve(graphics_layer)
-        e_layer = self.library.layers.resolve(epoxy_layer)
         if name in self.library.cells:
             if not overwrite:
                 raise LayoutError(
@@ -636,20 +630,8 @@ class Session:
 
         hl, hw = length / 2.0, width / 2.0
         ow = int(outline_width) if outline_width else max(1, int(round(min(length, width) * 0.02)))
-        ph = epoxy_size / 2.0
-        mark = epoxy_size / 3.0
 
         with self._batch():
-            if self.CHIP_PIN_CELL not in self.library.cells:
-                pc = self.library.new_cell(self.CHIP_PIN_CELL)
-                pc.add_rectangle(e_layer, -ph, -ph, ph, ph, pin="1")
-            if self.CHIP_PIN1_CELL not in self.library.cells:
-                p1 = self.library.new_cell(self.CHIP_PIN1_CELL)
-                p1.add_rectangle(e_layer, -ph, -ph, ph, ph, pin="1")
-                # pin-1 index mark: a small square just off the top-left
-                # corner of the pad, on the graphics layer.
-                p1.add_rectangle(g_layer, -ph - mark, ph, -ph, ph + mark)
-
             cell = self.library.new_cell(name)
             self.current_cell_name = name
             cell.add_path(
@@ -657,15 +639,27 @@ class Session:
                 [(-hl, -hw), (hl, -hw), (hl, hw), (-hl, hw), (-hl, -hw)],
                 max(1, ow), cap="flush",
             )
-            # the chip outline and the epoxy pads have just been drawn on
-            # these two layers -- make sure they're actually visible.
-            for n in (g_layer, e_layer):
-                try:
-                    self.library.layers.set_style(n, visible=True)
-                except (KeyError, IndexError):
-                    pass
+            try:
+                self.library.layers.set_style(g_layer, visible=True)
+            except (KeyError, IndexError):
+                pass
         self._notify()
         return name
+
+    def show_layers_of_cell(self, cell_name: str) -> None:
+        """Make every layer that ``cell_name`` (in the current design)
+        draws on visible -- used by the Chip Wizard so a freshly placed
+        ``chip_pin`` / ``chip_pin1`` instance is actually shown even if
+        its layers were switched off."""
+        c = self.library.cells.get(cell_name)
+        if c is None:
+            return
+        for sh in c.shapes:
+            try:
+                self.library.layers.set_style(sh.layer, visible=True)
+            except (KeyError, IndexError):
+                pass
+        self._notify()
 
     def export_cell_to_library(self, cell_name: str, index: int = 0,
                                overwrite: bool = False, reuse_shared: bool = True):
