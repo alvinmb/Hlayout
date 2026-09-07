@@ -33,8 +33,8 @@ class LayoutCanvas(tk.Canvas):
     """Renders a single Cell from a Library. Coordinates are DBU; the
     canvas keeps its own pixel-per-DBU scale and pan offset."""
 
-    GRID_MINOR_DBU = mm_to_dbu(1.0)   # 1 mm, in DBU (DBU-size independent)
-    GRID_MAJOR_EVERY = 10  # every 10 minor lines -> 10 mm
+    GRID_MINOR_DBU = mm_to_dbu(0.1)   # 0.1 mm, in DBU (DBU-size independent)
+    GRID_MAJOR_EVERY = 10  # every 10 minor lines -> 1 mm
 
     # Grid dot size, in screen pixels of radius around the exact grid
     # point (a (2r+1) x (2r+1) square blob) -- see _draw_grid_raster().
