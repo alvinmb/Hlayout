@@ -148,11 +148,13 @@ def _app(tmp_path):
     return app, apath
 
 
-def _start(app, name, pins, pin1_cell=PIN1, pin_cell=PIN):
+def _start(app, name, pins, pin1_cell=PIN1, pin_cell=PIN,
+           save_to_lib=True, lib_name=None):
     app.session.create_chip_cell(name, 3000, 2000, 62, 1800, 1200, 58)
     app._chip_wizard = {"name": name, "total": pins, "placed": 0,
                         "prev_grid": int(app.canvas.grid_dbu),
-                        "pin1_cell": pin1_cell, "pin_cell": pin_cell}
+                        "pin1_cell": pin1_cell, "pin_cell": pin_cell,
+                        "save_to_lib": save_to_lib, "lib_name": lib_name or name}
     app.session.use_cell(name)
     app.canvas.set_cell(name)
     from hlayout.core.units import mm_to_dbu
@@ -247,6 +249,42 @@ def test_chip_wizard_places_pin1_from_chip_pin1_and_the_rest_from_chip_pin(tmp_p
         assert "saved to" in app.status.get()
         # the epoxy-pad layer (58) is now visible
         assert app.session.library.layers[58].visible is True
+    finally:
+        app.destroy()
+
+
+def test_chip_wizard_skips_the_library_save_when_the_box_is_unticked(tmp_path):
+    app, apath = _app(tmp_path)
+    try:
+        _start(app, "NOSAVE", 2, save_to_lib=False)
+
+        def _click(wx, wy):
+            px, py = app.canvas.to_px(wx, wy)
+            app.canvas._on_click(types.SimpleNamespace(x=int(px), y=int(py)))
+        for wx, wy in [(-1000, -800), (1000, -800)]:
+            _click(wx, wy)
+
+        assert "NOSAVE" in app.session.library.cells      # built in the design
+        assert "NOSAVE" not in load_gds(apath).cells       # not exported
+        assert "not saved to a library" in app.status.get()
+    finally:
+        app.destroy()
+
+
+def test_chip_wizard_saves_under_the_given_library_name(tmp_path):
+    app, apath = _app(tmp_path)
+    try:
+        _start(app, "WORKNAME", 2, lib_name="DIE_2P")
+
+        def _click(wx, wy):
+            px, py = app.canvas.to_px(wx, wy)
+            app.canvas._on_click(types.SimpleNamespace(x=int(px), y=int(py)))
+        for wx, wy in [(-1000, -800), (1000, -800)]:
+            _click(wx, wy)
+
+        cells = load_gds(apath).cells
+        assert "DIE_2P" in cells and "WORKNAME" not in cells
+        assert "DIE_2P" in app.session.library.cells      # design cell renamed too
     finally:
         app.destroy()
 

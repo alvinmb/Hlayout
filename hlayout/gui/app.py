@@ -3241,9 +3241,11 @@ class App(tk.Tk):
         design / attached libraries). The wizard drops a white body
         outline and the epoxy pad, then you click once per die pin to
         place an instance of the chosen cell. When the last pin is
-        placed the finished cell is copied into the first attached
-        library and its .gds saved. Backed by Session.create_chip_cell()
-        + Session.export_cell_to_library()."""
+        placed, if "Save to attached library" is ticked the finished
+        cell is copied into the first attached library (under the given
+        name) and its .gds saved; otherwise it's just left in the
+        design. Backed by Session.create_chip_cell() +
+        Session.export_cell_to_library()."""
         if not self.session.attached_libraries:
             dialogs.show_info(
                 "Chip Wizard",
@@ -3283,8 +3285,9 @@ class App(tk.Tk):
             text="Build a bare-die chip footprint. Enter the body size, outline "
                  "layer, epoxy die-attach pad size + layer, pin count and the "
                  "die-pad cells to use; then click once per die pin to place an "
-                 f"instance. The finished cell is saved into {libs[0]['name']!r} "
-                 f"({libs[0]['path']}).",
+                 "instance. If \"Save to attached library\" stays ticked, the "
+                 f"finished cell is written into {libs[0]['name']!r} "
+                 f"({libs[0]['path']}) when the last pin is placed.",
             wraplength=400, justify="left",
         ).pack(anchor="w", padx=12, pady=(12, 8))
 
@@ -3356,6 +3359,33 @@ class App(tk.Tk):
                     textvariable=pins_var).grid(row=row, column=1, sticky="w", padx=4, pady=4)
         row += 1
 
+        save_var = tk.BooleanVar(value=True)
+        lib_name_var = tk.StringVar(value="")
+        lib_name_entry = ttk.Entry(form, textvariable=lib_name_var, width=22)
+
+        def _toggle_save(*_):
+            lib_name_entry.configure(state="normal" if save_var.get() else "disabled")
+        save_chk = ttk.Checkbutton(
+            form, text="Save to attached library when finished",
+            variable=save_var, command=_toggle_save)
+        save_chk.grid(row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(8, 2))
+        row += 1
+        ttk.Label(form, text="Save as (library cell name):").grid(
+            row=row, column=0, sticky="e", padx=4, pady=4)
+        lib_name_entry.grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+
+        # mirror the cell name into the library-name field until the user
+        # edits it themselves
+        _prev = {"name": name_var.get()}
+
+        def _mirror_name(*_):
+            if lib_name_var.get() in ("", _prev["name"]):
+                lib_name_var.set(name_var.get())
+            _prev["name"] = name_var.get()
+        name_var.trace_add("write", _mirror_name)
+        _toggle_save()
+
         error_var = tk.StringVar(value="")
         ttk.Label(win, textvariable=error_var, foreground="red", wraplength=400,
                   justify="left").pack(anchor="w", padx=12)
@@ -3417,6 +3447,8 @@ class App(tk.Tk):
                 "name": name, "total": n_pins, "placed": 0,
                 "prev_grid": int(self.canvas.grid_dbu),
                 "pin1_cell": pin1_cell, "pin_cell": pin_cell,
+                "save_to_lib": bool(save_var.get()),
+                "lib_name": lib_name_var.get().strip() or name,
             }
             self.session.use_cell(name)
             self.canvas.set_cell(name)
@@ -3472,13 +3504,40 @@ class App(tk.Tk):
                 pass
 
     def _on_chip_pins_done(self):
-        """canvas.on_chip_pins_done: the last pin is placed -- copy the
-        finished chip cell into the first attached library and save it."""
+        """canvas.on_chip_pins_done: the last pin is placed. If the
+        wizard's "Save to attached library" box was ticked, copy the
+        finished chip cell into the first attached library (under the
+        library name given) and save it; otherwise just leave it in the
+        design."""
         w = self._chip_wizard
         if w is None:
             return
         self._restore_chip_grid(w)
         name = w["name"]
+
+        if not w.get("save_to_lib"):
+            self._chip_wizard = None
+            self.refresh_all()
+            self.status.set(
+                f"Chip Wizard: {name!r} ({w['total']} pins) built in the design "
+                f"-- not saved to a library"
+            )
+            return
+
+        # rename the design cell if the library name differs (the cell
+        # isn't referenced by anything yet, so this is a plain re-key)
+        lib_target = w.get("lib_name") or name
+        if lib_target != name and lib_target not in self.session.library.cells:
+            cells = self.session.library.cells
+            c = cells.pop(name)
+            c.name = lib_target
+            cells[lib_target] = c
+            if self.session.current_cell_name == name:
+                self.session.current_cell_name = lib_target
+            self.canvas.set_cell(lib_target)
+            self.cell_var.set(lib_target)
+            name = lib_target
+
         try:
             lib_name, path = self.session.export_cell_to_library(name, index=0, overwrite=False)
         except LayoutError as e:
