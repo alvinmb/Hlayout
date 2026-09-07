@@ -16,13 +16,16 @@ from ..core.shapes import CIRCLE_SEGMENT_CHOICES
 from ..core.units import dbu_to_mm, mm_to_dbu
 from ..io.sidecar import load_design
 from ..io.techfile import (
+    default_layer_thickness,
     load_bond_rules,
     load_dielectric_rules,
+    load_layer_thickness,
     load_refdes_annotation_layer,
     load_resistor_geometry_rules,
     load_route_rules,
     save_bond_rules,
     save_dielectric_rules,
+    save_layer_thickness,
     save_refdes_annotation_layer,
     save_resistor_geometry_rules,
     save_route_rules,
@@ -344,6 +347,7 @@ class App(tk.Tk):
         setupm.add_checkbutton(label="Orthogonal/45° Routing", variable=self.ortho_var,
                                 command=self._on_ortho_change)
         setupm.add_command(label="Grid Spacing...", command=self.show_grid_spacing_dialog)
+        setupm.add_command(label="Layer Thicknesses (3D)...", command=self.show_layer_thickness_dialog)
         setupm.add_separator()
         setupm.add_command(label="Path Style...", command=self.show_path_style_dialog)
         setupm.add_command(label="Circle Segments...", command=self.show_circle_segments_dialog)
@@ -1932,6 +1936,97 @@ class App(tk.Tk):
 
         spacing_spin.focus_set()
         win.bind("<Return>", lambda e: apply_and_close())
+        win.bind("<Escape>", lambda e: win.destroy())
+
+    def show_layer_thickness_dialog(self):
+        """Setup > Layer Thicknesses (3D)...: the fired-film thickness
+        (micron) of each printed layer, used by File > Export to FreeCAD
+        (3D Macro). Layer-number order is the print/fire order; a blank
+        row means "not a physical film" (skipped in 3D). Pre-filled from
+        the saved `layer_thickness` tech-param, or the role heuristic
+        (hlayout.io.techfile.default_layer_thickness) where unset. Saved
+        into library.tech_params, so File > Save GDS / Setup > Save
+        Technology File... carries it."""
+        lib = self.session.library
+        saved = load_layer_thickness(lib)
+        seeded = default_layer_thickness(lib)
+        drawn = {sh.layer for c in lib.cells.values() for sh in c.shapes}
+        rows_layers = sorted(set(drawn) | {int(k) for k in saved} | {int(k) for k in seeded})
+        if not rows_layers:
+            dialogs.show_info(
+                "Layer Thicknesses",
+                "Nothing is drawn yet -- add some geometry, then set the "
+                "printed-film thicknesses here.", parent=self)
+            return
+
+        win = tk.Toplevel(self)
+        win.title("Layer Thicknesses (3D export)")
+        win.transient(self)
+        win.grab_set()
+        win.geometry("380x460")
+
+        ttk.Label(
+            win,
+            text="Fired-film thickness in microns for each printed layer, in "
+                 "print order (top row is fired first). Blank = not a physical "
+                 "film -- skipped in the 3D export.",
+            wraplength=350, justify="left").pack(anchor="w", padx=12, pady=(12, 6))
+
+        canvas = tk.Canvas(win, highlightthickness=0)
+        scroll = ttk.Scrollbar(win, orient="vertical", command=canvas.yview)
+        inner = ttk.Frame(canvas)
+        inner.bind("<Configure>",
+                   lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.configure(yscrollcommand=scroll.set)
+        canvas.pack(side="top", fill="both", expand=True, padx=(12, 0))
+        scroll.pack(side="top", fill="y")
+
+        ttk.Label(inner, text="Layer", width=22).grid(row=0, column=0, sticky="w")
+        ttk.Label(inner, text="µm").grid(row=0, column=1, sticky="w", padx=6)
+        vars_by_layer = {}
+        for i, n in enumerate(rows_layers, start=1):
+            lname = lib.layers[n].name if n < len(lib.layers) else f"L{n}"
+            ttk.Label(inner, text=f"L{n}  {lname}", width=22).grid(
+                row=i, column=0, sticky="w", pady=1)
+            cur = saved.get(str(n), seeded.get(str(n)))
+            v = tk.StringVar(value=("" if not cur else f"{float(cur):g}"))
+            ttk.Entry(inner, textvariable=v, width=8).grid(
+                row=i, column=1, sticky="w", padx=6, pady=1)
+            vars_by_layer[n] = v
+
+        error_var = tk.StringVar(value="")
+        ttk.Label(win, textvariable=error_var, foreground="red",
+                  wraplength=350).pack(anchor="w", padx=12)
+
+        def apply_and_close():
+            out = {}
+            for n, v in vars_by_layer.items():
+                s = v.get().strip()
+                if not s:
+                    continue
+                try:
+                    t = float(s)
+                except ValueError:
+                    error_var.set(f"L{n}: {s!r} isn't a number.")
+                    return
+                if t < 0:
+                    error_var.set(f"L{n}: thickness can't be negative.")
+                    return
+                if t > 0:
+                    out[str(n)] = t
+            save_layer_thickness(lib, out)
+            self.status.set(f"layer thicknesses saved ({len(out)} printed film(s))")
+            win.destroy()
+
+        btn_row = ttk.Frame(win)
+        btn_row.pack(pady=(6, 12))
+        ttk.Button(btn_row, text="Reset to heuristic",
+                   command=lambda: [vars_by_layer[n].set(
+                       "" if str(n) not in seeded else f"{float(seeded[str(n)]):g}")
+                       for n in rows_layers]).pack(side="left", padx=6)
+        ttk.Button(btn_row, text="OK", command=apply_and_close).pack(side="left", padx=6)
+        ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=6)
         win.bind("<Escape>", lambda e: win.destroy())
 
     def _delete_selected(self):

@@ -144,3 +144,46 @@ def test_freecad_command_and_session_method(tmp_path):
     assert "written to" in out
     p2 = s.export_freecad(str(tmp_path / "via_api.FCMacro"))
     compile(open(p2).read(), p2, "exec")
+
+
+def test_setup_layer_thickness_dialog_saves(tmp_path):
+    tk = pytest.importorskip("tkinter")
+    from hlayout.gui.app import App
+    from hlayout.io.techfile import load_layer_thickness
+    import tkinter.ttk as ttk
+
+    lib = _design()
+    try:
+        app = App(lib)
+    except tk.TclError as e:
+        pytest.skip(f"no display: {e}")
+    try:
+        app.update()
+        app.show_layer_thickness_dialog()
+        app.update()
+        top = next(w for w in app.winfo_children() if isinstance(w, tk.Toplevel))
+
+        entries = []
+        def walk(w):
+            for c in w.winfo_children():
+                if isinstance(c, ttk.Entry):
+                    entries.append(c)
+                walk(c)
+        walk(top)
+        assert entries                       # one row per drawn/seeded layer
+        # bump the first film to 33 um and OK
+        entries[0].delete(0, "end"); entries[0].insert(0, "33")
+
+        def find_btn(w, label):
+            for c in w.winfo_children():
+                if isinstance(c, ttk.Button) and c.cget("text") == label:
+                    return c
+                r = find_btn(c, label)
+                if r:
+                    return r
+        find_btn(top, "OK").invoke()
+        app.update()
+
+        assert 33.0 in load_layer_thickness(app.session.library).values()
+    finally:
+        app.destroy()
