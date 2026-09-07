@@ -124,6 +124,13 @@ Files:
                                        visible layer with data, named
                                        <output_prefix>_L<NN>_<layer name>.gbr;
                                        cell defaults to the current cell
+    FREECAD <path.FCMacro> [cell=<name>]
+                                       write a FreeCAD macro that rebuilds the design
+                                       as a 3D solid stack (one coloured solid per
+                                       printed film at its fired-thickness elevation,
+                                       wire bonds as raised loops, components as
+                                       fixed-height bodies or substituted models);
+                                       run it inside FreeCAD. Needs shapely
     MERGE <lib1.gds> <lib2.gds> <lib3.gds> [library_name]
                                        combine every cell from lib1 and lib2 into a
                                        new file lib3 -- a plain file-to-file operation,
@@ -812,6 +819,27 @@ class CommandInterpreter:
         if skipped_text:
             msg += f" ({skipped_text} text shape(s) skipped -- Gerber has no text primitive)"
         return msg
+
+    def _cmd_freecad(self, args):
+        usage = "usage: FREECAD <path.FCMacro> [cell=<name>]"
+        if not args:
+            raise CommandError(usage)
+        cell_name = None
+        out = None
+        for a in args:
+            if a.lower().startswith("cell="):
+                cell_name = a.split("=", 1)[1]
+            elif out is None:
+                out = a
+            else:
+                raise CommandError(usage)
+        if out is None:
+            raise CommandError(usage)
+        try:
+            written = self.session.export_freecad(out, cell_name=cell_name)
+        except LayoutError as e:
+            raise CommandError(str(e))
+        return f"FreeCAD 3D macro written to {written}"
 
     def _cmd_merge(self, args):
         usage = "usage: MERGE <lib1.gds> <lib2.gds> <lib3.gds> [library_name]"

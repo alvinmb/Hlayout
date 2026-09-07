@@ -329,6 +329,7 @@ class App(tk.Tk):
         filem.add_separator()
         filem.add_command(label="Gerber Export Sets...", command=lambda: open_gerber_batch_window(self))
         filem.add_command(label="DXF Export Sets...", command=lambda: open_dxf_batch_window(self))
+        filem.add_command(label="Export to FreeCAD (3D Macro)...", command=self.export_freecad_macro)
         filem.add_separator()
         filem.add_command(label="Exit", command=self._on_quit)
 
@@ -2349,6 +2350,27 @@ class App(tk.Tk):
             msg += f", {n} cell name(s) renamed to avoid collisions"
         self.status.set(msg)
         dialogs.show_info("Merge GDS Libraries", msg, parent=self)
+
+    def export_freecad_macro(self):
+        """File > Export to FreeCAD (3D Macro)...: write a .FCMacro that
+        rebuilds the current cell as a 3D solid stack when run inside
+        FreeCAD. Layer thicknesses / component 3D come from the design's
+        tech-params, else the role heuristic. Needs shapely."""
+        name = self.session.current_cell_name or ""
+        path = filedialog.asksaveasfilename(
+            title="Export to FreeCAD (3D Macro)",
+            defaultextension=".FCMacro",
+            initialfile=f"{self.session.library.name}_{name}.FCMacro" if name else "",
+            filetypes=[("FreeCAD macro", "*.FCMacro"), ("All files", "*.*")])
+        if not path:
+            return
+        try:
+            written = self.session.export_freecad(path)
+        except (LayoutError, OSError) as e:
+            dialogs.show_error("Export to FreeCAD", str(e), parent=self)
+            return
+        self.status.set(f"FreeCAD 3D macro written to {written} "
+                        f"-- run it inside FreeCAD (Macro > Macros...)")
 
     def attach_library(self):
         path = filedialog.askopenfilename(filetypes=[("GDSII", "*.gds"), ("All files", "*.*")])

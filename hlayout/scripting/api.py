@@ -240,6 +240,25 @@ class Session:
             raise LibraryError("no current cell to export")
         return write_dxf(self.library, name, path, layers=layers)
 
+    def export_freecad(self, path: str, cell_name: Optional[str] = None):
+        """Write a FreeCAD macro (``.FCMacro``) at ``path`` that, run
+        inside FreeCAD, rebuilds the design (default: the current cell)
+        as a 3D stack of coloured solids -- one per printed film, at the
+        elevation its fired-film thickness puts it (layer number order =
+        print order), with each layer's shapes merged through the same
+        shapely pipeline the mask ops use, wire bonds as raised loops,
+        and placed components as fixed-height bodies or substituted
+        STEP/IGES models. Layer thicknesses and component models come
+        from Setup (``layer_thickness`` / ``component_models``
+        tech-params), falling back to the role heuristics in
+        hlayout.io.techfile. Requires the ``shapely`` package. Returns
+        ``path``."""
+        from ..io.freecadio import write_freecad_macro
+        name = cell_name or self.current_cell_name
+        if name is None:
+            raise LibraryError("no current cell to export")
+        return write_freecad_macro(self.library, name, path)
+
     def run_dxf_export_batch(self, jobs=None, cell_name: Optional[str] = None):
         """Run a saved series of DXF export jobs -- e.g. one job per
         downstream tool/consumer, each with its own layer subset and

@@ -904,3 +904,185 @@ def save_dxf_export_jobs(library: Library, jobs) -> None:
             "layers": d.get("layers"),
         })
     library.tech_params[DXF_JOBS_KEY] = json.dumps(payload)
+
+
+# --- 3D / FreeCAD export: per-layer fired-film thickness -------------------
+#
+# The layer table's number order IS the print/fire (z) order; the only
+# extra datum needed for a 3D view is how thick each printed film is.
+# A layer with no entry (or 0) is not a physical film -- documentation,
+# ref-des annotation, keep-out markers, route boundary -- and is skipped
+# entirely by the FreeCAD export (contributes nothing to geometry or to
+# the running elevation). See hlayout.io.freecadio.
+
+LAYER_THICKNESS_KEY = "layer_thickness"
+
+#: Fired-film thickness defaults (micron) by inferred layer role.
+_DEFAULT_FILM_UM = {
+    "substrate": 635,     # 25-mil alumina
+    "dielectric": 30,
+    "conductor": 12,
+    "resistor": 15,
+    "glaze": 20,
+}
+
+
+#: Fall-back film thickness (micron) for a drawn-on, filled, visible
+#: layer that matches no recognised role.
+_GENERIC_FILM_UM = 10
+
+
+def default_layer_thickness(library: Library) -> dict:
+    """Best-effort {str(layer): thickness_um}: the recognised role
+    layers (resistor / route / bond / dielectric / glaze) get a
+    role-specific fired thickness, every other layer that actually
+    carries filled, visible geometry gets a generic film thickness, and
+    the lowest such layer is bumped to a ceramic-substrate thickness.
+    Layers with nothing drawn on them (or drawn outline-only / hidden)
+    get no entry -> non-physical, skipped by the 3D export."""
+    out: dict = {}
+    try:
+        rg = load_resistor_geometry_rules(library)
+        for n in (rg.get("resistor_layer"),):
+            if isinstance(n, int) and n >= 0:
+                out[str(n)] = _DEFAULT_FILM_UM["resistor"]
+        for n in (rg.get("ink_layers") or {}).values():
+            if isinstance(n, int) and n >= 0:
+                out[str(n)] = _DEFAULT_FILM_UM["resistor"]
+        for n in (rg.get("conductor_layer"),):
+            if isinstance(n, int) and n >= 0:
+                out[str(n)] = _DEFAULT_FILM_UM["conductor"]
+        for n in (rg.get("glaze_layer"),):
+            if isinstance(n, int) and n >= 0:
+                out[str(n)] = _DEFAULT_FILM_UM["glaze"]
+    except Exception:
+        pass
+    try:
+        rr = load_route_rules(library)
+        for n in (rr.get("layer_a"), rr.get("layer_b")):
+            if isinstance(n, int) and n >= 0:
+                out.setdefault(str(n), _DEFAULT_FILM_UM["conductor"])
+    except Exception:
+        pass
+    try:
+        b = int(load_bond_rules(library)["layer"])
+        if b >= 0:
+            out.setdefault(str(b), _DEFAULT_FILM_UM["conductor"])
+    except Exception:
+        pass
+    try:
+        d = int(load_dielectric_rules(library)["layer"])
+        if d >= 0:
+            out.setdefault(str(d), _DEFAULT_FILM_UM["dielectric"])
+    except Exception:
+        pass
+
+    # every other layer that actually carries filled, visible geometry
+    drawn = set()
+    for cell in library.cells.values():
+        for sh in cell.shapes:
+            drawn.add(sh.layer)
+    filmable = sorted(
+        n for n in drawn
+        if 0 <= n < len(library.layers)
+        and library.layers[n].visible and library.layers[n].fill
+    )
+    for n in filmable:
+        out.setdefault(str(n), _GENERIC_FILM_UM)
+        nm = library.layers[n].name.lower()
+        if any(w in nm for w in ("substrate", "alumina", "ceramic")):
+            out[str(n)] = max(out.get(str(n), 0), _DEFAULT_FILM_UM["substrate"])
+    return out
+
+
+def load_layer_thickness(library: Library) -> dict:
+    """{str(layer): thickness_um} from library.tech_params, or {} if none
+    saved (the caller falls back to default_layer_thickness())."""
+    raw = library.tech_params.get(LAYER_THICKNESS_KEY)
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    out = {}
+    if isinstance(data, dict):
+        for k, v in data.items():
+            try:
+                t = float(v)
+            except (TypeError, ValueError):
+                continue
+            if t > 0:
+                out[str(int(k))] = t
+    return out
+
+
+def save_layer_thickness(library: Library, thickness: dict) -> None:
+    payload = {}
+    for k, v in (thickness or {}).items():
+        try:
+            t = float(v)
+        except (TypeError, ValueError):
+            continue
+        if t > 0:
+            payload[str(int(k))] = t
+    library.tech_params[LAYER_THICKNESS_KEY] = json.dumps(payload)
+
+
+# --- 3D / FreeCAD export: per-component-cell 3D representation -------------
+#
+# Each placed cell instance is shown in the 3D export as either a flat
+# extrusion of a fixed body height ("extrude") or by substituting an
+# external STEP/IGES model FreeCAD imports and positions ("model").
+# {cell_name: {"mode","height_um","z_offset_um","model_path"}}.
+
+COMPONENT_MODELS_KEY = "component_models"
+
+DEFAULT_COMPONENT_HEIGHT_UM = 400
+
+
+def load_component_models(library: Library) -> dict:
+    raw = library.tech_params.get(COMPONENT_MODELS_KEY)
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    out = {}
+    if isinstance(data, dict):
+        for name, d in data.items():
+            if not isinstance(d, dict):
+                continue
+            mode = d.get("mode", "extrude")
+            if mode not in ("extrude", "model"):
+                mode = "extrude"
+            entry = {"mode": mode,
+                     "height_um": float(d.get("height_um", DEFAULT_COMPONENT_HEIGHT_UM)),
+                     "z_offset_um": float(d.get("z_offset_um", 0.0)),
+                     "model_path": str(d.get("model_path", "") or "")}
+            out[str(name)] = entry
+    return out
+
+
+def save_component_models(library: Library, models: dict) -> None:
+    payload = {}
+    for name, d in (models or {}).items():
+        if not isinstance(d, dict):
+            continue
+        mode = d.get("mode", "extrude")
+        payload[str(name)] = {
+            "mode": mode if mode in ("extrude", "model") else "extrude",
+            "height_um": float(d.get("height_um", DEFAULT_COMPONENT_HEIGHT_UM)),
+            "z_offset_um": float(d.get("z_offset_um", 0.0)),
+            "model_path": str(d.get("model_path", "") or ""),
+        }
+    library.tech_params[COMPONENT_MODELS_KEY] = json.dumps(payload)
+
+
+def default_component_models(library: Library) -> dict:
+    """No per-cell overrides by default -- every placed component is
+    shown as a fixed-height extrusion (DEFAULT_COMPONENT_HEIGHT_UM).
+    Placed here as the hook a future Setup dialog / role heuristic can
+    fill in."""
+    return {}
