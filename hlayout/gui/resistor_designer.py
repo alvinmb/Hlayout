@@ -231,8 +231,15 @@ class Solution:
         return self.body_width * self.body_length
 
     @property
+    def geom_code(self) -> str:
+        """Compact geometry tag: "R" (rectangle) or "T<n>" (top-hat,
+        n legs)."""
+        return f"T{self.n_folds}" if self.is_top_hat else "R"
+
+    @property
     def geom_label(self) -> str:
-        return f"top-hat ({self.n_folds}-fold)" if self.is_top_hat else "rectangle"
+        return f"top-hat, {self.n_folds}-fold (T{self.n_folds})" if self.is_top_hat \
+            else "rectangle (R)"
 
     @property
     def ar_label(self) -> str:
@@ -786,7 +793,7 @@ class ARDiagram(tk.Canvas):
 
 class SolutionPanel(ttk.Frame):
     COLS = ("ink", "squares", "length", "width", "trim_p", "ratio", "geom", "rec")
-    HEADINGS = ["Ink (Ω/□)", "Squares", "L (mm)", "Width", "Trim P (mW)", "Ratio", "Shape", "★"]
+    HEADINGS = ["Ink (Ω/□)", "Squares", "L (mm)", "Width", "Trim P (mW)", "Ratio", "Geom", "★"]
 
     def __init__(self, master, on_use):
         super().__init__(master, padding=4)
@@ -838,7 +845,7 @@ class SolutionPanel(ttk.Frame):
                           if sol.is_top_hat else f"{dbu_to_mm(sol.body_length):.3f}")
             values = (_eng(sol.ink_rsh), f"{sol.squares:.4f}", length_txt,
                       sol.width_label, f"{max_p:.0f}", sol.ar_label,
-                      sol.geom_label,
+                      sol.geom_code,
                       "★ REC" if sol.recommended else "")
             tags = ("rec",) if sol.recommended else ()
             self.table.insert("", "end", iid=str(i), values=values, tags=tags)
@@ -882,9 +889,9 @@ class SolutionPanel(ttk.Frame):
 
 class ResistorTable(ttk.Frame):
     COLS = ("ref", "value", "aim", "tol", "power", "width", "ink",
-            "squares", "length", "ratio", "sols", "pok", "status")
+            "squares", "length", "geom", "ratio", "sols", "pok", "status")
     HEADINGS = ["Ref Des", "Value", "Aim Value", "Tol", "Power (mW)", "Width",
-                "Ink (Ω/□)", "Squares", "L (mm)", "Ratio", "Sols", "P OK", "Status"]
+                "Ink (Ω/□)", "Squares", "L (mm)", "Geom", "Ratio", "Sols", "P OK", "Status"]
 
     def __init__(self, master, on_select):
         super().__init__(master, padding=4)
@@ -928,12 +935,14 @@ class ResistorTable(ttk.Frame):
         pok = res.power_ok
         status = "OK" if sol else ("NO SOL" if n == 0 else "—")
         p_txt = "OK" if pok else f"> {res.effective_max_power_mw:.0f}"
+        geom_txt = sol.geom_code if sol else "—"   # R = rectangle, T<n> = top-hat
         values = (
             res.ref_des, res.value_label, res.aim_value_label(rules), res.tolerance,
             f"{res.power_mw:.1f}", res.width_label,
             _eng(sol.ink_rsh) if sol else "—",
             f"{sol.squares:.3f}" if sol else "—",
-            f"{dbu_to_mm(sol.body_length):.3f}" if sol else "—",
+            f"{dbu_to_mm(sol.footprint_length):.3f}" if sol else "—",
+            geom_txt,
             sol.ar_label if sol else "—",
             str(n), p_txt, status,
         )

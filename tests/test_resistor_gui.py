@@ -539,3 +539,27 @@ def test_optimise_radio_repicks_the_whole_design(monkeypatch):
         assert load_resistor_design_rules(app.session.library)["select_mode"] == "area"
     finally:
         app.destroy()
+
+
+def test_resistor_table_shows_R_or_T_geometry_code():
+    app = _make_app()
+    try:
+        from hlayout.gui.resistor_designer import open_resistor_designer, Resistor
+        win = open_resistor_designer(app)
+        win.rules.available_inks = [10000]
+        for ref, val in (("RR", 5_000), ("RT", 300_000)):
+            r = Resistor(ref_des=ref, value=val, tolerance="5%",
+                         power_mw=50.0, body_width=500.0)
+            r.compute_solutions(win.rules)
+            win.resistors.append(r)
+        win._refresh_all()
+        app.update()
+
+        geom_col = win.res_table.COLS.index("geom")
+        codes = {win.res_table.table.item(iid, "values")[0]:
+                 win.res_table.table.item(iid, "values")[geom_col]
+                 for iid in win.res_table.table.get_children()}
+        assert codes["RR"] == "R"                 # fits as a rectangle
+        assert codes["RT"].startswith("T")        # folded top-hat, e.g. "T6"
+    finally:
+        app.destroy()
