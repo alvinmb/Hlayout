@@ -20,10 +20,12 @@ it, named ``<path>.hlaux``, containing:
     the Thick-Film Resistor Designer's design rules live, see
     hlayout.io.techfile.RESISTOR_RULES_KEY, so "the resistor design
     file" is already covered by the same blob), and
-  * a full copy (embedded, base64-encoded GDSII bytes -- not just a
-    path) of every attached reference library, so re-opening the
-    design still works even if the original attached file was moved,
-    renamed, or deleted in the meantime.
+  * the source path of every attached reference library, plus a full
+    embedded copy (base64-encoded GDSII bytes). On open, the live file
+    at the source path is used when it's still there and readable -- so
+    edits to an attached library (e.g. the Chip Wizard adding a part)
+    show up next time -- and the embedded copy is the silent fallback
+    for when that file has moved, been renamed, or deleted.
 
 File > Open GDS... (and the OPEN command) look for this sidecar next
 to whatever .gds file is opened and, if present, restore all of the
@@ -133,24 +135,44 @@ def load_design(gds_path: str) -> LoadedDesign:
     attach_errors = []
     for entry in data.get("attached_libraries", []):
         name = entry.get("name", "?")
-        try:
-            blob = base64.b64decode(entry["gds_base64"])
-        except Exception as e:
-            attach_errors.append(f"{name}: could not decode embedded library ({e})")
-            continue
-        fd, tmp_path = tempfile.mkstemp(suffix=".gds")
-        os.close(fd)
-        try:
-            with open(tmp_path, "wb") as f:
-                f.write(blob)
-            lib = load_gds(tmp_path, library_name=name)
-        except Exception as e:
-            attach_errors.append(f"{name}: could not load embedded library ({e})")
-            continue
-        finally:
-            os.remove(tmp_path)
+        src = entry.get("source_path")
+
+        # Prefer the live file at source_path when it's still there and
+        # readable -- so editing an attached library's .gds (e.g. the
+        # Chip Wizard writing a new part into it) shows up on the next
+        # open. The embedded base64 copy is the fallback for when the
+        # file has moved away (portability), and is used silently then.
+        lib = None
+        if src and os.path.isfile(src):
+            try:
+                lib = load_gds(src, library_name=name)
+            except Exception as e:
+                attach_errors.append(
+                    f"{name}: {src} couldn't be read ({e}); using the copy "
+                    "embedded in the design"
+                )
+                lib = None
+
+        if lib is None:
+            try:
+                blob = base64.b64decode(entry["gds_base64"])
+            except Exception as e:
+                attach_errors.append(f"{name}: could not decode embedded library ({e})")
+                continue
+            fd, tmp_path = tempfile.mkstemp(suffix=".gds")
+            os.close(fd)
+            try:
+                with open(tmp_path, "wb") as f:
+                    f.write(blob)
+                lib = load_gds(tmp_path, library_name=name)
+            except Exception as e:
+                attach_errors.append(f"{name}: could not load embedded library ({e})")
+                continue
+            finally:
+                os.remove(tmp_path)
+
         attached_libraries.append(lib)
-        attached_paths.append(entry.get("source_path") or f"(restored from {os.path.basename(gds_path)}{SIDECAR_SUFFIX})")
+        attached_paths.append(src or f"(restored from {os.path.basename(gds_path)}{SIDECAR_SUFFIX})")
 
     return LoadedDesign(
         library=library,

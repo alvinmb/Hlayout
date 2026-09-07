@@ -80,6 +80,30 @@ def test_open_design_restores_attached_libraries_even_if_source_moved(tmp_path):
     assert "PAD" in s2.attached_libraries[0].cells
 
 
+def test_open_design_picks_up_edits_to_the_live_attached_library_file(tmp_path):
+    # The sidecar embeds a copy, but if the source .gds is still there
+    # and has been edited since (e.g. the Chip Wizard wrote a new part
+    # into it), the open should reflect the current file, not the stale
+    # embedded snapshot.
+    part_path = _make_part_library(tmp_path / "part.gds")
+    s = Session.new("DEMO")
+    s.new_cell("TOP")
+    s.attach_library(part_path)
+    design_path = str(tmp_path / "design.gds")
+    s.save_design(design_path)
+
+    # edit the attached library's file on disk, without touching the design
+    plib = Session.open(part_path)
+    plib.new_cell("NEWPART")
+    plib.rect(0, 0, 0, 20, 20)
+    plib.save(part_path)
+
+    s2 = Session.open_design(design_path)
+    assert not s2.attach_errors
+    assert "NEWPART" in s2.attached_libraries[0].cells
+    assert "PAD" in s2.attached_libraries[0].cells
+
+
 def test_open_design_with_no_sidecar_behaves_like_plain_open(tmp_path):
     s = Session.new("DEMO")
     s.new_cell("TOP")
