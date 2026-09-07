@@ -1972,15 +1972,17 @@ class App(tk.Tk):
                  "film -- skipped in the 3D export.",
             wraplength=350, justify="left").pack(anchor="w", padx=12, pady=(12, 6))
 
-        canvas = tk.Canvas(win, highlightthickness=0)
-        scroll = ttk.Scrollbar(win, orient="vertical", command=canvas.yview)
+        list_frame = ttk.Frame(win)
+        list_frame.pack(fill="both", expand=True, padx=(12, 0))
+        canvas = tk.Canvas(list_frame, highlightthickness=0)
+        scroll = ttk.Scrollbar(list_frame, orient="vertical", command=canvas.yview)
         inner = ttk.Frame(canvas)
         inner.bind("<Configure>",
                    lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.create_window((0, 0), window=inner, anchor="nw")
         canvas.configure(yscrollcommand=scroll.set)
-        canvas.pack(side="top", fill="both", expand=True, padx=(12, 0))
-        scroll.pack(side="top", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
 
         ttk.Label(inner, text="Layer", width=22).grid(row=0, column=0, sticky="w")
         ttk.Label(inner, text="µm").grid(row=0, column=1, sticky="w", padx=6)
