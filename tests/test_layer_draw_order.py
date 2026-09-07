@@ -78,6 +78,41 @@ def test_layer_draw_order_is_stable_for_shapes_sharing_a_layer():
         app.destroy()
 
 
+def test_a_thick_path_is_stippled_with_its_layers_fill_pattern():
+    app = _make_app()
+    try:
+        s = app.session
+        s.library.layers.set_style(3, fill=True, stipple=3, visible=True)
+        s.rect(3, 0, 0, 4000, 400)                       # a filled rect for reference
+        s.path(3, [(0, 2000), (8000, 2000)], width=600)  # thick -> stippled
+        s.path(3, [(0, 5000), (8000, 5000)], width=2)    # thin  -> no stipple
+        app.canvas.set_cell("TOP")
+        app.canvas.scale = 0.05
+        app.canvas.redraw()
+
+        polys, lines = {}, {}
+        for item in app.canvas.find_all():
+            entry = app.canvas._item_to_shape.get(item)
+            if not (entry and entry[0] == "shape"):
+                continue
+            kind = app.canvas.type(item)
+            (polys if kind == "polygon" else lines).setdefault(item, None)
+            st = app.canvas.itemcget(item, "stipple")
+            w = float(app.canvas.itemcget(item, "width"))
+            if kind == "line":
+                lines[item] = (w, st)
+            else:
+                polys[item] = st
+
+        rect_stipple = next(iter(polys.values()))
+        assert rect_stipple                       # the reference rect is stippled
+        widths = sorted(lines.values())
+        assert widths[0][1] == ""                 # the thin path: no stipple
+        assert widths[-1][1] == rect_stipple      # the thick path: same pattern as the rect
+    finally:
+        app.destroy()
+
+
 def test_sref_child_shapes_also_draw_in_ascending_layer_order():
     app = _make_app()
     try:

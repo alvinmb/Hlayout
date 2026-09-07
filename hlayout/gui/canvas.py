@@ -2757,8 +2757,16 @@ class LayoutCanvas(tk.Canvas):
             width_px = max(1, shape.width * self.scale)
             cap = tk.ROUND if shape.cap == PathCap.ROUND else (
                 tk.PROJECTING if shape.cap == PathCap.SQUARE else tk.BUTT)
+            # Stipple the stroke with the layer's fill pattern too, so a
+            # thick conductor trace matches the crosshatch of the
+            # Rectangles/Polygons on the same layer. Only when the line
+            # is wide enough on screen for the pattern to read -- a
+            # stippled 1-2 px line just turns dotty and can vanish (same
+            # threshold the Path preview uses).
+            line_stipple = stipple if (stipple and width_px >= 3) else ""
             item = self.create_line(*coords, fill=color, width=width_px,
-                                     capstyle=cap, joinstyle=tk.ROUND)
+                                     capstyle=cap, joinstyle=tk.ROUND,
+                                     stipple=line_stipple)
         elif isinstance(shape, Text):
             px, py = self.to_px(*t(shape.origin))
             size = max(6, int(shape.height * self.scale))
