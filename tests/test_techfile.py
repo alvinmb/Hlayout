@@ -107,10 +107,18 @@ def test_resistor_design_rules_round_trip_through_tech_params():
         "ar_min": 0.2,
         "ar_max": 5.0,
         "available_inks": [10, 100, 1000],
+        "select_mode": "inks",
     }
     save_resistor_design_rules(lib, custom)
     assert lib.tech_params  # a single JSON entry was stashed there
     assert load_resistor_design_rules(lib) == custom
+
+
+def test_resistor_design_rules_load_fills_in_select_mode_default():
+    lib = Library("DEMO")
+    save_resistor_design_rules(lib, {"aim_pct": 80.0, "ar_min": 0.2, "ar_max": 5.0,
+                                     "available_inks": [10, 100]})
+    assert load_resistor_design_rules(lib)["select_mode"] == "aspect"
 
 
 def test_resistor_design_rules_survive_a_full_techfile_save_and_load(tmp_path):

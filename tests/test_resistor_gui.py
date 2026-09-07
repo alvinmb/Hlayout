@@ -479,3 +479,63 @@ def test_advance_place_cursor_moves_past_the_footprint_plus_margin():
         assert win._next_place_x == expected
     finally:
         app.destroy()
+
+
+# --- top-hat geometry + whole-design selection criteria --------------------
+
+def test_high_value_resistor_gets_an_auto_top_hat_solution():
+    from hlayout.gui.resistor_designer import Resistor, DesignRules
+    rules = DesignRules(aim_pct=75, ar_min=0.25, ar_max=4.0,
+                        available_inks=[10000])
+    # aim ~ 300k * 0.8 = 240k; on the only ink (10k/sq) that's 24
+    # squares -- can't be a rectangle within 4:1, so it auto-folds.
+    r = Resistor(ref_des="RH", value=300_000, tolerance="5%",
+                 power_mw=25.0, body_width=500.0)
+    r.compute_solutions(rules)
+    assert len(r.solutions) == 1
+    top = r.solutions[0]
+    assert top.is_top_hat and top.n_folds >= 2
+    assert top.footprint_length < top.body_length     # folded is more compact
+    assert top.aspect_ratio <= rules.ar_max + 1e-9
+
+
+def test_generate_resistor_n_folds_draws_a_meander_path():
+    from hlayout.scripting import Session
+    from hlayout.core.shapes import Path
+    s = Session.new("D")
+    s.new_cell("TOP")
+    name = s.generate_resistor(0, 0, 500, 40000, ink_rsh=10000,
+                               ref_des="R1", n_folds=4)
+    body = s.library.cells[name].shapes
+    paths = [sh for sh in body if isinstance(sh, Path)]
+    assert len(paths) == 1
+    assert len(paths[0].points) == 8                   # 4 legs x 2 points
+    assert paths[0].width == 500
+
+
+def test_optimise_radio_repicks_the_whole_design(monkeypatch):
+    app = _make_app()
+    try:
+        from hlayout.gui.resistor_designer import open_resistor_designer
+        win = open_resistor_designer(app)
+        win.rules.available_inks = [100, 1000, 10000]
+        _seed(win, specs=(("R1", 1000, "5%", 50.0), ("R2", 10000, "5%", 50.0),
+                          ("R3", 3000, "5%", 50.0)))
+        app.update()
+
+        win.select_mode_var.set("inks")
+        win._on_select_mode_change()
+        inks_used = {r.selected.ink_rsh for r in win.resistors if r.selected}
+        assert len(inks_used) == 1                     # one ink covers all three
+
+        win.select_mode_var.set("area")
+        win._on_select_mode_change()
+        for r in win.resistors:
+            if r.selected:
+                assert r.selected.area == min(s.area for s in r.solutions)
+
+        # the choice is persisted into the design's tech params
+        from hlayout.io.techfile import load_resistor_design_rules
+        assert load_resistor_design_rules(app.session.library)["select_mode"] == "area"
+    finally:
+        app.destroy()

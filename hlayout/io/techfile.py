@@ -147,6 +147,12 @@ DEFAULT_RESISTOR_RULES = {
     "ar_max": 4.0,
     "available_inks": [10, 30, 100, 300, 1000, 3000,
                         10_000, 30_000, 100_000, 300_000, 1_000_000],
+    # How the Thick-Film Resistor Designer auto-picks each resistor's
+    # solution: "aspect" (nearest to square, per resistor -- the
+    # original behaviour), "inks" (fewest distinct sheet-resistance inks
+    # across the whole design), or "area" (smallest total resistor ink
+    # area).
+    "select_mode": "aspect",
 }
 
 

@@ -879,7 +879,7 @@ class Session:
                            space_c=None, glaze_oversize=None, resistor_layer=None,
                            conductor_layer=None, glaze_layer=None, doc_layer=None,
                            keepout_layer=None, keepout_oversize=None,
-                           label_height=None, cell_name=None) -> str:
+                           label_height=None, cell_name=None, n_folds: int = 1) -> str:
         """Build a complete thick-film resistor structure -- the resistor
         ink body, its protective glaze overprint, its two end conductor
         pads, and (if ``ref_des`` is given) a reference-designator label
@@ -944,11 +944,20 @@ class Session:
         Rules... (Library.tech_params, via
         hlayout.io.techfile.load_resistor_geometry_rules()).
 
+        ``n_folds`` > 1 draws the ink body as a top-hat / meander of that
+        many legs instead of a single rectangle -- for a resistor with
+        more squares than fit as a rectangle within the aspect-ratio
+        limit. ``body_length`` stays the total (electrical) ink run; the
+        drawn footprint is ``body_length / n_folds`` long. The Thick-Film
+        Resistor Designer passes this automatically for a top-hat
+        solution.
+
         Building the device cell and placing its Sref are both part of
         a single undo step."""
         parent_cell_name = self.current_cell_name
         if parent_cell_name is None:
             raise LayoutError("no current cell; call new_cell()/use_cell() first")
+        n_folds = max(1, int(n_folds))
 
         rules = load_resistor_geometry_rules(self.library)
         a = float(overlap_a) if overlap_a is not None else rules["overlap_a"]
@@ -975,18 +984,46 @@ class Session:
 
         with self._batch():
             self.new_cell(device_name)  # also switches current_cell_name
-            self.rect(r_layer, -(half_l + a), -half_w, half_l + a, half_w)
-            self.rect(g_layer, -(half_l + a + d), -(half_w + d), half_l + a + d, half_w + d)
-            # A resistor is an inherently unambiguous 2-terminal part, so
-            # its pads are auto-numbered the same way create_pad_cell()
-            # numbers a 2-pad footprint: lower X is pin "1".
-            self.rect(c_layer, -(half_l + a + b), -pad_half_w, -half_l, pad_half_w, pin="1")
-            self.rect(c_layer, half_l, -pad_half_w, half_l + a + b, pad_half_w, pin="2")
-            if k_layer is not None and int(k_layer) >= 0:
-                # dielectric keep-out: the gap between the two terminals
-                # (body_length long, full pad width), grown by E.
-                self.rect(int(k_layer), -(half_l + e), -(pad_half_w + e),
-                          half_l + e, pad_half_w + e)
+            if n_folds <= 1:
+                self.rect(r_layer, -(half_l + a), -half_w, half_l + a, half_w)
+                self.rect(g_layer, -(half_l + a + d), -(half_w + d), half_l + a + d, half_w + d)
+                # A resistor is an inherently unambiguous 2-terminal part,
+                # so its pads are auto-numbered the same way
+                # create_pad_cell() numbers a 2-pad footprint: lower X is
+                # pin "1".
+                self.rect(c_layer, -(half_l + a + b), -pad_half_w, -half_l, pad_half_w, pin="1")
+                self.rect(c_layer, half_l, -pad_half_w, half_l + a + b, pad_half_w, pin="2")
+                if k_layer is not None and int(k_layer) >= 0:
+                    # dielectric keep-out: the gap between the two
+                    # terminals (body_length long, full pad width), grown
+                    # by E.
+                    self.rect(int(k_layer), -(half_l + e), -(pad_half_w + e),
+                              half_l + e, pad_half_w + e)
+            else:
+                # Top-hat / meander: fold the ink run into n_folds legs
+                # (each along Y, stepped along X) so the same electrical
+                # length lands in a compact footprint. The centreline
+                # path is body_width wide; total run stays ~body_length.
+                pitch = body_width * 2.0
+                connectors = (n_folds - 1) * pitch
+                leg_len = max(body_width, (body_length - connectors) / n_folds)
+                hl = leg_len / 2.0
+                x0 = -((n_folds - 1) * pitch) / 2.0
+                pts = []
+                for i in range(n_folds):
+                    xi = x0 + i * pitch
+                    pts += ([(xi, -hl), (xi, hl)] if i % 2 == 0 else [(xi, hl), (xi, -hl)])
+                self.path(r_layer, [(int(round(px)), int(round(py))) for px, py in pts],
+                          max(1, int(round(body_width))), cap="flush")
+                x_end = x0 + (n_folds - 1) * pitch
+                self.rect(g_layer, x0 - half_w - d, -hl - d, x_end + half_w + d, hl + d)
+                # pads at the two free ends (pts[0] and pts[-1])
+                (ax, ay), (bx, by) = pts[0], pts[-1]
+                self.rect(c_layer, ax - half_w - c, ay - a - b, ax + half_w + c, ay + a, pin="1")
+                if by > 0:
+                    self.rect(c_layer, bx - half_w - c, by - a, bx + half_w + c, by + a + b, pin="2")
+                else:
+                    self.rect(c_layer, bx - half_w - c, by - a - b, bx + half_w + c, by + a, pin="2")
             self.use_cell(parent_cell_name)
             # The ref-des is the placed instance's own SRef.label -- the
             # same per-instance floating annotation every other placed

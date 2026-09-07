@@ -67,6 +67,10 @@ AR_MIN_DEFAULT = 0.25
 AR_MAX_DEFAULT = 4.00
 AIM_PCT_DEFAULT = 75.0
 
+#: Most legs an auto top-hat / meander solution will use before the
+#: designer gives up on that ink (a higher-rsh ink will need fewer).
+MAX_TOP_HAT_FOLDS = 8
+
 TOLERANCES = ["0.1%", "0.5%", "1%", "2%", "5%", "10%", "20%"]
 
 # Standard thick-film body widths with power ratings.
@@ -172,22 +176,27 @@ class DesignRules:
     global like the original tool's Settings class."""
 
     def __init__(self, aim_pct=AIM_PCT_DEFAULT, ar_min=AR_MIN_DEFAULT,
-                 ar_max=AR_MAX_DEFAULT, available_inks=None):
+                 ar_max=AR_MAX_DEFAULT, available_inks=None, select_mode="aspect"):
         self.aim_pct = aim_pct
         self.ar_min = ar_min
         self.ar_max = ar_max
         self.available_inks = list(available_inks) if available_inks else list(DEFAULT_INKS)
+        #: "aspect" | "inks" | "area" -- how the window auto-picks each
+        #: resistor's selected solution (see ResistorDesignerWindow).
+        self.select_mode = select_mode if select_mode in ("aspect", "inks", "area") else "aspect"
 
     @classmethod
     def from_library(cls, library) -> "DesignRules":
         data = load_resistor_design_rules(library)
         return cls(aim_pct=data["aim_pct"], ar_min=data["ar_min"],
-                    ar_max=data["ar_max"], available_inks=data["available_inks"])
+                    ar_max=data["ar_max"], available_inks=data["available_inks"],
+                    select_mode=data.get("select_mode", "aspect"))
 
     def save_to_library(self, library) -> None:
         save_resistor_design_rules(library, {
             "aim_pct": self.aim_pct, "ar_min": self.ar_min,
             "ar_max": self.ar_max, "available_inks": list(self.available_inks),
+            "select_mode": self.select_mode,
         })
 
 
@@ -200,6 +209,30 @@ class Solution:
     aspect_ratio: float
     score: float
     recommended: bool = False
+    #: >1 when the resistor is too many squares to fit as a plain
+    #: rectangle within ar_max, so it's folded into a top-hat / meander
+    #: of this many legs. body_length is still the *electrical* length
+    #: (total ink run); the drawn footprint is body_length / n_folds
+    #: long. aspect_ratio is the folded footprint's per-leg aspect.
+    n_folds: int = 1
+
+    @property
+    def is_top_hat(self) -> bool:
+        return self.n_folds > 1
+
+    @property
+    def footprint_length(self) -> float:
+        return self.body_length / self.n_folds
+
+    @property
+    def area(self) -> float:
+        """Resistor ink area (DBU^2) -- electrical, so folding doesn't
+        change it: squares x body_width^2. Lower for a higher-rsh ink."""
+        return self.body_width * self.body_length
+
+    @property
+    def geom_label(self) -> str:
+        return f"top-hat ({self.n_folds}-fold)" if self.is_top_hat else "rectangle"
 
     @property
     def ar_label(self) -> str:
@@ -261,13 +294,32 @@ class Resistor:
         aim = self.aim_value(rules)
         for rsh in rules.available_inks:
             sq = aim / rsh
-            if not (rules.ar_min <= sq <= rules.ar_max):
+            if sq < rules.ar_min:
+                # too few squares even for a rectangle -- a wider body or
+                # a lower-rsh ink is needed, folding doesn't help.
                 continue
-            self.solutions.append(Solution(
-                ink_rsh=rsh, squares=sq,
-                body_width=self.body_width, body_length=sq * self.body_width,
-                aspect_ratio=sq, score=abs(math.log(sq)),
-            ))
+            if sq <= rules.ar_max:
+                self.solutions.append(Solution(
+                    ink_rsh=rsh, squares=sq,
+                    body_width=self.body_width, body_length=sq * self.body_width,
+                    aspect_ratio=sq, score=abs(math.log(sq)),
+                ))
+            else:
+                # doesn't fit as a rectangle within ar_max -> auto top-hat:
+                # fold into the fewest legs whose per-leg aspect is <= ar_max.
+                n = max(2, math.ceil(sq / rules.ar_max))
+                if n > MAX_TOP_HAT_FOLDS:
+                    # needs an impractical fold count on this ink -- skip
+                    # it; a higher-rsh ink will need fewer folds.
+                    continue
+                per_leg = sq / n
+                self.solutions.append(Solution(
+                    ink_rsh=rsh, squares=sq,
+                    body_width=self.body_width, body_length=sq * self.body_width,
+                    aspect_ratio=per_leg, n_folds=n,
+                    # rank after any real rectangle, and prefer fewer folds
+                    score=abs(math.log(per_leg)) + 0.5 + 0.2 * (n - 1),
+                ))
         self.solutions.sort(key=lambda s: s.score)
         if self.solutions:
             self.solutions[0].recommended = True
@@ -733,8 +785,8 @@ class ARDiagram(tk.Canvas):
 # ─────────────────────────────────────────────────────────────────────────
 
 class SolutionPanel(ttk.Frame):
-    COLS = ("ink", "squares", "length", "width", "trim_p", "ratio", "rec")
-    HEADINGS = ["Ink (Ω/□)", "Squares", "L (mm)", "Width", "Trim P (mW)", "Ratio", "★"]
+    COLS = ("ink", "squares", "length", "width", "trim_p", "ratio", "geom", "rec")
+    HEADINGS = ["Ink (Ω/□)", "Squares", "L (mm)", "Width", "Trim P (mW)", "Ratio", "Shape", "★"]
 
     def __init__(self, master, on_use):
         super().__init__(master, padding=4)
@@ -782,8 +834,11 @@ class SolutionPanel(ttk.Frame):
         self.table.delete(*self.table.get_children())
         for i, sol in enumerate(self._solutions):
             max_p = effective_power_for_width(int(sol.body_width))
-            values = (_eng(sol.ink_rsh), f"{sol.squares:.4f}", f"{dbu_to_mm(sol.body_length):.3f}",
+            length_txt = (f"{dbu_to_mm(sol.footprint_length):.3f} (fold)"
+                          if sol.is_top_hat else f"{dbu_to_mm(sol.body_length):.3f}")
+            values = (_eng(sol.ink_rsh), f"{sol.squares:.4f}", length_txt,
                       sol.width_label, f"{max_p:.0f}", sol.ar_label,
+                      sol.geom_label,
                       "★ REC" if sol.recommended else "")
             tags = ("rec",) if sol.recommended else ()
             self.table.insert("", "end", iid=str(i), values=values, tags=tags)
@@ -1069,6 +1124,16 @@ class ResistorDesignerWindow(tk.Toplevel):
             ("Recalculate", self._recalculate_all),
         ]:
             ttk.Button(toolbar, text=text, command=cmd).pack(side="left", padx=2)
+
+        ttk.Separator(toolbar, orient="vertical").pack(side="left", fill="y", padx=8)
+        ttk.Label(toolbar, text="Optimise:").pack(side="left", padx=(2, 2))
+        self.select_mode_var = tk.StringVar(value=self.rules.select_mode)
+        for label, mode in [("Aspect ratio", "aspect"),
+                            ("Fewest inks", "inks"),
+                            ("Smallest area", "area")]:
+            ttk.Radiobutton(toolbar, text=label, value=mode,
+                            variable=self.select_mode_var,
+                            command=self._on_select_mode_change).pack(side="left")
         ttk.Separator(toolbar, orient="vertical").pack(side="left", fill="y", padx=8)
         ttk.Button(toolbar, text="Design Rules...", command=self._open_design_rules).pack(
             side="left", padx=2)
@@ -1191,10 +1256,62 @@ class ResistorDesignerWindow(tk.Toplevel):
     def _auto_select_all(self):
         for res in self.resistors:
             res.compute_solutions(self.rules)
+        self._apply_selection_criteria()
         self._refresh_all()
         r = self.res_table.current_row()
         if r >= 0:
             self._on_res_selected(r)
+
+    def _on_select_mode_change(self):
+        self.rules.select_mode = self.select_mode_var.get()
+        self.rules.save_to_library(self.library)
+        self._apply_selection_criteria()
+        self._refresh_all()
+        r = self.res_table.current_row()
+        if r >= 0:
+            self._on_res_selected(r)
+        self.status_var.set({
+            "aspect": "Optimise: each resistor's solution nearest to square.",
+            "inks": "Optimise: fewest distinct sheet-resistance inks across the design.",
+            "area": "Optimise: smallest total resistor ink area.",
+        }.get(self.rules.select_mode, ""))
+
+    def _apply_selection_criteria(self):
+        """Re-pick every resistor's selected_idx for the whole design
+        according to self.rules.select_mode. "aspect" keeps
+        compute_solutions()' own best-score pick (index 0); "area" takes
+        each resistor's smallest-ink-area solution; "inks" runs a greedy
+        set-cover so the design uses the fewest distinct inks."""
+        mode = self.rules.select_mode
+        solved = [r for r in self.resistors if r.solutions]
+
+        if mode == "area":
+            for r in solved:
+                r.selected_idx = min(range(len(r.solutions)),
+                                      key=lambda i: r.solutions[i].area)
+            return
+
+        if mode == "inks":
+            from collections import Counter
+            pools = {id(r): {s.ink_rsh for s in r.solutions} for r in solved}
+            chosen: set = set()
+            uncovered = list(solved)
+            while uncovered:
+                c = Counter()
+                for r in uncovered:
+                    for ink in pools[id(r)]:
+                        c[ink] += 1
+                best_ink = c.most_common(1)[0][0]
+                chosen.add(best_ink)
+                uncovered = [r for r in uncovered if best_ink not in pools[id(r)]]
+            for r in solved:
+                cand = [i for i, s in enumerate(r.solutions) if s.ink_rsh in chosen]
+                r.selected_idx = min(cand, key=lambda i: r.solutions[i].score) if cand else 0
+            return
+
+        # "aspect": the recommendation compute_solutions() already made
+        for r in solved:
+            r.selected_idx = 0
 
     def _recalculate_all(self):
         for res in self.resistors:
@@ -1205,6 +1322,8 @@ class ResistorDesignerWindow(tk.Toplevel):
                     if sol.ink_rsh == prev:
                         res.selected_idx = i
                         break
+        if self.rules.select_mode != "aspect":
+            self._apply_selection_criteria()
         self._refresh_all()
 
     def _open_design_rules(self):
@@ -1268,9 +1387,10 @@ class ResistorDesignerWindow(tk.Toplevel):
 
     def _footprint_length(self, sol, geom_rules) -> float:
         """Total pad-to-pad (outer edge to outer edge) length of a
-        solution's resistor structure -- body_length + 2*A + 2*B --
-        used to space consecutive placements apart."""
-        return sol.body_length + 2 * geom_rules["overlap_a"] + 2 * geom_rules["pad_b"]
+        solution's resistor structure -- footprint_length + 2*A + 2*B --
+        used to space consecutive placements apart. For a top-hat the
+        footprint is body_length / n_folds long."""
+        return sol.footprint_length + 2 * geom_rules["overlap_a"] + 2 * geom_rules["pad_b"]
 
     def _default_place_x(self, sol, geom_rules) -> float:
         """Default centre X for the next placement: half this
@@ -1333,7 +1453,8 @@ class ResistorDesignerWindow(tk.Toplevel):
         try:
             self.app.session.generate_resistor(
                 x, y, sol.body_width, sol.body_length, rotation=rotation,
-                ink_rsh=sol.ink_rsh, ref_des=res.ref_des, conductor_layer=conductor_layer)
+                ink_rsh=sol.ink_rsh, ref_des=res.ref_des, conductor_layer=conductor_layer,
+                n_folds=sol.n_folds)
         except LayoutError as e:
             dialogs.show_error("Place in Layout", str(e), parent=self)
             return
@@ -1379,7 +1500,7 @@ class ResistorDesignerWindow(tk.Toplevel):
             try:
                 self.app.session.generate_resistor(
                     x, y, sol.body_width, sol.body_length,
-                    ink_rsh=sol.ink_rsh, ref_des=res.ref_des)
+                    ink_rsh=sol.ink_rsh, ref_des=res.ref_des, n_folds=sol.n_folds)
             except LayoutError as e:
                 dialogs.show_error("Place All in Layout",
                                       f"{res.ref_des}: {e}", parent=self)

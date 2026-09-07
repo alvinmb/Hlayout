@@ -38,7 +38,6 @@ from .dxf_batch_window import open_dxf_batch_window
 from .gerber_batch_window import open_gerber_batch_window
 from .maskop_window import open_maskop_batch_window
 from .resistor_designer import open_resistor_designer
-from .thinfilm_designer import open_thin_film_designer
 
 
 class ViewWindow(tk.Toplevel):
@@ -425,10 +424,6 @@ class App(tk.Tk):
         toolsm.add_command(
             label="Thick-Film Resistor Designer...",
             command=lambda: open_resistor_designer(self),
-        )
-        toolsm.add_command(
-            label="Thin-Film Resistor Designer...",
-            command=lambda: open_thin_film_designer(self),
         )
         toolsm.add_command(label="Via Wizard...", command=self.show_via_wizard)
         toolsm.add_command(label="Pad Wizard...", command=self.show_pad_wizard)
