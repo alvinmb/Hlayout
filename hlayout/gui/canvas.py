@@ -2686,6 +2686,17 @@ class LayoutCanvas(tk.Canvas):
             # isn't independently placed in the current cell.
             self._collect_nested_sref(sub, transform, depth + 1, add, highlight=highlight,
                                        click_target=target)
+        for sub_aref in child.arefs:
+            # an ARef nested inside a placed cell -- expand each array
+            # position to a throwaway SRef and recurse, same as
+            # _draw_cell does for a top-level ARef.
+            for origin in sub_aref.instance_origins():
+                inst = SRef(cell_name=sub_aref.cell_name, origin=origin,
+                            rotation=sub_aref.rotation,
+                            magnification=sub_aref.magnification,
+                            x_reflection=sub_aref.x_reflection)
+                self._collect_nested_sref(inst, transform, depth + 1, add,
+                                           highlight=highlight, click_target=target)
 
     def _collect_nested_sref(self, ref: SRef, parent_transform, depth, add, highlight=False,
                               click_target=None):
@@ -2723,6 +2734,14 @@ class LayoutCanvas(tk.Canvas):
         for sub in child.srefs:
             self._collect_nested_sref(sub, transform, depth + 1, add, highlight=highlight,
                                        click_target=target)
+        for sub_aref in child.arefs:
+            for origin in sub_aref.instance_origins():
+                inst = SRef(cell_name=sub_aref.cell_name, origin=origin,
+                            rotation=sub_aref.rotation,
+                            magnification=sub_aref.magnification,
+                            x_reflection=sub_aref.x_reflection)
+                self._collect_nested_sref(inst, transform, depth + 1, add,
+                                           highlight=highlight, click_target=target)
 
     def _draw_shape(self, shape, layer, transform=None, selected=False):
         t = transform or (lambda p: p)

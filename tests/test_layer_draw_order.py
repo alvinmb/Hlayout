@@ -134,3 +134,33 @@ def test_sref_child_shapes_also_draw_in_ascending_layer_order():
         assert len(items) > 0
     finally:
         app.destroy()
+
+
+def test_aref_nested_inside_a_placed_cell_still_draws():
+    # An ARef nested inside a cell that is itself placed as an SRef in
+    # the cell being edited used to render nothing -- _collect_sref /
+    # _collect_nested_sref only recursed into child.srefs, never
+    # child.arefs -- so a subassembly's arrayed pins vanished the moment
+    # the subassembly was placed one level up.
+    app = _make_app()
+    try:
+        s = app.session
+        s.new_cell("PIN")
+        s.rect(2, -50, -50, 50, 50)
+
+        s.new_cell("BLOCK")
+        s.rect(61, 0, 0, 5000, 4000)                    # a direct shape
+        s.aref("PIN", (500, 3500), columns=8, rows=1, col_spacing=500)
+
+        s.use_cell("TOP")
+        s.sref("BLOCK", (0, 0))
+        app.canvas.set_cell("TOP")
+        app.canvas.redraw()
+
+        polys = [it for it in app.canvas.find_all()
+                 if app.canvas.type(it) == "polygon"]
+        # 1 direct BLOCK rect + 8 arrayed PIN rects, all flattened
+        # through the one placed BLOCK instance
+        assert len(polys) >= 9
+    finally:
+        app.destroy()
