@@ -144,10 +144,11 @@ def _app(tmp_path):
     return app, apath
 
 
-def _start(app, name, pins):
+def _start(app, name, pins, pin1_cell=PIN1, pin_cell=PIN):
     app.session.create_chip_cell(name, 3000, 2000, 62)
     app._chip_wizard = {"name": name, "total": pins, "placed": 0,
-                        "prev_grid": int(app.canvas.grid_dbu)}
+                        "prev_grid": int(app.canvas.grid_dbu),
+                        "pin1_cell": pin1_cell, "pin_cell": pin_cell}
     app.session.use_cell(name)
     app.canvas.set_cell(name)
     from hlayout.core.units import mm_to_dbu
@@ -156,24 +157,61 @@ def _start(app, name, pins):
     app.canvas.start_chip_pins(pins)
 
 
-def test_chip_wizard_missing_pin_cells_is_reported(tmp_path, monkeypatch):
+def test_chip_wizard_no_attached_library_is_reported(tmp_path, monkeypatch):
     from hlayout.gui.app import App
     lib = Library("DESIGN")
     lib.new_cell("TOP")
-    empty = str(tmp_path / "empty.gds")
-    e = Library("E"); e.new_cell("D"); save_gds(e, empty)
     try:
         app = App(lib)
     except tk.TclError as ex:
         pytest.skip(f"no display available: {ex}")
     try:
         app.update()
-        app.session.attach_library(empty)
         seen = {}
         monkeypatch.setattr("hlayout.gui.dialogs.show_info",
-                            lambda title, msg, **k: seen.update(title=title, msg=msg))
+                            lambda title, msg, **k: seen.update(msg=msg))
         app.show_chip_wizard()
-        assert "chip_pin" in seen["msg"]
+        assert "attach" in seen["msg"].lower()
+    finally:
+        app.destroy()
+
+
+def test_chip_wizard_pin_cell_names_can_be_chosen_incl_underscore_variant(tmp_path):
+    # The parts library names its pin-1 cell "chip_pin_1" (an underscore),
+    # not "chip_pin1" -- the wizard lets you pick whichever cell you want
+    # for pin 1 and for the rest.
+    from hlayout.gui.app import App
+    apath = str(tmp_path / "cw.gds")
+    plib = Library("CW")
+    pc = plib.new_cell("chip_pin")
+    pc.add_rectangle(58, -900, -900, 900, 900, pin="1")
+    p1 = plib.new_cell("chip_pin_1")
+    p1.add_rectangle(58, -900, -900, 900, 900, pin="1")
+    save_gds(plib, apath)
+
+    lib = Library("DESIGN")
+    lib.new_cell("TOP")
+    try:
+        app = App(lib)
+    except tk.TclError as ex:
+        pytest.skip(f"no display available: {ex}")
+    try:
+        app.update()
+        app.session.attach_library(apath)
+        app.canvas.set_cell("TOP")
+
+        _start(app, "CHIPX", 3, pin1_cell="chip_pin_1", pin_cell="chip_pin")
+
+        def _click(wx, wy):
+            px, py = app.canvas.to_px(wx, wy)
+            app.canvas._on_click(types.SimpleNamespace(x=int(px), y=int(py)))
+        for wx, wy in [(-1000, -800), (1000, -800), (0, 800)]:
+            _click(wx, wy)
+
+        reloaded = load_gds(apath)
+        refs = reloaded.cells["CHIPX"].srefs
+        assert [r.cell_name for r in refs] == ["chip_pin_1", "chip_pin", "chip_pin"]
+        assert [r.label for r in refs] == ["1", "2", "3"]
     finally:
         app.destroy()
 

@@ -3216,9 +3216,8 @@ class App(tk.Tk):
         win.bind("<Escape>", lambda e: win.destroy())
 
     def _chip_pin_cell_source(self, cell_name):
-        """Where the Chip Wizard's `chip_pin` / `chip_pin1` cell lives:
-        the current design, else the first attached library that has it,
-        else None."""
+        """Where a die-pin cell lives: the current design, else the first
+        attached library that has it, else None."""
         if cell_name in self.session.library.cells:
             return "current"
         for i, lib in enumerate(self.session.attached_libraries):
@@ -3226,40 +3225,50 @@ class App(tk.Tk):
                 return i
         return None
 
+    def _placeable_pin_cell_names(self):
+        """Every cell name available to place as a die pin: the current
+        design's cells plus every cell in every attached library."""
+        names = set(self.session.library.cells)
+        for lib in self.session.attached_libraries:
+            names |= set(lib.cells)
+        return sorted(names)
+
     def show_chip_wizard(self):
         """Tools > Chip Wizard...: build a bare-die / chip footprint
         interactively. Enter the body size, the chip-graphics (outline)
-        layer and the pin count; the wizard drops the body outline, then
-        you click once per die pin -- pin 1 places an instance of your
-        `chip_pin1` cell, every other pin an instance of `chip_pin`
-        (both taken from the attached parts library). When the last pin
-        is placed the finished cell is copied into the first attached
+        layer, the pin count, and which cells to use for pin 1 and for
+        the rest (picked from the design / attached libraries); the
+        wizard drops the body outline, then you click once per die pin
+        to place an instance of the chosen cell. When the last pin is
+        placed the finished cell is copied into the first attached
         library and its .gds saved. Backed by Session.create_chip_cell()
         + Session.export_cell_to_library()."""
         if not self.session.attached_libraries:
             dialogs.show_info(
                 "Chip Wizard",
                 "No library is attached yet. Use Setup > Attach Library... to "
-                "attach the parts library (it must contain your 'chip_pin' and "
-                "'chip_pin1' cells) and the file the finished chip is saved "
-                "into, then try the Chip Wizard again.",
+                "attach the parts library your die-pin cells live in (and the "
+                "file the finished chip is saved into), then try the Chip "
+                "Wizard again.",
                 parent=self,
             )
             return
 
-        missing = [n for n in (self.session.CHIP_PIN_CELL, self.session.CHIP_PIN1_CELL)
-                   if self._chip_pin_cell_source(n) is None]
-        if missing:
+        pin_cells = self._placeable_pin_cell_names()
+        if not pin_cells:
             dialogs.show_info(
                 "Chip Wizard",
-                f"The die-pin cell(s) {', '.join(repr(m) for m in missing)} were "
-                "not found in the design or any attached library. Add a "
-                "'chip_pin' cell (the epoxy die-attach pad for pins 2..N) and a "
-                "'chip_pin1' cell (pin 1, usually with a pin-1 mark) to your "
-                "parts library, then try again.",
+                "No cells are available to place as die pins. Add your die-pad "
+                "cell(s) to the attached parts library, then try again.",
                 parent=self,
             )
             return
+
+        def _default(*prefs):
+            for p in prefs:
+                if p in pin_cells:
+                    return p
+            return pin_cells[0]
 
         win = tk.Toplevel(self)
         win.title("Chip Wizard")
@@ -3271,10 +3280,9 @@ class App(tk.Tk):
         ttk.Label(
             win,
             text="Build a bare-die chip footprint. Enter the body size, outline "
-                 "layer and pin count below; then click once per die pin -- pin 1 "
-                 "places a 'chip_pin1' instance, the rest place 'chip_pin' (from "
-                 f"your parts library). The finished cell is saved into "
-                 f"{libs[0]['name']!r} ({libs[0]['path']}).",
+                 "layer, pin count, and the die-pad cells to use; then click "
+                 "once per die pin to place an instance. The finished cell is "
+                 f"saved into {libs[0]['name']!r} ({libs[0]['path']}).",
             wraplength=400, justify="left",
         ).pack(anchor="w", padx=12, pady=(12, 8))
 
@@ -3310,6 +3318,18 @@ class App(tk.Tk):
                      values=choices).grid(row=row, column=1, sticky="w", padx=4, pady=4)
         row += 1
 
+        ttk.Label(form, text="Pin 1 cell:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        pin1_cell_var = tk.StringVar(value=_default("chip_pin1", "chip_pin_1"))
+        ttk.Combobox(form, textvariable=pin1_cell_var, width=20, state="readonly",
+                     values=pin_cells).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+
+        ttk.Label(form, text="Pins 2..N cell:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        pin_cell_var = tk.StringVar(value=_default("chip_pin"))
+        ttk.Combobox(form, textvariable=pin_cell_var, width=20, state="readonly",
+                     values=pin_cells).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+
         ttk.Label(form, text="Number of pins:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
         pins_var = tk.IntVar(value=4)
         ttk.Spinbox(form, from_=1, to=1000, width=10,
@@ -3336,6 +3356,14 @@ class App(tk.Tk):
                 error_var.set("Number of pins must be at least 1.")
                 return
             g_layer = int(gfx_layer_var.get().split(" ", 1)[0])
+            pin1_cell = pin1_cell_var.get()
+            pin_cell = pin_cell_var.get()
+            if self._chip_pin_cell_source(pin1_cell) is None:
+                error_var.set(f"Pin 1 cell {pin1_cell!r} isn't available.")
+                return
+            if self._chip_pin_cell_source(pin_cell) is None:
+                error_var.set(f"Pins 2..N cell {pin_cell!r} isn't available.")
+                return
 
             def do_create(overwrite):
                 return self.session.create_chip_cell(
@@ -3364,6 +3392,7 @@ class App(tk.Tk):
             self._chip_wizard = {
                 "name": name, "total": n_pins, "placed": 0,
                 "prev_grid": int(self.canvas.grid_dbu),
+                "pin1_cell": pin1_cell, "pin_cell": pin_cell,
             }
             self.session.use_cell(name)
             self.canvas.set_cell(name)
@@ -3386,16 +3415,15 @@ class App(tk.Tk):
 
     def _on_chip_pin(self, point, pin_no):
         """canvas.on_chip_pin: place a die-pin instance for the chip
-        being built, centred on the clicked point -- pin 1 places an
-        instance of the `chip_pin1` cell (from the design or the
-        attached parts library), every other pin an instance of
-        `chip_pin`. The instance's Label carries the pin number, and its
-        layers are switched on so it's visible."""
+        being built, centred on the clicked point -- pin 1 places the
+        wizard's chosen pin-1 cell, every other pin its chosen pin
+        cell (from the design or an attached library). The instance's
+        Label carries the pin number, and its layers are switched on so
+        it's visible."""
         w = self._chip_wizard
         if w is None:
             return
-        cell_name = (self.session.CHIP_PIN1_CELL if pin_no == 1
-                     else self.session.CHIP_PIN_CELL)
+        cell_name = w["pin1_cell"] if pin_no == 1 else w["pin_cell"]
         try:
             self.session.use_cell(w["name"])
             self.session.place_cell(cell_name, point, label=str(pin_no))
