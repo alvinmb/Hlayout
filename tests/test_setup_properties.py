@@ -36,14 +36,15 @@ def _walk(w):
         yield from _walk(c)
 
 
-def test_technology_properties_has_the_five_rule_tabs_and_a_more_tab():
+def test_technology_properties_has_the_rule_tabs_and_a_more_tab():
     app = _make_app()
     try:
         win = app.show_technology_properties_dialog()
         nb = next(w for w in _walk(win) if isinstance(w, ttk.Notebook))
         tabs = [nb.tab(t, "text") for t in nb.tabs()]
-        assert tabs[:5] == ["Route", "Resistors", "Ref-Des", "Wire Bonds", "Dielectric"]
-        assert len(tabs) == 6  # + "More..."
+        assert tabs[:6] == ["Route", "Resistors", "Ref-Des", "Wire Bonds",
+                            "Dielectric", "Thicknesses"]
+        assert len(tabs) == 7  # + "More..."
         win.destroy()
     finally:
         app.destroy()
