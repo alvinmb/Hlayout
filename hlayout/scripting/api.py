@@ -600,16 +600,17 @@ class Session:
     CHIP_OUTLINE_COLOR = "#ffffff"
 
     def create_chip_cell(self, name: str, length: float, width: float,
-                         graphics_layer, epoxy_size: float, epoxy_layer, *,
-                         outline_width: Optional[float] = None,
+                         graphics_layer, epoxy_length: float, epoxy_width: float,
+                         epoxy_layer, *, outline_width: Optional[float] = None,
                          overwrite: bool = False):
         """Start a bare-die / chip footprint cell in the CURRENT design:
 
           * a body outline -- a closed rectangular Path of ``length`` x
             ``width`` DBU, centred on the origin, on ``graphics_layer``,
             which is forced white and visible;
-          * a square epoxy die-attach pad of side ``epoxy_size`` DBU,
-            centred on the origin, on ``epoxy_layer`` (forced visible).
+          * an ``epoxy_length`` x ``epoxy_width`` DBU epoxy die-attach
+            pad, centred on the origin, on ``epoxy_layer`` (forced
+            visible) -- rectangular, since chips are.
 
         The die *pins* are added afterwards as instances of the
         ``chip_pin`` / ``chip_pin1`` cells you provide (e.g. in the
@@ -627,8 +628,8 @@ class Session:
             raise LayoutError("a cell name is required")
         if length <= 0 or width <= 0:
             raise LayoutError("chip length and width must be positive")
-        if epoxy_size <= 0:
-            raise LayoutError("epoxy pad size must be positive")
+        if epoxy_length <= 0 or epoxy_width <= 0:
+            raise LayoutError("epoxy pad length and width must be positive")
         g_layer = self.library.layers.resolve(graphics_layer)
         e_layer = self.library.layers.resolve(epoxy_layer)
         if name in self.library.cells:
@@ -640,12 +641,12 @@ class Session:
 
         hl, hw = length / 2.0, width / 2.0
         ow = int(outline_width) if outline_width else max(1, int(round(min(length, width) * 0.02)))
-        eh = epoxy_size / 2.0
+        el, ew = epoxy_length / 2.0, epoxy_width / 2.0
 
         with self._batch():
             cell = self.library.new_cell(name)
             self.current_cell_name = name
-            cell.add_rectangle(e_layer, -eh, -eh, eh, eh)   # epoxy die-attach pad
+            cell.add_rectangle(e_layer, -el, -ew, el, ew)   # epoxy die-attach pad
             cell.add_path(
                 g_layer,
                 [(-hl, -hw), (hl, -hw), (hl, hw), (-hl, hw), (-hl, -hw)],

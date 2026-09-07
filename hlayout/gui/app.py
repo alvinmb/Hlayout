@@ -3320,10 +3320,16 @@ class App(tk.Tk):
                      values=choices).grid(row=row, column=1, sticky="w", padx=4, pady=4)
         row += 1
 
-        ttk.Label(form, text="Epoxy pad size (mm, square):").grid(row=row, column=0, sticky="e", padx=4, pady=4)
-        epoxy_var = tk.DoubleVar(value=dbu_to_mm(mm_to_dbu(1.5)))
+        ttk.Label(form, text="Epoxy pad length (mm, X):").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        epoxy_l_var = tk.DoubleVar(value=dbu_to_mm(mm_to_dbu(1.8)))
         ttk.Spinbox(form, from_=0.001, to=100.0, increment=0.001, width=10,
-                    textvariable=epoxy_var).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+                    textvariable=epoxy_l_var).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+
+        ttk.Label(form, text="Epoxy pad width (mm, Y):").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        epoxy_w_var = tk.DoubleVar(value=dbu_to_mm(mm_to_dbu(1.8)))
+        ttk.Spinbox(form, from_=0.001, to=100.0, increment=0.001, width=10,
+                    textvariable=epoxy_w_var).grid(row=row, column=1, sticky="w", padx=4, pady=4)
         row += 1
 
         ttk.Label(form, text="Epoxy pad layer:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
@@ -3362,9 +3368,10 @@ class App(tk.Tk):
             try:
                 length = mm_to_dbu(float(length_var.get()))
                 width = mm_to_dbu(float(width_var.get()))
-                epoxy = mm_to_dbu(float(epoxy_var.get()))
+                epoxy_l = mm_to_dbu(float(epoxy_l_var.get()))
+                epoxy_w = mm_to_dbu(float(epoxy_w_var.get()))
             except (tk.TclError, ValueError):
-                error_var.set("Chip length, width and epoxy pad size must be numbers.")
+                error_var.set("Chip and epoxy-pad length/width must be numbers.")
                 return
             n_pins = int(pins_var.get())
             if n_pins < 1:
@@ -3383,7 +3390,8 @@ class App(tk.Tk):
 
             def do_create(overwrite):
                 return self.session.create_chip_cell(
-                    name, length, width, g_layer, epoxy, e_layer, overwrite=overwrite)
+                    name, length, width, g_layer, epoxy_l, epoxy_w, e_layer,
+                    overwrite=overwrite)
 
             try:
                 do_create(overwrite=False)

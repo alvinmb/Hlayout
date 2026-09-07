@@ -45,7 +45,7 @@ def test_create_chip_cell_lays_a_white_outline_and_an_epoxy_pad():
     s = Session.new("D")
     s.new_cell("TOP")
     name = s.create_chip_cell("CHIP", 2000, 1000, graphics_layer=60,
-                              epoxy_size=1500, epoxy_layer=58)
+                              epoxy_length=1800, epoxy_width=1200, epoxy_layer=58)
     assert name == "CHIP"
     assert s.current_cell_name == "CHIP"
 
@@ -60,7 +60,7 @@ def test_create_chip_cell_lays_a_white_outline_and_an_epoxy_pad():
 
     epoxy = next(sh for sh in body if isinstance(sh, Rectangle))
     assert epoxy.layer == 58
-    assert epoxy.bbox() == (-750, -750, 750, 750)
+    assert epoxy.bbox() == (-900, -600, 900, 600)     # rectangular, 1800 x 1200
 
     # outline layer is white and visible; epoxy layer visible
     assert s.library.layers[60].color.lower() == "#ffffff"
@@ -74,13 +74,13 @@ def test_create_chip_cell_rejects_bad_size_and_name_clash():
     s = Session.new("D")
     s.new_cell("TOP")
     with pytest.raises(LayoutError, match="positive"):
-        s.create_chip_cell("X", 0, 100, 1, 10, 2)
+        s.create_chip_cell("X", 0, 100, 1, 10, 10, 2)
     with pytest.raises(LayoutError, match="epoxy"):
-        s.create_chip_cell("X", 100, 100, 1, 0, 2)
-    s.create_chip_cell("CHIP", 100, 100, 1, 10, 2)
+        s.create_chip_cell("X", 100, 100, 1, 0, 10, 2)
+    s.create_chip_cell("CHIP", 100, 100, 1, 10, 10, 2)
     with pytest.raises(LayoutError, match="already exists"):
-        s.create_chip_cell("CHIP", 200, 200, 1, 10, 2)
-    s.create_chip_cell("CHIP", 200, 200, 1, 10, 2, overwrite=True)
+        s.create_chip_cell("CHIP", 200, 200, 1, 10, 10, 2)
+    s.create_chip_cell("CHIP", 200, 200, 1, 10, 10, 2, overwrite=True)
     outline = next(sh for sh in s.library.cells["CHIP"].shapes if isinstance(sh, Path))
     assert max(p[0] for p in outline.points) == 100
 
@@ -89,7 +89,7 @@ def test_create_chip_cell_is_one_undo_step():
     s = Session.new("D")
     s.new_cell("TOP")
     s.clear_undo_history()
-    s.create_chip_cell("CHIP", 100, 100, 1, 10, 2)
+    s.create_chip_cell("CHIP", 100, 100, 1, 10, 10, 2)
     assert "CHIP" in s.library.cells
     assert s.undo() is True
     assert "CHIP" not in s.library.cells
@@ -110,7 +110,7 @@ def test_show_layers_of_cell_unhides_every_layer_it_draws_on():
 
 def test_export_carries_the_placed_pin_cells_and_keeps_their_labels(tmp_path):
     s, apath = _session_with_parts(tmp_path)
-    s.create_chip_cell("CHIP", 1000, 1000, 60, 500, 58)
+    s.create_chip_cell("CHIP", 1000, 1000, 60, 500, 500, 58)
     s.use_cell("CHIP")
     s.place_cell(PIN1, (-300, -300), label="1")
     s.place_cell(PIN, (300, -300), label="2")
@@ -149,7 +149,7 @@ def _app(tmp_path):
 
 
 def _start(app, name, pins, pin1_cell=PIN1, pin_cell=PIN):
-    app.session.create_chip_cell(name, 3000, 2000, 62, 1500, 58)
+    app.session.create_chip_cell(name, 3000, 2000, 62, 1800, 1200, 58)
     app._chip_wizard = {"name": name, "total": pins, "placed": 0,
                         "prev_grid": int(app.canvas.grid_dbu),
                         "pin1_cell": pin1_cell, "pin_cell": pin_cell}
