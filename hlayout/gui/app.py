@@ -1,4 +1,4 @@
-"""Main application window for the Thick & Thin Film Hybrid Layout CAD tool."""
+"""Main application window for the Thick-Film Hybrid Layout CAD tool."""
 
 import os
 import webbrowser
@@ -106,7 +106,7 @@ class App(tk.Tk):
         # nothing" reports. Route it through a dialog instead.
         self.report_callback_exception = self._report_callback_exception
         self._apply_global_font_size()
-        self.title("HLayout — Thick & Thin Film Hybrid Layout CAD")
+        self.title("HLayout — Thick-Film Hybrid Layout CAD")
 
         # Clamp the requested window size to the actual screen, so on a
         # display smaller than the "ideal" 2050x820 the window (and the
@@ -679,8 +679,8 @@ class App(tk.Tk):
         dialogs.show_info(
             "About HLayout",
             "HLayout\n"
-            "Thick & Thin Film Hybrid Layout CAD Tool\n\n"
-            "A layout editor for thick-and-thin-film hybrid microelectronics: "
+            "Thick-Film Hybrid Layout CAD Tool\n\n"
+            "A layout editor for thick-film hybrid microelectronics: "
             "64 layers, GDSII I/O, mouse and command-bar driven drawing/editing, "
             "attached reference libraries, and a full Python scripting API.\n\n"
             f"Version {__version__}",
