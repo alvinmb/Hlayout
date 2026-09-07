@@ -329,12 +329,30 @@ class Resistor:
             self.selected_idx = None
 
 
-def _ar_color(ar: float) -> str:
-    if 0.9 <= ar <= 1.1:
-        return ACCENT2
-    if ar < 0.5 or ar > 2.0:
-        return WARN
-    return GOLD
+def _ar_quality(ar: float, ar_min: float, ar_max: float) -> str:
+    """Rate an aspect ratio against the *process* AR window (the Min/Max
+    AR set in the Design Rules form -- a process limit, not a per-resistor
+    one): 'bad' outside [ar_min, ar_max], 'good' in the central third of
+    the window (log scale -- near its geometric mean, ~square for a
+    symmetric window), 'edge' for the valid-but-near-a-limit rest.
+    Nothing here is a hard-coded AR number."""
+    if ar <= 0 or ar_min <= 0 or ar_max <= ar_min:
+        return "edge"
+    if ar < ar_min or ar > ar_max:
+        return "bad"
+    frac = ((math.log(ar) - math.log(ar_min))
+            / (math.log(ar_max) - math.log(ar_min)))
+    return "good" if 1 / 3 <= frac <= 2 / 3 else "edge"
+
+
+_AR_TK_COLOR = {"good": ACCENT2, "edge": GOLD, "bad": WARN}
+_AR_HTML_COLOR = {"good": "color:#2da44e;", "edge": "color:#b08800;",
+                  "bad": "color:#cf222e;"}
+
+
+def _ar_color(ar: float, ar_min: float = AR_MIN_DEFAULT,
+              ar_max: float = AR_MAX_DEFAULT) -> str:
+    return _AR_TK_COLOR[_ar_quality(ar, ar_min, ar_max)]
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -746,10 +764,14 @@ class ARDiagram(tk.Canvas):
         kwargs.setdefault("highlightthickness", 0)
         super().__init__(master, **kwargs)
         self._sol = None
+        self._ar_min = AR_MIN_DEFAULT
+        self._ar_max = AR_MAX_DEFAULT
         self.bind("<Configure>", lambda e: self._redraw())
 
-    def set_solution(self, sol: Optional[Solution]):
+    def set_solution(self, sol: Optional[Solution], rules: "Optional[DesignRules]" = None):
         self._sol = sol
+        if rules is not None:
+            self._ar_min, self._ar_max = rules.ar_min, rules.ar_max
         self._redraw()
 
     def _redraw(self):
@@ -771,7 +793,7 @@ class ARDiagram(tk.Canvas):
             rw = min(aw, max(4, ah * ar))
         rx = mg + (aw - rw) / 2
         ry = mg + (ah - rh) / 2
-        color = _ar_color(ar)
+        color = _ar_color(ar, self._ar_min, self._ar_max)
         self.create_rectangle(rx, ry, rx + rw, ry + rh, fill=color, outline=color,
                                stipple="gray50")
         self.create_text(
@@ -853,7 +875,7 @@ class SolutionPanel(ttk.Frame):
         if sel:
             idx = int(sel[0])
             if 0 <= idx < len(self._solutions):
-                self.diagram.set_solution(self._solutions[idx])
+                self.diagram.set_solution(self._solutions[idx], self._rules)
 
     def _use(self):
         sel = self.table.selection()
@@ -866,7 +888,7 @@ class SolutionPanel(ttk.Frame):
     def _update_diagram(self):
         idx = self._current_idx
         sol = self._solutions[idx] if idx is not None and idx < len(self._solutions) else None
-        self.diagram.set_solution(sol)
+        self.diagram.set_solution(sol, self._rules)
 
     def clear(self):
         self._solutions = []
@@ -1614,12 +1636,8 @@ class ResistorDesignerWindow(tk.Toplevel):
                     is_sel = (i == res.selected_idx)
                     is_rec = sol.recommended
                     trim_p = effective_power_for_width(int(sol.body_width))
-                    if 0.9 <= sol.aspect_ratio <= 1.1:
-                        ar_style = "color:#2da44e;"
-                    elif sol.aspect_ratio < 0.5 or sol.aspect_ratio > 2.0:
-                        ar_style = "color:#cf222e;"
-                    else:
-                        ar_style = "color:#b08800;"
+                    ar_style = _AR_HTML_COLOR[_ar_quality(
+                        sol.aspect_ratio, self.rules.ar_min, self.rules.ar_max)]
                     row_class = "sol-selected" if is_sel else ("sol-rec" if is_rec else "sol-row")
                     rows_html.append(
                         f'<tr class="{row_class}">'
