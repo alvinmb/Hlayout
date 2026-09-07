@@ -259,6 +259,8 @@ class App(tk.Tk):
             f.configure(size=self.UI_FONT_SIZE)
         default_family = tkfont.nametofont("TkDefaultFont", self).cget("family")
         self._menu_font = (default_family, self.UI_FONT_SIZE)
+        #: bold, UI_FONT_SIZE -- the bottom message/status line uses this
+        self._status_font = (default_family, self.UI_FONT_SIZE, "bold")
 
     def _default_library(self) -> Library:
         lib = Library("UNTITLED")
@@ -2123,7 +2125,8 @@ class App(tk.Tk):
     def _build_statusbar(self):
         bar = ttk.Frame(self)
         bar.pack(side="bottom", fill="x")
-        ttk.Label(bar, textvariable=self.status, anchor="w").pack(fill="x", padx=4)
+        ttk.Label(bar, textvariable=self.status, anchor="w",
+                  font=self._status_font).pack(fill="x", padx=4)
 
     # --- command bar / console handlers ---------------------------------
     def _on_command_enter(self, event=None):
