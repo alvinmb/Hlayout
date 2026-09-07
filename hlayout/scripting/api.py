@@ -594,33 +594,43 @@ class Session:
     CHIP_PIN_CELL = "chip_pin"
     CHIP_PIN1_CELL = "chip_pin1"
 
+    #: The chip-graphics (body-outline) layer is forced to this colour
+    #: by create_chip_cell() so the outline reads clearly over the
+    #: copper underneath it.
+    CHIP_OUTLINE_COLOR = "#ffffff"
+
     def create_chip_cell(self, name: str, length: float, width: float,
-                         graphics_layer, *, outline_width: Optional[float] = None,
+                         graphics_layer, epoxy_size: float, epoxy_layer, *,
+                         outline_width: Optional[float] = None,
                          overwrite: bool = False):
         """Start a bare-die / chip footprint cell in the CURRENT design:
-        a body outline only -- a closed rectangular Path of ``length`` x
-        ``width`` DBU, centred on the origin, on ``graphics_layer`` --
-        which is forced visible.
 
-        The die pins themselves are instances of the ``chip_pin`` /
-        ``chip_pin1`` cells (which you provide, e.g. in the attached
-        parts library): the Chip Wizard places one ``chip_pin1`` for
-        pin 1 and one ``chip_pin`` per remaining pin, then
-        export_cell_to_library() carries the chip and those two pin
-        cells into the library together (reusing the copies already
-        there).
+          * a body outline -- a closed rectangular Path of ``length`` x
+            ``width`` DBU, centred on the origin, on ``graphics_layer``,
+            which is forced white and visible;
+          * a square epoxy die-attach pad of side ``epoxy_size`` DBU,
+            centred on the origin, on ``epoxy_layer`` (forced visible).
 
-        ``graphics_layer`` accepts a number or an existing layer name.
-        ``outline_width`` (DBU) defaults to 2% of the shorter body edge,
-        min 1. Raises LayoutError on a non-positive size, or if ``name``
-        is already a cell here and ``overwrite`` is false. One undo
-        step; the new cell becomes the current cell."""
+        The die *pins* are added afterwards as instances of the
+        ``chip_pin`` / ``chip_pin1`` cells you provide (e.g. in the
+        attached parts library); export_cell_to_library() then carries
+        the chip and those pin cells into the library together.
+
+        ``graphics_layer`` / ``epoxy_layer`` accept a number or an
+        existing layer name. ``outline_width`` (DBU) defaults to 2% of
+        the shorter body edge, min 1. Raises LayoutError on a
+        non-positive size, or if ``name`` is already a cell here and
+        ``overwrite`` is false. One undo step; the new cell becomes the
+        current cell."""
         name = (name or "").strip()
         if not name:
             raise LayoutError("a cell name is required")
         if length <= 0 or width <= 0:
             raise LayoutError("chip length and width must be positive")
+        if epoxy_size <= 0:
+            raise LayoutError("epoxy pad size must be positive")
         g_layer = self.library.layers.resolve(graphics_layer)
+        e_layer = self.library.layers.resolve(epoxy_layer)
         if name in self.library.cells:
             if not overwrite:
                 raise LayoutError(
@@ -630,17 +640,24 @@ class Session:
 
         hl, hw = length / 2.0, width / 2.0
         ow = int(outline_width) if outline_width else max(1, int(round(min(length, width) * 0.02)))
+        eh = epoxy_size / 2.0
 
         with self._batch():
             cell = self.library.new_cell(name)
             self.current_cell_name = name
+            cell.add_rectangle(e_layer, -eh, -eh, eh, eh)   # epoxy die-attach pad
             cell.add_path(
                 g_layer,
                 [(-hl, -hw), (hl, -hw), (hl, hw), (-hl, hw), (-hl, -hw)],
                 max(1, ow), cap="flush",
             )
             try:
-                self.library.layers.set_style(g_layer, visible=True)
+                self.library.layers.set_style(
+                    g_layer, color=self.CHIP_OUTLINE_COLOR, visible=True)
+            except (KeyError, IndexError):
+                pass
+            try:
+                self.library.layers.set_style(e_layer, visible=True)
             except (KeyError, IndexError):
                 pass
         self._notify()

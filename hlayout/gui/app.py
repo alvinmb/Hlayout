@@ -3235,11 +3235,12 @@ class App(tk.Tk):
 
     def show_chip_wizard(self):
         """Tools > Chip Wizard...: build a bare-die / chip footprint
-        interactively. Enter the body size, the chip-graphics (outline)
-        layer, the pin count, and which cells to use for pin 1 and for
-        the rest (picked from the design / attached libraries); the
-        wizard drops the body outline, then you click once per die pin
-        to place an instance of the chosen cell. When the last pin is
+        interactively. Enter the body size, the outline (chip-graphics)
+        layer, the epoxy die-attach pad size + layer, the pin count, and
+        which cells to use for pin 1 and for the rest (picked from the
+        design / attached libraries). The wizard drops a white body
+        outline and the epoxy pad, then you click once per die pin to
+        place an instance of the chosen cell. When the last pin is
         placed the finished cell is copied into the first attached
         library and its .gds saved. Backed by Session.create_chip_cell()
         + Session.export_cell_to_library()."""
@@ -3280,9 +3281,10 @@ class App(tk.Tk):
         ttk.Label(
             win,
             text="Build a bare-die chip footprint. Enter the body size, outline "
-                 "layer, pin count, and the die-pad cells to use; then click "
-                 "once per die pin to place an instance. The finished cell is "
-                 f"saved into {libs[0]['name']!r} ({libs[0]['path']}).",
+                 "layer, epoxy die-attach pad size + layer, pin count and the "
+                 "die-pad cells to use; then click once per die pin to place an "
+                 f"instance. The finished cell is saved into {libs[0]['name']!r} "
+                 f"({libs[0]['path']}).",
             wraplength=400, justify="left",
         ).pack(anchor="w", padx=12, pady=(12, 8))
 
@@ -3312,9 +3314,21 @@ class App(tk.Tk):
                     textvariable=width_var).grid(row=row, column=1, sticky="w", padx=4, pady=4)
         row += 1
 
-        ttk.Label(form, text="Chip graphics layer:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        ttk.Label(form, text="Chip graphics layer (outline):").grid(row=row, column=0, sticky="e", padx=4, pady=4)
         gfx_layer_var = tk.StringVar(value=choices[1] if len(choices) > 1 else choices[0])
         ttk.Combobox(form, textvariable=gfx_layer_var, width=20, state="readonly",
+                     values=choices).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+
+        ttk.Label(form, text="Epoxy pad size (mm, square):").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        epoxy_var = tk.DoubleVar(value=dbu_to_mm(mm_to_dbu(1.5)))
+        ttk.Spinbox(form, from_=0.001, to=100.0, increment=0.001, width=10,
+                    textvariable=epoxy_var).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+
+        ttk.Label(form, text="Epoxy pad layer:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        epoxy_layer_var = tk.StringVar(value=choices[0])
+        ttk.Combobox(form, textvariable=epoxy_layer_var, width=20, state="readonly",
                      values=choices).grid(row=row, column=1, sticky="w", padx=4, pady=4)
         row += 1
 
@@ -3348,14 +3362,16 @@ class App(tk.Tk):
             try:
                 length = mm_to_dbu(float(length_var.get()))
                 width = mm_to_dbu(float(width_var.get()))
+                epoxy = mm_to_dbu(float(epoxy_var.get()))
             except (tk.TclError, ValueError):
-                error_var.set("Chip length and width must be numbers.")
+                error_var.set("Chip length, width and epoxy pad size must be numbers.")
                 return
             n_pins = int(pins_var.get())
             if n_pins < 1:
                 error_var.set("Number of pins must be at least 1.")
                 return
             g_layer = int(gfx_layer_var.get().split(" ", 1)[0])
+            e_layer = int(epoxy_layer_var.get().split(" ", 1)[0])
             pin1_cell = pin1_cell_var.get()
             pin_cell = pin_cell_var.get()
             if self._chip_pin_cell_source(pin1_cell) is None:
@@ -3367,7 +3383,7 @@ class App(tk.Tk):
 
             def do_create(overwrite):
                 return self.session.create_chip_cell(
-                    name, length, width, g_layer, overwrite=overwrite)
+                    name, length, width, g_layer, epoxy, e_layer, overwrite=overwrite)
 
             try:
                 do_create(overwrite=False)
