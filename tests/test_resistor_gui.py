@@ -481,22 +481,29 @@ def test_advance_place_cursor_moves_past_the_footprint_plus_margin():
         app.destroy()
 
 
-# --- top-hat geometry + whole-design selection criteria --------------------
+# --- rectangle-only sizing + whole-design selection criteria --------------
 
-def test_high_value_resistor_gets_an_auto_top_hat_solution():
+def test_resistor_too_long_for_any_ink_gets_no_solution():
+    # compute_solutions is rectangle-only: an ink is a solution only when
+    # ar_min <= squares <= ar_max. aim ~ 300k * 0.8 = 240k; on the only
+    # ink (10k/sq) that's 24 squares -- way past 4:1 -- so there is NO
+    # solution (a top-hat would be needed, which isn't implemented yet).
     from hlayout.gui.resistor_designer import Resistor, DesignRules
     rules = DesignRules(aim_pct=75, ar_min=0.25, ar_max=4.0,
                         available_inks=[10000])
-    # aim ~ 300k * 0.8 = 240k; on the only ink (10k/sq) that's 24
-    # squares -- can't be a rectangle within 4:1, so it auto-folds.
     r = Resistor(ref_des="RH", value=300_000, tolerance="5%",
                  power_mw=25.0, body_width=500.0)
     r.compute_solutions(rules)
-    assert len(r.solutions) == 1
-    top = r.solutions[0]
-    assert top.is_top_hat and top.n_folds >= 2
-    assert top.footprint_length < top.body_length     # folded is more compact
-    assert top.aspect_ratio <= rules.ar_max + 1e-9
+    assert r.solutions == [] and r.selected is None
+
+    # a high-rsh ink that brings it within 4:1 gives a plain rectangle
+    rules.available_inks = [10000, 100_000]
+    r.compute_solutions(rules)
+    assert [s.n_folds for s in r.solutions] == [1]
+    sol = r.solutions[0]
+    assert sol.ink_rsh == 100_000
+    assert rules.ar_min <= sol.aspect_ratio <= rules.ar_max
+    assert sol.aspect_ratio == sol.body_length / sol.body_width
 
 
 def test_generate_resistor_n_folds_draws_a_meander_path():
@@ -518,9 +525,11 @@ def test_optimise_radio_repicks_the_whole_design(monkeypatch):
     try:
         from hlayout.gui.resistor_designer import open_resistor_designer
         win = open_resistor_designer(app)
-        win.rules.available_inks = [100, 1000, 10000]
-        _seed(win, specs=(("R1", 1000, "5%", 50.0), ("R2", 10000, "5%", 50.0),
-                          ("R3", 3000, "5%", 50.0)))
+        win.rules.available_inks = [1000, 3000]
+        # R1/R2 each fit as a rectangle on either ink; R3 (6k) only fits
+        # on 3k/sq -- so "fewest inks" must put all three on 3k/sq.
+        _seed(win, specs=(("R1", 1000, "5%", 50.0), ("R2", 3000, "5%", 50.0),
+                          ("R3", 6000, "5%", 50.0)))
         app.update()
 
         win.select_mode_var.set("inks")
@@ -541,7 +550,7 @@ def test_optimise_radio_repicks_the_whole_design(monkeypatch):
         app.destroy()
 
 
-def test_resistor_table_shows_R_or_T_geometry_code():
+def test_resistor_table_shows_R_geometry_code_or_no_sol():
     app = _make_app()
     try:
         from hlayout.gui.resistor_designer import open_resistor_designer, Resistor
@@ -560,6 +569,6 @@ def test_resistor_table_shows_R_or_T_geometry_code():
                  win.res_table.table.item(iid, "values")[geom_col]
                  for iid in win.res_table.table.get_children()}
         assert codes["RR"] == "R"                 # fits as a rectangle
-        assert codes["RT"].startswith("T")        # folded top-hat, e.g. "T6"
+        assert codes["RT"] == "—"                 # 24 squares on 10k ink: NO SOL
     finally:
         app.destroy()

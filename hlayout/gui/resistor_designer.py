@@ -67,8 +67,10 @@ AR_MIN_DEFAULT = 0.25
 AR_MAX_DEFAULT = 4.00
 AIM_PCT_DEFAULT = 75.0
 
-#: Most legs an auto top-hat / meander solution will use before the
-#: designer gives up on that ink (a higher-rsh ink will need fewer).
+#: Most legs a top-hat / meander solution may use before the designer
+#: gives up on that ink (a higher-rsh ink needs fewer). Reserved for the
+#: native top-hat design pass -- compute_solutions() is rectangle-only
+#: for now (see its comment).
 MAX_TOP_HAT_FOLDS = 8
 
 TOLERANCES = ["0.1%", "0.5%", "1%", "2%", "5%", "10%", "20%"]
@@ -297,36 +299,28 @@ class Resistor:
         return None
 
     def compute_solutions(self, rules: DesignRules):
+        # Rectangle only. An ink is a solution when the resistor fits as a
+        # single rectangle inside the aspect-ratio window -- for a
+        # rectangle, squares == footprint length / width, so ar_min <= sq
+        # <= ar_max IS the min/max length rule. An ink that would need
+        # more than ar_max squares (a top-hat / meander) is skipped: a
+        # higher-rsh ink needs fewer squares, and if none fits the
+        # resistor is reported NO SOL (widen the body or add a higher-rsh
+        # ink). Native top-hat design is deferred -- the previous
+        # "fold an over-long rectangle into N legs" code produced a
+        # footprint whose real aspect blew past ar_max and a preview that
+        # didn't match, so it was removed rather than shipped half-done.
         self.solutions.clear()
         aim = self.aim_value(rules)
         for rsh in rules.available_inks:
             sq = aim / rsh
-            if sq < rules.ar_min:
-                # too few squares even for a rectangle -- a wider body or
-                # a lower-rsh ink is needed, folding doesn't help.
+            if sq < rules.ar_min or sq > rules.ar_max:
                 continue
-            if sq <= rules.ar_max:
-                self.solutions.append(Solution(
-                    ink_rsh=rsh, squares=sq,
-                    body_width=self.body_width, body_length=sq * self.body_width,
-                    aspect_ratio=sq, score=abs(math.log(sq)),
-                ))
-            else:
-                # doesn't fit as a rectangle within ar_max -> auto top-hat:
-                # fold into the fewest legs whose per-leg aspect is <= ar_max.
-                n = max(2, math.ceil(sq / rules.ar_max))
-                if n > MAX_TOP_HAT_FOLDS:
-                    # needs an impractical fold count on this ink -- skip
-                    # it; a higher-rsh ink will need fewer folds.
-                    continue
-                per_leg = sq / n
-                self.solutions.append(Solution(
-                    ink_rsh=rsh, squares=sq,
-                    body_width=self.body_width, body_length=sq * self.body_width,
-                    aspect_ratio=per_leg, n_folds=n,
-                    # rank after any real rectangle, and prefer fewer folds
-                    score=abs(math.log(per_leg)) + 0.5 + 0.2 * (n - 1),
-                ))
+            self.solutions.append(Solution(
+                ink_rsh=rsh, squares=sq,
+                body_width=self.body_width, body_length=sq * self.body_width,
+                aspect_ratio=sq, score=abs(math.log(sq)),
+            ))
         self.solutions.sort(key=lambda s: s.score)
         if self.solutions:
             self.solutions[0].recommended = True

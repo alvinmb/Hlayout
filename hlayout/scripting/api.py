@@ -964,12 +964,12 @@ class Session:
         hlayout.io.techfile.load_resistor_geometry_rules()).
 
         ``n_folds`` > 1 draws the ink body as a top-hat / meander of that
-        many legs instead of a single rectangle -- for a resistor with
-        more squares than fit as a rectangle within the aspect-ratio
-        limit. ``body_length`` stays the total (electrical) ink run; the
-        drawn footprint is ``body_length / n_folds`` long. The Thick-Film
-        Resistor Designer passes this automatically for a top-hat
-        solution.
+        many legs instead of a single rectangle. ``body_length`` stays
+        the total (electrical) ink run; the drawn footprint is
+        ``body_length / n_folds`` long. This is a low-level option for
+        scripted/manual use -- the Thick-Film Resistor Designer is
+        rectangle-only for now and always passes ``n_folds`` = 1 (native
+        top-hat sizing is not yet implemented).
 
         Building the device cell and placing its Sref are both part of
         a single undo step."""
