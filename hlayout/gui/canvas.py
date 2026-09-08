@@ -144,9 +144,9 @@ class LayoutCanvas(tk.Canvas):
         self._chip_pin_total = 0
         self.snap_enabled = True
         self.snap_dbu = self.grid_dbu  # snap to the current grid spacing by default
-        # Orthogonal/45-degree routing constraint -- Path and Route
-        # (2-Layer) drawing (Setup > Orthogonal/45 Routing / the "Ortho
-        # 45" toolbar checkbox). On by default: every new segment is
+        # Orthogonal/45-degree routing constraint -- Polygon, Path and
+        # Route (2-Layer) drawing (Setup > Orthogonal/45 Routing / the
+        # "Ortho 45" toolbar checkbox). On by default: every new segment is
         # forced to horizontal, vertical, or a clean 45-degree diagonal
         # from the last point already placed, the way real traces are
         # actually routed (arbitrary angles are unusual on any process,
@@ -778,15 +778,16 @@ class LayoutCanvas(tk.Canvas):
 
     def _next_draw_point(self, x, y):
         """Turn a raw DBU cursor position into the point a click would
-        actually place: grid-snapped via _snap(), and -- for Path/Route
-        drawing, once at least one point is already pending, with
-        self.ortho_enabled on -- further constrained to a clean
+        actually place: grid-snapped via _snap(), and -- for Polygon/
+        Path/Route drawing, once at least one point is already pending,
+        with self.ortho_enabled on -- further constrained to a clean
         horizontal/vertical/45-degree segment from the last point via
         _constrain_to_ortho(). Shared by _on_click() and _on_motion()
         so the rubber-band preview always shows exactly the point a
         click would commit, never a raw diagonal the click wouldn't
-        actually land on."""
-        if (self.ortho_enabled and self.draw_mode in ("path", "route")
+        actually land on. (A polygon's implicit closing edge back to the
+        first point is not constrained -- only the segments you draw.)"""
+        if (self.ortho_enabled and self.draw_mode in ("poly", "path", "route")
                 and self._pending_points):
             x0, y0 = self._pending_points[-1]
             return self._constrain_to_ortho(x0, y0, x, y)

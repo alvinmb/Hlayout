@@ -106,17 +106,51 @@ def test_path_drawing_free_angle_when_ortho_disabled():
         app.destroy()
 
 
-def test_ortho_does_not_constrain_poly_or_rect_drawing():
-    # Only Path/Route are constrained -- a freeform polygon should keep
-    # placing points exactly where clicked (modulo grid snap).
+def test_poly_drawing_constrains_each_segment_to_ortho():
+    # Polygon drawing honours the Ortho/45 constraint too -- each edge
+    # you draw is forced to 0/45/90 from the previous point.
     app, top = _make_app()
     try:
         app.mode_var.set("poly")
         app._on_mode_change()
         app.canvas.snap_enabled = False
         app.canvas._on_click(_ev(*app.canvas.to_px(0, 0)))
+        app.canvas._on_click(_ev(*app.canvas.to_px(1000, 130)))   # near-flat
+        px, py = app.canvas._pending_points[1]
+        assert py == 0 and (px, py) != (1000, 130)
+        app.canvas._on_click(_ev(*app.canvas.to_px(px + 1000, py + 940)))  # near-45
+        qx, qy = app.canvas._pending_points[2]
+        assert abs((qx - px) - (qy - py)) <= 1        # a clean 45 from point 1
+    finally:
+        app.destroy()
+
+
+def test_poly_drawing_free_angle_when_ortho_disabled():
+    app, top = _make_app()
+    try:
+        app.mode_var.set("poly")
+        app._on_mode_change()
+        app.canvas.snap_enabled = False
+        app.canvas.ortho_enabled = False
+        app.canvas._on_click(_ev(*app.canvas.to_px(0, 0)))
         app.canvas._on_click(_ev(*app.canvas.to_px(1000, 130)))
         assert app.canvas._pending_points[1] == (1000, 130)
+    finally:
+        app.destroy()
+
+
+def test_ortho_does_not_constrain_rect_drawing():
+    # A rectangle is a 2-click corner-to-corner drag -- ortho doesn't
+    # apply, the opposite corner lands exactly where clicked.
+    app, top = _make_app()
+    try:
+        app.mode_var.set("rect")
+        app._on_mode_change()
+        app.canvas.snap_enabled = False
+        app.canvas._on_click(_ev(*app.canvas.to_px(0, 0)))
+        app.canvas._on_click(_ev(*app.canvas.to_px(1000, 130)))
+        rect = top.shapes[-1]
+        assert rect.bbox() == (0, 0, 1000, 130)
     finally:
         app.destroy()
 
