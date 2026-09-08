@@ -2459,27 +2459,36 @@ class LayoutCanvas(tk.Canvas):
         # labels -- always drawn LAST so none of it is ever buried under
         # any real geometry, from any instance, however the cells were
         # ordered.
+
+        # 2a: an invisible hit-region covering each sref's WHOLE bounding
+        # box, so a part whose footprint is mostly unfilled outline with
+        # only small pads (an SMD cap: two pads + a hollow body) is still
+        # clickable in its empty middle. All created here, before the
+        # handles/labels, and each pushed under every real shape so a
+        # hit-region can never outrank actual geometry. Ordered SMALLEST
+        # bbox first: successive tag_lower() calls leave the smallest
+        # instance's hit-region highest among the hit-regions, so a click
+        # where a small part (a resistor) sits inside a big container or
+        # board instance's bounding box selects the small part, not the
+        # container.
+        from ..core.library import _transform_bbox
+        _hit_specs = []
+        for ref in cell.srefs:
+            box = self._cell_bbox_safe(ref.cell_name)
+            if box is None:
+                continue
+            x1, y1, x2, y2 = _transform_bbox(box, ref)
+            _hit_specs.append((abs((x2 - x1) * (y2 - y1)), ref, (x1, y1, x2, y2)))
+        _hit_specs.sort(key=lambda s: s[0])
+        for _area, ref, (x1, y1, x2, y2) in _hit_specs:
+            p0 = self.to_px(x1, y1)
+            p1 = self.to_px(x2, y2)
+            hit = self.create_rectangle(*p0, *p1, outline="", fill="")
+            self.tag_lower(hit)
+            self._item_to_shape[hit] = ("sref", ref)
+
         for ref in cell.srefs:
             highlight = (ref is selected_ref) or (id(ref) in multi_ref_ids)
-            # An invisible hit-region covering the instance's WHOLE
-            # bounding box (created after ALL real geometry, then pushed
-            # to the very bottom of the canvas stack) so it can never
-            # outrank a real shape -- from this instance or any other --
-            # that happens to overlap the same pixel. Without this, a
-            # part whose footprint is mostly unfilled outline/silkscreen
-            # with only small pads (e.g. an SMD capacitor -- two small
-            # pads and a hollow body outline, unlike a resistor's ink
-            # that fills the whole footprint) had no click target at all
-            # in the empty middle of its own outline.
-            box = self._cell_bbox_safe(ref.cell_name)
-            if box is not None:
-                from ..core.library import _transform_bbox
-                x1, y1, x2, y2 = _transform_bbox(box, ref)
-                p0 = self.to_px(x1, y1)
-                p1 = self.to_px(x2, y2)
-                hit = self.create_rectangle(*p0, *p1, outline="", fill="")
-                self.tag_lower(hit)
-                self._item_to_shape[hit] = ("sref", ref)
             # A small selectable handle at the instance origin, since the
             # instance itself has no single canvas item of its own.
             hx, hy = self.to_px(*ref.origin)

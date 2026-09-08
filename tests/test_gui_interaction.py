@@ -113,3 +113,45 @@ def test_select_drag_and_delete():
         assert rect_shape not in app.session.cell.shapes
     finally:
         app.destroy()
+
+
+def test_click_selects_a_small_part_inside_a_big_container_instance():
+    # A big board/package cell placed as an SRef used to blanket every
+    # small part inside its bounding box with an invisible full-bbox
+    # hit-region, so clicking a resistor selected the board. Hit-regions
+    # are now ordered smallest-bbox-first, so the small part wins where
+    # they overlap.
+    app = _make_app()
+    try:
+        s = app.session
+        lib = s.library
+        lib.layers.set_style(1, name="Outline", fill=False, visible=True)
+        lib.layers.set_style(2, name="Ink", fill=True, visible=True)
+
+        s.new_cell("BOARD")
+        s.path(1, [(-20000, -20000), (20000, -20000), (20000, 20000),
+                   (-20000, 20000), (-20000, -20000)], 50)
+
+        s.new_cell("R1")
+        s.rect(2, -800, -300, 800, 300)
+
+        s.use_cell("TOP")
+        s.sref("BOARD", (0, 0))            # big, placed FIRST
+        r1_ref = s.sref("R1", (5000, 0))   # small, sitting inside the board
+
+        app.canvas.set_cell("TOP")
+        app.canvas.fit_view()
+        app.update()
+
+        # click the centre of R1's body -> R1, not the board
+        app.canvas._select_click(_ev(*app.canvas.to_px(5000, 0)))
+        assert app.canvas.selected is not None
+        assert app.canvas.selected[0] == "sref"
+        assert app.canvas.selected[1] is r1_ref
+
+        # bare board area (no part there) still selects the board
+        app.canvas._select_click(_ev(*app.canvas.to_px(-12000, 12000)))
+        assert app.canvas.selected[0] == "sref"
+        assert app.canvas.selected[1].cell_name == "BOARD"
+    finally:
+        app.destroy()
