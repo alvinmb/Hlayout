@@ -6,7 +6,7 @@ import copy
 import math
 import tkinter as tk
 from tkinter import font as tkfont
-from tkinter import messagebox, simpledialog
+from tkinter import messagebox, simpledialog, ttk
 
 from ..core.errors import CellError, GeometryError
 from ..core.maskops import layer_to_shapely, shapely_to_polygons
@@ -3288,10 +3288,27 @@ def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
         entries[label] = var
         row += 1
 
+    def add_layer_field(current):
+        # A dropdown of the technology's actual layer stack ("N: name"),
+        # so a shape's layer is picked from the real layers rather than
+        # typed as a bare number. Still editable, so a raw number for a
+        # layer outside the listed range remains accepted; on_ok() parses
+        # the leading integer either way.
+        nonlocal row
+        tk.Label(win, text="Layer").grid(row=row, column=0, sticky="e", padx=6, pady=3)
+        layers = parent.library.layers
+        choices = [f"{n}: {layers[n].name}" for n in range(len(layers))]
+        var = tk.StringVar(value=(choices[current] if 0 <= current < len(choices)
+                                  else str(current)))
+        ttk.Combobox(win, textvariable=var, width=26, values=choices).grid(
+            row=row, column=1, padx=6, pady=3)
+        entries["Layer"] = var
+        row += 1
+
     error_var = tk.StringVar(value="")
 
     if kind == "shape":
-        add_field("Layer", shape.layer)
+        add_layer_field(shape.layer)
         if isinstance(shape, Rectangle):
             (x1, y1), _, (x2, y2), _ = shape.points
             add_field("X1", x1)
@@ -3349,7 +3366,7 @@ def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
             if checkpoint:
                 checkpoint()
             if kind == "shape":
-                shape.layer = int(entries["Layer"].get())
+                shape.layer = int(str(entries["Layer"].get()).split(":", 1)[0].strip())
                 if isinstance(shape, Rectangle):
                     x1 = float(entries["X1"].get())
                     y1 = float(entries["Y1"].get())

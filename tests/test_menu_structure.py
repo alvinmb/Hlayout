@@ -1535,24 +1535,20 @@ def test_edit_selected_dialog_apply_is_undoable():
                 app.after(20, fill_in_and_apply)
                 return
             win = tops[0]
-            labels = []
-            entry_widgets = []
             buttons = []
+            layer_combo = []
 
             def walk(w):
                 for c in w.winfo_children():
-                    if c.winfo_class() == "Label":
-                        labels.append(c.cget("text"))
-                    elif c.winfo_class() == "Entry":
-                        entry_widgets.append(c)
-                    elif c.winfo_class() == "Button":
+                    if c.winfo_class() == "Button":
                         buttons.append(c)
+                    elif c.winfo_class() == "TCombobox":
+                        layer_combo.append(c)
                     walk(c)
 
             walk(win)
-            layer_entry = entry_widgets[labels.index("Layer")]
-            layer_entry.delete(0, tk.END)
-            layer_entry.insert(0, "5")
+            # the Layer field is a dropdown of the technology's layer stack
+            layer_combo[0].set("5: " + app.session.library.layers[5].name)
             ok_button = next(b for b in buttons if b.cget("text") == "OK")
             ok_button.invoke()
             seen["applied"] = True
@@ -1566,6 +1562,48 @@ def test_edit_selected_dialog_apply_is_undoable():
         assert s.cell.shapes[0].layer == 5
         assert s.undo() is True
         assert s.cell.shapes[0].layer == 0
+    finally:
+        app.destroy()
+
+
+def test_edit_shape_dialog_layer_field_reads_the_layer_stack():
+    from tkinter import ttk
+    app = _make_app()
+    try:
+        s = app.session
+        s.library.layers.set_style(7, name="Metal-7")
+        s.polygon(7, [(0, 0), (100, 0), (100, 100)])
+        shape = s.cell.shapes[0]
+        app.canvas.draw_mode = "select"
+        app.canvas.selected = ("shape", shape)
+
+        found = {}
+
+        def inspect():
+            tops = _find_toplevels(app)
+            if not tops:
+                app.after(20, inspect)
+                return
+            combos = []
+
+            def walk(w):
+                for c in w.winfo_children():
+                    if isinstance(c, ttk.Combobox):
+                        combos.append(c)
+                    walk(c)
+
+            walk(tops[0])
+            found["values"] = list(combos[0]["values"]) if combos else None
+            found["current"] = combos[0].get() if combos else None
+            tops[0].destroy()
+
+        app.after(20, inspect)
+        assert app.canvas.edit_selected() is True
+        # the dropdown is the whole technology layer stack, and the
+        # polygon's own layer (7: Metal-7) is preselected
+        assert found["values"][7] == "7: Metal-7"
+        assert found["values"][0] == "0: " + s.library.layers[0].name
+        assert found["current"] == "7: Metal-7"
     finally:
         app.destroy()
 
