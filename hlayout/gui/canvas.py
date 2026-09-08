@@ -962,20 +962,36 @@ class LayoutCanvas(tk.Canvas):
         return best
 
     def _editable_point_shapes(self):
-        """Polygon/Path shapes in the current cell — the ones whose
-        individual vertices/edges can be grabbed and edited directly.
-        (Rectangle is excluded: reshaping one corner would break its
-        4-point-rectangle invariant; use the edit dialog for that.)
-        Shapes on a hidden layer are excluded too -- selection should
-        only ever pick up what's actually visible on screen, the same
+        """Polygon/Path/Rectangle shapes in the current cell — the ones
+        whose individual vertices/edges can be grabbed and edited
+        directly. A Rectangle is promoted to a Polygon the moment one of
+        its vertices/edges is actually reshaped (see
+        _promote_rect_to_polygon) -- a stretched rectangle edge is just a
+        quadrilateral -- so it gets the same free vertex/edge editing a
+        Polygon has. Shapes on a hidden layer are excluded -- selection
+        only ever picks up what's actually visible on screen, the same
         as whole-shape/sref selection (_pick_item_at, backed by
         _item_to_shape, which redraw() only populates for visible
         layers) already does."""
         cell = self.library.cells.get(self.cell_name)
         if cell is None:
             return []
-        return [s for s in cell.shapes if isinstance(s, (Polygon, Path))
+        return [s for s in cell.shapes if isinstance(s, (Polygon, Path, Rectangle))
                 and self.library.layers[s.layer].visible]
+
+    def _promote_rect_to_polygon(self, rect):
+        """Swap a Rectangle for a Polygon carrying the same points,
+        layer, datatype and pin, in place in the current cell, so its
+        vertices and edges can be reshaped freely the way a Polygon's
+        can. The caller checkpoints; this does not. Returns the new
+        Polygon, or `rect` unchanged if it isn't in the current cell."""
+        cell = self.library.cells.get(self.cell_name)
+        if cell is None or rect not in cell.shapes:
+            return rect
+        poly = Polygon(layer=rect.layer, points=list(rect.points),
+                       datatype=rect.datatype, pin=rect.pin)
+        cell.shapes[cell.shapes.index(rect)] = poly
+        return poly
 
     def _hit_test_vertex(self, ex, ey):
         best = None
@@ -995,7 +1011,7 @@ class LayoutCanvas(tk.Canvas):
         for shape in self._editable_point_shapes():
             pts = shape.points
             n = len(pts)
-            edge_count = n if isinstance(shape, Polygon) else n - 1
+            edge_count = n - 1 if isinstance(shape, Path) else n  # Polygon/Rectangle are closed
             for i in range(edge_count):
                 j = (i + 1) % n
                 pa = self.to_px(*pts[i])
@@ -1138,12 +1154,18 @@ class LayoutCanvas(tk.Canvas):
                 baked.origin = (int(round(ox + ldx)), int(round(oy + ldy)))
         elif kind == "vertex":
             _, shape, idx = self.selected
+            if isinstance(shape, Rectangle):     # first drag: becomes a free quad
+                shape = self._promote_rect_to_polygon(shape)
+                self.selected = ("vertex", shape, idx)
             ox, oy = self._drag_snapshot[idx]
             pts = list(shape.points)
             pts[idx] = (int(round(ox + dx)), int(round(oy + dy)))
             shape.points = pts
         elif kind == "edge":
             _, shape, (i, j) = self.selected
+            if isinstance(shape, Rectangle):     # first drag: becomes a free quad
+                shape = self._promote_rect_to_polygon(shape)
+                self.selected = ("edge", shape, (i, j))
             oxi, oyi = self._drag_snapshot[i]
             oxj, oyj = self._drag_snapshot[j]
             pts = list(shape.points)
@@ -1399,6 +1421,8 @@ class LayoutCanvas(tk.Canvas):
             pt = self._snap(*pt)
         pt = (int(round(pt[0])), int(round(pt[1])))
         self.checkpoint()
+        if isinstance(shape, Rectangle):
+            shape = self._promote_rect_to_polygon(shape)
         pts = list(shape.points)
         pts.insert(i + 1, pt)
         shape.points = pts
@@ -1434,7 +1458,7 @@ class LayoutCanvas(tk.Canvas):
 
         if kind == "vertex":
             _, shape, idx = self.selected
-            min_pts = 3 if isinstance(shape, Polygon) else 2
+            min_pts = 3 if isinstance(shape, (Polygon, Rectangle)) else 2
             if len(shape.points) <= min_pts:
                 # The point can't be removed without breaking the shape's
                 # minimum -- but the user selected it and pressed Delete,
@@ -1451,6 +1475,8 @@ class LayoutCanvas(tk.Canvas):
                 )
             else:
                 self.checkpoint()
+                if isinstance(shape, Rectangle):   # 4 pts -> triangle: a polygon now
+                    shape = self._promote_rect_to_polygon(shape)
                 pts = list(shape.points)
                 del pts[idx]
                 shape.points = pts

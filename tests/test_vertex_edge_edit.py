@@ -258,6 +258,79 @@ def test_delete_segment_still_refused_for_a_polygon_edge():
         app.destroy()
 
 
+# --- Rectangle edge/vertex editing (promotes to Polygon) -------------------
+
+def test_stretch_rectangle_edge_promotes_to_polygon_and_moves_that_edge():
+    from hlayout.core.shapes import Polygon, Rectangle
+    app, top = _make_app()
+    try:
+        rect = top.add_rectangle(0, 0, 0, 10000, 10000, pin="1")
+        app.canvas.redraw()
+
+        # grab the bottom edge (0,0)-(10000,0)
+        app.canvas._select_click(_ev(*app.canvas.to_px(5000, 0)))
+        assert app.canvas.selected[0] == "edge"
+        assert app.canvas.selected[1] is rect          # still a Rectangle until dragged
+
+        target = app.canvas.to_px(5000, -3000)
+        app.canvas._on_drag_motion(_ev(*target))
+        app.canvas._on_release(_ev(*target))
+
+        assert rect not in top.shapes                   # promoted...
+        poly = top.shapes[0]
+        assert isinstance(poly, Polygon)
+        assert poly.pin == "1"                          # ...carrying the pin
+        # only the grabbed edge's two endpoints moved
+        assert poly.points[0][1] == -3000 and poly.points[1][1] == -3000
+        assert poly.points[2] == (10000, 10000) and poly.points[3] == (0, 10000)
+
+        app.session.undo()                              # one undo step
+        restored = app.session.library.cells[top.name]
+        assert isinstance(restored.shapes[0], Rectangle)
+    finally:
+        app.destroy()
+
+
+def test_drag_rectangle_vertex_promotes_to_polygon():
+    from hlayout.core.shapes import Polygon
+    app, top = _make_app()
+    try:
+        rect = top.add_rectangle(0, 0, 0, 10000, 10000)
+        app.canvas.redraw()
+
+        app.canvas._select_click(_ev(*app.canvas.to_px(0, 0)))   # bottom-left corner
+        assert app.canvas.selected[0] == "vertex"
+
+        target = app.canvas.to_px(-2000, -2000)
+        app.canvas._on_drag_motion(_ev(*target))
+        app.canvas._on_release(_ev(*target))
+
+        poly = top.shapes[0]
+        assert isinstance(poly, Polygon)
+        assert poly.points[0] == (-2000, -2000)
+        assert poly.points[1] == (10000, 0)             # neighbours unmoved -> a real quad
+    finally:
+        app.destroy()
+
+
+def test_insert_vertex_on_rectangle_edge_promotes_and_adds_a_point():
+    from hlayout.core.shapes import Polygon
+    app, top = _make_app()
+    try:
+        top.add_rectangle(0, 0, 0, 10000, 10000)
+        app.canvas.redraw()
+
+        app.canvas._select_click(_ev(*app.canvas.to_px(5000, 0)))
+        assert app.canvas.selected[0] == "edge"
+
+        assert app.canvas.insert_vertex_on_selected_edge() is True
+        poly = top.shapes[0]
+        assert isinstance(poly, Polygon)
+        assert len(poly.points) == 5 and poly.points[1] == (5000, 0)
+    finally:
+        app.destroy()
+
+
 # --- Edit > Continue Path... -------------------------------------------------
 
 def test_continue_path_extends_existing_path_as_one_undo_step():
