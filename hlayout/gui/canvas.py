@@ -942,11 +942,24 @@ class LayoutCanvas(tk.Canvas):
     MEASURE_POINT_RADIUS = 6
 
     def _pick_item_at(self, ex, ey):
+        # Among every selectable item under the cursor, pick the one with
+        # the SMALLEST on-screen bounding box -- clicking a resistor that
+        # sits inside a big package / board instance selects the resistor,
+        # not the container, whichever was drawn on top and even when the
+        # small part's own geometry is unfilled outline (only its
+        # invisible full-bbox hit-region is under the cursor). Ties (equal
+        # area) go to the topmost, i.e. the last in stacking order.
         items = self.find_overlapping(ex - 3, ey - 3, ex + 3, ey + 3)
-        for item in reversed(items):
-            if item in self._item_to_shape:
-                return item
-        return None
+        best = None
+        best_area = None
+        for item in items:                       # bottom -> top
+            if item not in self._item_to_shape:
+                continue
+            bb = self.bbox(item)
+            area = abs((bb[2] - bb[0]) * (bb[3] - bb[1])) if bb else 0.0
+            if best is None or area <= best_area:
+                best, best_area = item, area
+        return best
 
     def _editable_point_shapes(self):
         """Polygon/Path shapes in the current cell — the ones whose

@@ -118,15 +118,17 @@ def test_select_drag_and_delete():
 def test_click_selects_a_small_part_inside_a_big_container_instance():
     # A big board/package cell placed as an SRef used to blanket every
     # small part inside its bounding box with an invisible full-bbox
-    # hit-region, so clicking a resistor selected the board. Hit-regions
-    # are now ordered smallest-bbox-first, so the small part wins where
-    # they overlap.
+    # hit-region, so clicking a resistor selected the board -- even worse
+    # when the part's own geometry is unfilled outline (only its
+    # hit-region sits under an interior click). _pick_item_at now takes
+    # the smallest-bbox item under the cursor, so the small part wins.
     app = _make_app()
     try:
         s = app.session
         lib = s.library
         lib.layers.set_style(1, name="Outline", fill=False, visible=True)
-        lib.layers.set_style(2, name="Ink", fill=True, visible=True)
+        # resistor drawn OUTLINE-ONLY, like the screenshot that reported this
+        lib.layers.set_style(2, name="Ink", fill=False, visible=True)
 
         s.new_cell("BOARD")
         s.path(1, [(-20000, -20000), (20000, -20000), (20000, 20000),
@@ -143,8 +145,9 @@ def test_click_selects_a_small_part_inside_a_big_container_instance():
         app.canvas.fit_view()
         app.update()
 
-        # click the centre of R1's body -> R1, not the board
-        app.canvas._select_click(_ev(*app.canvas.to_px(5000, 0)))
+        # click well inside R1's (unfilled) body, off its origin/label,
+        # so only R1's and the board's hit-regions are under the cursor
+        app.canvas._select_click(_ev(*app.canvas.to_px(5400, 150)))
         assert app.canvas.selected is not None
         assert app.canvas.selected[0] == "sref"
         assert app.canvas.selected[1] is r1_ref
