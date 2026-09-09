@@ -1169,9 +1169,24 @@ class LayoutCanvas(tk.Canvas):
                 self.selected = ("edge", shape, (i, j))
             oxi, oyi = self._drag_snapshot[i]
             oxj, oyj = self._drag_snapshot[j]
+            edx, edy = dx, dy
+            if self.ortho_enabled:
+                # Push the edge only along its own normal, so it stays
+                # parallel to its original orientation: an axis-aligned
+                # edge then moves purely perpendicular to itself and the
+                # neighbouring edges stay orthogonal (Manhattan reshape).
+                # A slanted edge just slides along its perpendicular.
+                # Drop the component of the mouse delta that runs along
+                # the edge. Toggle "Ortho 45" off for a free edge move.
+                evx, evy = oxj - oxi, oyj - oyi
+                elen2 = evx * evx + evy * evy
+                if elen2:
+                    t = (dx * evx + dy * evy) / elen2
+                    edx = dx - t * evx
+                    edy = dy - t * evy
             pts = list(shape.points)
-            pts[i] = (int(round(oxi + dx)), int(round(oyi + dy)))
-            pts[j] = (int(round(oxj + dx)), int(round(oyj + dy)))
+            pts[i] = (int(round(oxi + edx)), int(round(oyi + edy)))
+            pts[j] = (int(round(oxj + edx)), int(round(oyj + edy)))
             shape.points = pts
         else:
             _, shape = self.selected

@@ -56,6 +56,52 @@ def test_click_polygon_edge_moves_only_that_edge():
         app.destroy()
 
 
+def test_diagonal_edge_drag_stays_orthogonal_with_ortho_on():
+    # Dragging a horizontal edge with the mouse moving diagonally must
+    # push the edge straight (only perpendicular to itself), so its two
+    # endpoints keep their x and the neighbouring edges stay vertical.
+    app, top = _make_app()
+    try:
+        assert app.canvas.ortho_enabled is True
+        poly = top.add_polygon(0, [(0, 0), (10000, 0), (10000, 10000), (0, 10000)])
+        app.canvas.redraw()
+
+        app.canvas._select_click(_ev(*app.canvas.to_px(5000, 0)))
+        assert app.canvas.selected[0] == "edge"
+
+        # mouse drags up AND across
+        target_px = app.canvas.to_px(9000, 2000)
+        app.canvas._on_drag_motion(_ev(*target_px))
+        app.canvas._on_release(_ev(*target_px))
+
+        assert poly.points[0] == (0, 2000)         # x unchanged, only y moved
+        assert poly.points[1] == (10000, 2000)
+        assert poly.points[2] == (10000, 10000)
+        assert poly.points[3] == (0, 10000)
+    finally:
+        app.destroy()
+
+
+def test_diagonal_edge_drag_is_free_with_ortho_off():
+    app, top = _make_app()
+    try:
+        app.canvas.ortho_enabled = False
+        poly = top.add_polygon(0, [(0, 0), (10000, 0), (10000, 10000), (0, 10000)])
+        app.canvas.redraw()
+
+        app.canvas._select_click(_ev(*app.canvas.to_px(5000, 0)))
+        assert app.canvas.selected[0] == "edge"
+
+        target_px = app.canvas.to_px(9000, 2000)
+        app.canvas._on_drag_motion(_ev(*target_px))
+        app.canvas._on_release(_ev(*target_px))
+
+        assert poly.points[0] == (4000, 2000)      # both components applied
+        assert poly.points[1] == (14000, 2000)
+    finally:
+        app.destroy()
+
+
 def test_click_path_vertex_moves_only_that_vertex():
     app, top = _make_app()
     try:
