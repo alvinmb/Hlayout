@@ -40,7 +40,7 @@
       "color": "#f58231",
       "stipple": 7,
       "fill": true,
-      "visible": true
+      "visible": false
     },
     {
       "number": 5,
@@ -159,7 +159,7 @@
       "name": "Resister Glaze",
       "color": "#4363d8",
       "stipple": 3,
-      "fill": true,
+      "fill": false,
       "visible": true
     },
     {
@@ -448,7 +448,7 @@
       "color": "#f032e6",
       "stipple": 1,
       "fill": true,
-      "visible": true
+      "visible": false
     },
     {
       "number": 56,
@@ -456,11 +456,11 @@
       "color": "#bcf60c",
       "stipple": 2,
       "fill": true,
-      "visible": true
+      "visible": false
     },
     {
       "number": 57,
-      "name": "L57",
+      "name": "substrate utie",
       "color": "#fabebe",
       "stipple": 3,
       "fill": true,
@@ -494,7 +494,7 @@
       "number": 61,
       "name": "Document 1",
       "color": "#ffffff",
-      "stipple": 7,
+      "stipple": 3,
       "fill": false,
       "visible": true
     },
@@ -509,18 +509,21 @@
     {
       "number": 63,
       "name": "Dimention  2",
-      "color": "#aaffc3",
+      "color": "#ffffff",
       "stipple": 0,
-      "fill": true,
+      "fill": false,
       "visible": true
     }
   ],
   "params": {
-    "route_rules": "{\"layer_a\": 3, \"layer_b\": 5, \"via_cell\": \"VIA_Layer3_to_Layer5\", \"boundary_layer\": 57}",
-    "resistor_geometry_rules": "{\"overlap_a\": 300, \"pad_b\": 500, \"space_c\": 200, \"glaze_oversize\": 300, \"keepout_oversize\": 100, \"resistor_layer\": 30, \"conductor_layer\": 3, \"glaze_layer\": 19, \"doc_layer\": 62, \"keepout_layer\": 4, \"ink_layers\": {\"10\": 8, \"30\": 9, \"100\": 10, \"300\": 11, \"1000\": 12, \"3000\": 13, \"10000\": 14, \"30000\": 15, \"100000\": 16, \"300000\": 17, \"1000000\": 18}}",
+    "route_rules": "{\"layer_a\": 3, \"layer_b\": 5, \"via_cell\": \"VIA_Layer3_to_Layer5\", \"boundary_layer\": -1}",
+    "resistor_geometry_rules": "{\"overlap_a\": 300, \"pad_b\": 500, \"space_c\": 300, \"glaze_oversize\": 300, \"keepout_oversize\": 1000, \"resistor_layer\": 30, \"conductor_layer\": 3, \"glaze_layer\": 19, \"doc_layer\": 62, \"keepout_layer\": 4, \"ink_layers\": {\"10\": 8, \"30\": 9, \"100\": 10, \"300\": 11, \"1000\": 12, \"3000\": 13, \"10000\": 14, \"30000\": 15, \"100000\": 16, \"300000\": 17, \"1000000\": 18}}",
     "resistor_design_rules": "{\"aim_pct\": 75.0, \"ar_min\": 0.25, \"ar_max\": 4.0, \"available_inks\": [10, 30, 100, 300, 1000, 3000, 10000, 30000, 100000, 300000, 1000000]}",
     "refdes_annotation_layer": "62",
     "dielectric_rules": "{\"layer\": 4, \"margin\": 1000, \"clearance\": 150, \"keepout_layers\": []}",
-    "bond_rules": "{\"layer\": 59, \"width\": 30, \"pad\": 100, \"min_length\": 300, \"max_length\": 5000}"
+    "bond_rules": "{\"layer\": 59, \"width\": 30, \"pad\": 100, \"min_length\": 300, \"max_length\": 5000}",
+    "resistor_list": "[{\"ref_des\": \"R1\", \"value\": 680000.0, \"tolerance\": \"5%\", \"power_mw\": 125.0, \"body_width\": 2000.0, \"selected_ink\": 300000.0}, {\"ref_des\": \"R2\", \"value\": 680000.0, \"tolerance\": \"5%\", \"power_mw\": 125.0, \"body_width\": 2000.0, \"selected_ink\": 300000.0}, {\"ref_des\": \"R3\", \"value\": 340000.0, \"tolerance\": \"5%\", \"power_mw\": 125.0, \"body_width\": 2000.0, \"selected_ink\": 300000.0}]",
+    "drc_rules": "[{\"kind\": \"MIN_WIDTH\", \"layer_a\": 3, \"layer_b\": null, \"value\": 300.0, \"name\": \"1st con min_width\", \"color\": \"#e6194b\"}, {\"kind\": \"MIN_SPACE_BETWEEN\", \"layer_a\": 3, \"layer_b\": 3, \"value\": 300.0, \"name\": \"1st con metal_2_metal\", \"color\": \"#3cb44b\"}]",
+    "mask_op_steps": "[{\"kind\": \"XOR\", \"layer_a\": 3, \"result_layer\": 55, \"layer_b\": 3, \"amount\": 0.0, \"name\": \"\", \"flatten\": true, \"simplify\": 0}]"
   }
 }
