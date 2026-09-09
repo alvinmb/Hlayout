@@ -800,7 +800,7 @@ class App(tk.Tk):
     def _build_bottom_toolbar(self):
         """The toolbar row at the bottom of the window (above the status
         bar and Command bar). Used to be split across two rows: a view/
-        navigation toolbar (Fit, Zoom In/Out, Grid, New View, the Cell
+        navigation toolbar (Fit, Select, Zoom Win, Grid, New View, the Cell
         selector) right under the menu bar, and a separate draw-mode
         toolbar (Select/Rect/Polygon/.../Cell Instance radio buttons,
         Layer, Snap to grid, Delete Selected) further down. The
@@ -815,10 +815,18 @@ class App(tk.Tk):
         bar = ttk.Frame(self)
         bar.pack(side="top", fill="x")
 
+        # Select / Zoom Win here just set the draw mode (same as Edit >
+        # Select and View > Zoom Window) -- they replaced the old
+        # Zoom In / Zoom Out step buttons, which stay on the View menu
+        # (+/-) and are covered better by the Zoom Window drag anyway.
+        def _pick_mode(mode):
+            self.mode_var.set(mode)
+            self._on_mode_change()
+
         for label, cmd in [
             ("Fit", lambda: self.canvas.fit_view()),
-            ("Zoom In", lambda: self.canvas.zoom_in()),
-            ("Zoom Out", lambda: self.canvas.zoom_out()),
+            ("Select", lambda: _pick_mode("select")),
+            ("Zoom Win", lambda: _pick_mode("zoomwin")),
             ("Grid", lambda: self.canvas.toggle_grid()),
             ("New View", self.new_view_window),
         ]:

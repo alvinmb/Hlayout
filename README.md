@@ -159,8 +159,8 @@ grid, `F1` for the command reference.
 
 - **Canvas** (left): the layout view, starting right below the menu
   bar. Middle-drag or right-drag to pan, mouse wheel to zoom.
-- **Bottom toolbar** (above the status bar and Command bar): Fit, Zoom
-  In, Zoom Out, Grid, New View, the Cell selector, the target Layer
+- **Bottom toolbar** (above the status bar and Command bar): Fit,
+  Select, Zoom Win, Grid, New View, the Cell selector, the target Layer
   (pick from the dropdown, or type a layer number or name directly), a
   Snap to grid toggle, and Delete Selected. There's no separate
   draw-tool button row any more — picking a draw tool (Select, Rect,
