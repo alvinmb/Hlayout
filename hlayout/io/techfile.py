@@ -282,14 +282,15 @@ def save_resistor_list(library: Library, rows) -> None:
 #                      long edges), not just matching the ink's own
 #                      footprint. Glaze size = (body_width + 2*D) x
 #                      (body_length + 2*A + 2*D).
-#   E (keepout_oversize) -- a DIELECTRIC KEEP-OUT rectangle drawn BETWEEN
-#                      THE TWO CONDUCTOR TERMINALS (x within the
-#                      body_length gap that separates the pads), on
-#                      "keepout_layer", grown by E on all four sides.
-#                      It marks where the inter-layer dielectric must be
-#                      cleared so the printed resistor ink fires on a
-#                      bare surface -- subtract this layer from the
-#                      dielectric. Keep-out size = (body_width + 2*C +
+#   E (keepout_oversize) -- a DIELECTRIC KEEP-OUT rectangle over the
+#                      resistor ink footprint BETWEEN THE TWO CONDUCTOR
+#                      TERMINALS: body_length (the gap that separates the
+#                      pads) by body_width (the ink width, NOT the wider
+#                      pad width), on "keepout_layer", grown by E on all
+#                      four sides. It marks where the inter-layer
+#                      dielectric must be cleared so the printed resistor
+#                      ink fires on a bare surface -- subtract this layer
+#                      from the dielectric. Keep-out size = (body_width +
 #                      2*E) x (body_length + 2*E). "keepout_layer" = -1
 #                      (the default) disables it -- nothing is drawn.
 #

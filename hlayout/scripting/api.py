@@ -949,10 +949,11 @@ class Session:
         accepted for backward compatibility but ignored.
 
         ``keepout_layer``/``keepout_oversize`` add a DIELECTRIC KEEP-OUT
-        rectangle spanning the gap *between the two conductor terminals*
-        (x within body_length, y at the full pad width), grown by
-        ``keepout_oversize`` (E) on all four sides -- size = (body_width
-        + 2*C + 2*E) x (body_length + 2*E). It marks where the
+        rectangle over the resistor ink footprint *between the two
+        conductor terminals* -- ``body_length`` (the terminal gap) by
+        ``body_width`` (the ink width, not the wider pad width) -- grown
+        by ``keepout_oversize`` (E) on all four sides -- size =
+        (body_width + 2*E) x (body_length + 2*E). It marks where the
         inter-layer dielectric must be cleared so the printed ink fires
         on a bare surface (subtract this layer from the dielectric). A
         keep-out layer of -1 (the default) draws nothing.
@@ -1013,11 +1014,12 @@ class Session:
                 self.rect(c_layer, -(half_l + a + b), -pad_half_w, -half_l, pad_half_w, pin="1")
                 self.rect(c_layer, half_l, -pad_half_w, half_l + a + b, pad_half_w, pin="2")
                 if k_layer is not None and int(k_layer) >= 0:
-                    # dielectric keep-out: the gap between the two
-                    # terminals (body_length long, full pad width), grown
-                    # by E.
-                    self.rect(int(k_layer), -(half_l + e), -(pad_half_w + e),
-                              half_l + e, pad_half_w + e)
+                    # dielectric keep-out: the resistor ink footprint
+                    # between the two conductor terminals -- body_length
+                    # (the terminal gap) by body_width, NOT the wider pad
+                    # width -- grown by E on all four sides.
+                    self.rect(int(k_layer), -(half_l + e), -(half_w + e),
+                              half_l + e, half_w + e)
             else:
                 # Top-hat / meander: fold the ink run into n_folds legs
                 # (each along Y, stepped along X) so the same electrical

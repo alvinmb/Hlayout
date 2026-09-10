@@ -162,10 +162,12 @@ def test_generate_resistor_draws_dielectric_keepout_between_terminals():
     # length = body_length + 2*E = 1000 + 50 ; the gap between the two
     # terminals (inner pad edges are at +-half_l = +-500) plus E each end.
     assert (x1 - x0) == 1050.0
-    # width = body_width + 2*C + 2*E = 200 + 100 + 50
-    assert (y1 - y0) == 350.0
+    # width = body_width + 2*E = 200 + 50 (the ink width, NOT the wider
+    # pad width -- space_c does not widen the keep-out)
+    assert (y1 - y0) == 250.0
     # centred on the resistor, i.e. strictly inside the terminal gap +/- E
     assert x0 == -525.0 and x1 == 525.0
+    assert y0 == -125.0 and y1 == 125.0
 
 
 def test_generate_resistor_keepout_layer_arg_overrides_saved_rule():
