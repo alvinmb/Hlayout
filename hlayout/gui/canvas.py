@@ -13,7 +13,7 @@ from ..core.maskops import layer_to_shapely, shapely_to_polygons
 from ..core.shapes import (ARef, CIRCLE_SEGMENT_CHOICES, MAX_PATH_POINTS, MAX_POLY_POINTS, Path,
                            PathCap, Polygon, Rectangle, SRef, Text)
 from ..core.units import DBU_MM, dbu_to_mm, mm_to_dbu
-from ..io.techfile import load_refdes_annotation_layer
+from ..io.techfile import load_bond_rules, load_refdes_annotation_layer
 
 # Bitmaps used to approximate the 9 stipple/fill patterns on a Tk canvas.
 # Index 0 ("solid") is drawn as a plain filled polygon (no stipple).
@@ -913,6 +913,7 @@ class LayoutCanvas(tk.Canvas):
             if len(self._pending_points) == 2:
                 self._commit_move_bond()
             else:
+                self._update_preview(*pt)
                 self.on_mode_status(self._move_bond_hint())
 
     def _on_double_click(self, e):
@@ -1968,6 +1969,9 @@ class LayoutCanvas(tk.Canvas):
         elif self.draw_mode == "wire_bond" and len(self._pending_points) == 1:
             x0, y0 = self._pending_points[0]
             self._draw_wire_bond_overlay(x0, y0, mouse_x, mouse_y, tag="preview")
+        elif self.draw_mode == "move_bond" and len(self._pending_points) == 1:
+            self._draw_move_bond_overlay(self._pending_points[0], mouse_x, mouse_y,
+                                          tag="preview")
         elif self.draw_mode in ("poly", "path", "route"):
             coords = []
             for p in self._pending_points:
@@ -2055,6 +2059,57 @@ class LayoutCanvas(tk.Canvas):
             self.create_rectangle(x0b - 3, y0b - 1, x1b + 3, y1b + 1,
                                    fill="#0d1117", outline="#ffb020", tags=tag)
             self.tag_raise(text_id)
+
+    def _find_bond_to_move(self, grab):
+        """The wire bond nearest DBU point ``grab``: returns
+        ``((fixed_x, fixed_y), (moving_x, moving_y))`` -- the endpoint
+        that stays put and the one Move Wire Bond would pick up
+        (whichever end ``grab`` is closer to) -- or None when no bond
+        connector Path on the bond layer lies within the bond rules'
+        reach of ``grab``. Mirrors how ScriptingAPI.find_wire_bond() /
+        move_wire_bond() locate the bond and choose the end, so the
+        preview matches what the second click actually commits."""
+        cell = self.library.cells.get(self.cell_name)
+        if cell is None:
+            return None
+        rules = load_bond_rules(self.library)
+        r_layer = int(rules["layer"])
+        if r_layer < 0:
+            return None                     # no wire-bond layer configured
+        reach = float(max(int(rules["pad"]), int(rules["width"]), 1))
+        gx, gy = grab
+        best, best_d = None, reach
+        for s in cell.shapes:
+            if not (isinstance(s, Path) and s.layer == r_layer and len(s.points) == 2):
+                continue
+            (ax, ay), (bx, by) = s.points
+            d = _dist_point_to_segment(gx, gy, ax, ay, bx, by)
+            if d <= best_d:
+                best_d = d
+                best = ((ax, ay), (bx, by))
+        if best is None:
+            return None
+        (ax, ay), (bx, by) = best
+        if (gx - ax) ** 2 + (gy - ay) ** 2 <= (gx - bx) ** 2 + (gy - by) ** 2:
+            return (bx, by), (ax, ay)       # grab nearer A: A moves, B stays
+        return (ax, ay), (bx, by)
+
+    def _draw_move_bond_overlay(self, grab, mx, my, tag):
+        """Preview for Edit > Move Wire Bond once an end is grabbed: a
+        faint line where the bond sits now, and the live O------O it
+        would become -- fixed end to the cursor -- so the new span is
+        visible against the bond rules' min/max before the second click
+        commits it. Draws nothing when the first click wasn't near a
+        bond (there's nothing to move)."""
+        picked = self._find_bond_to_move(grab)
+        if picked is None:
+            return
+        fixed, moving = picked
+        q0, q1 = self.to_px(*fixed), self.to_px(*moving)
+        self.create_line(*q0, *q1, fill="#5a5a5a", dash=(2, 3), tags=tag)
+        for px, py in (q0, q1):
+            self.create_oval(px - 4, py - 4, px + 4, py + 4, outline="#5a5a5a", tags=tag)
+        self._draw_wire_bond_overlay(fixed[0], fixed[1], mx, my, tag)
 
     def _commit_wire_bond(self):
         p0, p1 = self._pending_points

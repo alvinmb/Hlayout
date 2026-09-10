@@ -373,3 +373,29 @@ def test_move_wire_bond_tool_moves_the_grabbed_end_only():
         assert app.canvas.draw_mode == "move_bond"    # stays armed
     finally:
         app.destroy()
+
+
+def test_find_bond_to_move_returns_the_far_end_as_fixed():
+    app = _app_with_a_bond()                       # bond (50,50)-(2050,50)
+    try:
+        c = app.canvas
+        assert c._find_bond_to_move((60, 50)) == ((2050, 50), (50, 50))
+        assert c._find_bond_to_move((2040, 50)) == ((50, 50), (2050, 50))
+        assert c._find_bond_to_move((1000, 60)) is not None   # anywhere along it
+        assert c._find_bond_to_move((1000, 9000)) is None     # nowhere near a bond
+    finally:
+        app.destroy()
+
+
+def test_move_wire_bond_preview_is_drawn_after_the_grab_and_cleared_on_exit():
+    app = _app_with_a_bond()
+    try:
+        c = app.canvas
+        c.set_mode("move_bond")
+        c._pending_points = [(60, 50)]            # left end grabbed
+        c._update_preview(50, 650)               # cursor now here
+        assert c.find_withtag("preview")          # O------O + ghost on screen
+        c.cancel_draw()
+        assert not c.find_withtag("preview")      # cleared when the tool exits
+    finally:
+        app.destroy()
