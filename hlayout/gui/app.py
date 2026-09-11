@@ -2,6 +2,7 @@
 
 import os
 import webbrowser
+import zipfile
 import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import filedialog, simpledialog, ttk
@@ -14,7 +15,7 @@ from ..core.library import Library
 from ..core.maskops import MASK_OPS
 from ..core.shapes import CIRCLE_SEGMENT_CHOICES
 from ..core.units import dbu_to_mm, mm_to_dbu
-from ..io.sidecar import load_design
+from ..io.sidecar import load_design, sidecar_path
 from ..io.techfile import (
     default_layer_thickness,
     load_bond_rules,
@@ -41,6 +42,24 @@ from .dxf_batch_window import open_dxf_batch_window
 from .gerber_batch_window import open_gerber_batch_window
 from .maskop_window import open_maskop_batch_window
 from .resistor_designer import open_resistor_designer
+
+
+def _unique_arcname(used: set, name: str) -> str:
+    """A zip member name guaranteed distinct from everything already in
+    `used` -- e.g. two attached libraries with the same filename in
+    different folders -- by appending "_2", "_3", ... before the
+    extension as needed. Records the chosen name in `used` before
+    returning it. Used by App.archive_design()."""
+    if name not in used:
+        used.add(name)
+        return name
+    stem, ext = os.path.splitext(name)
+    i = 2
+    while f"{stem}_{i}{ext}" in used:
+        i += 1
+    new_name = f"{stem}_{i}{ext}"
+    used.add(new_name)
+    return new_name
 
 
 class ViewWindow(tk.Toplevel):
@@ -328,6 +347,7 @@ class App(tk.Tk):
         filem.add_command(label="Save GDS...", command=self.save_gds, accelerator="Ctrl+S")
         filem.add_command(label="Save As...", command=self.save_as_gds, accelerator="Ctrl+Shift+S")
         filem.add_command(label="Save As Library...", command=self.save_as_library)
+        filem.add_command(label="Archive Design...", command=self.archive_design)
         filem.add_separator()
         filem.add_command(label="Merge GDS Libraries...", command=self.show_merge_gds_dialog)
         filem.add_separator()
@@ -2422,6 +2442,58 @@ class App(tk.Tk):
             return
         self.current_path = path
         self.status.set(f"saved {path} (+ technology/attached-libraries sidecar)")
+
+    def archive_design(self):
+        """File > Archive Design...: bundle every file that makes up the
+        open design into one .zip -- the .gds itself, its .hlaux sidecar
+        (technology + tech_params) if one exists, and every attached
+        library .gds that's still reachable at its recorded path (an
+        embedded copy already lives in the sidecar, so this is about
+        also keeping the standalone originals together, not needed to
+        reopen the design). Skips any attached-library path that isn't a
+        real file on disk (e.g. one restored from the sidecar with no
+        live source, or since moved/deleted) rather than failing the
+        whole archive over it.
+
+        The design must already be saved -- current_path is what
+        "this design"'s files are defined relative to -- so this refuses
+        with a message to save first if it's unset."""
+        if not self.current_path:
+            dialogs.show_warning(
+                "Archive Design", "Save the design (File > Save GDS...) before archiving it.",
+                parent=self)
+            return
+        gds_path = self.current_path
+        if not os.path.exists(gds_path):
+            dialogs.show_error(
+                "Archive Design failed", f"{gds_path} no longer exists on disk.", parent=self)
+            return
+
+        files = [gds_path]
+        sc = sidecar_path(gds_path)
+        if os.path.exists(sc):
+            files.append(sc)
+        for p in self.session._attached_paths:
+            if p and os.path.isfile(p) and p not in files:
+                files.append(p)
+
+        default_name = os.path.splitext(os.path.basename(gds_path))[0] + "_archive.zip"
+        zip_path = filedialog.asksaveasfilename(
+            title="Archive Design", defaultextension=".zip", filetypes=[("Zip archive", "*.zip")],
+            initialdir=os.path.dirname(gds_path), initialfile=default_name)
+        if not zip_path:
+            return
+
+        used_names = set()
+        try:
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for f in files:
+                    zf.write(f, arcname=_unique_arcname(used_names, os.path.basename(f)))
+        except OSError as e:
+            dialogs.show_error("Archive Design failed", str(e), parent=self)
+            return
+        self.status.set(
+            f"archived {len(files)} file(s) ({', '.join(sorted(used_names))}) -> {zip_path}")
 
     def new_view_window(self):
         ViewWindow(self, self.session.library, title=f"View - {self.session.current_cell_name}",

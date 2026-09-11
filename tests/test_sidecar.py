@@ -284,6 +284,88 @@ def test_save_as_gds_cancel_leaves_current_path_untouched(tmp_path, monkeypatch)
         app.destroy()
 
 
+def test_archive_design_zips_gds_sidecar_and_attached_library(tmp_path, monkeypatch):
+    import zipfile
+
+    os.makedirs(tmp_path / "sub")
+    part_path = _make_part_library(tmp_path / "sub" / "apart.gds")
+    app = _make_app()
+    try:
+        app.session.rect(0, 0, 0, 10, 10)
+        app.session.attach_library(part_path)
+        design_path = str(tmp_path / "design.gds")
+
+        from hlayout.gui import app as app_module
+        monkeypatch.setattr(app_module.filedialog, "asksaveasfilename", lambda **kw: design_path)
+        app.save_gds()
+        assert os.path.exists(sidecar_path(design_path))
+
+        zip_path = str(tmp_path / "out" / "bundle.zip")
+        os.makedirs(os.path.dirname(zip_path))
+        captured = {}
+
+        def fake_zip_dialog(**kw):
+            captured.update(kw)
+            return zip_path
+
+        monkeypatch.setattr(app_module.filedialog, "asksaveasfilename", fake_zip_dialog)
+        app.archive_design()
+
+        assert captured["initialdir"] == os.path.dirname(design_path)
+        assert captured["initialfile"] == "design_archive.zip"
+        assert os.path.exists(zip_path)
+        with zipfile.ZipFile(zip_path) as zf:
+            names = set(zf.namelist())
+        assert names == {"design.gds", "design.gds.hlaux", "apart.gds"}
+    finally:
+        app.destroy()
+
+
+def test_archive_design_dedupes_same_basename_from_different_folders(tmp_path, monkeypatch):
+    import zipfile
+
+    os.makedirs(tmp_path / "a")
+    os.makedirs(tmp_path / "b")
+    part_a = _make_part_library(tmp_path / "a" / "part.gds", cell_name="PADA")
+    part_b = _make_part_library(tmp_path / "b" / "part.gds", cell_name="PADB")
+    app = _make_app()
+    try:
+        app.session.attach_library(part_a)
+        app.session.attach_library(part_b)
+        design_path = str(tmp_path / "design.gds")
+
+        from hlayout.gui import app as app_module
+        monkeypatch.setattr(app_module.filedialog, "asksaveasfilename", lambda **kw: design_path)
+        app.save_gds()
+
+        zip_path = str(tmp_path / "bundle.zip")
+        monkeypatch.setattr(app_module.filedialog, "asksaveasfilename", lambda **kw: zip_path)
+        app.archive_design()
+
+        with zipfile.ZipFile(zip_path) as zf:
+            names = set(zf.namelist())
+        assert names == {"design.gds", "design.gds.hlaux", "part.gds", "part_2.gds"}
+    finally:
+        app.destroy()
+
+
+def test_archive_design_refuses_when_the_design_has_never_been_saved(monkeypatch):
+    app = _make_app()
+    try:
+        from hlayout.gui import app as app_module
+        warned = []
+        monkeypatch.setattr(app_module.dialogs, "show_warning",
+                             lambda *a, **kw: warned.append((a, kw)))
+        called = []
+        monkeypatch.setattr(app_module.filedialog, "asksaveasfilename",
+                             lambda **kw: called.append(1) or "")
+        app.archive_design()
+        assert called == []           # never even got to the zip-location prompt
+        assert len(warned) == 1
+    finally:
+        app.destroy()
+
+
 def test_app_new_library_clears_attached_libraries(tmp_path):
     part_path = _make_part_library(tmp_path / "clearpart.gds")
     app = _make_app()

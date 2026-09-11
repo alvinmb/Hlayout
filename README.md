@@ -106,9 +106,9 @@ in the app (toolbar buttons, command bar equivalents, etc.) has a
 home under one of them:
 
 - **File** — New, Open GDS..., Save GDS..., Save As..., Save As
-  Library..., Export Gerber..., Exit. Pure file I/O for the design
-  itself; library-attach and cell-placement live under Setup/Create
-  instead (see below).
+  Library..., Archive Design..., Export Gerber..., Exit. Pure file I/O
+  for the design itself; library-attach and cell-placement live under
+  Setup/Create instead (see below).
 - **Setup** — Attach Library..., Attached Libraries..., Layers... (jumps
   to the Layers tab), Snap to Grid (checkbox), Path Style... (a small
   dialog to set the width and end cap used when drawing new paths —
@@ -609,6 +609,19 @@ set. The new location becomes the file Save/`Ctrl+S` writes to from
 then on, so Save As... is how to save a copy under a new name or move
 the open design to a different folder; the old file on disk is left
 untouched, not deleted.
+
+**File > Archive Design...** bundles every file that makes up the open
+(already-saved) design into one `.zip`: the `.gds` itself, its
+`.hlaux` sidecar if one exists, and every attached library `.gds` still
+reachable at its recorded path (an embedded copy already lives in the
+sidecar, so the standalone originals aren't needed to reopen the
+design — this is about keeping them together for handoff/backup). An
+attached-library path that no longer points at a real file — since
+moved, deleted, or restored from the sidecar with no live source — is
+skipped rather than failing the whole archive; two files that happen to
+share a name get de-duplicated (`part.gds`, `part_2.gds`, ...) inside
+the zip. Refuses with a message if the design has never been saved,
+since there's no `current_path` to define "this design"'s files from.
 
 The same behaviour is available from the command bar / scripting API:
 `SAVE <path.gds>` with no `library_name` (`session.save_design(path)`)
