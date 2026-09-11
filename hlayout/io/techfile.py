@@ -629,7 +629,7 @@ BOND_RULES_KEY = "bond_rules"
 
 DEFAULT_BOND_RULES = {
     "layer": -1,
-    "width": 30,        # DBU -- a ~25 um / 1 mil bond wire
+    "width": 50,        # DBU -- a ~50 um / 2 mil bond wire (thicker/heavier gauge)
     "pad": 100,         # DBU -- ball/stitch bond footprint diameter at each end
     "min_length": 300,  # DBU -- shortest span a bonder can reliably loop
     "max_length": 5000, # DBU -- longest unsupported span before sag/shorting
