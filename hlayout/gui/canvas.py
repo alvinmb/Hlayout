@@ -1161,7 +1161,21 @@ class LayoutCanvas(tk.Canvas):
                 self.selected = ("vertex", shape, idx)
             ox, oy = self._drag_snapshot[idx]
             pts = list(shape.points)
-            pts[idx] = (int(round(ox + dx)), int(round(oy + dy)))
+            if (self.ortho_enabled and isinstance(shape, Path)
+                    and len(pts) >= 2 and idx in (0, len(pts) - 1)):
+                # Dragging a Path's endpoint extends it -- keep the new
+                # tip horizontal/vertical/45 from its one neighbour, the
+                # same constraint a newly drawn segment gets (see
+                # _constrain_to_ortho()), so extending a clean path
+                # doesn't leave a slanted last segment. Interior vertices
+                # (two neighbours, no single "extend" direction) and
+                # Polygon/Rectangle vertices (always closed, no loose
+                # end) still move freely.
+                nx0, ny0 = pts[1] if idx == 0 else pts[-2]
+                new_pt = self._constrain_to_ortho(nx0, ny0, ox + dx, oy + dy)
+            else:
+                new_pt = (int(round(ox + dx)), int(round(oy + dy)))
+            pts[idx] = new_pt
             shape.points = pts
         elif kind == "edge":
             _, shape, (i, j) = self.selected

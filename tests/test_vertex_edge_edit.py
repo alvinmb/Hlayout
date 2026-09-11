@@ -124,6 +124,50 @@ def test_click_path_vertex_moves_only_that_vertex():
         app.destroy()
 
 
+def test_drag_path_endpoint_extends_it_orthogonally():
+    # Dragging a Path's loose end (the one-neighbour vertex that
+    # "extends" it) must land on one of the 8 compass/45 directions
+    # from its neighbour, same as a freshly drawn segment, so extending
+    # a clean orthogonal path doesn't leave a slanted last segment.
+    app, top = _make_app()
+    try:
+        assert app.canvas.ortho_enabled is True
+        path = top.add_path(1, [(0, 0), (10000, 0)], width=400, cap="round")
+        app.canvas.redraw()
+
+        app.canvas._select_click(_ev(*app.canvas.to_px(10000, 0)))
+        assert app.canvas.selected == ("vertex", path, 1)
+
+        # dragged up-and-right, not a clean angle from the anchor (0, 0)
+        target_px = app.canvas.to_px(14000, 3000)
+        app.canvas._on_drag_motion(_ev(*target_px))
+        app.canvas._on_release(_ev(*target_px))
+
+        assert path.points[0] == (0, 0)             # anchor end untouched
+        x, y = path.points[1]
+        assert y == 0                                # snapped to due east
+        assert x > 10000                              # extended, not shrunk
+    finally:
+        app.destroy()
+
+
+def test_drag_path_endpoint_is_free_with_ortho_off():
+    app, top = _make_app()
+    try:
+        app.canvas.ortho_enabled = False
+        path = top.add_path(1, [(0, 0), (10000, 0)], width=400, cap="round")
+        app.canvas.redraw()
+
+        app.canvas._select_click(_ev(*app.canvas.to_px(10000, 0)))
+        target_px = app.canvas.to_px(14000, 3000)
+        app.canvas._on_drag_motion(_ev(*target_px))
+        app.canvas._on_release(_ev(*target_px))
+
+        assert path.points[1] == (14000, 3000)
+    finally:
+        app.destroy()
+
+
 def test_delete_vertex_removes_only_one_point():
     app, top = _make_app()
     try:
