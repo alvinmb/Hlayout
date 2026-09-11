@@ -326,6 +326,7 @@ class App(tk.Tk):
         filem.add_command(label="New", command=self.new_library, accelerator="Ctrl+N")
         filem.add_command(label="Open GDS...", command=self.open_gds, accelerator="Ctrl+O")
         filem.add_command(label="Save GDS...", command=self.save_gds, accelerator="Ctrl+S")
+        filem.add_command(label="Save As...", command=self.save_as_gds, accelerator="Ctrl+Shift+S")
         filem.add_command(label="Save As Library...", command=self.save_as_library)
         filem.add_separator()
         filem.add_command(label="Merge GDS Libraries...", command=self.show_merge_gds_dialog)
@@ -453,6 +454,7 @@ class App(tk.Tk):
         self.bind("<Control-n>", lambda e: self.new_library())
         self.bind("<Control-o>", lambda e: self.open_gds())
         self.bind("<Control-s>", lambda e: self.save_gds())
+        self.bind("<Control-Shift-S>", lambda e: self.save_as_gds())
         self.bind("<Control-z>", lambda e: self._undo())
         self.bind("<Control-y>", lambda e: self._redo())
         self.bind("<Control-Shift-Z>", lambda e: self._redo())
@@ -2392,6 +2394,31 @@ class App(tk.Tk):
             self.session.save_design(path)
         except LayoutError as e:
             dialogs.show_error("Save failed", str(e), parent=self)
+            return
+        self.current_path = path
+        self.status.set(f"saved {path} (+ technology/attached-libraries sidecar)")
+
+    def save_as_gds(self):
+        """File > Save As...: always prompt for a location -- pre-filled
+        with the current file's folder/name, if any -- and save the
+        design there (design + technology/attached-libraries sidecar,
+        exactly like Save GDS...). Unlike Save GDS..., this never
+        silently reuses current_path even when one is already set, so
+        it's the way to save a copy under a new name or move the open
+        design to a different folder. The new path becomes current_path,
+        so Save/Ctrl+S from here on writes there, not the old location
+        -- the old file on disk is left untouched."""
+        initial_dir = os.path.dirname(self.current_path) if self.current_path else None
+        initial_file = os.path.basename(self.current_path) if self.current_path else ""
+        path = filedialog.asksaveasfilename(
+            defaultextension=".gds", filetypes=[("GDSII", "*.gds")],
+            initialdir=initial_dir, initialfile=initial_file)
+        if not path:
+            return
+        try:
+            self.session.save_design(path)
+        except LayoutError as e:
+            dialogs.show_error("Save As failed", str(e), parent=self)
             return
         self.current_path = path
         self.status.set(f"saved {path} (+ technology/attached-libraries sidecar)")

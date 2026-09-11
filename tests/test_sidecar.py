@@ -224,6 +224,66 @@ def test_app_save_gds_then_open_gds_round_trips_technology_and_attachments(tmp_p
         app.destroy()
 
 
+def test_save_as_gds_moves_the_open_design_to_a_new_location(tmp_path, monkeypatch):
+    app = _make_app()
+    try:
+        app.session.rect(0, 0, 0, 10, 10)
+        first_path = str(tmp_path / "first" / "design.gds")
+        os.makedirs(os.path.dirname(first_path))
+
+        from hlayout.gui import app as app_module
+        monkeypatch.setattr(app_module.filedialog, "asksaveasfilename", lambda **kw: first_path)
+        app.save_gds()
+        assert app.current_path == first_path
+        assert os.path.exists(first_path)
+
+        # Save As... prompts again even though current_path is already
+        # set (Save GDS... would silently reuse it) and moves the design
+        # forward to the new location -- pre-filled from the old one.
+        captured_kwargs = {}
+        second_path = str(tmp_path / "second" / "design_v2.gds")
+        os.makedirs(os.path.dirname(second_path))
+
+        def fake_save_as(**kw):
+            captured_kwargs.update(kw)
+            return second_path
+
+        monkeypatch.setattr(app_module.filedialog, "asksaveasfilename", fake_save_as)
+        app.save_as_gds()
+
+        assert captured_kwargs["initialdir"] == os.path.dirname(first_path)
+        assert captured_kwargs["initialfile"] == os.path.basename(first_path)
+        assert app.current_path == second_path
+        assert os.path.exists(second_path)
+
+        # Ctrl+S / Save GDS... from here on writes the NEW location, not
+        # the old one -- and the old file is left untouched, not deleted.
+        app.session.rect(0, 0, 0, 20, 20)
+        monkeypatch.setattr(app_module.filedialog, "asksaveasfilename",
+                             lambda **kw: (_ for _ in ()).throw(AssertionError("should not prompt")))
+        app.save_gds()
+        assert app.current_path == second_path
+        assert os.path.exists(first_path)
+    finally:
+        app.destroy()
+
+
+def test_save_as_gds_cancel_leaves_current_path_untouched(tmp_path, monkeypatch):
+    app = _make_app()
+    try:
+        design_path = str(tmp_path / "design.gds")
+        from hlayout.gui import app as app_module
+        monkeypatch.setattr(app_module.filedialog, "asksaveasfilename", lambda **kw: design_path)
+        app.save_gds()
+        assert app.current_path == design_path
+
+        monkeypatch.setattr(app_module.filedialog, "asksaveasfilename", lambda **kw: "")
+        app.save_as_gds()
+        assert app.current_path == design_path
+    finally:
+        app.destroy()
+
+
 def test_app_new_library_clears_attached_libraries(tmp_path):
     part_path = _make_part_library(tmp_path / "clearpart.gds")
     app = _make_app()

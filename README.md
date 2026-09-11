@@ -105,9 +105,10 @@ The top-level menu bar is organized into eight menus, and every command
 in the app (toolbar buttons, command bar equivalents, etc.) has a
 home under one of them:
 
-- **File** — New, Open GDS..., Save GDS..., Save As Library..., Export
-  Gerber..., Exit. Pure file I/O for the design itself; library-attach
-  and cell-placement live under Setup/Create instead (see below).
+- **File** — New, Open GDS..., Save GDS..., Save As..., Save As
+  Library..., Export Gerber..., Exit. Pure file I/O for the design
+  itself; library-attach and cell-placement live under Setup/Create
+  instead (see below).
 - **Setup** — Attach Library..., Attached Libraries..., Layers... (jumps
   to the Layers tab), Snap to Grid (checkbox), Path Style... (a small
   dialog to set the width and end cap used when drawing new paths —
@@ -599,6 +600,15 @@ always did, with default layers and nothing attached; this is purely
 additive; and **File > Save As Library...** deliberately does *not*
 write a sidecar, since that command exists to publish a bare, portable
 `.gds` for other designs to attach, not to snapshot a whole session.
+
+**File > Save As...** (`Ctrl+Shift+S`) always prompts for a location —
+pre-filled with the current file's folder/name, if any — and saves
+there (design + sidecar, exactly like Save GDS...), unlike Save
+GDS.../`Ctrl+S`, which silently reuses the current file once one is
+set. The new location becomes the file Save/`Ctrl+S` writes to from
+then on, so Save As... is how to save a copy under a new name or move
+the open design to a different folder; the old file on disk is left
+untouched, not deleted.
 
 The same behaviour is available from the command bar / scripting API:
 `SAVE <path.gds>` with no `library_name` (`session.save_design(path)`)
