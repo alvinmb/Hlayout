@@ -3038,21 +3038,46 @@ class App(tk.Tk):
         electrical contact area in a real process; normally sized AT OR
         ABOVE the pad size, since the pad lands within/over the opening.
         """
+        # The window to actually parent/transient this wizard to: normally
+        # the main App, but Setup > Technology Properties...'s Route tab
+        # also opens this (via its "New Via Cell..." button) while ITS OWN
+        # Toplevel holds the modal grab. A Toplevel that's transient to the
+        # App instead of to that currently-modal dialog is a sibling of it
+        # in Windows' eyes, not a child -- so once this wizard closes,
+        # Windows can activate/raise the App above the still-open dialog
+        # instead of returning to it, leaving it buried and looking
+        # "frozen" (nothing responds, because nothing you can see is
+        # actually on top). Resolving the parent from whatever currently
+        # has focus keeps the chain correct either way this is opened.
+        parent = self.focus_get()
+        parent = parent.winfo_toplevel() if parent is not None else self
+
         if not self.session.attached_libraries:
             dialogs.show_info(
                 "Via Wizard",
                 "No library is attached yet. Use Setup > Attach Library... to "
                 "attach the GDSII file the via should be saved into, then try "
                 "the Via Wizard again.",
-                parent=self,
+                parent=parent,
             )
             return
 
-        win = tk.Toplevel(self)
+        win = tk.Toplevel(parent)
         win.title("Via Wizard")
-        win.transient(self)
+        win.transient(parent)
         win.grab_set()
         win.resizable(False, False)
+
+        def _close():
+            win.destroy()
+            # Handing this wizard's grab back to `parent` -- destroying a
+            # grab-holding Toplevel auto-releases the grab, but Tk has no
+            # grab *stack*, so parent doesn't get it back on its own; left
+            # ungrabbed it's still visible/responsive (see the transient
+            # note above for what actually caused the "frozen" report),
+            # just no longer exclusive -- this restores that.
+            if parent is not self and parent.winfo_exists():
+                parent.grab_set()
 
         ttk.Label(
             win,
@@ -3236,7 +3261,7 @@ class App(tk.Tk):
                         "Via Wizard",
                         f"A via cell named {name!r} already "
                         "exists in that library. Replace it?",
-                        parent=self,
+                        parent=win,
                     ):
                         try:
                             created_name, path = do_create(overwrite=True)
@@ -3252,14 +3277,15 @@ class App(tk.Tk):
             self.status.set(f"created via cell {created_name!r}, saved to {path}")
             if on_created is not None:
                 on_created(created_name)
-            win.destroy()
+            _close()
 
         btn_row = ttk.Frame(win)
         btn_row.pack(pady=(6, 12))
         ttk.Button(btn_row, text="Create", command=create_and_close).pack(side="left", padx=6)
-        ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=6)
+        ttk.Button(btn_row, text="Cancel", command=_close).pack(side="left", padx=6)
 
-        win.bind("<Escape>", lambda e: win.destroy())
+        win.bind("<Escape>", lambda e: _close())
+        win.protocol("WM_DELETE_WINDOW", _close)
 
     def show_pad_wizard(self):
         """Tools > Pad Wizard...: create a rectangular pad cell -- a

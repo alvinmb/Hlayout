@@ -118,6 +118,59 @@ def test_route_tab_with_no_via_cell_does_not_trap_the_dialog():
         app.destroy()
 
 
+def test_new_via_cell_from_route_tab_parents_the_wizard_to_technology_properties(tmp_path):
+    # Regression: opening Via Wizard from the Route tab's "New Via
+    # Cell..." button -- while Technology Properties itself holds the
+    # modal grab -- used to always parent/transient the wizard to the
+    # main App instead of to the dialog that's actually open. On
+    # Windows that made the wizard a sibling of Technology Properties
+    # rather than its child, so closing the wizard could raise the App
+    # above the still-open dialog and bury it -- it looked "frozen"
+    # (nothing responds, because nothing you can see is on top). See
+    # App.show_via_wizard().
+    from hlayout.io.gdsio import save_gds
+    app = _make_app()
+    try:
+        parts = Library("PARTS")
+        parts_path = str(tmp_path / "parts.gds")
+        save_gds(parts, parts_path)
+        app.session.attach_library(parts_path)
+
+        tp_win = app.show_technology_properties_dialog()
+        via_btn = next(b for b in _walk(tp_win)
+                       if isinstance(b, ttk.Button) and "Via Cell" in b.cget("text"))
+        # focus_force(), not focus_set(): needs the OS to actually hand
+        # this toplevel real input focus (like a genuine click would),
+        # not just Tk's internal focus bookkeeping -- otherwise
+        # focus_get() inside show_via_wizard() can come back None here
+        # depending on what focus a previous test's now-destroyed
+        # window left behind, and the very thing this test exists to
+        # pin down (parenting off the real focused window) never gets
+        # exercised.
+        via_btn.focus_force()
+        app.update()
+        via_btn.invoke()
+        app.update()
+
+        via_win = next(w for w in tp_win.winfo_children()
+                       if isinstance(w, tk.Toplevel) and w.title() == "Via Wizard")
+        assert via_win.master is tp_win        # chained to the open dialog, not the App
+
+        # Closing it must leave Technology Properties fully usable --
+        # not buried/unresponsive.
+        cancel = next(b for b in _walk(via_win)
+                      if isinstance(b, ttk.Button) and b.cget("text") == "Cancel")
+        cancel.invoke()
+        app.update()
+        assert tp_win.winfo_exists()
+        ok = next(b for b in _walk(tp_win)
+                  if isinstance(b, ttk.Button) and b.cget("text") == "OK")
+        ok.invoke()
+        assert not tp_win.winfo_exists()
+    finally:
+        app.destroy()
+
+
 def test_standalone_wire_bond_dialog_still_opens_and_saves():
     app = _make_app()
     try:
