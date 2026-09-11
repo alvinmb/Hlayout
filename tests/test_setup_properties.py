@@ -171,6 +171,51 @@ def test_new_via_cell_from_route_tab_parents_the_wizard_to_technology_properties
         app.destroy()
 
 
+def test_drc_rules_from_more_tab_is_not_left_grab_blocked():
+    # Regression: Technology Properties' own grab_set() is a LOCAL grab
+    # -- it captures every input event app-wide, not just events aimed
+    # at that window. Opening one of the More tab's editors (DRC Rules,
+    # Mask Operation Batch, Gerber/DXF Export Sets) used to leave that
+    # grab in place, so the new window sat there completely inert --
+    # not even its own comboboxes would respond, e.g. "can't enter a
+    # violation layer" on the DRC window's "Mark violations on layer:"
+    # picker -- since every click still routed to Technology Properties
+    # alone. See App.show_technology_properties_dialog()'s _open_more().
+    app = _make_app()
+    try:
+        tp_win = app.show_technology_properties_dialog()
+        nb = next(w for w in _walk(tp_win) if isinstance(w, ttk.Notebook))
+        nb.select(nb.tabs()[-1])                       # "More..."
+        app.update()
+
+        drc_btn = next(b for b in _walk(tp_win)
+                       if isinstance(b, ttk.Button) and "DRC Rules" in b.cget("text"))
+        drc_btn.invoke()
+        app.update()
+
+        assert tp_win.grab_current() is None           # released, not stuck on tp_win
+
+        drc_win = app._drc_window
+        assert drc_win is not None and drc_win.winfo_exists()
+        combo = next(w for w in _walk(drc_win)
+                     if isinstance(w, ttk.Combobox) and str(w.cget("textvariable")) == str(drc_win.error_layer_var))
+        assert len(combo.cget("values")) == len(app.session.library.layers)   # the full layer stack
+        combo.set(combo.cget("values")[3])
+        assert drc_win.error_layer_var.get() == combo.cget("values")[3]      # actually reaches the widget
+
+        # The Mark-violations checkbutton is a plain toggle right next to
+        # it -- flipping it is a second, simpler proof that ordinary
+        # clicks now land on drc_win at all (grab-blocked, this would be
+        # just as inert as the combobox was).
+        check = next(w for w in _walk(drc_win)
+                     if isinstance(w, ttk.Checkbutton) and str(w.cget("variable")) == str(drc_win.mark_var))
+        before = drc_win.mark_var.get()
+        check.invoke()
+        assert drc_win.mark_var.get() is not before
+    finally:
+        app.destroy()
+
+
 def test_standalone_wire_bond_dialog_still_opens_and_saves():
     app = _make_app()
     try:

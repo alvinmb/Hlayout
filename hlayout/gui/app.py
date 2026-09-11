@@ -1642,6 +1642,23 @@ class App(tk.Tk):
         nb.add(more, text="More…")
         ttk.Label(more, text="Editors with their own windows:",
                   foreground="#555").pack(anchor="w", padx=12, pady=(12, 6))
+
+        def _open_more(opener):
+            # These editors are their own independent, non-modal windows
+            # (reused across calls, meant to stay open and be worked in
+            # alongside everything else) -- but `win`'s grab_set() above
+            # is a LOCAL grab, meaning it captures EVERY input event
+            # app-wide, not just events aimed at `win`. Left in place,
+            # the window `opener` just created would sit there entirely
+            # inert -- not even its own comboboxes would respond -- since
+            # every click still routes to `win` alone. Release it before
+            # opening, then reclaim it once `win` is the active window
+            # again (its own FocusIn), so Technology Properties itself is
+            # still modal to the main app, but doesn't lock out the
+            # editor window it just handed off to.
+            win.grab_release()
+            return opener(self)
+
         for text, opener in (
             ("DRC Rules…", open_drc_window),
             ("Mask Operation Batch…", open_maskop_batch_window),
@@ -1649,7 +1666,8 @@ class App(tk.Tk):
             ("DXF Export Sets…", open_dxf_batch_window),
         ):
             ttk.Button(more, text=text, width=26,
-                       command=lambda o=opener: o(self)).pack(anchor="w", padx=16, pady=3)
+                       command=lambda o=opener: _open_more(o)).pack(anchor="w", padx=16, pady=3)
+        win.bind("<FocusIn>", lambda e: win.grab_set())
 
         err = tk.StringVar(value="")
         ttk.Label(win, textvariable=err, foreground="red", wraplength=420,
