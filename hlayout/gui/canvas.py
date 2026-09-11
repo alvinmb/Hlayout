@@ -257,6 +257,16 @@ class LayoutCanvas(tk.Canvas):
         # typing in the command bar.
         self.bind("<r>", lambda e: self.rotate_selected(90))
         self.bind("<R>", lambda e: self.rotate_selected(90))
+        # Arrow keys: nudge the current selection by one grid unit (see
+        # nudge_selected()) -- DBU y is up, so Up/Down add/subtract
+        # grid_dbu from y and Left/Right subtract/add it from x (see
+        # to_px()'s "y flips: DBU up = screen up"). Bound on the canvas
+        # so they only fire when it has focus, never while typing
+        # elsewhere (the command bar, a dialog field, ...).
+        self.bind("<Up>", lambda e: self.nudge_selected(0, self.grid_dbu))
+        self.bind("<Down>", lambda e: self.nudge_selected(0, -self.grid_dbu))
+        self.bind("<Left>", lambda e: self.nudge_selected(-self.grid_dbu, 0))
+        self.bind("<Right>", lambda e: self.nudge_selected(self.grid_dbu, 0))
         self.focus_set()
 
     # --- coordinate transforms -----------------------------------------
@@ -1888,6 +1898,81 @@ class LayoutCanvas(tk.Canvas):
             shape.rotation = (shape.rotation + angle_deg) % 360.0
         else:
             shape.points = _apply_rotate(shape.points, angle_deg)
+        self._after_edit()
+        return True
+
+    def nudge_selected(self, ddx, ddy):
+        """Arrow keys (Select mode only): move the current selection by
+        (ddx, ddy) DBU -- one grid unit in the pressed direction,
+        regardless of whether Snap to grid is on (that toggle only
+        affects mouse clicks/drags; a keyboard nudge always steps a full
+        grid unit). Moves whatever a mouse drag would move for the same
+        selection: a window-selected group or a whole shape/cell
+        instance translates outright; a vertex/edge reshapes the shape
+        (promoting a Rectangle to a Polygon first, same as dragging one
+        does -- see _promote_rect_to_polygon()); a floated ref-des
+        label/baked Text handle moves relative to its part. A single
+        keypress only ever moves along one axis, so a reshaped vertex or
+        an edge kept to its own normal (Ortho/45, same rule
+        _on_drag_motion() applies) is automatically orthogonal -- no
+        separate constraint needed here. Returns True if something
+        moved, False if nothing is selected or the current tool isn't
+        Select."""
+        if self.draw_mode != "select":
+            return False
+        if self.selected_multi:
+            self.checkpoint()
+            for kind, shape in self.selected_multi:
+                _apply_translate(shape, _geom_snapshot(kind, shape), ddx, ddy)
+            self._after_edit()
+            return True
+        if self.selected is None:
+            return False
+        kind = self.selected[0]
+        self.checkpoint()
+        if kind == "sref_label":
+            _, ref = self.selected
+            ox, oy = ref.label_offset
+            ref.label_offset = (int(round(ox + ddx)), int(round(oy + ddy)))
+        elif kind == "sref_reftext":
+            _, ref = self.selected
+            baked = self._refdes_baked_shape(ref)
+            if baked is None:
+                return False
+            ldx, ldy = self._parent_delta_to_local(ref, ddx, ddy)
+            ox, oy = baked.origin
+            baked.origin = (int(round(ox + ldx)), int(round(oy + ldy)))
+        elif kind == "vertex":
+            _, shape, idx = self.selected
+            if isinstance(shape, Rectangle):     # becomes a free quad, same as a drag
+                shape = self._promote_rect_to_polygon(shape)
+                self.selected = ("vertex", shape, idx)
+            pts = list(shape.points)
+            ox, oy = pts[idx]
+            pts[idx] = (int(round(ox + ddx)), int(round(oy + ddy)))
+            shape.points = pts
+        elif kind == "edge":
+            _, shape, (i, j) = self.selected
+            if isinstance(shape, Rectangle):     # becomes a free quad, same as a drag
+                shape = self._promote_rect_to_polygon(shape)
+                self.selected = ("edge", shape, (i, j))
+            pts = list(shape.points)
+            oxi, oyi = pts[i]
+            oxj, oyj = pts[j]
+            edx, edy = ddx, ddy
+            if self.ortho_enabled:
+                evx, evy = oxj - oxi, oyj - oyi
+                elen2 = evx * evx + evy * evy
+                if elen2:
+                    t = (ddx * evx + ddy * evy) / elen2
+                    edx = ddx - t * evx
+                    edy = ddy - t * evy
+            pts[i] = (int(round(oxi + edx)), int(round(oyi + edy)))
+            pts[j] = (int(round(oxj + edx)), int(round(oyj + edy)))
+            shape.points = pts
+        else:
+            _, shape = self.selected
+            _apply_translate(shape, _geom_snapshot(kind, shape), ddx, ddy)
         self._after_edit()
         return True
 

@@ -153,7 +153,9 @@ home under one of them:
 
 Common actions also have keyboard accelerators: `Ctrl+N`/`Ctrl+O`/
 `Ctrl+S` for New/Open/Save, `F` to fit the view, `G` to toggle the
-grid, `F1` for the command reference.
+grid, `F1` for the command reference. In Select mode, the arrow keys
+nudge the current selection by one grid unit (`R` rotates it 90
+degrees).
 
 ### GUI layout
 

@@ -499,3 +499,121 @@ def test_continue_path_requires_a_whole_path_selected():
         assert app.canvas.continue_path() is False
     finally:
         app.destroy()
+
+
+# --- Arrow-key nudge (Select mode) ------------------------------------
+
+def test_nudge_selected_moves_whole_shape_by_one_grid_unit():
+    app, top = _make_app()
+    try:
+        rect = top.add_rectangle(0, 0, 0, 1000, 1000)
+        app.canvas.redraw()
+        app.canvas.selected = ("shape", rect)
+        g = app.canvas.grid_dbu
+
+        assert app.canvas.nudge_selected(g, 0) is True
+        assert rect.points == [(g, 0), (g + 1000, 0), (g + 1000, 1000), (g, 1000)]
+
+        assert app.canvas.nudge_selected(0, g) is True
+        assert rect.points == [(g, g), (g + 1000, g), (g + 1000, g + 1000), (g, g + 1000)]
+
+        app.session.undo()
+        app.session.undo()
+        restored = app.session.library.cells[top.name].shapes[0]
+        assert restored.points == [(0, 0), (1000, 0), (1000, 1000), (0, 1000)]
+    finally:
+        app.destroy()
+
+
+def test_nudge_selected_does_nothing_when_nothing_selected_or_not_in_select_mode():
+    app, top = _make_app()
+    try:
+        top.add_rectangle(0, 0, 0, 1000, 1000)
+        app.canvas.redraw()
+        app.canvas.selected = None
+        assert app.canvas.nudge_selected(app.canvas.grid_dbu, 0) is False
+
+        app.canvas.selected = ("shape", top.shapes[0])
+        app.canvas.draw_mode = "rect"
+        assert app.canvas.nudge_selected(app.canvas.grid_dbu, 0) is False
+    finally:
+        app.destroy()
+
+
+def test_nudge_selected_vertex_promotes_rectangle_and_moves_only_that_corner():
+    app, top = _make_app()
+    try:
+        rect = top.add_rectangle(0, 0, 0, 10000, 10000)
+        app.canvas.redraw()
+        app.canvas._select_click(_ev(*app.canvas.to_px(0, 0)))
+        assert app.canvas.selected[0] == "vertex"
+        g = app.canvas.grid_dbu
+
+        assert app.canvas.nudge_selected(-g, -g) is True
+
+        from hlayout.core.shapes import Polygon
+        poly = top.shapes[0]
+        assert isinstance(poly, Polygon)             # promoted, like a drag
+        assert poly.points[0] == (-g, -g)
+        assert poly.points[1] == (10000, 0)          # neighbours unmoved
+    finally:
+        app.destroy()
+
+
+def test_nudge_selected_edge_stays_orthogonal():
+    app, top = _make_app()
+    try:
+        poly = top.add_polygon(0, [(0, 0), (10000, 0), (10000, 10000), (0, 10000)])
+        app.canvas.redraw()
+        app.canvas._select_click(_ev(*app.canvas.to_px(5000, 0)))  # bottom edge
+        assert app.canvas.selected[0] == "edge"
+        g = app.canvas.grid_dbu
+
+        # perpendicular (Down) moves the edge
+        assert app.canvas.nudge_selected(0, -g) is True
+        assert poly.points[0] == (0, -g) and poly.points[1] == (10000, -g)
+
+        # along the edge itself (Right) is projected away -- an edge
+        # kept orthogonal to itself, same rule a mouse drag follows
+        assert app.canvas.nudge_selected(g, 0) is True
+        assert poly.points[0] == (0, -g) and poly.points[1] == (10000, -g)
+    finally:
+        app.destroy()
+
+
+def test_nudge_selected_moves_a_window_selected_group():
+    app, top = _make_app()
+    try:
+        r1 = top.add_rectangle(0, 0, 0, 100, 100)
+        r2 = top.add_rectangle(0, 2000, 0, 2100, 100)
+        app.canvas.redraw()
+        app.canvas.selected = None
+        app.canvas.selected_multi = [("shape", r1), ("shape", r2)]
+        g = app.canvas.grid_dbu
+
+        assert app.canvas.nudge_selected(0, g) is True
+        assert r1.points[0] == (0, g)
+        assert r2.points[0] == (2000, g)
+    finally:
+        app.destroy()
+
+
+def test_arrow_key_press_nudges_the_selected_shape():
+    app, top = _make_app()
+    try:
+        rect = top.add_rectangle(0, 0, 0, 1000, 1000)
+        app.canvas.redraw()
+        app.canvas.selected = ("shape", rect)
+        app.canvas.focus_force()
+        app.update()
+        g = app.canvas.grid_dbu
+
+        app.canvas.event_generate("<Right>", when="now")
+        app.update()
+        assert rect.points[0] == (g, 0)
+
+        app.canvas.event_generate("<Up>", when="now")
+        app.update()
+        assert rect.points[0] == (g, g)
+    finally:
+        app.destroy()
