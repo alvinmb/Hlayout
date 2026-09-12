@@ -104,6 +104,48 @@ def test_render_cell_svg_scale_argument_overrides_auto():
     assert f'width="{2000 * DBU_MM * 3.0:.3f}mm"' in svg
 
 
+# --- Outline-only layers stay visible at print scale (a package body /
+# component outline is routinely drawn with Fill unchecked) ------------
+
+def test_outline_only_polygon_gets_a_physical_hairline_not_1_dbu():
+    from hlayout.io.printio import _hairline_dbu
+
+    s = _design()
+    s.library.layers.set_style(5, fill=False)
+    s.rect(5, 0, 0, 20000, 20000)   # a 20x20mm outline-only package body
+    svg, layer_order, scale_used = render_cell_svg(s.library, "TOP", margin_dbu=0, scale=1.0)
+    assert 5 in layer_order
+    assert scale_used == 1.0
+    expected = _hairline_dbu(1.0)
+    assert expected == 150.0   # 0.15mm hairline / 0.001 mm-per-DBU
+    assert f'stroke-width="{expected:.4f}"' in svg
+    # the old bug: a literal 1-DBU (1 micron) stroke -- present in the
+    # geometry, invisible at any real scale, not merely faint.
+    assert 'stroke-width="1"/>' not in svg
+
+
+def test_outline_only_polygon_hairline_shrinks_with_scale():
+    from hlayout.io.printio import _hairline_dbu
+
+    s = _design()
+    s.library.layers.set_style(5, fill=False)
+    s.rect(5, 0, 0, 500, 500)   # tiny -- auto-scales up
+    svg, _layers, scale_used = render_cell_svg(s.library, "TOP", margin_dbu=0)
+    assert scale_used > 1.0
+    expected = _hairline_dbu(scale_used)
+    assert f'stroke-width="{expected:.4f}"' in svg
+
+
+def test_thin_path_is_not_thinner_than_the_hairline_floor():
+    from hlayout.io.printio import _hairline_dbu
+
+    s = Session.new("THINPATH")
+    s.new_cell("TOP")
+    s.path(1, [(0, 0), (20000, 0)], width=1, cap="round")   # 1 DBU -- essentially zero
+    svg, _layers, scale_used = render_cell_svg(s.library, "TOP", margin_dbu=0, scale=1.0)
+    assert f'stroke-width="{_hairline_dbu(scale_used):.4f}"' in svg
+
+
 # --- write_print_html() ------------------------------------------------
 
 def test_write_print_html_writes_a_file_with_a_legend(tmp_path):

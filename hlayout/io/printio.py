@@ -38,6 +38,13 @@ Fidelity gaps (disclosed, not silently approximated):
     practice, and getting a compounded rotation's sign right after the
     DBU-to-SVG y-flip is easy to get subtly backwards, which would be
     worse than a plain but correct label.
+  * A polygon outline (drawn even when Fill is on, and the ONLY thing
+    drawn when it's off -- an outline-only "Fill" layer is exactly how
+    a component body/package outline is usually represented) is a
+    plotting convention, not real geometry -- so it's held to a fixed
+    physical HAIRLINE_MM on the page, not the design's actual DBU
+    coordinates. Do not read a printed outline's thickness as a
+    dimension.
 """
 
 import html
@@ -61,6 +68,22 @@ PRINT_TARGET_MM = 150.0
 #: one first -- printed engineering-drawing style (2x, 5x, 10x, ...),
 #: not an arbitrary decimal that happens to hit PRINT_TARGET_MM exactly.
 _NICE_SCALES = (1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0)
+
+#: Thinnest line width (mm, on the physical printed page) any stroke is
+#: ever allowed to shrink below -- a real drafting hairline. The
+#: viewBox is in raw DBU, so a stroke needs a DIFFERENT DBU width at
+#: every scale to come out at this same physical thickness; see
+#: _hairline_dbu(). Without this, an outline-only layer (Fill
+#: unchecked -- a component body/package outline is drawn this way
+#: routinely) rendered with a literal "1 DBU" (1 micron) stroke is
+#: geometrically present but printed at a small fraction of a pixel --
+#: invisible, not merely faint, on any design bigger than a few dozen
+#: microns across.
+HAIRLINE_MM = 0.15
+
+
+def _hairline_dbu(scale_used: float) -> float:
+    return HAIRLINE_MM / (DBU_MM * scale_used)
 
 
 def _auto_scale(width_mm: float, height_mm: float) -> float:
@@ -178,6 +201,7 @@ def render_cell_svg(library: Library, cell_name: str, margin_dbu: float = 2000.0
     # stretches the drawing to fill it, which is exactly "print
     # bigger" without touching a single coordinate below.
     printed_width_mm, printed_height_mm = width_mm * scale_used, height_mm * scale_used
+    hairline = _hairline_dbu(scale_used)
 
     def sx(x):
         return x - x0
@@ -201,12 +225,12 @@ def render_cell_svg(library: Library, cell_name: str, margin_dbu: float = 2000.0
             pts_attr = " ".join(f"{sx(x):.2f},{sy(y):.2f}" for x, y in pts)
             fill = color if layer.fill else "none"
             parts.append(f'<polygon points="{pts_attr}" fill="{fill}" '
-                          f'stroke="{color}" stroke-width="1"/>')
+                          f'stroke="{color}" stroke-width="{hairline:.4f}"/>')
         for pts, width_dbu_path in paths.get(n, []):
             pts_attr = " ".join(f"{sx(x):.2f},{sy(y):.2f}" for x, y in pts)
-            w = max(1.0, width_dbu_path)
+            w = max(hairline, width_dbu_path)
             parts.append(f'<polyline points="{pts_attr}" fill="none" stroke="{color}" '
-                          f'stroke-width="{w:.2f}" stroke-linecap="round" stroke-linejoin="round"/>')
+                          f'stroke-width="{w:.4f}" stroke-linecap="round" stroke-linejoin="round"/>')
         for (x, y), text in texts.get(n, []):
             parts.append(f'<text x="{sx(x):.2f}" y="{sy(y):.2f}" font-size="{height_dbu * 0.02:.1f}" '
                           f'fill="{color}">{html.escape(text)}</text>')
