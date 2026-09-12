@@ -259,6 +259,21 @@ class Session:
             raise LibraryError("no current cell to export")
         return write_freecad_macro(self.library, name, path)
 
+    def print_cell(self, cell_name: Optional[str] = None, out_path: Optional[str] = None) -> str:
+        """Render the design (default: the current cell) as a
+        printable HTML page -- a color-swatch legend plus an SVG
+        drawing of its visible, flattened geometry at true physical
+        scale -- and write it to ``out_path`` (a fresh temp .html file
+        if not given). Returns the path written; File > Print... (and
+        the PRINT command) then hand that off to the OS's own print
+        flow, since Tkinter has no print dialog of its own. See
+        hlayout.io.printio for exactly what does/doesn't render."""
+        from ..io.printio import write_print_html
+        name = cell_name or self.current_cell_name
+        if name is None:
+            raise LibraryError("no current cell to print")
+        return write_print_html(self.library, name, out_path)
+
     def run_dxf_export_batch(self, jobs=None, cell_name: Optional[str] = None):
         """Run a saved series of DXF export jobs -- e.g. one job per
         downstream tool/consumer, each with its own layer subset and

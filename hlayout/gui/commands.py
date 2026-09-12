@@ -131,6 +131,13 @@ Files:
                                        wire bonds as raised loops, components as
                                        fixed-height bodies or substituted models);
                                        run it inside FreeCAD. Needs shapely
+    PRINT [cell=<name>] [out=<path.html>]
+                                       render the design (default: the current cell)
+                                       as a printable HTML page -- a legend plus an
+                                       SVG drawing of its visible geometry at true
+                                       physical scale -- and hand it to the system's
+                                       print flow (or just open it if that fails, so
+                                       Ctrl+P still works). Same as File > Print...
     MERGE <lib1.gds> <lib2.gds> <lib3.gds> [library_name]
                                        combine every cell from lib1 and lib2 into a
                                        new file lib3 -- a plain file-to-file operation,
@@ -840,6 +847,28 @@ class CommandInterpreter:
         except LayoutError as e:
             raise CommandError(str(e))
         return f"FreeCAD 3D macro written to {written}"
+
+    def _cmd_print(self, args):
+        usage = "usage: PRINT [cell=<name>] [out=<path.html>]"
+        cell_name = None
+        out = None
+        for a in args:
+            if a.lower().startswith("cell="):
+                cell_name = a.split("=", 1)[1]
+            elif a.lower().startswith("out="):
+                out = a.split("=", 1)[1]
+            else:
+                raise CommandError(usage)
+        try:
+            path = self.session.print_cell(cell_name=cell_name, out_path=out)
+        except LayoutError as e:
+            raise CommandError(str(e))
+        from ..io.printio import send_to_system_printer
+        if send_to_system_printer(path):
+            return f"sent to the system printer: {path}"
+        import webbrowser
+        webbrowser.open(path)
+        return f"opened {path} -- use Ctrl+P to print (no system print handoff available here)"
 
     def _cmd_merge(self, args):
         usage = "usage: MERGE <lib1.gds> <lib2.gds> <lib3.gds> [library_name]"

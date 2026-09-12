@@ -106,9 +106,9 @@ in the app (toolbar buttons, command bar equivalents, etc.) has a
 home under one of them:
 
 - **File** — New, Open GDS..., Save GDS..., Save As..., Save As
-  Library..., Archive Design..., Export Gerber..., Exit. Pure file I/O
-  for the design itself; library-attach and cell-placement live under
-  Setup/Create instead (see below).
+  Library..., Archive Design..., Export Gerber..., Print... (`Ctrl+P`),
+  Exit. Pure file I/O for the design itself; library-attach and
+  cell-placement live under Setup/Create instead (see below).
 - **Setup** — Attach Library..., Attached Libraries..., Layers... (jumps
   to the Layers tab), Snap to Grid (checkbox), Path Style... (a small
   dialog to set the width and end cap used when drawing new paths —
@@ -153,27 +153,34 @@ home under one of them:
   a short description, and the version number.
 
 Common actions also have keyboard accelerators: `Ctrl+N`/`Ctrl+O`/
-`Ctrl+S` for New/Open/Save, `F` to fit the view, `G` to toggle the
-grid, `F1` for the command reference. In Select mode, the arrow keys
-nudge the current selection by one grid unit (`R` rotates it 90
-degrees).
+`Ctrl+S` for New/Open/Save, `Ctrl+Shift+S` for Save As..., `Ctrl+P` for
+Print..., `F` to fit the view, `G` to toggle the grid, `F1` for the
+command reference. In Select mode, the arrow keys nudge the current
+selection by one grid unit (`R` rotates it 90 degrees).
 
 ### GUI layout
 
 - **Canvas** (left): the layout view, starting right below the menu
   bar. Middle-drag or right-drag to pan, mouse wheel to zoom.
+- **Top toolbar** (right under the menu bar): the Cell selector, the
+  target Layer (pick from the dropdown, or type a layer number or name
+  directly), and an **Auto-save (15 min)** switch — turn it on to save
+  the design (a plain Save GDS..., .gds + .hlaux sidecar) automatically
+  every 15 minutes while it's open. It's a per-session setting only
+  (off by default, not remembered across reopening the app) and skips
+  silently — noted on the status line, switch left on — until the
+  design has been saved at least once by hand, since that's what gives
+  it a location to write to.
 - **Bottom toolbar** (above the status bar and Command bar): Fit,
-  Select, Zoom Win, Grid, New View, the Cell selector, the target Layer
-  (pick from the dropdown, or type a layer number or name directly), a
-  Snap to grid toggle, and Delete Selected. There's no separate
-  draw-tool button row any more — picking a draw tool (Select, Rect,
-  Polygon, Path, Circle, Text, Cell Instance) is done from the
-  **Create** and **Edit** menus (see Menu bar, above), which used to
-  duplicate a row of buttons here. Path width/end cap and circle
-  segment count live in **Setup > Path Style...** and
-  **Setup > Circle Segments...** instead of on this toolbar (see
-  below) — both are options that only apply to a single draw tool,
-  unlike Layer and Snap to grid.
+  Select, Zoom Win, Grid, New View, a Snap to grid toggle, and Delete
+  Selected. There's no separate draw-tool button row any more —
+  picking a draw tool (Select, Rect, Polygon, Path, Circle, Text, Cell
+  Instance) is done from the **Create** and **Edit** menus (see Menu
+  bar, above), which used to duplicate a row of buttons here. Path
+  width/end cap and circle segment count live in
+  **Setup > Path Style...** and **Setup > Circle Segments...** instead
+  of on this toolbar (see below) — both are options that only apply to
+  a single draw tool, unlike Snap to grid.
 - **Layers tab** (right): an **All On** / **All Off** button pair above
   the table to toggle every layer's visibility at once, then all 64
   layers with visibility checkbox, an editable **name** field, colour
@@ -632,6 +639,28 @@ restores a sidecar if present. If an embedded attached library fails to
 restore (corrupted sidecar, truncated file), the rest of the design
 still opens — check `session.attach_errors` (a list of messages, empty
 if nothing went wrong) or watch for the warning dialog in the GUI.
+
+### Printing
+
+**File > Print...** (`Ctrl+P`) renders the current cell — its visible,
+flattened geometry (every SRef/ARef resolved, same "print what's on
+screen" rule the Gerber/DXF exporters follow) plus a colour-swatch
+layer legend — as an SVG drawing sized to true physical scale from the
+design's own units, wrapped in a printable HTML page. Tkinter has no
+print dialog of its own, so this hands the page straight to the OS's
+own print flow (`os.startfile(path, "print")` on Windows) and falls
+back to just opening it in the default browser — Ctrl+P there still
+prints it — if that handoff isn't available on this platform/setup.
+Text shapes ARE included (unlike Gerber, which has no text primitive),
+drawn at their position but unrotated; path end caps are always drawn
+round regardless of their own cap style — both disclosed simplifications
+in `hlayout.io.printio`, not silent approximations.
+
+The same behaviour is available from the command bar / scripting API:
+`PRINT [cell=<name>] [out=<path.html>]` (`Session.print_cell()` to
+build the page, `hlayout.io.printio.send_to_system_printer()` for the
+OS handoff) — `cell` defaults to the current cell, `out` to a fresh
+temp file.
 
 ### Remap layers
 
@@ -1237,6 +1266,13 @@ Files:
                                        visible layer with data, named
                                        <output_prefix>_L<NN>_<layer name>.gbr;
                                        cell defaults to the current cell
+    PRINT [cell=<name>] [out=<path.html>]
+                                       render the design (default: the current cell)
+                                       as a printable HTML page -- a legend plus an
+                                       SVG drawing of its visible geometry at true
+                                       physical scale -- and hand it to the system's
+                                       print flow (or just open it if that fails, so
+                                       Ctrl+P still works). Same as File > Print...
 
 Technology file (layer stack + open-ended global parameters; usually
 loaded once at the start of a design):

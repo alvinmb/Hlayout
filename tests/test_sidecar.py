@@ -366,6 +366,90 @@ def test_archive_design_refuses_when_the_design_has_never_been_saved(monkeypatch
         app.destroy()
 
 
+# --- Auto-save (top toolbar switch) -----------------------------------
+
+def test_autosave_toggle_schedules_and_cancels_the_timer():
+    app = _make_app()
+    try:
+        assert app.autosave_var.get() is False
+        assert getattr(app, "_autosave_job", None) is None
+
+        app.autosave_var.set(True)
+        app._on_autosave_toggle()
+        assert app._autosave_job is not None      # a self.after() timer is now pending
+
+        app.autosave_var.set(False)
+        app._on_autosave_toggle()
+        assert app._autosave_job is None          # cancelled, nothing left pending
+    finally:
+        app.destroy()
+
+
+def test_autosave_tick_writes_to_current_path_and_reschedules(tmp_path):
+    app = _make_app()
+    try:
+        app.session.rect(0, 0, 0, 100, 100)
+        design_path = str(tmp_path / "design.gds")
+        app.current_path = design_path
+        app.autosave_var.set(True)
+
+        app._run_autosave()
+
+        assert os.path.exists(design_path)
+        assert os.path.exists(sidecar_path(design_path))   # same write as Save GDS...
+        assert "auto-saved" in app.status.get()
+        assert app._autosave_job is not None               # still armed -- ticks again
+    finally:
+        app._cancel_autosave()
+        app.destroy()
+
+
+def test_autosave_tick_skips_but_stays_armed_when_never_saved():
+    app = _make_app()
+    try:
+        assert app.current_path is None
+        app.autosave_var.set(True)
+
+        app._run_autosave()
+
+        assert "skipped" in app.status.get()
+        assert app._autosave_job is not None   # doesn't disarm the switch, just skips this tick
+    finally:
+        app._cancel_autosave()
+        app.destroy()
+
+
+def test_autosave_does_not_fire_once_switched_off(tmp_path):
+    app = _make_app()
+    try:
+        app.current_path = str(tmp_path / "design.gds")
+        app.autosave_var.set(True)
+        app._on_autosave_toggle()
+        job = app._autosave_job
+        assert job is not None
+
+        app.autosave_var.set(False)
+        app._on_autosave_toggle()
+        # Cancelling the pending after() job means _run_autosave never
+        # fires for it -- nothing left to assert on the job itself
+        # (after_cancel doesn't leave a queryable "cancelled" state),
+        # so the real assertion is just that a fresh toggle-off always
+        # leaves _autosave_job cleared, checked in the timer test above.
+        assert app._autosave_job is None
+    finally:
+        app.destroy()
+
+
+def test_quitting_cancels_a_pending_autosave():
+    app = _make_app()
+    app.autosave_var.set(True)
+    app._on_autosave_toggle()
+    assert app._autosave_job is not None
+    # _on_quit() destroys app itself; this just proves it doesn't raise
+    # trying to cancel the pending timer on the way out.
+    app._on_quit()
+
+
 def test_app_new_library_clears_attached_libraries(tmp_path):
     part_path = _make_part_library(tmp_path / "clearpart.gds")
     app = _make_app()

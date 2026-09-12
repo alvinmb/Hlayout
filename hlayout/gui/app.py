@@ -1,6 +1,7 @@
 """Main application window for the Thick-Film Hybrid Layout CAD tool."""
 
 import os
+import time
 import webbrowser
 import zipfile
 import tkinter as tk
@@ -15,6 +16,7 @@ from ..core.library import Library
 from ..core.maskops import MASK_OPS
 from ..core.shapes import CIRCLE_SEGMENT_CHOICES
 from ..core.units import dbu_to_mm, mm_to_dbu
+from ..io.printio import send_to_system_printer
 from ..io.sidecar import load_design, sidecar_path
 from ..io.techfile import (
     default_layer_thickness,
@@ -354,6 +356,7 @@ class App(tk.Tk):
         filem.add_command(label="Gerber Export Sets...", command=lambda: open_gerber_batch_window(self))
         filem.add_command(label="DXF Export Sets...", command=lambda: open_dxf_batch_window(self))
         filem.add_command(label="Export to FreeCAD (3D Macro)...", command=self.export_freecad_macro)
+        filem.add_command(label="Print...", command=self.print_current_view, accelerator="Ctrl+P")
         filem.add_separator()
         filem.add_command(label="Exit", command=self._on_quit)
 
@@ -475,6 +478,7 @@ class App(tk.Tk):
         self.bind("<Control-o>", lambda e: self.open_gds())
         self.bind("<Control-s>", lambda e: self.save_gds())
         self.bind("<Control-Shift-S>", lambda e: self.save_as_gds())
+        self.bind("<Control-p>", lambda e: self.print_current_view())
         self.bind("<Control-z>", lambda e: self._undo())
         self.bind("<Control-y>", lambda e: self._redo())
         self.bind("<Control-Shift-Z>", lambda e: self._redo())
@@ -798,7 +802,9 @@ class App(tk.Tk):
         because Cell and Layer are the two controls reached for before
         anything else on a given part of the design -- worth keeping
         visible at the top instead of grouped in with view/draw-mode
-        options at the bottom."""
+        options at the bottom. Also carries the Auto-save switch (see
+        _on_autosave_toggle()) -- not a Cell/Layer control, but this is
+        the only always-visible row above the canvas."""
         bar = ttk.Frame(self)
         bar.pack(side="top", fill="x", before=self._menu_bar_anchor)
         self._top_toolbar_frame = bar
@@ -818,6 +824,16 @@ class App(tk.Tk):
         self.layer_combo.bind("<<ComboboxSelected>>", lambda e: self._on_layer_change())
         self.layer_combo.bind("<Return>", lambda e: self._on_layer_change())
         self.layer_combo.bind("<FocusOut>", lambda e: self._on_layer_change())
+
+        # Auto-save: a plain on/off switch, same convention as Snap to
+        # grid/Ortho 45 degree routing elsewhere -- off by default, and
+        # a per-session setting only (not saved into the technology
+        # file), since it's about this editing session, not the design
+        # itself. See _on_autosave_toggle()/_run_autosave().
+        ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=(16, 8), pady=2)
+        self.autosave_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(bar, text="Auto-save (15 min)", variable=self.autosave_var,
+                         command=self._on_autosave_toggle).pack(side="left", pady=2)
 
     def _build_bottom_toolbar(self):
         """The toolbar row at the bottom of the window (above the status
@@ -2436,6 +2452,56 @@ class App(tk.Tk):
         self.current_path = path
         self.status.set(f"saved {path} (+ technology/attached-libraries sidecar)")
 
+    #: Milliseconds between auto-saves while the top toolbar's
+    #: Auto-save switch is on -- see _on_autosave_toggle().
+    AUTOSAVE_INTERVAL_MS = 15 * 60 * 1000
+
+    def _on_autosave_toggle(self):
+        """Top toolbar > Auto-save (15 min): flips the recurring
+        self.after() timer on/off. Turning it on schedules the first
+        tick AUTOSAVE_INTERVAL_MS from now (not immediately -- flipping
+        the switch isn't itself a reason to save right away); turning
+        it off cancels whatever's pending. A per-session setting only,
+        not saved into the technology file or restored on reopen."""
+        self._cancel_autosave()
+        if self.autosave_var.get():
+            self._schedule_autosave()
+            self.status.set("auto-save on -- every 15 minutes while a file is open")
+        else:
+            self.status.set("auto-save off")
+
+    def _schedule_autosave(self):
+        self._autosave_job = self.after(self.AUTOSAVE_INTERVAL_MS, self._run_autosave)
+
+    def _cancel_autosave(self):
+        job = getattr(self, "_autosave_job", None)
+        if job is not None:
+            self.after_cancel(job)
+        self._autosave_job = None
+
+    def _run_autosave(self):
+        """Fires every AUTOSAVE_INTERVAL_MS while the switch is on.
+        Silent by design -- no dialog, just a status-line note -- since
+        it runs unattended and a save succeeding or being skipped is
+        exactly the kind of thing that shouldn't interrupt whatever the
+        user is doing. Skips (without disarming the switch) when the
+        design has never been saved yet -- current_path is what "where"
+        an auto-save writes to is defined from, same as Save GDS...,
+        and there's nothing to silently prompt a location for here."""
+        self._autosave_job = None
+        if self.current_path:
+            try:
+                self.session.save_design(self.current_path)
+                self.status.set(f"auto-saved {self.current_path} "
+                                f"at {time.strftime('%H:%M:%S')}")
+            except LayoutError as e:
+                self.status.set(f"auto-save failed: {e}")
+        else:
+            self.status.set("auto-save skipped -- save the design once "
+                            "(File > Save GDS...) to give it a location first")
+        if self.autosave_var.get():
+            self._schedule_autosave()
+
     def save_as_gds(self):
         """File > Save As...: always prompt for a location -- pre-filled
         with the current file's folder/name, if any -- and save the
@@ -2593,6 +2659,28 @@ class App(tk.Tk):
             return
         self.status.set(f"FreeCAD 3D macro written to {written} "
                         f"-- run it inside FreeCAD (Macro > Macros...)")
+
+    def print_current_view(self):
+        """File > Print... (Ctrl+P): render the current cell as a
+        printable HTML page (Session.print_cell() -- a legend plus an
+        SVG drawing of its visible geometry at true physical scale)
+        and hand it straight to the OS's own print flow
+        (hlayout.io.printio.send_to_system_printer() --
+        os.startfile(path, "print") on Windows), since Tkinter has no
+        print dialog of its own. Falls back to just opening the page
+        in the default browser if that handoff isn't available on this
+        platform/setup -- Ctrl+P there still prints it."""
+        try:
+            path = self.session.print_cell()
+        except LayoutError as e:
+            dialogs.show_error("Print", str(e), parent=self)
+            return
+        if send_to_system_printer(path):
+            self.status.set(f"sent to the system printer: {path}")
+        else:
+            webbrowser.open(path)
+            self.status.set(f"opened {path} for printing -- use Ctrl+P "
+                            f"(no system print handoff available here)")
 
     def attach_library(self):
         path = filedialog.askopenfilename(filetypes=[("GDSII", "*.gds"), ("All files", "*.*")])
@@ -4049,6 +4137,7 @@ class App(tk.Tk):
         self.props_text.config(state="disabled")
 
     def _on_quit(self):
+        self._cancel_autosave()
         self.destroy()
 
 
