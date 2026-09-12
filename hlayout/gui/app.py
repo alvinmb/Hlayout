@@ -356,6 +356,8 @@ class App(tk.Tk):
         filem.add_command(label="Gerber Export Sets...", command=lambda: open_gerber_batch_window(self))
         filem.add_command(label="DXF Export Sets...", command=lambda: open_dxf_batch_window(self))
         filem.add_command(label="Export to FreeCAD (3D Macro)...", command=self.export_freecad_macro)
+        filem.add_command(label="Build FreeCAD Component Library...",
+                          command=self.build_component_library_macro)
         filem.add_command(label="Print...", command=self.print_current_view, accelerator="Ctrl+P")
         filem.add_separator()
         filem.add_command(label="Exit", command=self._on_quit)
@@ -2660,6 +2662,25 @@ class App(tk.Tk):
             return
         self.status.set(f"FreeCAD 3D macro written to {written} "
                         f"-- run it inside FreeCAD (Macro > Macros...)")
+
+    def build_component_library_macro(self):
+        """File > Build FreeCAD Component Library...: write a .FCMacro
+        that, run inside FreeCAD, builds a small library of generic 3D
+        component bodies (ceramic chip capacitors + a 20-pin metal
+        package) and exports each as its own STEP file -- meant to be
+        referenced from a placed cell's component_models tech-param
+        (Setup > Technology Properties...) so export_freecad() can
+        substitute a real 3D body for that instance."""
+        out_dir = filedialog.askdirectory(title="Build FreeCAD Component Library -- Output Folder")
+        if not out_dir:
+            return
+        try:
+            written = self.session.generate_component_library(out_dir)
+        except OSError as e:
+            dialogs.show_error("Build Component Library", str(e), parent=self)
+            return
+        self.status.set(f"Component library macro written to {written} "
+                        f"-- run it inside FreeCAD to generate the STEP files")
 
     def print_current_view(self):
         """File > Print... (Ctrl+P): render the current cell as a

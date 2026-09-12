@@ -267,6 +267,36 @@ class Session:
             raise LibraryError("no current cell to export")
         return write_freecad_macro(self.library, name, path)
 
+    def generate_component_library(self, out_dir: str, path: Optional[str] = None,
+                                     ceramic_caps=None, pkg20=None):
+        """Write a FreeCAD macro (``.FCMacro``) at ``path`` (default:
+        ``<out_dir>/build_component_library.FCMacro``) that, run inside
+        FreeCAD, builds a small library of generic 3D component
+        bodies -- standard EIA ceramic chip-capacitor case sizes
+        (0603/0805/1206 by default) and a 20-pin sealed metal/ceramic
+        hybrid flatpack -- and exports each as its own ``.step`` file
+        into ``out_dir``.
+
+        Those STEP files are meant to be referenced from a placed
+        cell's ``component_models`` tech-param (Setup > Technology
+        Properties...): set its mode to "model" and model_path to one
+        of the generated files, and export_freecad() then substitutes
+        this real 3D body for that instance instead of a flat extruded
+        footprint. This function only writes the macro text -- the
+        STEP files themselves only exist once the macro is actually
+        run inside FreeCAD.
+
+        `ceramic_caps`, if given, overrides the default case-size list
+        (a list of (name, length_mm, width_mm, height_mm,
+        end_termination_length_mm) tuples; pass [] to skip capacitors
+        entirely). `pkg20` overrides any subset of the 20-pin
+        package's dimensions as a dict (e.g. {"leads_per_side": 8} for
+        a 16-pin version), or pass pkg20=False to skip it. Returns
+        ``path``. See hlayout.io.component_library for details."""
+        from ..io.component_library import write_component_library_macro
+        return write_component_library_macro(out_dir, path=path,
+                                              ceramic_caps=ceramic_caps, pkg20=pkg20)
+
     def print_cell(self, cell_name: Optional[str] = None, out_path: Optional[str] = None,
                     scale: Optional[float] = None) -> str:
         """Render the design (default: the current cell) as a

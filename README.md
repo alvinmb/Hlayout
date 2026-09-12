@@ -585,6 +585,49 @@ optionally restricts the export to a subset of layer numbers, same as
 `export_gerber()`. (There's no command-bar `DXF` command yet — use
 `export_dxf()` directly, or the File menu.)
 
+### Export to FreeCAD (3D)
+
+**File > Export to FreeCAD (3D Macro)...** writes a `.FCMacro` — a
+plain Python script for [FreeCAD](https://www.freecad.org/) — that,
+when run inside FreeCAD (Macro > Macros... > Execute, or headlessly via
+`freecadcmd`), rebuilds the current cell as a 3D stack of coloured
+solids: one solid per printed film/layer, stacked at the elevation its
+fired-film thickness puts it (layer number order = print order, same
+convention as the rest of hlayout), each layer merged through the same
+shapely pipeline Mask Operations/DXF export use, with wire bonds
+rendered as raised loops. Layer thicknesses come from the
+`layer_thickness` tech-param (Setup > Technology Properties...),
+falling back to a role heuristic (conductor/dielectric/resistor/etc.)
+when a layer has no explicit thickness set. Requires `shapely`.
+
+Placed components (Srefs) render as either a fixed-height extruded box
+(the default), or — via the `component_models` tech-param — a real 3D
+body substituted from an external STEP/IGES file, so a schematic
+footprint can be swapped for an accurate mechanical model without
+touching the design's own geometry. Available from scripting as
+`session.export_freecad(path, cell_name=None)`.
+
+**File > Build FreeCAD Component Library...** writes a second,
+independent `.FCMacro` that, run inside FreeCAD, builds a small set of
+generic 3D component bodies — the standard EIA ceramic chip-capacitor
+case sizes (0603/0805/1206) and a 20-pin sealed metal/ceramic hybrid
+flatpack (10 gull-wing leads per long side at 1.27 mm pitch) — and
+exports each as its own `.step` file into a folder you choose. Those
+STEP files are exactly what `component_models`, above, expects as a
+`model_path`: generate the library once, then point any placed cell at
+one of the resulting files to get a real 3D body in the FreeCAD export
+instead of a flat box. The geometry is a generic placeholder (right
+case size and pin count, not any one manufacturer's exact outline) —
+useful for visualization and interference-checking, not for
+manufacturing drawings.
+
+Available from scripting as
+`session.generate_component_library(out_dir, path=None, ceramic_caps=None, pkg20=None)`
+(see `hlayout/io/component_library.py`) — pass a custom `ceramic_caps`
+list to generate different case sizes, or `pkg20` overrides (e.g.
+`{"leads_per_side": 8}` for a 16-pin version, or `pkg20=False` to skip
+it).
+
 ### Technology files
 
 A **technology file** captures everything about *how a process draws*
