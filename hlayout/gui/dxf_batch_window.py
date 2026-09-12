@@ -42,13 +42,14 @@ def _layer_label(library, number):
 class JobDialog(tk.Toplevel):
     """Modal Add/Edit form for one DXF export job."""
 
-    def __init__(self, parent, library, job: DxfExportJob = None):
+    def __init__(self, parent, library, job: DxfExportJob = None, initial_dir=None):
         super().__init__(parent)
         self.title("Add DXF Export Job" if job is None else "Edit DXF Export Job")
         self.transient(parent)
         self.grab_set()
         self.resizable(False, False)
         self.library = library
+        self.initial_dir = initial_dir
         self.result = None
         self._build(job)
         self.bind("<Escape>", lambda e: self.destroy())
@@ -110,6 +111,7 @@ class JobDialog(tk.Toplevel):
         path = filedialog.asksaveasfilename(
             title="DXF Output File", defaultextension=".dxf",
             filetypes=[("DXF", "*.dxf"), ("All files", "*.*")], parent=self,
+            initialdir=self.initial_dir,
         )
         if path:
             self.path_var.set(path)
@@ -226,8 +228,11 @@ class DxfBatchWindow(tk.Toplevel):
         sel = self.job_table.selection()
         return int(sel[0]) if sel else -1
 
+    def _default_dir(self):
+        return self.app.default_export_dir("dxf") if self.app is not None else None
+
     def _add_job(self):
-        dlg = JobDialog(self, self.library)
+        dlg = JobDialog(self, self.library, initial_dir=self._default_dir())
         self.wait_window(dlg)
         if dlg.result is not None:
             self.jobs.append(dlg.result)
@@ -239,7 +244,7 @@ class DxfBatchWindow(tk.Toplevel):
         if row < 0:
             dialogs.show_info("Edit Job", "Select a job first.", parent=self)
             return
-        dlg = JobDialog(self, self.library, job=self.jobs[row])
+        dlg = JobDialog(self, self.library, job=self.jobs[row], initial_dir=self._default_dir())
         self.wait_window(dlg)
         if dlg.result is not None:
             self.jobs[row] = dlg.result
@@ -302,7 +307,7 @@ class DxfBatchWindow(tk.Toplevel):
         path = filedialog.asksaveasfilename(
             title="Export DXF", defaultextension=".dxf",
             filetypes=[("DXF", "*.dxf"), ("All files", "*.*")],
-            initialfile=self.library.name, parent=self,
+            initialfile=self.library.name, initialdir=self._default_dir(), parent=self,
         )
         if not path:
             return

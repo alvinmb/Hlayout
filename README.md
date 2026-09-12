@@ -542,6 +542,13 @@ cell) or `session.export_gerber(prefix, cell_name=None, layers=None)`,
 the latter also accepting an optional list of layer numbers to restrict
 the export to.
 
+Tools > Gerber Export Sets... "Quick Export..." and its per-job Browse
+dialog default to a `gerber` subfolder next to the open design's own
+`.gds` file (e.g. `C:/jobs/board1/gerber` for a design opened from
+`C:/jobs/board1/board1.gds`), created automatically the first time it's
+needed — you can always browse elsewhere instead, this only sets where
+the dialog opens to.
+
 ### Export DXF
 
 **File > DXF Export Sets...** (also under Tools) writes the current
@@ -585,20 +592,31 @@ optionally restricts the export to a subset of layer numbers, same as
 `export_gerber()`. (There's no command-bar `DXF` command yet — use
 `export_dxf()` directly, or the File menu.)
 
+Like Gerber, Tools > DXF Export Sets... "Quick Export..." and its
+per-job Browse dialog default to a `dxf` subfolder next to the open
+design's `.gds` file, created automatically the first time it's
+needed.
+
 ### Export to FreeCAD (3D)
 
-**File > Export to FreeCAD (3D Macro)...** writes a `.FCMacro` — a
-plain Python script for [FreeCAD](https://www.freecad.org/) — that,
-when run inside FreeCAD (Macro > Macros... > Execute, or headlessly via
-`freecadcmd`), rebuilds the current cell as a 3D stack of coloured
-solids: one solid per printed film/layer, stacked at the elevation its
-fired-film thickness puts it (layer number order = print order, same
-convention as the rest of hlayout), each layer merged through the same
-shapely pipeline Mask Operations/DXF export use, with wire bonds
-rendered as raised loops. Layer thicknesses come from the
-`layer_thickness` tech-param (Setup > Technology Properties...),
-falling back to a role heuristic (conductor/dielectric/resistor/etc.)
-when a layer has no explicit thickness set. Requires `shapely`.
+**File > Export to FreeCAD (3D Macro)...** writes straight into a
+`freecad` subfolder next to the open design's `.gds` file (created
+automatically the first time it's needed — same convention as the
+Gerber/DXF `gerber`/`dxf` subfolders above), naming the file from the
+library/cell name; if the design has never been saved yet (so there's
+no folder to put it next to), it asks for an output folder instead. It
+writes a `.FCMacro` there — a plain Python script for
+[FreeCAD](https://www.freecad.org/) — that, when run inside FreeCAD
+(Macro > Macros... > Execute, or headlessly via `freecadcmd`),
+rebuilds the current cell as a 3D stack of coloured solids: one solid
+per printed film/layer, stacked at the elevation its fired-film
+thickness puts it (layer number order = print order, same convention
+as the rest of hlayout), each layer merged through the same shapely
+pipeline Mask Operations/DXF export use, with wire bonds rendered as
+raised loops. Layer thicknesses come from the `layer_thickness`
+tech-param (Setup > Technology Properties...), falling back to a role
+heuristic (conductor/dielectric/resistor/etc.) when a layer has no
+explicit thickness set. Requires `shapely`.
 
 Placed components (Srefs) render as either a fixed-height extruded box
 (the default), or — via the `component_models` tech-param — a real 3D
@@ -608,12 +626,14 @@ touching the design's own geometry. Available from scripting as
 `session.export_freecad(path, cell_name=None)`.
 
 **File > Build FreeCAD Component Library...** writes a second,
-independent `.FCMacro` that, run inside FreeCAD, builds a small set of
-generic 3D component bodies — the standard EIA ceramic chip-capacitor
-case sizes (0603/0805/1206) and a 20-pin sealed metal/ceramic hybrid
-flatpack (10 gull-wing leads per long side at 1.27 mm pitch) — and
-exports each as its own `.step` file into a folder you choose. Those
-STEP files are exactly what `component_models`, above, expects as a
+independent `.FCMacro` into that same `freecad` subfolder (same
+fallback-to-asking rule when the design has never been saved) that,
+run inside FreeCAD, builds a small set of generic 3D component bodies
+— the standard EIA ceramic chip-capacitor case sizes (0603/0805/1206)
+and a 20-pin sealed metal/ceramic hybrid flatpack (10 gull-wing leads
+per long side at 1.27 mm pitch) — and exports each as its own `.step`
+file alongside it. Those STEP files are exactly what
+`component_models`, above, expects as a
 `model_path`: generate the library once, then point any placed cell at
 one of the resulting files to get a real 3D body in the FreeCAD export
 instead of a flat box. The geometry is a generic placeholder (right

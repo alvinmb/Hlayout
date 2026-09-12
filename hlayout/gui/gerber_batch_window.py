@@ -39,13 +39,14 @@ def _layer_label(library, number):
 class JobDialog(tk.Toplevel):
     """Modal Add/Edit form for one Gerber export job."""
 
-    def __init__(self, parent, library, job: GerberExportJob = None):
+    def __init__(self, parent, library, job: GerberExportJob = None, initial_dir=None):
         super().__init__(parent)
         self.title("Add Gerber Export Job" if job is None else "Edit Gerber Export Job")
         self.transient(parent)
         self.grab_set()
         self.resizable(False, False)
         self.library = library
+        self.initial_dir = initial_dir
         self.result = None
         self._build(job)
         self.bind("<Escape>", lambda e: self.destroy())
@@ -110,6 +111,7 @@ class JobDialog(tk.Toplevel):
         path = filedialog.asksaveasfilename(
             title="Gerber Output Prefix", defaultextension="",
             filetypes=[("All files", "*.*")], parent=self,
+            initialdir=self.initial_dir,
         )
         if path:
             self.prefix_var.set(path)
@@ -225,8 +227,11 @@ class GerberBatchWindow(tk.Toplevel):
         sel = self.job_table.selection()
         return int(sel[0]) if sel else -1
 
+    def _default_dir(self):
+        return self.app.default_export_dir("gerber") if self.app is not None else None
+
     def _add_job(self):
-        dlg = JobDialog(self, self.library)
+        dlg = JobDialog(self, self.library, initial_dir=self._default_dir())
         self.wait_window(dlg)
         if dlg.result is not None:
             self.jobs.append(dlg.result)
@@ -238,7 +243,7 @@ class GerberBatchWindow(tk.Toplevel):
         if row < 0:
             dialogs.show_info("Edit Job", "Select a job first.", parent=self)
             return
-        dlg = JobDialog(self, self.library, job=self.jobs[row])
+        dlg = JobDialog(self, self.library, job=self.jobs[row], initial_dir=self._default_dir())
         self.wait_window(dlg)
         if dlg.result is not None:
             self.jobs[row] = dlg.result
@@ -303,7 +308,7 @@ class GerberBatchWindow(tk.Toplevel):
         path = filedialog.asksaveasfilename(
             title="Export Gerber", defaultextension="",
             filetypes=[("All files", "*.*")],
-            initialfile=self.library.name, parent=self,
+            initialfile=self.library.name, initialdir=self._default_dir(), parent=self,
         )
         if not path:
             return

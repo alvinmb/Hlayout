@@ -2642,19 +2642,41 @@ class App(tk.Tk):
         self.status.set(msg)
         dialogs.show_info("Merge GDS Libraries", msg, parent=self)
 
+    def default_export_dir(self, subfolder: str):
+        """<home>/<subfolder> (created if it doesn't exist yet), where
+        <home> is the folder the currently open/saved GDS file lives in
+        -- e.g. default_export_dir("gerber") for a design opened from
+        C:/jobs/board1/board1.gds is C:/jobs/board1/gerber. Returns
+        None if the design has never been saved (current_path unset),
+        since there's no "home" to key off yet -- callers should fall
+        back to asking the user in that case. Used to give Gerber/DXF/
+        FreeCAD export their own conventional subfolder next to the
+        design instead of wherever the OS file dialog last happened to
+        be, or a folder picker prompt every time."""
+        if not self.current_path:
+            return None
+        out_dir = os.path.join(os.path.dirname(self.current_path), subfolder)
+        os.makedirs(out_dir, exist_ok=True)
+        return out_dir
+
     def export_freecad_macro(self):
         """File > Export to FreeCAD (3D Macro)...: write a .FCMacro that
         rebuilds the current cell as a 3D solid stack when run inside
         FreeCAD. Layer thicknesses / component 3D come from the design's
-        tech-params, else the role heuristic. Needs shapely."""
+        tech-params, else the role heuristic. Needs shapely.
+
+        Writes straight into <home>/freecad (see default_export_dir())
+        with no prompt, where <home> is the open design's own folder;
+        falls back to asking for a folder only when the design has
+        never been saved yet (no home to key off)."""
         name = self.session.current_cell_name or ""
-        path = filedialog.asksaveasfilename(
-            title="Export to FreeCAD (3D Macro)",
-            defaultextension=".FCMacro",
-            initialfile=f"{self.session.library.name}_{name}.FCMacro" if name else "",
-            filetypes=[("FreeCAD macro", "*.FCMacro"), ("All files", "*.*")])
-        if not path:
-            return
+        out_dir = self.default_export_dir("freecad")
+        if out_dir is None:
+            out_dir = filedialog.askdirectory(title="Export to FreeCAD (3D Macro) -- Output Folder")
+            if not out_dir:
+                return
+        filename = f"{self.session.library.name}_{name}.FCMacro" if name else "design.FCMacro"
+        path = os.path.join(out_dir, filename)
         try:
             written = self.session.export_freecad(path)
         except (LayoutError, OSError) as e:
@@ -2670,10 +2692,16 @@ class App(tk.Tk):
         package) and exports each as its own STEP file -- meant to be
         referenced from a placed cell's component_models tech-param
         (Setup > Technology Properties...) so export_freecad() can
-        substitute a real 3D body for that instance."""
-        out_dir = filedialog.askdirectory(title="Build FreeCAD Component Library -- Output Folder")
-        if not out_dir:
-            return
+        substitute a real 3D body for that instance.
+
+        Writes into <home>/freecad (same subfolder export_freecad_macro
+        uses) with no prompt; falls back to asking for a folder only
+        when the design has never been saved yet."""
+        out_dir = self.default_export_dir("freecad")
+        if out_dir is None:
+            out_dir = filedialog.askdirectory(title="Build FreeCAD Component Library -- Output Folder")
+            if not out_dir:
+                return
         try:
             written = self.session.generate_component_library(out_dir)
         except OSError as e:
