@@ -9,11 +9,15 @@ magnification/mirror/offset applied), so a Gerber file never contains
 an AB block or nested reference of its own -- exactly what fab tools
 expect to receive.
 
-Only **visible** layers (Setup > Layers..., ``LAYER <n> visible=0|1``)
-that actually have shapes in them (after flattening) get a file --
-an empty or hidden layer produces nothing, matching "export what's on
-screen" rather than every layer number that merely exists in the
-64-entry layer table.
+By default (no explicit ``layers`` argument), only **visible** layers
+(Setup > Layers..., ``LAYER <n> visible=0|1``) that actually have
+shapes in them (after flattening) get a file -- an empty or hidden
+layer produces nothing, matching "export what's on screen" rather than
+every layer number that merely exists in the 64-entry layer table.
+Naming a layer explicitly via ``layers=`` (e.g. a Gerber Export Sets
+job's hand-picked list) overrides that visibility gate for the layers
+named -- a deliberate, by-number request shouldn't be silently
+dropped by an unrelated display toggle.
 
 Format conventions:
   * Coordinates: absolute, in millimetres, format ``%FSLAX46Y46*%``
@@ -55,18 +59,26 @@ _GERBER_UNITS_PER_DBU = 1000
 _MAX_DEPTH = 64
 
 
-def _flatten_layer_data(library: Library, cell_name: str):
+def _flatten_layer_data(library: Library, cell_name: str,
+                         layers: Optional[List[int]] = None):
     """Walk the Sref hierarchy starting at ``cell_name``, applying each
     instance's transform, and bucket the resulting *world-space*
     geometry by layer number. Returns (polys, paths, skipped_text):
       polys: {layer_number: [[(x, y), ...], ...]}   (DBU, float)
       paths: {layer_number: [([(x, y), ...], width_dbu), ...]}
-      skipped_text: count of Text shapes on a visible layer, not
+      skipped_text: count of Text shapes on an exported layer, not
         exported (Gerber has no text primitive -- see module docstring)
-    Invisible layers are skipped entirely, same as the on-screen view."""
+
+    An invisible layer is skipped, same as the on-screen view -- UNLESS
+    it's named in ``layers``: an explicit, by-number request (a Gerber
+    Export Sets job's hand-picked layer list) is a deliberate ask for
+    that data and shouldn't be silently vetoed by an unrelated Setup >
+    Layers display toggle the way the *implicit* "export everything
+    visible" default should be."""
     polys: Dict[int, List[List[Tuple[float, float]]]] = {}
     paths: Dict[int, List[Tuple[List[Tuple[float, float]], float]]] = {}
     skipped_text = 0
+    explicit = set(layers) if layers is not None else None
 
     def walk(name, transform, scale, depth):
         nonlocal skipped_text
@@ -75,7 +87,7 @@ def _flatten_layer_data(library: Library, cell_name: str):
         cell = library.cells[name]
         for shape in cell.shapes:
             layer = library.layers[shape.layer]
-            if not layer.visible:
+            if not (layer.visible or (explicit is not None and shape.layer in explicit)):
                 continue
             if isinstance(shape, (Rectangle, Polygon)):
                 pts = [transform(p) for p in shape.points]
@@ -174,13 +186,18 @@ def _write_layer_file(path, layer, polys, paths):
 
 def write_gerber_layers(library: Library, cell_name: str, out_prefix: str,
                          layers: Optional[List[int]] = None):
-    """Write one Gerber RS-274X file per visible layer that has data in
+    """Write one Gerber RS-274X file per layer that has data in
     ``cell_name`` (after flattening every Sref), named
     ``<out_prefix>_L<NN>_<layer name>.gbr``.
 
-    ``layers``, if given, restricts export to that subset of layer
-    numbers (still only ones that are visible and have data); the
-    default (None) exports every visible layer with data.
+    ``layers``, if given, restricts export to exactly that subset of
+    layer numbers -- including one that's currently hidden (Setup >
+    Layers... / ``LAYER <n> visible=0``): naming a layer explicitly
+    (e.g. a Gerber Export Sets job's hand-picked layer list) is a
+    deliberate request for that data, so it isn't silently vetoed by
+    an unrelated display toggle the way the implicit default is. The
+    default (``layers=None``) exports every *visible* layer with data
+    -- "export what's on screen".
 
     Returns (written, skipped_text):
       written: [(layer_number, file_path), ...], in ascending layer order
@@ -194,7 +211,7 @@ def write_gerber_layers(library: Library, cell_name: str, out_prefix: str,
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
 
-    polys, paths, skipped_text = _flatten_layer_data(library, cell_name)
+    polys, paths, skipped_text = _flatten_layer_data(library, cell_name, layers=layers)
     indices = sorted(set(polys.keys()) | set(paths.keys()))
 
     written = []
@@ -202,8 +219,6 @@ def write_gerber_layers(library: Library, cell_name: str, out_prefix: str,
         if layers is not None and n not in layers:
             continue
         layer = library.layers[n]
-        if not layer.visible:
-            continue  # _flatten_layer_data already excludes these; kept as a safety check
         p_list = polys.get(n, [])
         w_list = paths.get(n, [])
         if not p_list and not w_list:

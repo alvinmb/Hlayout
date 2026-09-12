@@ -113,6 +113,23 @@ def test_layers_filter_restricts_export(tmp_path):
     assert [n for n, _ in written] == [1]
 
 
+def test_explicit_layers_filter_overrides_hidden(tmp_path):
+    """An explicitly-named layer (e.g. a Gerber Export Sets job's
+    hand-picked list) must still export even if it's currently hidden
+    on screen -- only the IMPLICIT "every visible layer" default
+    (test_invisible_layer_is_not_exported above) should key off the
+    Setup > Layers visibility toggle."""
+    lib = Library("GBTEST")
+    cell = lib.new_cell("TOP")
+    cell.add_rectangle(2, 0, 0, mm_to_dbu(1), mm_to_dbu(1))
+    lib.layers[2].visible = False
+    prefix = str(tmp_path / "out")
+
+    written, _ = write_gerber_layers(lib, "TOP", prefix, layers=[2])
+
+    assert [n for n, _ in written] == [2]
+
+
 def test_unknown_cell_raises_value_error(tmp_path):
     import pytest
     lib = Library("GBTEST")

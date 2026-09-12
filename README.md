@@ -517,10 +517,15 @@ As Library/attached libraries). Prompts for a base filename (the
 prefix) and writes one flattened file per layer, named
 `<prefix>_L<NN>_<layer name>.gbr`:
 
-- Only **visible** layers (Setup > Layers..., or `LAYER <n>
-  visible=0|1`) that actually **have data** get a file — a hidden or
-  empty layer produces nothing, so the output matches what's on screen
+- By default, only **visible** layers (Setup > Layers..., or `LAYER
+  <n> visible=0|1`) that actually **have data** get a file — an empty
+  layer produces nothing, so the output matches what's on screen
   rather than every one of the 64 layer slots that merely exist.
+  Naming a layer explicitly (the `layers` argument below, or a Gerber
+  Export Sets job's hand-picked layer list) exports it even if it's
+  currently hidden — a deliberate, by-number request isn't silently
+  dropped by the display toggle the way the "everything visible"
+  default is.
 - Every cell instance (Sref) is **flattened** — its shapes are copied
   out with the placement's rotation/magnification/mirror/offset already
   applied — so a Gerber file never contains a nested block of its own,
@@ -557,8 +562,11 @@ per hlayout layer, rather than one file per layer like Gerber, since
 DXF has its own native LAYER table. R12 is deliberately the oldest
 common dialect: every CAD tool, old or new, reads it cleanly.
 
-- Only **visible** layers that actually have data are written, same
-  "print what's on screen" rule Gerber follows.
+- By default, only **visible** layers that actually have data are
+  written, same "print what's on screen" rule Gerber follows. Naming a
+  layer explicitly (the `layers` argument below, or a DXF Export Sets
+  job's hand-picked layer list) writes it even if it's currently
+  hidden, same override Gerber's `layers` argument gets.
 - Every cell instance (Sref) is **flattened**, same as Gerber.
 - Every layer's Polygon/Rectangle/Path shapes are **merged** with the
   same shapely pipeline Tools > Mask Operations... uses

@@ -223,6 +223,36 @@ def test_write_dxf_layers_argument_restricts_export(tmp_path):
     assert count == 1
 
 
+def test_write_dxf_explicit_layers_argument_overrides_hidden(tmp_path):
+    """An explicitly-named layer (e.g. a DXF Export Sets job's
+    hand-picked list) must still export even if it's currently hidden
+    on screen -- only the IMPLICIT "every visible layer" default
+    (test_write_dxf_skips_a_hidden_layer above) should key off the
+    Setup > Layers visibility toggle."""
+    s = _design()
+    s.rect(7, 0, 0, 100, 100)
+    s.library.layers.set_style(7, visible=False)
+    out = str(tmp_path / "explicit_hidden.dxf")
+    written, count = write_dxf(s.library, "TOP", out, layers=[7])
+    assert written == [7]
+    assert count == 1
+
+
+def test_write_dxf_explicit_layers_argument_includes_refdes_on_a_hidden_layer(tmp_path):
+    s = _design()
+    save_refdes_annotation_layer(s.library, 10)
+    s.library.layers.set_style(10, visible=False)
+    s.new_cell("R1DEV")
+    s.rect(0, -500, -500, 500, 500)
+    s.use_cell("TOP")
+    s.sref("R1DEV", (2000, 3000), label="R1")
+    out = str(tmp_path / "explicit_hidden_refdes.dxf")
+    written, count = write_dxf(s.library, "TOP", out, layers=[0, 10])
+    assert 10 in written
+    labels = [t[2] for t in _texts(open(out).read())]
+    assert "R1" in labels
+
+
 def test_write_dxf_no_such_cell_raises():
     s = _design()
     with pytest.raises(ValueError):

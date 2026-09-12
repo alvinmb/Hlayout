@@ -16,9 +16,16 @@ the exported file never contains a block/INSERT of its own.
 Unlike Gerber, a single DXF file naturally holds every layer (DXF has its
 own LAYER table, so there's no need for one file per layer), and DXF
 *does* have a native TEXT entity -- so, unlike write_gerber_layers(),
-nothing here is silently skipped: every Polygon/Rectangle/Path shape on a
-visible layer is exported, along with any Text and every ref designator
-(baked or floating -- see "Reference designators" below).
+nothing here is silently skipped: every Polygon/Rectangle/Path shape on
+an exported layer is exported, along with any Text and every ref
+designator (baked or floating -- see "Reference designators" below).
+
+By default (no explicit ``layers`` argument), only **visible** layers
+(Setup > Layers..., ``LAYER <n> visible=0|1``) with data are exported
+-- "export what's on screen". Naming a layer explicitly via ``layers=``
+(e.g. a DXF Export Sets job's hand-picked list) overrides that
+visibility gate for the layers named -- a deliberate, by-number
+request shouldn't be silently dropped by an unrelated display toggle.
 
 Every layer's Polygon/Rectangle/Path shapes are UNIONED together with
 the same shapely pipeline Tools > Mask Operations... uses
@@ -141,7 +148,8 @@ def _merged_layer_rings(library: Library, cell, layer_n: int) -> List[List[Tuple
     return rings
 
 
-def _flatten_texts_and_refdes(library: Library, cell_name: str):
+def _flatten_texts_and_refdes(library: Library, cell_name: str,
+                               layers: Optional[List[int]] = None):
     """Walk the Sref/Aref hierarchy starting at ``cell_name``, applying
     each instance's transform, and bucket by layer number:
       - every Text shape already drawn as real geometry (this also
@@ -149,12 +157,24 @@ def _flatten_texts_and_refdes(library: Library, cell_name: str):
       - a synthesized Text for every SRef.label that ISN'T baked -- see
         module docstring's "Reference designators" note.
     Returns {layer_number: [(x, y, text, height_dbu, rotation_deg), ...]}.
-    Invisible layers are skipped entirely, same as the on-screen view.
-    Text rotation under a mirrored ancestor is a best-effort composition
-    (mirroring flips the sense of further rotation); plain nested
-    rotation/translation/magnification is exact."""
+
+    An invisible layer is skipped, same as the on-screen view -- UNLESS
+    it's named in ``layers``: an explicit, by-number request (a DXF
+    Export Sets job's hand-picked layer list) is a deliberate ask for
+    that data and shouldn't be silently vetoed by an unrelated Setup >
+    Layers display toggle the way the *implicit* "export everything
+    visible" default should be. Text rotation under a mirrored ancestor
+    is a best-effort composition (mirroring flips the sense of further
+    rotation); plain nested rotation/translation/magnification is
+    exact."""
     refdes_layer = load_refdes_annotation_layer(library)
     texts: Dict[int, List[Tuple[float, float, str, float, float]]] = {}
+    explicit = set(layers) if layers is not None else None
+
+    def layer_ok(n: int) -> bool:
+        if explicit is not None and n in explicit:
+            return True
+        return library.layers[n].visible
 
     def walk(name, transform, rotation_deg, mirrored, scale, depth):
         if depth > _MAX_DEPTH or name not in library.cells:
@@ -163,8 +183,7 @@ def _flatten_texts_and_refdes(library: Library, cell_name: str):
         for shape in cell.shapes:
             if not isinstance(shape, Text):
                 continue
-            layer = library.layers[shape.layer]
-            if not layer.visible:
+            if not layer_ok(shape.layer):
                 continue
             x, y = transform(shape.origin)
             rot = (shape.rotation + rotation_deg) % 360
@@ -192,7 +211,7 @@ def _flatten_texts_and_refdes(library: Library, cell_name: str):
                 return parent((rx + ox, ry + oy))
 
             if (ref.label and refdes_layer is not None and refdes_layer >= 0
-                    and library.layers[refdes_layer].visible):
+                    and layer_ok(refdes_layer)):
                 child = library.cells.get(ref.cell_name)
                 baked = None
                 if child is not None:
@@ -261,9 +280,14 @@ def write_dxf(library: Library, cell_name: str, path: str,
     data. Every layer's Polygon/Rectangle/Path shapes are merged first
     (see module docstring) -- requires the shapely package.
 
-    ``layers``, if given, restricts export to that subset of layer
-    numbers (still only ones that are visible and have data); the
-    default (None) exports every visible layer with data.
+    ``layers``, if given, restricts export to exactly that subset of
+    layer numbers -- including one that's currently hidden (Setup >
+    Layers... / ``LAYER <n> visible=0``): naming a layer explicitly
+    (e.g. a DXF Export Sets job's hand-picked layer list) is a
+    deliberate request for that data, so it isn't silently vetoed by
+    an unrelated display toggle the way the implicit default is. The
+    default (``layers=None``) exports every *visible* layer with data
+    -- "export what's on screen".
 
     Returns (written_layers, entity_count):
       written_layers: [layer_number, ...], in ascending order
@@ -284,11 +308,10 @@ def write_dxf(library: Library, cell_name: str, path: str,
         os.makedirs(out_dir, exist_ok=True)
 
     cell = library.get_cell(cell_name)
-    candidate_layers = (
-        [n for n in layers if 0 <= n < NUM_LAYERS] if layers is not None
-        else list(range(NUM_LAYERS))
-    )
-    candidate_layers = [n for n in candidate_layers if library.layers[n].visible]
+    if layers is not None:
+        candidate_layers = [n for n in layers if 0 <= n < NUM_LAYERS]
+    else:
+        candidate_layers = [n for n in range(NUM_LAYERS) if library.layers[n].visible]
 
     poly_rings: Dict[int, List[List[Tuple[float, float]]]] = {}
     for n in candidate_layers:
@@ -296,7 +319,7 @@ def write_dxf(library: Library, cell_name: str, path: str,
         if rings:
             poly_rings[n] = rings
 
-    texts = _flatten_texts_and_refdes(library, cell_name)
+    texts = _flatten_texts_and_refdes(library, cell_name, layers=layers)
     if layers is not None:
         texts = {n: t for n, t in texts.items() if n in layers}
 
