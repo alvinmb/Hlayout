@@ -2688,11 +2688,12 @@ class App(tk.Tk):
     def build_component_library_macro(self):
         """File > Build FreeCAD Component Library...: write a .FCMacro
         that, run inside FreeCAD, builds a small library of generic 3D
-        component bodies (ceramic chip capacitors + a 20-pin metal
-        package) and exports each as its own STEP file -- meant to be
-        referenced from a placed cell's component_models tech-param
-        (Setup > Technology Properties...) so export_freecad() can
-        substitute a real 3D body for that instance.
+        component bodies (ceramic chip capacitors, a 20-pin metal
+        package, and the SOT-23/323/89/223 transistor package family)
+        and exports each as its own STEP file -- meant to be referenced
+        from a placed cell's component_models tech-param (Setup >
+        Technology Properties...) so export_freecad() can substitute a
+        real 3D body for that instance.
 
         Writes into <home>/freecad (same subfolder export_freecad_macro
         uses) with no prompt; falls back to asking for a folder only

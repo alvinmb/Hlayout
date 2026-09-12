@@ -268,14 +268,15 @@ class Session:
         return write_freecad_macro(self.library, name, path)
 
     def generate_component_library(self, out_dir: str, path: Optional[str] = None,
-                                     ceramic_caps=None, pkg20=None):
+                                     ceramic_caps=None, pkg20=None, sot_packages=None):
         """Write a FreeCAD macro (``.FCMacro``) at ``path`` (default:
         ``<out_dir>/build_component_library.FCMacro``) that, run inside
         FreeCAD, builds a small library of generic 3D component
         bodies -- standard EIA ceramic chip-capacitor case sizes
-        (0603/0805/1206 by default) and a 20-pin sealed metal/ceramic
-        hybrid flatpack -- and exports each as its own ``.step`` file
-        into ``out_dir``.
+        (0603/0805/1206 by default), a 20-pin sealed metal/ceramic
+        hybrid flatpack, and the common SOT (small-outline-transistor)
+        gull-wing package family (SOT-23/323/89/223 by default) -- and
+        exports each as its own ``.step`` file into ``out_dir``.
 
         Those STEP files are meant to be referenced from a placed
         cell's ``component_models`` tech-param (Setup > Technology
@@ -291,11 +292,15 @@ class Session:
         end_termination_length_mm) tuples; pass [] to skip capacitors
         entirely). `pkg20` overrides any subset of the 20-pin
         package's dimensions as a dict (e.g. {"leads_per_side": 8} for
-        a 16-pin version), or pass pkg20=False to skip it. Returns
+        a 16-pin version), or pass pkg20=False to skip it.
+        `sot_packages` overrides the default {name: kwargs} dict of SOT
+        variants (see hlayout.io.component_library.DEFAULT_SOT_PACKAGES
+        for the make_sot() kwargs shape) to add/replace variants (e.g.
+        a SOT-23-5), or pass {} to skip the family entirely. Returns
         ``path``. See hlayout.io.component_library for details."""
         from ..io.component_library import write_component_library_macro
-        return write_component_library_macro(out_dir, path=path,
-                                              ceramic_caps=ceramic_caps, pkg20=pkg20)
+        return write_component_library_macro(out_dir, path=path, ceramic_caps=ceramic_caps,
+                                              pkg20=pkg20, sot_packages=sot_packages)
 
     def print_cell(self, cell_name: Optional[str] = None, out_path: Optional[str] = None,
                     scale: Optional[float] = None) -> str:

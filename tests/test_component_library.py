@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from hlayout.io.component_library import (
     DEFAULT_CERAMIC_CAPS,
     DEFAULT_PKG20,
+    DEFAULT_SOT_PACKAGES,
     write_component_library_macro,
 )
 from hlayout.scripting import Session
@@ -35,6 +36,7 @@ def test_macro_contains_freecad_boilerplate_and_output_dir(tmp_path):
     assert repr(out_dir) in text
     assert "def make_ceramic_cap(" in text
     assert "def make_pkg20(" in text
+    assert "def make_sot(" in text
 
 
 def test_macro_emits_one_export_call_per_default_ceramic_cap(tmp_path):
@@ -85,6 +87,43 @@ def test_pkg20_overrides_merge_onto_the_default(tmp_path):
     assert "make_pkg20(" in text
     assert "8," in text  # overridden leads_per_side made it into the call
     assert f"{DEFAULT_PKG20['length_mm']!r}" in text  # untouched default still present
+
+
+def test_macro_emits_one_export_call_per_default_sot_package(tmp_path):
+    out_dir = str(tmp_path / "complib")
+    path = write_component_library_macro(out_dir)
+    text = open(path).read()
+    for name in DEFAULT_SOT_PACKAGES:
+        assert repr(name) in text
+    assert "make_sot(" in text
+    assert text.count("make_sot(") == 1 + len(DEFAULT_SOT_PACKAGES)  # def + one call per part
+
+
+def test_custom_sot_packages_dict_replaces_the_default(tmp_path):
+    out_dir = str(tmp_path / "complib")
+    path = write_component_library_macro(
+        out_dir, sot_packages={"SOT_CUSTOM": dict(L=3.0, W=1.5, H=1.0, lead_t=0.1,
+                                                    lead_out=0.4, lead_foot=0.4,
+                                                    leads_neg_y=[(0.0, 0.4)])})
+    text = open(path).read()
+    assert "SOT_CUSTOM" in text
+    assert "SOT_23" not in text
+
+
+def test_empty_sot_packages_dict_skips_the_family_entirely(tmp_path):
+    out_dir = str(tmp_path / "complib")
+    path = write_component_library_macro(out_dir, sot_packages={})
+    text = open(path).read()
+    assert text.count("make_sot(") == 1  # only the def, no export() calls
+    for name in DEFAULT_SOT_PACKAGES:
+        assert name not in text
+
+
+def test_sot_packages_false_also_skips_the_family(tmp_path):
+    out_dir = str(tmp_path / "complib")
+    path = write_component_library_macro(out_dir, sot_packages=False)
+    text = open(path).read()
+    assert text.count("make_sot(") == 1
 
 
 def test_session_generate_component_library_delegates(tmp_path):

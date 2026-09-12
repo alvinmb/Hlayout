@@ -629,24 +629,36 @@ touching the design's own geometry. Available from scripting as
 independent `.FCMacro` into that same `freecad` subfolder (same
 fallback-to-asking rule when the design has never been saved) that,
 run inside FreeCAD, builds a small set of generic 3D component bodies
-— the standard EIA ceramic chip-capacitor case sizes (0603/0805/1206)
-and a 20-pin sealed metal/ceramic hybrid flatpack (10 gull-wing leads
-per long side at 1.27 mm pitch) — and exports each as its own `.step`
-file alongside it. Those STEP files are exactly what
-`component_models`, above, expects as a
-`model_path`: generate the library once, then point any placed cell at
-one of the resulting files to get a real 3D body in the FreeCAD export
-instead of a flat box. The geometry is a generic placeholder (right
-case size and pin count, not any one manufacturer's exact outline) —
-useful for visualization and interference-checking, not for
-manufacturing drawings.
+and exports each as its own `.step` file alongside it:
+
+- The standard EIA ceramic chip-capacitor case sizes (0603/0805/1206).
+- A 20-pin sealed metal/ceramic hybrid flatpack (10 gull-wing leads per
+  long side at 1.27 mm pitch).
+- The common **SOT** (small-outline-transistor) gull-wing package
+  family: **SOT-23** and **SOT-323** (SC-70) — the classic 3-lead
+  outline, 2 leads on one side and 1 on the other, SOT-323 just a
+  smaller version of the same shape — **SOT-89** — 3 leads on one side
+  plus an exposed metal heatsink tab flush with the body's top on the
+  other (not a lead, physically part of the body) — and **SOT-223** —
+  3 leads on one side plus one wide gull-wing tab lead for heat sinking
+  through the PCB pad on the other.
+
+Those STEP files are exactly what `component_models`, above, expects
+as a `model_path`: generate the library once, then point any placed
+cell at one of the resulting files to get a real 3D body in the
+FreeCAD export instead of a flat box. The geometry is a generic
+placeholder (right case size, pin count, and lead arrangement, not any
+one manufacturer's exact outline) — useful for visualization and
+interference-checking, not for manufacturing drawings.
 
 Available from scripting as
-`session.generate_component_library(out_dir, path=None, ceramic_caps=None, pkg20=None)`
+`session.generate_component_library(out_dir, path=None, ceramic_caps=None, pkg20=None, sot_packages=None)`
 (see `hlayout/io/component_library.py`) — pass a custom `ceramic_caps`
-list to generate different case sizes, or `pkg20` overrides (e.g.
+list to generate different case sizes, `pkg20` overrides (e.g.
 `{"leads_per_side": 8}` for a 16-pin version, or `pkg20=False` to skip
-it).
+it), or a custom `sot_packages` dict (see `DEFAULT_SOT_PACKAGES`) to
+add/replace SOT variants (e.g. a SOT-23-5), or `{}` to skip the family
+entirely.
 
 ### Technology files
 
