@@ -226,11 +226,19 @@ class Session:
     def export_dxf(self, path: str, cell_name: Optional[str] = None,
                     layers: Optional[List[int]] = None):
         """Export the design (default: the current cell) as a single DXF
-        (AutoCAD R2000) file at ``path``, with one DXF layer per hlayout
-        layer that's visible and has data. Like export_gerber(), every
-        Sref is flattened rather than round-tripped -- but unlike Gerber,
-        DXF has a native TEXT entity, so Text shapes are included, not
+        (AutoCAD R12/AC1009) file at ``path``, with one DXF layer per
+        hlayout layer that's visible and has data. Like export_gerber(),
+        every Sref is flattened rather than round-tripped -- but unlike
+        Gerber, DXF has a native TEXT entity, so Text shapes (and every
+        reference designator, baked or floating) are included, not
         skipped.
+
+        Every layer's Polygon/Rectangle/Path shapes are merged with the
+        same shapely pipeline Tools > Mask Operations... uses before
+        being written -- a Path's width is baked into real, unambiguous
+        polygon geometry (not a DXF attribute some readers ignore), and
+        touching/overlapping shapes on one layer become a single clean
+        region. Requires the shapely package.
 
         `layers`, if given, restricts export to that subset of layer
         numbers. Returns (written_layers, entity_count) -- see

@@ -542,6 +542,49 @@ cell) or `session.export_gerber(prefix, cell_name=None, layers=None)`,
 the latter also accepting an optional list of layer numbers to restrict
 the export to.
 
+### Export DXF
+
+**File > DXF Export Sets...** (also under Tools) writes the current
+design out as a single **AutoCAD R12 (AC1009)** file — one DXF layer
+per hlayout layer, rather than one file per layer like Gerber, since
+DXF has its own native LAYER table. R12 is deliberately the oldest
+common dialect: every CAD tool, old or new, reads it cleanly.
+
+- Only **visible** layers that actually have data are written, same
+  "print what's on screen" rule Gerber follows.
+- Every cell instance (Sref) is **flattened**, same as Gerber.
+- Every layer's Polygon/Rectangle/Path shapes are **merged** with the
+  same shapely pipeline Tools > Mask Operations... uses
+  (`hlayout.core.maskops.layer_to_shapely_flattened()`) before being
+  written, rather than exported as separate, possibly-overlapping
+  entities: a Path is first stroked into its outline (buffered by half
+  its width, honouring its end-cap style) — so its width is baked
+  directly into real polygon geometry, not a DXF "constant width"
+  POLYLINE attribute some readers ignore — and touching/overlapping
+  shapes on the same layer merge into one clean region, matching the
+  as-fired reality of a screen-printed film. A resulting hole (e.g. a
+  fill with a via window cut in it) is closed with the same
+  "bridge to a zero-width slit" trick used for GDSII mask-op output,
+  since DXF's own POLYLINE has no native hole concept either. Requires
+  the `shapely` package (also needed for Mask Operations/DRC).
+- **Text is exported** (DXF has a native TEXT entity, unlike Gerber),
+  including every **reference designator** — a ref-des already baked
+  into its own cell as a real Text shape is exported as-is; the much
+  more common case, `SRef.label` floating over the instance as a
+  canvas-only overlay with no shape of its own, is synthesized into a
+  real TEXT entity at the same instance-centre-plus-offset position the
+  canvas computes, on the Ref-Des annotation layer (Setup > Technology
+  Properties...).
+- Colour: R12 has no true-colour support, so each layer's colour is
+  approximated to the nearest of the 9 standard AutoCAD Color Index
+  entries.
+
+The same export is available from the scripting API as
+`session.export_dxf(path, cell_name=None, layers=None)` — `layers`
+optionally restricts the export to a subset of layer numbers, same as
+`export_gerber()`. (There's no command-bar `DXF` command yet — use
+`export_dxf()` directly, or the File menu.)
+
 ### Technology files
 
 A **technology file** captures everything about *how a process draws*

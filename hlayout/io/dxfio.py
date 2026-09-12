@@ -16,20 +16,49 @@ the exported file never contains a block/INSERT of its own.
 Unlike Gerber, a single DXF file naturally holds every layer (DXF has its
 own LAYER table, so there's no need for one file per layer), and DXF
 *does* have a native TEXT entity -- so, unlike write_gerber_layers(),
-nothing here is silently skipped: every Polygon/Rectangle/Path/Text shape
-on a visible layer is exported.
+nothing here is silently skipped: every Polygon/Rectangle/Path shape on a
+visible layer is exported, along with any Text and every ref designator
+(baked or floating -- see "Reference designators" below).
+
+Every layer's Polygon/Rectangle/Path shapes are UNIONED together with
+the same shapely pipeline Tools > Mask Operations... uses
+(hlayout.core.maskops.layer_to_shapely_flattened()) before being
+written out, rather than exported as separate, possibly-overlapping
+entities:
+  * A Path has no filled area of its own (it's a centreline + width),
+    so it's first stroked into its outline polygon (buffered by half
+    its width, honouring its end-cap style) -- meaning its width is
+    baked directly into real, unambiguous polygon geometry instead of
+    a DXF POLYLINE "constant width" attribute that not every reader
+    honours.
+  * Two overlapping/touching shapes on the same layer merge into one
+    clean region, matching the as-fired reality of a screen-printed
+    film -- not two overlapping outlines a downstream tool has to
+    reconcile itself.
+  * A resulting hole (e.g. a dielectric fill with a via window cut in
+    it) is closed with the same "bridge to a zero-width slit" trick
+    hlayout.core.maskops uses for GDSII output -- DXF's own POLYLINE
+    has no native hole concept either.
+Requires the shapely package (also needed for Mask Operations/DRC).
+
+Reference designators: a ref-des that's baked into its own cell as a
+real Text shape (rare -- see hlayout.gui.canvas._refdes_baked_shape())
+is already picked up by the ordinary Text export above. The much more
+common case -- SRef.label floating over the instance, drawn only as a
+canvas overlay with no shape of its own -- is synthesized into a real
+TEXT entity here too, at the same instance-bbox-centre-plus-offset
+position the canvas computes, on Setup > Technology Properties...'s
+Ref-Des layer, using REFDES_EXPORT_HEIGHT_DBU (SRef.label_height is a
+fixed on-screen PIXEL size, independent of zoom, so there's no real
+physical height to carry over for it).
 
 Format conventions:
   * Coordinates: millimetres, converted from hlayout's 1-DBU-per-micron
     grid. (R12 predates the $INSUNITS header variable, so the unit is a
     convention rather than something the file states -- worth knowing on
     import into a tool that assumes a different default unit.)
-  * Polygon / Rectangle: a closed POLYLINE outlining the shape's points.
-  * Path: a POLYLINE (open, unless the path's own points already close
-    back on themselves) with a constant width (groups 40/41) equal to the
-    path's width. R12's constant-width polyline has no round/square/
-    flush end-cap concept, so -- like Gerber's aperture stroke -- the
-    path's `cap` style isn't distinguished in the export.
+  * Polygon / Rectangle / Path: a closed POLYLINE per merged region (see
+    above) outlining its point ring.
   * Text: a TEXT entity (origin, height, rotation) -- exported as-is,
     since DXF has a native text primitive (Gerber does not).
   * Colour: R12 has no true-colour support, only the fixed 256-entry
@@ -46,12 +75,19 @@ import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
-from ..core.errors import GeometryError
-from ..core.library import Library
-from ..core.shapes import Path, Polygon, Rectangle, SRef, Text, expand_arefs_to_srefs
+from ..core.errors import CellError, GeometryError
+from ..core.layers import NUM_LAYERS
+from ..core.library import Library, _transform_bbox
+from ..core.maskops import _close_holes, _require_shapely, layer_to_shapely_flattened
+from ..core.shapes import Text, expand_arefs_to_srefs
 from ..core.units import DBU_MM
+from .techfile import load_refdes_annotation_layer
 
 _MAX_DEPTH = 64
+
+#: Text height (DBU) used for a synthesized (floating, un-baked) ref-des
+#: TEXT entity -- see module docstring's "Reference designators" note.
+REFDES_EXPORT_HEIGHT_DBU = 500  # 0.5 mm
 
 # The 9 standard AutoCAD Color Index (ACI) entries whose RGB values are
 # fixed/well-known regardless of AutoCAD version -- see module docstring.
@@ -68,19 +104,56 @@ _ACI_BASIC = {
 }
 
 
-def _flatten(library: Library, cell_name: str):
-    """Walk the Sref hierarchy starting at ``cell_name``, applying each
-    instance's transform, and bucket the resulting *world-space* geometry
-    by layer number. Returns (polys, paths, texts):
-      polys: {layer_number: [[(x, y), ...], ...]}              (DBU, float)
-      paths: {layer_number: [([(x, y), ...], width_dbu), ...]}
-      texts: {layer_number: [(x, y, text, height_dbu, rotation_deg), ...]}
+def _merged_layer_rings(library: Library, cell, layer_n: int) -> List[List[Tuple[float, float]]]:
+    """Every Polygon/Rectangle/Path on ``layer_n`` anywhere in ``cell``'s
+    Sref/Aref hierarchy, stroked (for a Path) and unioned into one clean
+    set of point rings via the same shapely pipeline Mask Operations
+    uses -- see module docstring. Each returned ring is a closed point
+    list (float DBU), holes already bridged in. Empty if the layer has
+    no such geometry."""
+    geom = layer_to_shapely_flattened(library, cell, layer_n)
+    if geom is None or geom.is_empty:
+        return []
+    if geom.geom_type == "Polygon":
+        candidates = [geom]
+    elif geom.geom_type == "MultiPolygon":
+        candidates = list(geom.geoms)
+    elif geom.geom_type == "GeometryCollection":
+        candidates = []
+        for g in geom.geoms:
+            if g.geom_type == "Polygon":
+                candidates.append(g)
+            elif g.geom_type == "MultiPolygon":
+                candidates.extend(g.geoms)
+            # Points/LineStrings in the collection (degenerate touches/
+            # slivers) carry no area -- skip them, same as
+            # maskops.shapely_to_polygons() does for a GDS result.
+    else:
+        candidates = []
+
+    rings = []
+    for poly in candidates:
+        if poly.is_empty or poly.area == 0:
+            continue
+        ring = _close_holes(poly)
+        if len(ring) >= 3:
+            rings.append([(float(x), float(y)) for x, y in ring])
+    return rings
+
+
+def _flatten_texts_and_refdes(library: Library, cell_name: str):
+    """Walk the Sref/Aref hierarchy starting at ``cell_name``, applying
+    each instance's transform, and bucket by layer number:
+      - every Text shape already drawn as real geometry (this also
+        covers a part's own baked ref-des, if any);
+      - a synthesized Text for every SRef.label that ISN'T baked -- see
+        module docstring's "Reference designators" note.
+    Returns {layer_number: [(x, y, text, height_dbu, rotation_deg), ...]}.
     Invisible layers are skipped entirely, same as the on-screen view.
     Text rotation under a mirrored ancestor is a best-effort composition
     (mirroring flips the sense of further rotation); plain nested
     rotation/translation/magnification is exact."""
-    polys: Dict[int, List[List[Tuple[float, float]]]] = {}
-    paths: Dict[int, List[Tuple[List[Tuple[float, float]], float]]] = {}
+    refdes_layer = load_refdes_annotation_layer(library)
     texts: Dict[int, List[Tuple[float, float, str, float, float]]] = {}
 
     def walk(name, transform, rotation_deg, mirrored, scale, depth):
@@ -88,21 +161,17 @@ def _flatten(library: Library, cell_name: str):
             return
         cell = library.cells[name]
         for shape in cell.shapes:
+            if not isinstance(shape, Text):
+                continue
             layer = library.layers[shape.layer]
             if not layer.visible:
                 continue
-            if isinstance(shape, (Rectangle, Polygon)):
-                pts = [transform(p) for p in shape.points]
-                polys.setdefault(shape.layer, []).append(pts)
-            elif isinstance(shape, Path):
-                pts = [transform(p) for p in shape.points]
-                paths.setdefault(shape.layer, []).append((pts, shape.width * scale))
-            elif isinstance(shape, Text):
-                x, y = transform(shape.origin)
-                rot = (shape.rotation + rotation_deg) % 360
-                texts.setdefault(shape.layer, []).append(
-                    (x, y, shape.text, shape.height * scale, rot)
-                )
+            x, y = transform(shape.origin)
+            rot = (shape.rotation + rotation_deg) % 360
+            texts.setdefault(shape.layer, []).append(
+                (x, y, shape.text, shape.height * scale, rot)
+            )
+
         for ref in cell.srefs + expand_arefs_to_srefs(cell.arefs):
             theta = math.radians(ref.rotation)
             cos_t, sin_t = math.cos(theta), math.sin(theta)
@@ -122,12 +191,41 @@ def _flatten(library: Library, cell_name: str):
                 ry = x * sin_t + y * cos_t
                 return parent((rx + ox, ry + oy))
 
+            if (ref.label and refdes_layer is not None and refdes_layer >= 0
+                    and library.layers[refdes_layer].visible):
+                child = library.cells.get(ref.cell_name)
+                baked = None
+                if child is not None:
+                    for sh in child.shapes:
+                        if isinstance(sh, Text) and sh.text == ref.label:
+                            baked = sh
+                            break
+                if baked is None:
+                    try:
+                        box = library.cell_bbox(ref.cell_name)
+                    except CellError:
+                        box = None
+                    if box is not None:
+                        x1, y1, x2, y2 = _transform_bbox(box, ref)
+                        cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+                    else:
+                        cx, cy = ref.origin
+                    lox, loy = ref.label_offset
+                    # (cx+lox, cy+loy) is in `cell`'s own local space --
+                    # the same space shape.origin is in for cell.shapes
+                    # above -- so it goes through the accumulated
+                    # ancestor `transform`, not `child_transform`.
+                    ax, ay = transform((cx + lox, cy + loy))
+                    texts.setdefault(refdes_layer, []).append(
+                        (ax, ay, ref.label, REFDES_EXPORT_HEIGHT_DBU * scale, rotation_deg)
+                    )
+
             child_rotation = rotation_deg + (-ref.rotation if mirrored else ref.rotation)
             walk(ref.cell_name, child_transform, child_rotation % 360,
                  mirrored ^ xr, scale * mag, depth + 1)
 
     walk(cell_name, lambda p: p, 0.0, False, 1.0, 0)
-    return polys, paths, texts
+    return texts
 
 
 def _safe_dxf_layer_name(layer) -> str:
@@ -160,7 +258,8 @@ def write_dxf(library: Library, cell_name: str, path: str,
               layers: Optional[List[int]] = None):
     """Write ``cell_name`` out as a single ASCII DXF (AutoCAD R12) file at
     ``path``, with one DXF layer per hlayout layer that's visible and has
-    data.
+    data. Every layer's Polygon/Rectangle/Path shapes are merged first
+    (see module docstring) -- requires the shapely package.
 
     ``layers``, if given, restricts export to that subset of layer
     numbers (still only ones that are visible and have data); the
@@ -172,16 +271,36 @@ def write_dxf(library: Library, cell_name: str, path: str,
     """
     if cell_name not in library.cells:
         raise ValueError(f"no such cell {cell_name!r}")
+    try:
+        _require_shapely()
+    except GeometryError as e:
+        raise GeometryError(
+            "DXF export merges each layer's shapes with the shapely package, "
+            "which isn't installed -- run: pip install shapely"
+        ) from e
 
     out_dir = os.path.dirname(path)
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
 
-    polys, paths, texts = _flatten(library, cell_name)
-    indices = sorted(set(polys.keys()) | set(paths.keys()) | set(texts.keys()))
+    cell = library.get_cell(cell_name)
+    candidate_layers = (
+        [n for n in layers if 0 <= n < NUM_LAYERS] if layers is not None
+        else list(range(NUM_LAYERS))
+    )
+    candidate_layers = [n for n in candidate_layers if library.layers[n].visible]
+
+    poly_rings: Dict[int, List[List[Tuple[float, float]]]] = {}
+    for n in candidate_layers:
+        rings = _merged_layer_rings(library, cell, n)
+        if rings:
+            poly_rings[n] = rings
+
+    texts = _flatten_texts_and_refdes(library, cell_name)
     if layers is not None:
-        indices = [n for n in indices if n in layers]
-    indices = [n for n in indices if library.layers[n].visible]
+        texts = {n: t for n, t in texts.items() if n in layers}
+
+    indices = sorted(set(poly_rings) | set(texts))
 
     written_layers = []
     entity_count = 0
@@ -190,10 +309,9 @@ def write_dxf(library: Library, cell_name: str, path: str,
 
     for n in indices:
         layer = library.layers[n]
-        p_list = polys.get(n, [])
-        w_list = paths.get(n, [])
+        rings = poly_rings.get(n, [])
         t_list = texts.get(n, [])
-        if not p_list and not w_list and not t_list:
+        if not rings and not t_list:
             continue
         written_layers.append(n)
         dxf_name = _safe_dxf_layer_name(layer)
@@ -207,9 +325,7 @@ def write_dxf(library: Library, cell_name: str, path: str,
             "6", "CONTINUOUS",
         ]
 
-        for pts in p_list:
-            if len(pts) < 3:
-                continue
+        for pts in rings:
             entity_lines += [
                 "0", "POLYLINE",
                 "8", dxf_name,
@@ -218,26 +334,6 @@ def write_dxf(library: Library, cell_name: str, path: str,
                 "70", "1",  # closed
             ]
             for x, y in pts:
-                entity_lines += ["0", "VERTEX", "8", dxf_name,
-                                  "10", _dxf_point(x), "20", _dxf_point(y)]
-            entity_lines += ["0", "SEQEND"]
-            entity_count += 1
-
-        for pts, width_dbu in w_list:
-            if len(pts) < 2:
-                continue
-            closed = pts[0] == pts[-1] and len(pts) > 2
-            verts = pts[:-1] if closed else pts
-            w = _dxf_point(width_dbu)
-            entity_lines += [
-                "0", "POLYLINE",
-                "8", dxf_name,
-                "62", str(aci),
-                "66", "1",
-                "70", "1" if closed else "0",
-                "40", w, "41", w,
-            ]
-            for x, y in verts:
                 entity_lines += ["0", "VERTEX", "8", dxf_name,
                                   "10", _dxf_point(x), "20", _dxf_point(y)]
             entity_lines += ["0", "SEQEND"]
