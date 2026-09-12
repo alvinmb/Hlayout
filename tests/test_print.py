@@ -10,6 +10,7 @@ from hlayout.core.library import Library
 from hlayout.io.printio import (
     PRINT_TARGET_MM,
     _auto_scale,
+    hidden_layers_with_data,
     render_cell_svg,
     send_to_system_printer,
     write_print_html,
@@ -34,6 +35,65 @@ def test_render_cell_svg_includes_only_visible_layers():
     assert layer_order == [0]
     assert 'id="layer-1"' not in svg
     assert 'id="layer-0"' in svg
+
+
+def test_render_cell_svg_excludes_hidden_layers_from_the_bbox_too():
+    # A hidden layer sitting far outside the visible geometry must not
+    # inflate the print bbox/auto-scale either -- not just be undrawn.
+    s = _design()
+    s.rect(1, 500000, 500000, 501000, 501000)   # far away, hidden
+    s.library.layers.set_style(1, visible=False)
+    svg, layer_order, _scale = render_cell_svg(s.library, "TOP", margin_dbu=0, scale=1.0)
+    assert layer_order == [0]
+    from hlayout.core.units import DBU_MM
+    assert f'width="{1000 * DBU_MM:.3f}mm"' in svg   # just the visible 1x1mm square
+
+
+# --- hidden_layers_with_data() -- explains a shape's absence from print --
+
+def test_hidden_layers_with_data_reports_a_hidden_layer_with_geometry():
+    s = _design()
+    s.library.layers.set_style(1, visible=False)
+    assert hidden_layers_with_data(s.library, "TOP") == [1]
+
+
+def test_hidden_layers_with_data_ignores_visible_layers():
+    s = _design()
+    assert hidden_layers_with_data(s.library, "TOP") == []
+
+
+def test_hidden_layers_with_data_ignores_hidden_layers_with_no_geometry():
+    s = _design()
+    s.library.layers.set_style(5, visible=False)   # nothing drawn on layer 5
+    assert hidden_layers_with_data(s.library, "TOP") == []
+
+
+def test_hidden_layers_with_data_sees_through_a_placed_instance():
+    s = _design()
+    s.new_cell("PKG")
+    s.rect(61, 0, 0, 20000, 20000)
+    s.use_cell("TOP")
+    s.sref("PKG", (0, 0))
+    s.library.layers.set_style(61, visible=False)
+    assert hidden_layers_with_data(s.library, "TOP") == [61]
+
+
+def test_write_print_html_warns_about_a_hidden_layer_with_data(tmp_path):
+    s = _design()
+    s.library.layers.set_style(1, name="Package Outline", visible=False)
+    out = str(tmp_path / "hidden.html")
+    write_print_html(s.library, "TOP", out)
+    text = open(out, encoding="utf-8").read()
+    assert "Not shown" in text
+    assert "1 (Package Outline)" in text
+
+
+def test_write_print_html_has_no_warning_when_nothing_is_hidden(tmp_path):
+    s = _design()
+    out = str(tmp_path / "clean.html")
+    write_print_html(s.library, "TOP", out)
+    text = open(out, encoding="utf-8").read()
+    assert "Not shown" not in text
 
 
 def test_render_cell_svg_sizes_to_true_physical_scale_when_forced():
@@ -259,6 +319,32 @@ def test_print_command_scale_option(tmp_path, monkeypatch):
     assert "Scale: 8x actual size." in open(out, encoding="utf-8").read()
 
 
+def test_print_command_notes_a_hidden_layer_with_data(tmp_path, monkeypatch):
+    from hlayout.gui.commands import CommandInterpreter
+    from hlayout.scripting import ScriptConsole
+
+    s = _design()
+    s.library.layers.set_style(1, visible=False)   # the path is on layer 1
+    interp = CommandInterpreter(s, ScriptConsole(s))
+    out = str(tmp_path / "hidden_cmd.html")
+    monkeypatch.setattr("hlayout.io.printio.send_to_system_printer", lambda p: True)
+    result = interp.run(f"PRINT out={out}")
+    assert "layer(s) 1" in result
+    assert "hidden" in result
+
+
+def test_print_command_no_hidden_note_when_nothing_is_hidden(tmp_path, monkeypatch):
+    from hlayout.gui.commands import CommandInterpreter
+    from hlayout.scripting import ScriptConsole
+
+    s = _design()
+    interp = CommandInterpreter(s, ScriptConsole(s))
+    out = str(tmp_path / "clean_cmd.html")
+    monkeypatch.setattr("hlayout.io.printio.send_to_system_printer", lambda p: True)
+    result = interp.run(f"PRINT out={out}")
+    assert "(note:" not in result
+
+
 def test_print_command_rejects_a_non_numeric_scale():
     from hlayout.gui.commands import CommandInterpreter
     from hlayout.scripting import ScriptConsole
@@ -338,5 +424,19 @@ def test_print_current_view_falls_back_to_the_browser(monkeypatch):
         app.print_current_view()
         assert len(opened) == 1
         assert "Ctrl+P" in app.status.get()
+    finally:
+        app.destroy()
+
+
+def test_print_current_view_notes_a_hidden_layer_with_data(monkeypatch):
+    from hlayout.gui import app as app_module
+    app = _make_app()
+    try:
+        app.session.rect(1, 0, 0, 100, 100)
+        app.session.library.layers.set_style(1, visible=False)
+        monkeypatch.setattr(app_module, "send_to_system_printer", lambda p: True)
+        app.print_current_view()
+        assert "layer(s) 1" in app.status.get()
+        assert "hidden" in app.status.get()
     finally:
         app.destroy()

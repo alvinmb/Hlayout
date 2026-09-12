@@ -874,12 +874,19 @@ class CommandInterpreter:
             path = self.session.print_cell(cell_name=cell_name, out_path=out, scale=scale)
         except LayoutError as e:
             raise CommandError(str(e))
-        from ..io.printio import send_to_system_printer
+        from ..io.printio import hidden_layers_with_data, send_to_system_printer
         if send_to_system_printer(path):
-            return f"sent to the system printer: {path}"
-        import webbrowser
-        webbrowser.open(path)
-        return f"opened {path} -- use Ctrl+P to print (no system print handoff available here)"
+            msg = f"sent to the system printer: {path}"
+        else:
+            import webbrowser
+            webbrowser.open(path)
+            msg = f"opened {path} -- use Ctrl+P to print (no system print handoff available here)"
+        resolved_cell = cell_name or self.session.current_cell_name
+        hidden = hidden_layers_with_data(self.session.library, resolved_cell)
+        if hidden:
+            names = ", ".join(str(n) for n in hidden)
+            msg += f" (note: layer(s) {names} have geometry here but are hidden -- not printed)"
+        return msg
 
     def _cmd_merge(self, args):
         usage = "usage: MERGE <lib1.gds> <lib2.gds> <lib3.gds> [library_name]"

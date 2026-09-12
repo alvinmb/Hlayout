@@ -16,7 +16,7 @@ from ..core.library import Library
 from ..core.maskops import MASK_OPS
 from ..core.shapes import CIRCLE_SEGMENT_CHOICES
 from ..core.units import dbu_to_mm, mm_to_dbu
-from ..io.printio import send_to_system_printer
+from ..io.printio import hidden_layers_with_data, send_to_system_printer
 from ..io.sidecar import load_design, sidecar_path
 from ..io.techfile import (
     default_layer_thickness,
@@ -2677,11 +2677,16 @@ class App(tk.Tk):
             dialogs.show_error("Print", str(e), parent=self)
             return
         if send_to_system_printer(path):
-            self.status.set(f"sent to the system printer: {path}")
+            msg = f"sent to the system printer: {path}"
         else:
             webbrowser.open(path)
-            self.status.set(f"opened {path} for printing -- use Ctrl+P "
-                            f"(no system print handoff available here)")
+            msg = (f"opened {path} for printing -- use Ctrl+P "
+                   f"(no system print handoff available here)")
+        hidden = hidden_layers_with_data(self.session.library, self.session.current_cell_name)
+        if hidden:
+            names = ", ".join(str(n) for n in hidden)
+            msg += f" (layer(s) {names} have geometry here but are hidden -- not printed)"
+        self.status.set(msg)
 
     def attach_library(self):
         path = filedialog.askopenfilename(filetypes=[("GDSII", "*.gds"), ("All files", "*.*")])

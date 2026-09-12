@@ -657,9 +657,23 @@ and falls back to just opening it in the default browser — Ctrl+P
 there still prints it — if that handoff isn't available on this
 platform/setup. Text shapes ARE included (unlike Gerber, which has no
 text primitive), drawn at their position but unrotated; path end caps
-are always drawn round regardless of their own cap style — both
-disclosed simplifications in `hlayout.io.printio`, not silent
-approximations.
+are always drawn round regardless of their own cap style; an outline
+(drawn whenever Fill is on, and the only thing drawn when it's off —
+how a component body/package outline is normally represented) is held
+to a fixed 0.15 mm hairline on the page rather than the design's own
+DBU width, so it stays visibly a line instead of shrinking to a
+fraction of a pixel at scale — all disclosed simplifications in
+`hlayout.io.printio`, not silent approximations.
+
+A layer with no data drawn on paper falls into one of two buckets, and
+the page tells you which: nothing on that layer in this cell at all,
+or the layer has geometry but is currently hidden (Setup >
+Layers...) — Print skips a hidden layer exactly the way the canvas
+does, "print what's on screen," and a printed page with anything
+hidden gets a "Not shown: `<n>` (`<name>`) ... currently hidden" note
+naming it, instead of leaving a missing shape to guesswork. The same
+note is appended to the PRINT command's result and the status line
+after File > Print....
 
 The drawing is normally printed at true physical scale (1:1) from the
 design's own units — but a design smaller than

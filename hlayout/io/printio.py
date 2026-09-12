@@ -104,8 +104,11 @@ def _flatten_for_print(library: Library, cell_name: str):
       polys: {layer_number: [[(x, y), ...], ...]}        (DBU, float)
       paths: {layer_number: [([(x, y), ...], width_dbu), ...]}
       texts: {layer_number: [((x, y), string), ...]}
-    Invisible layers are skipped entirely, same as the on-screen view.
-    """
+    Collects EVERY layer's geometry regardless of Setup > Layers...
+    visibility -- callers filter to visible layers themselves (see
+    render_cell_svg()) so hidden_layers_with_data() can also see what
+    a hidden layer would have drawn, to explain a shape's absence from
+    print rather than just silently reproducing it."""
     polys: Dict[int, List[List[Tuple[float, float]]]] = {}
     paths: Dict[int, List[Tuple[List[Tuple[float, float]], float]]] = {}
     texts: Dict[int, List[Tuple[Tuple[float, float], str]]] = {}
@@ -115,9 +118,6 @@ def _flatten_for_print(library: Library, cell_name: str):
             return
         cell = library.cells[name]
         for shape in cell.shapes:
-            layer = library.layers[shape.layer]
-            if not layer.visible:
-                continue
             if isinstance(shape, (Rectangle, Polygon)):
                 polys.setdefault(shape.layer, []).append([transform(p) for p in shape.points])
             elif isinstance(shape, Path):
@@ -165,24 +165,29 @@ def render_cell_svg(library: Library, cell_name: str, margin_dbu: float = 2000.0
     ambiguous what's been done to the drawing's size."""
     polys, paths, texts = _flatten_for_print(library, cell_name)
 
+    # "Print what's on screen": _flatten_for_print() collects every
+    # layer's geometry regardless of visibility, but only a VISIBLE
+    # layer is actually drawn (or counted toward the bbox/auto-scale) --
+    # same rule the Gerber/DXF exporters follow. A layer with data that
+    # got left out here because it's hidden is exactly what
+    # hidden_layers_with_data() reports, so a shape's absence from the
+    # page has an answer instead of looking like a print bug.
     layer_order: List[int] = []
     for n in list(polys) + list(paths) + list(texts):
-        if n not in layer_order:
+        if n not in layer_order and library.layers[n].visible:
             layer_order.append(n)
     layer_order.sort()
 
     xs: List[float] = []
     ys: List[float] = []
-    for pts_list in polys.values():
-        for pts in pts_list:
+    for n in layer_order:
+        for pts in polys.get(n, []):
             xs += [p[0] for p in pts]
             ys += [p[1] for p in pts]
-    for pts_list in paths.values():
-        for pts, _w in pts_list:
+        for pts, _w in paths.get(n, []):
             xs += [p[0] for p in pts]
             ys += [p[1] for p in pts]
-    for pts_list in texts.values():
-        for (x, y), _s in pts_list:
+        for (x, y), _s in texts.get(n, []):
             xs.append(x)
             ys.append(y)
 
@@ -239,6 +244,21 @@ def render_cell_svg(library: Library, cell_name: str, margin_dbu: float = 2000.0
     return "\n".join(parts), layer_order, scale_used
 
 
+def hidden_layers_with_data(library: Library, cell_name: str) -> List[int]:
+    """Layer numbers that have geometry somewhere in ``cell_name`` (any
+    depth of SRef/ARef) but are currently NOT visible (Setup >
+    Layers..., ``LAYER <n> visible=0``). Print/PRINT silently leaves
+    these off the page -- "print what's on screen", the same rule the
+    Gerber/DXF exporters follow -- which is easy to mistake for a bug
+    ("my package didn't print") when the shape was never going to show
+    up on the canvas either. write_print_html() surfaces this list
+    directly on the page instead of leaving it to guesswork. Returns
+    the layer numbers sorted, empty if nothing's affected."""
+    polys, paths, texts = _flatten_for_print(library, cell_name)
+    have_data = set(polys) | set(paths) | set(texts)
+    return sorted(n for n in have_data if not library.layers[n].visible)
+
+
 def write_print_html(library: Library, cell_name: str, out_path: str = None,
                       scale: Optional[float] = None) -> str:
     """Render ``cell_name`` (see render_cell_svg()) into a standalone,
@@ -253,6 +273,7 @@ def write_print_html(library: Library, cell_name: str, out_path: str = None,
     flow -- see App.print_current_view()) is the actual "print" step;
     this function only produces the page."""
     svg, layer_order, scale_used = render_cell_svg(library, cell_name, scale=scale)
+    hidden = hidden_layers_with_data(library, cell_name)
 
     legend_rows = []
     for n in layer_order:
@@ -269,6 +290,20 @@ def write_print_html(library: Library, cell_name: str, out_path: str = None,
     else:
         scale_note = f"Scale: {scale_used:g}x actual size."
 
+    hidden_note = ""
+    if hidden:
+        names = ", ".join(f"{n} ({library.layers[n].name})" for n in hidden)
+        hidden_note = (
+            f'<p class="no-print" style="color:#9a6700;background:#fff8e6;'
+            f'border:1px solid #e0c67a;border-radius:4px;padding:8px 10px;">'
+            f'<strong>Not shown:</strong> {html.escape(names)} '
+            f"{'has' if len(hidden) == 1 else 'have'} geometry here but "
+            f"{'is' if len(hidden) == 1 else 'are'} currently hidden "
+            f"(Setup &gt; Layers... to turn {'it' if len(hidden) == 1 else 'them'} "
+            f"back on) -- Print skips a hidden layer the same way the canvas does."
+            f"</p>"
+        )
+
     page = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -284,6 +319,7 @@ def write_print_html(library: Library, cell_name: str, out_path: str = None,
 <body>
 <h2>{html.escape(cell_name)}</h2>
 <p style="color:#555;"><strong>{html.escape(scale_note)}</strong></p>
+{hidden_note}
 <p class="no-print" style="color:#555;">
   Use your browser's Print (Ctrl+P) if it didn't open automatically --
   "Fit to page" if the drawing is larger than one sheet. Pass
