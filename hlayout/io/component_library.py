@@ -5,7 +5,9 @@ FreeCAD (Macro > Macros... > Execute, or ``freecadcmd file.FCMacro``),
 builds a small set of generic 3D component bodies and exports each as
 its own STEP file: a few standard EIA ceramic chip-capacitor case
 sizes, a 20-pin sealed metal/ceramic hybrid flatpack, and the common
-SOT (small-outline-transistor) gull-wing package family.
+SOT (small-outline-transistor) gull-wing package family -- both the
+3-lead transistor/diode outlines (SOT-23/323/89/223) and the narrow-
+body SOIC-style ICs (SOT-14/16/18).
 
 The point is to hand File > Export to FreeCAD (3D Macro).../
 Session.export_freecad()'s per-cell ``component_models`` substitution
@@ -61,6 +63,16 @@ DEFAULT_PKG20 = dict(
     lead_thickness_mm=0.15, lead_out_mm=1.5, lead_foot_mm=1.2,
 )
 
+def _soic_leads(n_per_side, pitch, lead_w=0.4):
+    """[(x_mm, lead_w), ...] for n_per_side leads centred on x=0 at
+    ``pitch`` spacing -- the same symmetric layout both long sides of
+    a narrow-body SOIC-style package share, used to build the SOT-14/
+    16/18 entries below without repeating the arithmetic per part."""
+    span = (n_per_side - 1) * pitch
+    x0 = -span / 2.0
+    return [(round(x0 + i * pitch, 4), lead_w) for i in range(n_per_side)]
+
+
 #: The common SOT (small-outline-transistor) gull-wing package family,
 #: each entry a kwargs dict for the generated macro's make_sot() (see
 #: _GEOMETRY_FUNCTIONS below). Real vendor dimensions vary a little
@@ -74,6 +86,13 @@ DEFAULT_PKG20 = dict(
 #:   -- physically part of the body).
 #: - SOT-223: 3 leads on one side plus one wide gull-wing tab lead
 #:   (for heat sinking through the PCB pad) on the other.
+#: - SOT-14/16/18: narrow-body SOIC-style ICs -- 7/8/9 leads per long
+#:   side at the standard 1.27 mm (50 mil) pitch, symmetric both sides
+#:   (unlike the 3-lead transistor outlines above). 14/16-pin body
+#:   sizes match the real narrow-SOIC (JEDEC MS-012) footprint; 18-pin
+#:   narrow-body isn't a real standardized size, so its body length is
+#:   extrapolated from the same lead-span-plus-margin the 14/16-pin
+#:   sizes follow.
 DEFAULT_SOT_PACKAGES = {
     "SOT_23": dict(L=2.9, W=1.3, H=1.1, lead_t=0.1, lead_out=0.4, lead_foot=0.4,
                    leads_neg_y=[(-0.475, 0.4), (0.475, 0.4)],
@@ -88,6 +107,12 @@ DEFAULT_SOT_PACKAGES = {
     "SOT_223": dict(L=6.5, W=3.5, H=1.6, lead_t=0.25, lead_out=0.8, lead_foot=1.0,
                     leads_neg_y=[(-2.3, 0.5), (0.0, 0.5), (2.3, 0.5)],
                     leads_pos_y=[(0.0, 3.0)]),
+    "SOT_14": dict(L=8.65, W=3.90, H=1.75, lead_t=0.2, lead_out=0.4, lead_foot=0.6,
+                   leads_neg_y=_soic_leads(7, 1.27), leads_pos_y=_soic_leads(7, 1.27)),
+    "SOT_16": dict(L=9.90, W=3.90, H=1.75, lead_t=0.2, lead_out=0.4, lead_foot=0.6,
+                   leads_neg_y=_soic_leads(8, 1.27), leads_pos_y=_soic_leads(8, 1.27)),
+    "SOT_18": dict(L=11.16, W=3.90, H=1.75, lead_t=0.2, lead_out=0.4, lead_foot=0.6,
+                   leads_neg_y=_soic_leads(9, 1.27), leads_pos_y=_soic_leads(9, 1.27)),
 }
 
 _GEOMETRY_FUNCTIONS = '''\

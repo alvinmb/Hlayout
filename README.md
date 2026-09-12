@@ -639,9 +639,13 @@ and exports each as its own `.step` file alongside it:
   outline, 2 leads on one side and 1 on the other, SOT-323 just a
   smaller version of the same shape — **SOT-89** — 3 leads on one side
   plus an exposed metal heatsink tab flush with the body's top on the
-  other (not a lead, physically part of the body) — and **SOT-223** —
+  other (not a lead, physically part of the body) — **SOT-223** —
   3 leads on one side plus one wide gull-wing tab lead for heat sinking
-  through the PCB pad on the other.
+  through the PCB pad on the other — and **SOT-14/16/18** — narrow-body
+  SOIC-style ICs, 7/8/9 leads per long side at the standard 1.27 mm
+  pitch, symmetric on both sides (14/16-pin body sizes match the real
+  narrow-SOIC footprint; 18-pin narrow-body isn't a real standardized
+  size, so its length is extrapolated the same way).
 
 Those STEP files are exactly what `component_models`, above, expects
 as a `model_path`: generate the library once, then point any placed

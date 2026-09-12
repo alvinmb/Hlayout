@@ -119,6 +119,23 @@ def test_empty_sot_packages_dict_skips_the_family_entirely(tmp_path):
         assert name not in text
 
 
+def test_default_sot_packages_include_the_soic_style_ic_variants():
+    for name, n_leads_per_side in (("SOT_14", 7), ("SOT_16", 8), ("SOT_18", 9)):
+        pkg = DEFAULT_SOT_PACKAGES[name]
+        assert len(pkg["leads_neg_y"]) == n_leads_per_side
+        assert len(pkg["leads_pos_y"]) == n_leads_per_side
+        # symmetric both sides, unlike the 3-lead transistor outlines
+        assert [x for x, _ in pkg["leads_neg_y"]] == [x for x, _ in pkg["leads_pos_y"]]
+
+
+def test_macro_emits_sot_14_16_18_by_default(tmp_path):
+    out_dir = str(tmp_path / "complib")
+    path = write_component_library_macro(out_dir)
+    text = open(path).read()
+    for name in ("SOT_14", "SOT_16", "SOT_18"):
+        assert repr(name) in text
+
+
 def test_sot_packages_false_also_skips_the_family(tmp_path):
     out_dir = str(tmp_path / "complib")
     path = write_component_library_macro(out_dir, sot_packages=False)

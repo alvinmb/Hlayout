@@ -2689,7 +2689,7 @@ class App(tk.Tk):
         """File > Build FreeCAD Component Library...: write a .FCMacro
         that, run inside FreeCAD, builds a small library of generic 3D
         component bodies (ceramic chip capacitors, a 20-pin metal
-        package, and the SOT-23/323/89/223 transistor package family)
+        package, and the SOT-23/323/89/223/14/16/18 package family)
         and exports each as its own STEP file -- meant to be referenced
         from a placed cell's component_models tech-param (Setup >
         Technology Properties...) so export_freecad() can substitute a

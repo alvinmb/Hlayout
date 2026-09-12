@@ -275,8 +275,10 @@ class Session:
         bodies -- standard EIA ceramic chip-capacitor case sizes
         (0603/0805/1206 by default), a 20-pin sealed metal/ceramic
         hybrid flatpack, and the common SOT (small-outline-transistor)
-        gull-wing package family (SOT-23/323/89/223 by default) -- and
-        exports each as its own ``.step`` file into ``out_dir``.
+        gull-wing package family (SOT-23/323/89/223 3-lead transistor
+        outlines plus SOT-14/16/18 narrow-body SOIC-style ICs, by
+        default) -- and exports each as its own ``.step`` file into
+        ``out_dir``.
 
         Those STEP files are meant to be referenced from a placed
         cell's ``component_models`` tech-param (Setup > Technology
