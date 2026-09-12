@@ -470,6 +470,7 @@ class App(tk.Tk):
 
         # --- Help ----------------------------------------------------------
         helpm = add_menu("Help")
+        helpm.add_command(label="User Manual", command=self.show_user_manual)
         helpm.add_command(label="Command Reference", command=self.show_command_reference, accelerator="F1")
         helpm.add_separator()
         helpm.add_command(label="About HLayout", command=self.show_about)
@@ -4061,6 +4062,55 @@ class App(tk.Tk):
         listbox.bind("<Return>", do_place)
 
         ttk.Button(win, text="Place", command=do_place).pack(padx=8, pady=(0, 8))
+
+    def show_user_manual(self):
+        """Help > User Manual: open docs/HLayout_User_Manual.docx --
+        a walkthrough of every menu, dialog, and built-in tool,
+        organized by what you're trying to do -- with whatever's
+        registered to handle .docx on this machine (Word, LibreOffice
+        Writer, ...). Complements Help > Command Reference /
+        docs/help.html, which is the exhaustive command-bar/Python API
+        syntax reference rather than a guided tour. Shows an info
+        dialog if the file can't be found (e.g. a copy of the app
+        distributed without its docs/ folder) instead of silently
+        doing nothing, and an error dialog if the OS can't figure out
+        how to open a .docx at all."""
+        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        manual_path = os.path.join(repo_root, "docs", "HLayout_User_Manual.docx")
+        if not os.path.isfile(manual_path):
+            dialogs.show_info(
+                "User Manual",
+                f"Couldn't find the user manual at {manual_path} -- "
+                "it may be missing from this copy of the app.",
+                parent=self,
+            )
+            return
+        try:
+            os.startfile(manual_path)   # Windows: launch its registered .docx handler
+            return
+        except (AttributeError, OSError):
+            # AttributeError: not Windows, os.startfile doesn't exist.
+            # OSError: it exists but nothing's registered to open .docx
+            # here -- either way, fall through and try the other
+            # platforms' own "open with the default app" mechanism.
+            pass
+        try:
+            import subprocess
+            import sys
+            if sys.platform == "darwin":
+                subprocess.run(["open", manual_path], check=True)
+            elif sys.platform.startswith("linux"):
+                subprocess.run(["xdg-open", manual_path], check=True)
+            else:
+                raise RuntimeError("no known way to open a file with its default app here")
+            return
+        except Exception as e:
+            dialogs.show_error(
+                "User Manual",
+                f"Couldn't open {manual_path} automatically ({e}). "
+                "Open it directly with Word or another .docx viewer.",
+                parent=self,
+            )
 
     def show_command_reference(self):
         """Open the full HTML command bar + Python API reference

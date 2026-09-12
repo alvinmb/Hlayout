@@ -142,6 +142,64 @@ def test_help_menu_has_command_reference():
         app.destroy()
 
 
+def test_help_menu_has_user_manual():
+    app = _make_app()
+    try:
+        labels = _submenu_labels(app, "Help")
+        assert "User Manual" in labels
+        # ahead of Command Reference: a walkthrough before the
+        # exhaustive syntax reference.
+        assert labels.index("User Manual") < labels.index("Command Reference")
+    finally:
+        app.destroy()
+
+
+def test_show_user_manual_opens_the_docx_with_the_os_default_handler(monkeypatch):
+    from hlayout.gui import app as app_module
+    app = _make_app()
+    try:
+        opened = []
+        monkeypatch.setattr(os, "startfile", lambda p: opened.append(p), raising=False)
+        app.show_user_manual()
+        assert len(opened) == 1
+        assert opened[0].endswith("HLayout_User_Manual.docx")
+    finally:
+        app.destroy()
+
+
+def test_show_user_manual_reports_a_missing_file(monkeypatch):
+    from hlayout.gui import app as app_module
+    app = _make_app()
+    try:
+        monkeypatch.setattr(os.path, "isfile", lambda p: False)
+        started = []
+        monkeypatch.setattr(os, "startfile", lambda p: started.append(p), raising=False)
+        warned = []
+        monkeypatch.setattr(app_module.dialogs, "show_info",
+                             lambda *a, **kw: warned.append((a, kw)))
+        app.show_user_manual()
+        assert started == []
+        assert len(warned) == 1
+    finally:
+        app.destroy()
+
+
+def test_show_user_manual_reports_when_nothing_can_open_it(monkeypatch):
+    from hlayout.gui import app as app_module
+    app = _make_app()
+    try:
+        def _fail(p):
+            raise OSError("no application is associated")
+        monkeypatch.setattr(os, "startfile", _fail, raising=False)
+        errors = []
+        monkeypatch.setattr(app_module.dialogs, "show_error",
+                             lambda *a, **kw: errors.append((a, kw)))
+        app.show_user_manual()
+        assert len(errors) == 1
+    finally:
+        app.destroy()
+
+
 def test_about_is_a_direct_command_not_a_submenu():
     app = _make_app()
     try:

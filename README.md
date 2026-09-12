@@ -147,8 +147,13 @@ home under one of them:
   between-layer design rule checks — see Design Rule Check, below),
   Export Gerber... (same as File > Export Gerber... — see Export
   Gerber, below).
-- **Help** — Command Reference (also `F1`): the full categorized
-  command bar reference in a scrollable dialog.
+- **Help** — User Manual: opens `docs/HLayout_User_Manual.docx` (this
+  walkthrough, organized by what you're trying to do) with whatever's
+  registered to handle `.docx` on this machine. Command Reference
+  (also `F1`): opens `docs/help.html` — the exhaustive, searchable
+  command-bar/Python API syntax reference — in the default browser,
+  falling back to a scrollable plain-text dialog if that file can't be
+  found.
 - **About** — a single direct item (not a submenu) with the app name,
   a short description, and the version number.
 
