@@ -15,8 +15,17 @@ labels the way a photoplotter output never would).
 
 The SVG is sized in real millimetres from the design's own DBU
 geometry (1 DBU = 1 micron), so a browser printing it "at 100%" comes
-out to true physical scale; "fit to page"/"shrink to fit" in the
-print dialog is still there for anything too large for one sheet.
+out to true physical scale for anything already a reasonable size on
+paper. A design smaller than PRINT_TARGET_MM in its larger dimension
+(hybrid parts are routinely a few mm across) is auto-scaled UP to
+around that size instead -- at "100%" that would otherwise print as a
+barely-visible speck -- using the nearest of a fixed set of clean
+factors (2x, 5x, 10x, ...) rather than whatever number happens to hit
+the target exactly, so the scale printed on the page is one you could
+actually measure back against. Pass an explicit ``scale`` to override
+the automatic choice, or 1.0 to force true size regardless. "Fit to
+page"/"shrink to fit" in the print dialog is still there for anything
+too large for one sheet even after this.
 
 Fidelity gaps (disclosed, not silently approximated):
   * Path end caps are always drawn round, regardless of the path's own
@@ -35,13 +44,34 @@ import html
 import math
 import os
 import tempfile
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from ..core.library import Library
 from ..core.shapes import Path, Polygon, Rectangle, Text, expand_arefs_to_srefs
 from ..core.units import DBU_MM
 
 _MAX_DEPTH = 64
+
+#: Auto-scale-up target (mm): a design whose larger dimension is
+#: smaller than this at true (1x) scale gets scaled up toward it
+#: instead -- see render_cell_svg()'s "scale" parameter.
+PRINT_TARGET_MM = 150.0
+
+#: Clean scale factors auto-scaling picks from, smallest sufficient
+#: one first -- printed engineering-drawing style (2x, 5x, 10x, ...),
+#: not an arbitrary decimal that happens to hit PRINT_TARGET_MM exactly.
+_NICE_SCALES = (1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0)
+
+
+def _auto_scale(width_mm: float, height_mm: float) -> float:
+    largest = max(width_mm, height_mm, 1e-9)
+    if largest >= PRINT_TARGET_MM:
+        return 1.0
+    needed = PRINT_TARGET_MM / largest
+    for s in _NICE_SCALES:
+        if s >= needed:
+            return s
+    return _NICE_SCALES[-1]
 
 
 def _flatten_for_print(library: Library, cell_name: str):
@@ -97,12 +127,19 @@ def _flatten_for_print(library: Library, cell_name: str):
     return polys, paths, texts
 
 
-def render_cell_svg(library: Library, cell_name: str, margin_dbu: float = 2000.0) -> Tuple[str, List[int]]:
+def render_cell_svg(library: Library, cell_name: str, margin_dbu: float = 2000.0,
+                     scale: Optional[float] = None) -> Tuple[str, List[int], float]:
     """Build an SVG document (as a string) of ``cell_name``'s visible,
-    flattened geometry, sized to true physical scale in millimetres.
-    Returns (svg_markup, layer_numbers_drawn) -- the second is used by
-    write_print_html() to build a legend of only the layers that
-    actually appear, in the order first encountered."""
+    flattened geometry. ``scale`` sets the printed size relative to
+    true physical size (2.0 = twice actual size on paper); left as
+    None, it's chosen automatically (see the module docstring) --
+    1.0 unless the design is smaller than PRINT_TARGET_MM, in which
+    case it's scaled up to about that size using the nearest clean
+    factor. Returns (svg_markup, layer_numbers_drawn, scale_used) --
+    the layer list is used by write_print_html() to build a legend of
+    only the layers that actually appear, in the order first
+    encountered; the scale is shown on the printed page so it's never
+    ambiguous what's been done to the drawing's size."""
     polys, paths, texts = _flatten_for_print(library, cell_name)
 
     layer_order: List[int] = []
@@ -135,6 +172,12 @@ def render_cell_svg(library: Library, cell_name: str, margin_dbu: float = 2000.0
         y0, y1 = min(ys) - margin_dbu, max(ys) + margin_dbu
     width_dbu, height_dbu = x1 - x0, y1 - y0
     width_mm, height_mm = width_dbu * DBU_MM, height_dbu * DBU_MM
+    scale_used = float(scale) if scale is not None else _auto_scale(width_mm, height_mm)
+    # The viewBox stays in raw DBU -- unscaled -- so scaling up is just
+    # a bigger physical width/height for the SAME viewBox; the browser
+    # stretches the drawing to fill it, which is exactly "print
+    # bigger" without touching a single coordinate below.
+    printed_width_mm, printed_height_mm = width_mm * scale_used, height_mm * scale_used
 
     def sx(x):
         return x - x0
@@ -146,8 +189,8 @@ def render_cell_svg(library: Library, cell_name: str, margin_dbu: float = 2000.0
         return y1 - y
 
     parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width_mm:.3f}mm" '
-        f'height="{height_mm:.3f}mm" viewBox="0 0 {width_dbu:.0f} {height_dbu:.0f}">',
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{printed_width_mm:.3f}mm" '
+        f'height="{printed_height_mm:.3f}mm" viewBox="0 0 {width_dbu:.0f} {height_dbu:.0f}">',
         f'<rect x="0" y="0" width="{width_dbu:.0f}" height="{height_dbu:.0f}" fill="white"/>',
     ]
     for n in layer_order:
@@ -169,19 +212,23 @@ def render_cell_svg(library: Library, cell_name: str, margin_dbu: float = 2000.0
                           f'fill="{color}">{html.escape(text)}</text>')
         parts.append('</g>')
     parts.append('</svg>')
-    return "\n".join(parts), layer_order
+    return "\n".join(parts), layer_order, scale_used
 
 
-def write_print_html(library: Library, cell_name: str, out_path: str = None) -> str:
+def write_print_html(library: Library, cell_name: str, out_path: str = None,
+                      scale: Optional[float] = None) -> str:
     """Render ``cell_name`` (see render_cell_svg()) into a standalone,
-    printable HTML page -- a title, a small color-swatch legend of the
-    layers actually drawn, and the SVG itself -- and write it to
-    ``out_path`` (a fresh temp .html file if not given). Returns the
-    path written. Opening the result in a browser and printing it
-    (Ctrl+P, or handed to the OS's own print flow -- see
-    App.print_current_view()) is the actual "print" step; this
-    function only produces the page."""
-    svg, layer_order = render_cell_svg(library, cell_name)
+    printable HTML page -- a title, a scale note, a small color-swatch
+    legend of the layers actually drawn, and the SVG itself -- and
+    write it to ``out_path`` (a fresh temp .html file if not given).
+    ``scale`` is passed straight through to render_cell_svg() -- left
+    as None, small designs are auto-scaled up so "print at 100%"
+    produces something bigger than a speck; see that function and the
+    module docstring. Returns the path written. Opening the result in
+    a browser and printing it (Ctrl+P, or handed to the OS's own print
+    flow -- see App.print_current_view()) is the actual "print" step;
+    this function only produces the page."""
+    svg, layer_order, scale_used = render_cell_svg(library, cell_name, scale=scale)
 
     legend_rows = []
     for n in layer_order:
@@ -192,6 +239,11 @@ def write_print_html(library: Library, cell_name: str, out_path: str = None) -> 
             f'border:1px solid #333;display:inline-block;margin-right:4px;"></span>'
             f'{html.escape(f"{n}: {layer.name}")}</span>'
         )
+
+    if scale_used == 1.0:
+        scale_note = "Scale: 1:1 (true physical size)."
+    else:
+        scale_note = f"Scale: {scale_used:g}x actual size."
 
     page = f"""<!DOCTYPE html>
 <html>
@@ -207,10 +259,11 @@ def write_print_html(library: Library, cell_name: str, out_path: str = None) -> 
 </head>
 <body>
 <h2>{html.escape(cell_name)}</h2>
+<p style="color:#555;"><strong>{html.escape(scale_note)}</strong></p>
 <p class="no-print" style="color:#555;">
-  Printed at true physical scale from the design's own units.
   Use your browser's Print (Ctrl+P) if it didn't open automatically --
-  "Fit to page" if the drawing is larger than one sheet.
+  "Fit to page" if the drawing is larger than one sheet. Pass
+  scale= to PRINT/print_cell() to override the scale shown above.
 </p>
 <div class="legend">{"".join(legend_rows)}</div>
 <div class="drawing">{svg}</div>

@@ -645,22 +645,34 @@ if nothing went wrong) or watch for the warning dialog in the GUI.
 **File > Print...** (`Ctrl+P`) renders the current cell — its visible,
 flattened geometry (every SRef/ARef resolved, same "print what's on
 screen" rule the Gerber/DXF exporters follow) plus a colour-swatch
-layer legend — as an SVG drawing sized to true physical scale from the
-design's own units, wrapped in a printable HTML page. Tkinter has no
-print dialog of its own, so this hands the page straight to the OS's
-own print flow (`os.startfile(path, "print")` on Windows) and falls
-back to just opening it in the default browser — Ctrl+P there still
-prints it — if that handoff isn't available on this platform/setup.
-Text shapes ARE included (unlike Gerber, which has no text primitive),
-drawn at their position but unrotated; path end caps are always drawn
-round regardless of their own cap style — both disclosed simplifications
-in `hlayout.io.printio`, not silent approximations.
+layer legend — as an SVG drawing wrapped in a printable HTML page.
+Tkinter has no print dialog of its own, so this hands the page straight
+to the OS's own print flow (`os.startfile(path, "print")` on Windows)
+and falls back to just opening it in the default browser — Ctrl+P
+there still prints it — if that handoff isn't available on this
+platform/setup. Text shapes ARE included (unlike Gerber, which has no
+text primitive), drawn at their position but unrotated; path end caps
+are always drawn round regardless of their own cap style — both
+disclosed simplifications in `hlayout.io.printio`, not silent
+approximations.
+
+The drawing is normally printed at true physical scale (1:1) from the
+design's own units — but a design smaller than
+`hlayout.io.printio.PRINT_TARGET_MM` (150 mm, comfortably true of most
+hybrid parts) in its larger dimension is auto-scaled UP to about that
+size instead, since printing a 2 mm resistor "at 100%" is a barely
+visible speck. The factor chosen is always one of a fixed, clean set
+(2x, 5x, 10x, 20x, ...) rather than an arbitrary decimal, and is always
+shown on the printed page itself ("Scale: 10x actual size") so what's
+on paper is never ambiguous. Pass `scale=` to pick a different factor,
+or `scale=1` to force true size regardless of how small the design is.
 
 The same behaviour is available from the command bar / scripting API:
-`PRINT [cell=<name>] [out=<path.html>]` (`Session.print_cell()` to
-build the page, `hlayout.io.printio.send_to_system_printer()` for the
-OS handoff) — `cell` defaults to the current cell, `out` to a fresh
-temp file.
+`PRINT [cell=<name>] [out=<path.html>] [scale=<n>]`
+(`Session.print_cell()` to build the page,
+`hlayout.io.printio.send_to_system_printer()` for the OS handoff) —
+`cell` defaults to the current cell, `out` to a fresh temp file, and
+`scale` to the auto behaviour above.
 
 ### Remap layers
 

@@ -131,13 +131,16 @@ Files:
                                        wire bonds as raised loops, components as
                                        fixed-height bodies or substituted models);
                                        run it inside FreeCAD. Needs shapely
-    PRINT [cell=<name>] [out=<path.html>]
+    PRINT [cell=<name>] [out=<path.html>] [scale=<n>]
                                        render the design (default: the current cell)
                                        as a printable HTML page -- a legend plus an
-                                       SVG drawing of its visible geometry at true
-                                       physical scale -- and hand it to the system's
-                                       print flow (or just open it if that fails, so
-                                       Ctrl+P still works). Same as File > Print...
+                                       SVG drawing of its visible geometry -- and hand
+                                       it to the system's print flow (or just open it
+                                       if that fails, so Ctrl+P still works). scale
+                                       defaults to auto (a design under ~150mm across
+                                       is scaled up to about that size instead of
+                                       printing as a speck at "100%"); pass 1 to force
+                                       true physical size. Same as File > Print...
     MERGE <lib1.gds> <lib2.gds> <lib3.gds> [library_name]
                                        combine every cell from lib1 and lib2 into a
                                        new file lib3 -- a plain file-to-file operation,
@@ -849,18 +852,26 @@ class CommandInterpreter:
         return f"FreeCAD 3D macro written to {written}"
 
     def _cmd_print(self, args):
-        usage = "usage: PRINT [cell=<name>] [out=<path.html>]"
+        usage = "usage: PRINT [cell=<name>] [out=<path.html>] [scale=<n>]"
         cell_name = None
         out = None
+        scale = None
         for a in args:
             if a.lower().startswith("cell="):
                 cell_name = a.split("=", 1)[1]
             elif a.lower().startswith("out="):
                 out = a.split("=", 1)[1]
+            elif a.lower().startswith("scale="):
+                try:
+                    scale = float(a.split("=", 1)[1])
+                except ValueError:
+                    raise CommandError("scale must be a number")
+                if scale <= 0:
+                    raise CommandError("scale must be positive")
             else:
                 raise CommandError(usage)
         try:
-            path = self.session.print_cell(cell_name=cell_name, out_path=out)
+            path = self.session.print_cell(cell_name=cell_name, out_path=out, scale=scale)
         except LayoutError as e:
             raise CommandError(str(e))
         from ..io.printio import send_to_system_printer

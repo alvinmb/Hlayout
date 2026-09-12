@@ -7,7 +7,13 @@ import pytest
 
 from hlayout.core.errors import LayoutError
 from hlayout.core.library import Library
-from hlayout.io.printio import render_cell_svg, send_to_system_printer, write_print_html
+from hlayout.io.printio import (
+    PRINT_TARGET_MM,
+    _auto_scale,
+    render_cell_svg,
+    send_to_system_printer,
+    write_print_html,
+)
 from hlayout.scripting import Session
 
 
@@ -24,18 +30,18 @@ def _design():
 def test_render_cell_svg_includes_only_visible_layers():
     s = _design()
     s.library.layers.set_style(1, visible=False)
-    svg, layer_order = render_cell_svg(s.library, "TOP")
+    svg, layer_order, _scale = render_cell_svg(s.library, "TOP", scale=1.0)
     assert layer_order == [0]
     assert 'id="layer-1"' not in svg
     assert 'id="layer-0"' in svg
 
 
-def test_render_cell_svg_sizes_to_true_physical_scale():
+def test_render_cell_svg_sizes_to_true_physical_scale_when_forced():
     from hlayout.core.units import DBU_MM
     s = _design()
-    _svg, layer_order = render_cell_svg(s.library, "TOP", margin_dbu=0)
-    svg, _ = render_cell_svg(s.library, "TOP", margin_dbu=0)
+    svg, _layers, scale_used = render_cell_svg(s.library, "TOP", margin_dbu=0, scale=1.0)
     # bbox is (0,0)-(2000,1000) DBU with margin_dbu=0 -> exact mm size
+    assert scale_used == 1.0
     assert f'width="{2000 * DBU_MM:.3f}mm"' in svg
     assert f'height="{1000 * DBU_MM:.3f}mm"' in svg
 
@@ -46,7 +52,7 @@ def test_render_cell_svg_flattens_a_placed_instance():
     s.rect(2, 0, 0, 500, 500)
     s.use_cell("TOP")
     s.sref("CHILD", (5000, 5000))
-    svg, layer_order = render_cell_svg(s.library, "TOP")
+    svg, layer_order, _scale = render_cell_svg(s.library, "TOP", scale=1.0)
     assert 2 in layer_order
     # The combined bbox (TOP's own 1000x1000 rect + CHILD's 500x500,
     # placed out at (5000,5000)) is far bigger than either alone --
@@ -58,9 +64,44 @@ def test_render_cell_svg_flattens_a_placed_instance():
 def test_render_cell_svg_empty_cell_does_not_raise():
     s = Session.new("EMPTY")
     s.new_cell("BLANK")
-    svg, layer_order = render_cell_svg(s.library, "BLANK")
+    svg, layer_order, _scale = render_cell_svg(s.library, "BLANK")
     assert layer_order == []
     assert "<svg" in svg
+
+
+# --- Auto-scale-up for print ("100%" of a tiny part is a speck) -------
+
+def test_auto_scale_leaves_large_designs_at_1x():
+    assert _auto_scale(PRINT_TARGET_MM, PRINT_TARGET_MM) == 1.0
+    assert _auto_scale(500.0, 20.0) == 1.0     # only the LARGER dimension matters
+
+
+def test_auto_scale_picks_the_smallest_clean_factor_that_reaches_the_target():
+    # A 2mm-wide part needs >=75x to reach PRINT_TARGET_MM (150mm) --
+    # the next clean factor at or above that is 100x, not some exact
+    # decimal that happens to land precisely on 150mm.
+    assert _auto_scale(2.0, 1.0) == 100.0
+
+
+def test_render_cell_svg_auto_scales_a_small_design_up():
+    s = _design()   # 2mm x 1mm -- well under PRINT_TARGET_MM
+    svg, _layers, scale_used = render_cell_svg(s.library, "TOP", margin_dbu=0)
+    assert scale_used > 1.0
+    from hlayout.core.units import DBU_MM
+    expected_width_mm = 2000 * DBU_MM * scale_used
+    assert f'width="{expected_width_mm:.3f}mm"' in svg
+    # the viewBox itself stays in raw (unscaled) DBU -- the browser
+    # stretches to the bigger physical width/height above, so the
+    # drawing's own coordinates never need touching for this.
+    assert 'viewBox="0 0 2000 1000"' in svg
+
+
+def test_render_cell_svg_scale_argument_overrides_auto():
+    s = _design()
+    svg, _layers, scale_used = render_cell_svg(s.library, "TOP", margin_dbu=0, scale=3.0)
+    assert scale_used == 3.0
+    from hlayout.core.units import DBU_MM
+    assert f'width="{2000 * DBU_MM * 3.0:.3f}mm"' in svg
 
 
 # --- write_print_html() ------------------------------------------------
@@ -86,6 +127,19 @@ def test_write_print_html_defaults_to_a_temp_file():
         os.remove(path)
 
 
+def test_write_print_html_shows_the_scale_used_on_the_page(tmp_path):
+    s = _design()   # small -- auto-scales up
+    out = str(tmp_path / "auto.html")
+    write_print_html(s.library, "TOP", out)
+    text = open(out, encoding="utf-8").read()
+    assert "Scale: 50x actual size." in text
+
+    out2 = str(tmp_path / "forced.html")
+    write_print_html(s.library, "TOP", out2, scale=1.0)
+    text2 = open(out2, encoding="utf-8").read()
+    assert "Scale: 1:1 (true physical size)." in text2
+
+
 # --- Session.print_cell() ----------------------------------------------
 
 def test_print_cell_defaults_to_current_cell(tmp_path):
@@ -94,6 +148,13 @@ def test_print_cell_defaults_to_current_cell(tmp_path):
     path = s.print_cell(out_path=out)
     assert path == out
     assert os.path.exists(out)
+
+
+def test_print_cell_passes_scale_through(tmp_path):
+    s = _design()
+    out = str(tmp_path / "p2.html")
+    s.print_cell(out_path=out, scale=4.0)
+    assert "Scale: 4x actual size." in open(out, encoding="utf-8").read()
 
 
 def test_print_cell_raises_with_no_current_cell():
@@ -142,6 +203,37 @@ def test_print_command_rejects_unknown_options():
     interp = CommandInterpreter(s, ScriptConsole(s))
     out = interp.run("PRINT bogus=1")
     assert out.startswith("error:")
+
+
+def test_print_command_scale_option(tmp_path, monkeypatch):
+    from hlayout.gui.commands import CommandInterpreter
+    from hlayout.scripting import ScriptConsole
+
+    s = _design()
+    interp = CommandInterpreter(s, ScriptConsole(s))
+    out = str(tmp_path / "scaled.html")
+    monkeypatch.setattr("hlayout.io.printio.send_to_system_printer", lambda p: True)
+    interp.run(f"PRINT out={out} scale=8")
+    assert "Scale: 8x actual size." in open(out, encoding="utf-8").read()
+
+
+def test_print_command_rejects_a_non_numeric_scale():
+    from hlayout.gui.commands import CommandInterpreter
+    from hlayout.scripting import ScriptConsole
+
+    s = _design()
+    interp = CommandInterpreter(s, ScriptConsole(s))
+    assert interp.run("PRINT scale=big").startswith("error:")
+
+
+def test_print_command_rejects_a_non_positive_scale():
+    from hlayout.gui.commands import CommandInterpreter
+    from hlayout.scripting import ScriptConsole
+
+    s = _design()
+    interp = CommandInterpreter(s, ScriptConsole(s))
+    assert interp.run("PRINT scale=0").startswith("error:")
+    assert interp.run("PRINT scale=-2").startswith("error:")
 
 
 # --- send_to_system_printer() -------------------------------------------
