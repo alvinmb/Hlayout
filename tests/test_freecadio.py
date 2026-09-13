@@ -128,6 +128,42 @@ def test_macro_emits_a_wire_bond_loop(tmp_path):
     assert "wire_bonds" in src
 
 
+def test_export_freecad_forwards_component_models_override(tmp_path):
+    """Session.export_freecad()'s component_models kwarg (added for the
+    auto-match feature) must reach write_freecad_macro() -- a matched
+    cell gets a model-mode block (Part.Shape().read(...)), not the
+    default flat extrude."""
+    lib = _design()
+    s = Session(lib)
+    s.use_cell("TOP")
+    step_path = str(tmp_path / "CHIP.step")
+    open(step_path, "w").close()
+    path = str(tmp_path / "override.FCMacro")
+    s.export_freecad(path, component_models={"CHIP": {"mode": "model", "model_path": step_path}})
+    src = open(path).read()
+    compile(src, path, "exec")
+    assert "# --- component CHIP (model) ---" in src
+    assert step_path.replace("\\", "\\\\") in src or step_path in src
+
+
+def test_match_freecad_components_requires_step_dir(tmp_path):
+    s = Session(_design())
+    s.use_cell("TOP")
+    with pytest.raises(LayoutError, match="step_dir"):
+        s.match_freecad_components()
+
+
+def test_match_freecad_components_end_to_end(tmp_path):
+    """CHIP (the _design() fixture's non-film-outline component) has no
+    size code in its name and no numbered pads, so it's correctly left
+    unmatched -- this just confirms the Session wrapper actually reaches
+    hlayout.io.component_match.build_match_report()."""
+    s = Session(_design())
+    s.use_cell("TOP")
+    report = s.match_freecad_components(step_dir=str(tmp_path))
+    assert [u.cell_name for u in report.unmatched] == ["CHIP"]
+
+
 def test_write_freecad_macro_rejects_a_bad_cell(tmp_path):
     lib = _design()
     with pytest.raises(LayoutError, match="no cell named"):

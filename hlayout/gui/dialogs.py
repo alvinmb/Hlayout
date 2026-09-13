@@ -131,6 +131,61 @@ def ask_yes_no(title, message, parent) -> bool:
     return result[0]
 
 
+def show_scrollable_text(title, lines, parent, ok_label="OK", cancel_label=None) -> bool:
+    """Modal report dialog for output too long/multi-line for
+    show_info's fixed-width Label -- e.g. Export to FreeCAD's
+    auto-matched-components report. A read-only, scrollable Text
+    widget listing `lines` (one per line), with an `ok_label` button
+    (returns True) and, if `cancel_label` is given, a Cancel button
+    beside it (returns False) -- e.g. for a preview the user can still
+    back out of before a file is actually written. Escape/closing the
+    window always returns False when a cancel option exists, else
+    True (there's nothing to cancel)."""
+    win = tk.Toplevel(parent)
+    win.title(title)
+    win.transient(parent)
+    win.geometry("560x360")
+
+    body = ttk.Frame(win, padding=16)
+    body.pack(fill="both", expand=True)
+
+    text_frame = ttk.Frame(body)
+    text_frame.pack(fill="both", expand=True, pady=(0, 12))
+    scrollbar = ttk.Scrollbar(text_frame, orient="vertical")
+    text = tk.Text(text_frame, wrap="word", yscrollcommand=scrollbar.set,
+                    relief="flat", borderwidth=0)
+    scrollbar.config(command=text.yview)
+    text.pack(side="left", fill="both", expand=True)
+    scrollbar.pack(side="left", fill="y")
+    text.insert("1.0", "\n".join(lines))
+    text.configure(state="disabled")
+
+    default_result = False if cancel_label else True
+    result = [default_result]
+
+    btn_row = ttk.Frame(body)
+    btn_row.pack(anchor="e")
+
+    def choose(value):
+        result[0] = value
+        win.destroy()
+
+    if cancel_label:
+        ttk.Button(btn_row, text=cancel_label, command=lambda: choose(False)).pack(
+            side="left", padx=(0, 6))
+    ok_btn = ttk.Button(btn_row, text=ok_label, command=lambda: choose(True))
+    ok_btn.pack(side="left")
+
+    win.bind("<Escape>", lambda e: choose(default_result))
+    win.protocol("WM_DELETE_WINDOW", lambda: choose(default_result))
+
+    _center_over(win, parent)
+    win.grab_set()
+    ok_btn.focus_set()
+    win.wait_window()
+    return result[0]
+
+
 def ask_choice(title, message, parent, choices, default=0) -> str:
     """Modal dialog with one button per option. `choices` is a list of
     (key, label) pairs (or plain strings, used as both key and label).

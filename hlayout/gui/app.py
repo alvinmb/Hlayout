@@ -2668,7 +2668,16 @@ class App(tk.Tk):
         Writes straight into <home>/freecad (see default_export_dir())
         with no prompt, where <home> is the open design's own folder;
         falls back to asking for a folder only when the design has
-        never been saved yet (no home to key off)."""
+        never been saved yet (no home to key off).
+
+        Before writing, placed component cells with no manual
+        component_models entry are auto-matched against whatever STEP
+        library already exists in that same folder (see
+        Session.match_freecad_components()/hlayout.io.component_match)
+        -- a passive cell by its name's size code, a SOT/PKG20-style
+        part by its pad footprint. If there's anything to report, a
+        preview lists it and lets you cancel before anything is
+        written; a manual override always wins over an auto-match."""
         name = self.session.current_cell_name or ""
         out_dir = self.default_export_dir("freecad")
         if out_dir is None:
@@ -2677,8 +2686,23 @@ class App(tk.Tk):
                 return
         filename = f"{self.session.library.name}_{name}.FCMacro" if name else "design.FCMacro"
         path = os.path.join(out_dir, filename)
+
         try:
-            written = self.session.export_freecad(path)
+            report = self.session.match_freecad_components(step_dir=out_dir)
+        except LayoutError as e:
+            dialogs.show_error("Export to FreeCAD", str(e), parent=self)
+            return
+
+        if report.matches or report.unmatched:
+            proceed = dialogs.show_scrollable_text(
+                "Auto-Matched Components", report.summary_lines(), parent=self,
+                ok_label="Export", cancel_label="Cancel")
+            if not proceed:
+                self.status.set("Export to FreeCAD cancelled.")
+                return
+
+        try:
+            written = self.session.export_freecad(path, component_models=report.component_models())
         except (LayoutError, OSError) as e:
             dialogs.show_error("Export to FreeCAD", str(e), parent=self)
             return

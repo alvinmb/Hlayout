@@ -46,6 +46,7 @@ from ..io.sidecar import load_design, save_design
 from ..io.techfile import (
     load_and_apply_techfile,
     load_bond_rules,
+    load_component_models,
     load_dielectric_rules,
     load_drc_rules,
     load_resistor_geometry_rules,
@@ -248,7 +249,10 @@ class Session:
             raise LibraryError("no current cell to export")
         return write_dxf(self.library, name, path, layers=layers)
 
-    def export_freecad(self, path: str, cell_name: Optional[str] = None):
+    def export_freecad(self, path: str, cell_name: Optional[str] = None, *,
+                        layer_thickness: Optional[dict] = None,
+                        component_models: Optional[dict] = None,
+                        loop_height_um: Optional[float] = None):
         """Write a FreeCAD macro (``.FCMacro``) at ``path`` that, run
         inside FreeCAD, rebuilds the design (default: the current cell)
         as a 3D stack of coloured solids -- one per printed film, at the
@@ -260,12 +264,51 @@ class Session:
         from Setup (``layer_thickness`` / ``component_models``
         tech-params), falling back to the role heuristics in
         hlayout.io.techfile. Requires the ``shapely`` package. Returns
-        ``path``."""
+        ``path``.
+
+        `layer_thickness`/`component_models`/`loop_height_um`, if given,
+        override those tech-param defaults for this export only --
+        nothing is written back to the saved technology file. Passing
+        `component_models` REPLACES the tech-param lookup rather than
+        merging with it, so build a full dict yourself if you want to
+        keep any existing manual entries (see
+        match_freecad_components()'s MatchReport.component_models(),
+        which does exactly that -- it starts from the design's saved
+        entries and layers auto-matches on top)."""
         from ..io.freecadio import write_freecad_macro
         name = cell_name or self.current_cell_name
         if name is None:
             raise LibraryError("no current cell to export")
-        return write_freecad_macro(self.library, name, path)
+        return write_freecad_macro(self.library, name, path,
+                                    layer_thickness=layer_thickness,
+                                    component_models=component_models,
+                                    loop_height_um=loop_height_um)
+
+    def match_freecad_components(self, cell_name: Optional[str] = None,
+                                  step_dir: Optional[str] = None):
+        """Guess which placed cells in `cell_name` (default: the
+        current cell) are surface-mounted parts matching a known
+        package in the FreeCAD component STEP library already built
+        into `step_dir` (e.g. via GUI's App.default_export_dir("freecad")
+        -- Session has no notion of "the design's folder" itself, so
+        `step_dir` is required here) -- see hlayout.io.component_match
+        for the two matching strategies (by name for sized passives, by
+        pad footprint for SOT-family/PKG20-style parts) and why a
+        manual component_models entry always wins.
+
+        Returns a hlayout.io.component_match.MatchReport -- pass its
+        ``.component_models()`` straight to export_freecad()'s own
+        `component_models=` to apply the auto-match without touching
+        the saved technology file; call ``.summary_lines()`` for a
+        human-readable report of what matched/didn't and why."""
+        from ..io.component_match import build_match_report
+        name = cell_name or self.current_cell_name
+        if name is None:
+            raise LibraryError("no current cell")
+        if not step_dir:
+            raise LibraryError("step_dir is required, e.g. App.default_export_dir('freecad')")
+        return build_match_report(self.library, name, step_dir,
+                                   component_models=load_component_models(self.library))
 
     def generate_component_library(self, out_dir: str, path: Optional[str] = None,
                                      ceramic_caps=None, pkg20=None, sot_packages=None):

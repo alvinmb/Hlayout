@@ -91,6 +91,21 @@ def _iter_polygons(geom):
 
 # --- hierarchy walk: component instances + wire-bond segments -------------
 
+def is_component_cell(library, cell_name, film_layers, comp_models):
+    """True if ``cell_name``, if placed, should be shown as its own
+    component body/model rather than descended into: named in
+    ``comp_models``, or drawing on any layer that isn't a printed film.
+    Pulled out of _walk_instances() so hlayout.io.component_match's
+    auto-matcher can apply the exact same "is this a component" test a
+    prospective match would actually be subject to."""
+    if cell_name in comp_models:
+        return True
+    c = library.cells.get(cell_name)
+    if c is None:
+        return False
+    return any(sh.layer not in film_layers for sh in c.shapes)
+
+
 def _walk_instances(library, cell_name, film_layers, comp_models):
     """Yield ``(kind, payload)`` for the flattened hierarchy of
     ``cell_name``:
@@ -99,19 +114,10 @@ def _walk_instances(library, cell_name, film_layers, comp_models):
       ("bond",      ((x0, y0), (x1, y1), width_dbu))
 
     ``transform`` maps a point in the component cell's own space to
-    world (DBU). A cell is a "component" if it's named in
-    ``comp_models`` or draws on any layer that isn't a printed film.
+    world (DBU). A cell is a "component" per is_component_cell() above.
     The walk does not descend into a component (its own shapes are its
     guts, handled by the film pass / its own body)."""
     bond_layers = film_layers  # bonds are found by the caller's own layer test
-
-    def is_component(cn):
-        if cn in comp_models:
-            return True
-        c = library.cells.get(cn)
-        if c is None:
-            return False
-        return any(sh.layer not in film_layers for sh in c.shapes)
 
     def walk(name, transform, rot_deg, mirrored, depth):
         if depth > _MAX_DEPTH or name not in library.cells:
@@ -138,7 +144,7 @@ def _walk_instances(library, cell_name, film_layers, comp_models):
 
             child_rot = (rot_deg + (-ref.rotation if mirrored else ref.rotation)) % 360
             child_mirror = mirrored ^ xr
-            if is_component(ref.cell_name):
+            if is_component_cell(library, ref.cell_name, film_layers, comp_models):
                 entry = comp_models.get(ref.cell_name, {"mode": "extrude"})
                 yield ("component",
                        (ref.cell_name, entry, child_transform, child_rot, child_mirror))

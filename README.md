@@ -630,8 +630,38 @@ Placed components (Srefs) render as either a fixed-height extruded box
 (the default), or — via the `component_models` tech-param — a real 3D
 body substituted from an external STEP/IGES file, so a schematic
 footprint can be swapped for an accurate mechanical model without
-touching the design's own geometry. Available from scripting as
-`session.export_freecad(path, cell_name=None)`.
+touching the design's own geometry.
+
+Before writing the macro, hlayout also **auto-matches** any placed
+component cell that has no manual `component_models` entry against
+whatever STEP library already exists in the same `freecad` folder (see
+Build FreeCAD Component Library..., below) — a two-part strategy:
+
+- A **passive** (chip cap/resistor/etc.) is matched by its cell **name**:
+  a known EIA size code (0603/0805/1206) found as a standalone token in
+  the name (e.g. `C1_0805`) picks the matching ceramic-cap body,
+  regardless of whether it's really a resistor or a capacitor (both use
+  the same generic placeholder shape).
+- A **chip semiconductor / multi-lead package** (the SOT family, and
+  PKG20) is matched by its own **pad footprint** instead — the number
+  of distinct numbered pads (`Rectangle`/`Polygon.pin`) plus their
+  spacing is compared against each library package's own lead layout.
+  Body height then comes from whatever the matched package already
+  assumes (e.g. SOT-23 is always ~1.1 mm tall) — there's no attempt to
+  infer height from a 2D footprint.
+
+A manual `component_models` entry always wins over an auto-match, and
+a matched package whose STEP file hasn't actually been built yet is
+left as today's flat-extruded box rather than a broken reference. File
+> Export to FreeCAD (3D Macro)... shows a preview of what auto-matched
+to what (and what didn't, and why) before anything is written, with a
+Cancel option. Available from scripting as
+`session.export_freecad(path, cell_name=None, component_models=None, ...)`
+and `session.match_freecad_components(cell_name=None, step_dir=None)`
+(returns a `hlayout.io.component_match.MatchReport` — pass its
+`.component_models()` straight to `export_freecad()`'s own
+`component_models=`). See `hlayout/io/component_match.py` for the
+matching details.
 
 **File > Build FreeCAD Component Library...** writes a second,
 independent `.FCMacro` into that same `freecad` subfolder (same
