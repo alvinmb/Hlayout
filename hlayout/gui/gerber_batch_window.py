@@ -281,8 +281,16 @@ class GerberBatchWindow(tk.Toplevel):
         row = 0
         for job, written, skipped_text in results:
             label = job.name or job.out_prefix
+            written_ns = [n for n, _ in written]
             if not written:
-                self.result_table.insert("", "end", iid=str(row), values=(label, "", "(no output)"))
+                # An explicitly-requested layer (job.layers) is exported
+                # regardless of Setup > Layers visibility (write_gerber_
+                # layers() only gates the implicit "all visible" default),
+                # so a requested layer missing here genuinely has no data
+                # -- not silently vetoed by being hidden on screen.
+                desc = ("no data on layer(s) " + ", ".join(str(n) for n in job.layers)
+                        if job.layers else "(no visible layer had data)")
+                self.result_table.insert("", "end", iid=str(row), values=(label, "", desc))
                 row += 1
                 continue
             for layer_n, path in written:
@@ -290,6 +298,12 @@ class GerberBatchWindow(tk.Toplevel):
                     label, layer_n, os.path.basename(path)))
                 total_files += 1
                 row += 1
+            if job.layers:
+                missing = [n for n in job.layers if n not in written_ns]
+                if missing:
+                    self.result_table.insert("", "end", iid=str(row), values=(
+                        label, ", ".join(str(n) for n in missing), "(no data on this layer)"))
+                    row += 1
             total_skipped += skipped_text
         note = f", {total_skipped} text shape(s) skipped (Gerber has no text primitive)" if total_skipped else ""
         self.status_var.set(

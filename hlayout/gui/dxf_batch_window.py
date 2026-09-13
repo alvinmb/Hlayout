@@ -39,6 +39,30 @@ def _layer_label(library, number):
     return f"{number} ({library.layers[number].name})"
 
 
+def _layer_result_desc(requested, written_layers):
+    """Result-table text for one job's layer column that never leaves
+    it ambiguous *why* a result looks empty or partial: distinguishes
+    "wrote nothing because no visible layer had data" (the implicit
+    "all visible layers" job) from "wrote some layers, but layer N
+    (explicitly requested) had no data" -- since write_dxf() exports an
+    explicitly-named layer regardless of its Setup > Layers visibility,
+    the only reason a requested layer goes missing from written_layers
+    now is that it genuinely has no data.
+
+    `requested` is job.layers (None = every visible layer); `written`
+    is the written_layers list run_dxf_export_batch() returned."""
+    if written_layers:
+        desc = ", ".join(str(n) for n in written_layers)
+        if requested:
+            missing = [n for n in requested if n not in written_layers]
+            if missing:
+                desc += " (no data on layer(s) " + ", ".join(str(n) for n in missing) + ")"
+        return desc
+    if requested:
+        return "no data on layer(s) " + ", ".join(str(n) for n in requested)
+    return "(no visible layer had data)"
+
+
 class JobDialog(tk.Toplevel):
     """Modal Add/Edit form for one DXF export job."""
 
@@ -282,7 +306,7 @@ class DxfBatchWindow(tk.Toplevel):
         row = 0
         for job, written_layers, entity_count in results:
             label = job.name or os.path.basename(job.path)
-            layer_desc = ", ".join(str(n) for n in written_layers) if written_layers else "(no data)"
+            layer_desc = _layer_result_desc(job.layers, written_layers)
             self.result_table.insert("", "end", iid=str(row), values=(
                 label, layer_desc, entity_count, os.path.basename(job.path)))
             row += 1
