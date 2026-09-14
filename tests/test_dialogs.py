@@ -98,6 +98,56 @@ def test_show_info_builds_a_modal_toplevel_that_closes_on_ok():
         app.destroy()
 
 
+def test_show_scrollable_text_ok_button_is_findable_and_clickable():
+    """Regression: the Text widget's own default requested size (24
+    lines) used to be able to crowd the button row out of a fixed-size
+    Toplevel entirely under plain pack() geometry, rendering a report
+    dialog with no visible way to dismiss it via a button -- see
+    show_scrollable_text()'s own comment on why it uses grid() with
+    explicit row weights instead."""
+    from hlayout.gui import dialogs
+    app = _make_app()
+    try:
+        seen = {}
+
+        def click_ok():
+            wins = _find_toplevels(app)
+            assert wins
+            win = wins[0]
+            win.update_idletasks()
+            btn = next(b for b in _collect_widgets(win, ttk.Button) if b.cget("text") == "OK")
+            seen["btn_height"] = btn.winfo_reqheight()
+            seen["mapped"] = btn.winfo_ismapped()
+            btn.invoke()
+
+        app.after(10, click_ok)
+        result = dialogs.show_scrollable_text(
+            "Report", ["line one", "line two", "line three"], parent=app, ok_label="OK")
+        assert result is True
+        assert _find_toplevels(app) == []
+        assert seen["btn_height"] > 0
+        assert seen["mapped"]
+    finally:
+        app.destroy()
+
+
+def test_show_scrollable_text_cancel_returns_false():
+    from hlayout.gui import dialogs
+    app = _make_app()
+    try:
+        def click_cancel():
+            win = _find_toplevels(app)[0]
+            btn = next(b for b in _collect_widgets(win, ttk.Button) if b.cget("text") == "Cancel")
+            btn.invoke()
+
+        app.after(10, click_cancel)
+        result = dialogs.show_scrollable_text(
+            "Report", ["a line"], parent=app, ok_label="OK", cancel_label="Cancel")
+        assert result is False
+    finally:
+        app.destroy()
+
+
 def test_ask_yes_no_returns_true_on_yes_and_false_on_no():
     from hlayout.gui import dialogs
     app = _make_app()

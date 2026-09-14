@@ -2723,22 +2723,53 @@ class App(tk.Tk):
                 return
         filename = f"{self.session.library.name}_{name}.FCMacro" if name else "design.FCMacro"
         path = os.path.join(out_dir, filename)
-
         step_dir = self.component_library_dir(ask_if_unset=False) or out_dir
+
+        self.status.set(f"Export to FreeCAD: matching components against {step_dir}...")
+        self.update_idletasks()
         try:
             report = self.session.match_freecad_components(step_dir=step_dir)
         except LayoutError as e:
             dialogs.show_error("Export to FreeCAD", str(e), parent=self)
+            self.status.set(f"Export to FreeCAD failed while matching components: {e}")
+            return
+        except Exception as e:
+            # Never fail silently: a Tkinter button callback that raises
+            # anything other than what's explicitly caught above prints a
+            # traceback to the console (if anyone's watching one) and the
+            # GUI itself does nothing else -- no dialog, no status change
+            # -- which looks exactly like "the export just didn't happen"
+            # with no way to tell why. Catch everything here as a last
+            # resort so that can never occur again.
+            import traceback
+            traceback.print_exc()
+            dialogs.show_error(
+                "Export to FreeCAD",
+                f"Unexpected error while matching components ({type(e).__name__}): {e}",
+                parent=self)
+            self.status.set(f"Export to FreeCAD failed while matching components: {e}")
             return
 
         if report.matches or report.unmatched:
             dialogs.show_scrollable_text(
                 "Auto-Matched Components", report.summary_lines(), parent=self, ok_label="OK")
 
+        self.status.set(f"Export to FreeCAD: writing {path}...")
+        self.update_idletasks()
         try:
             written = self.session.export_freecad(path, component_models=report.component_models())
         except (LayoutError, OSError) as e:
             dialogs.show_error("Export to FreeCAD", str(e), parent=self)
+            self.status.set(f"Export to FreeCAD failed while writing the macro: {e}")
+            return
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            dialogs.show_error(
+                "Export to FreeCAD",
+                f"Unexpected error while writing the macro ({type(e).__name__}): {e}",
+                parent=self)
+            self.status.set(f"Export to FreeCAD failed while writing the macro: {e}")
             return
         self.status.set(f"FreeCAD 3D macro written to {written} "
                         f"-- run it inside FreeCAD (Macro > Macros...)")
@@ -2763,10 +2794,21 @@ class App(tk.Tk):
         out_dir = self.component_library_dir()
         if out_dir is None:
             return
+        self.status.set(f"Build FreeCAD Component Library: writing to {out_dir}...")
+        self.update_idletasks()
         try:
             written = self.session.generate_component_library(out_dir)
         except OSError as e:
             dialogs.show_error("Build Component Library", str(e), parent=self)
+            self.status.set(f"Build Component Library failed: {e}")
+            return
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            dialogs.show_error(
+                "Build Component Library",
+                f"Unexpected error ({type(e).__name__}): {e}", parent=self)
+            self.status.set(f"Build Component Library failed: {e}")
             return
         self.status.set(f"Component library macro written to {written} "
                         f"-- run it inside FreeCAD to generate the STEP files")

@@ -145,18 +145,35 @@ def show_scrollable_text(title, lines, parent, ok_label="OK", cancel_label=None)
     win.title(title)
     win.transient(parent)
     win.geometry("560x360")
+    win.minsize(320, 200)
 
+    # grid, not pack, for the body/button split -- a Tk Text widget's
+    # default REQUESTED size is 24 lines tall regardless of how much
+    # content it actually holds, which is taller than this whole
+    # window; under pack() that request could consume the entire
+    # cavity before the button row ever gets laid out, rendering with
+    # no visible buttons at all (found live: a user saw exactly this,
+    # a report dialog with no way to dismiss it via a button). grid's
+    # row weights make the outcome explicit instead of order-dependent:
+    # row 0 (the text) is the only one allowed to grow; row 1 (the
+    # buttons) always gets its own natural size first, so it can never
+    # be squeezed out no matter how tall the text wants to be.
     body = ttk.Frame(win, padding=16)
     body.pack(fill="both", expand=True)
+    body.rowconfigure(0, weight=1)
+    body.rowconfigure(1, weight=0)
+    body.columnconfigure(0, weight=1)
 
     text_frame = ttk.Frame(body)
-    text_frame.pack(fill="both", expand=True, pady=(0, 12))
+    text_frame.grid(row=0, column=0, sticky="nsew", pady=(0, 12))
+    text_frame.rowconfigure(0, weight=1)
+    text_frame.columnconfigure(0, weight=1)
     scrollbar = ttk.Scrollbar(text_frame, orient="vertical")
     text = tk.Text(text_frame, wrap="word", yscrollcommand=scrollbar.set,
-                    relief="flat", borderwidth=0)
+                    relief="flat", borderwidth=0, height=1)
     scrollbar.config(command=text.yview)
-    text.pack(side="left", fill="both", expand=True)
-    scrollbar.pack(side="left", fill="y")
+    text.grid(row=0, column=0, sticky="nsew")
+    scrollbar.grid(row=0, column=1, sticky="ns")
     text.insert("1.0", "\n".join(lines))
     text.configure(state="disabled")
 
@@ -164,7 +181,7 @@ def show_scrollable_text(title, lines, parent, ok_label="OK", cancel_label=None)
     result = [default_result]
 
     btn_row = ttk.Frame(body)
-    btn_row.pack(anchor="e")
+    btn_row.grid(row=1, column=0, sticky="e")
 
     def choose(value):
         result[0] = value
