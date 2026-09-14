@@ -186,6 +186,51 @@ def test_export_freecad_model_mode_defaults_to_zero_rotation_correction(tmp_path
     assert "App.Rotation(V(0,0,1), 0.0000)" in src
 
 
+def test_export_freecad_names_repeat_instances_by_ref_designator(tmp_path):
+    """Multiple placements of the SAME component cell must not all get the
+    bare cell name as their FreeCAD object name -- FreeCAD disambiguates a
+    repeated Part::Feature name by bumping its own trailing digits, which
+    for a name like CAP_1210 makes several placements of one part look
+    like several different EIA sizes in the tree. Each placement's own ref
+    designator (SRef.label) must be used instead."""
+    lib = _design()
+    top = lib.cells["TOP"]
+    top.add_sref("CHIP", (3000, 3000), label="C1")
+    top.add_sref("CHIP", (6000, 3000), label="C2")
+    s = Session(lib)
+    s.use_cell("TOP")
+    step_path = str(tmp_path / "CHIP.step")
+    open(step_path, "w").close()
+    path = str(tmp_path / "labeled.FCMacro")
+    s.export_freecad(path, component_models={"CHIP": {"mode": "model", "model_path": step_path}})
+    src = open(path).read()
+    compile(src, path, "exec")
+    assert "addObject('Part::Feature', 'C1_CHIP')" in src
+    assert "addObject('Part::Feature', 'C2_CHIP')" in src
+    # the original fixture's un-labelled CHIP instance still gets a name,
+    # just not one that collides with the labelled ones
+    assert "addObject('Part::Feature', 'CHIP_1')" in src
+
+
+def test_export_freecad_names_repeat_unlabelled_instances_with_a_counter(tmp_path):
+    """No ref designator at all (e.g. a quick script placement) still must
+    not produce the bare cell name twice -- fall back to a per-cell counter
+    instead of leaving FreeCAD to auto-renumber a colliding name."""
+    lib = _design()
+    top = lib.cells["TOP"]
+    top.add_sref("CHIP", (3000, 3000))
+    s = Session(lib)
+    s.use_cell("TOP")
+    step_path = str(tmp_path / "CHIP.step")
+    open(step_path, "w").close()
+    path = str(tmp_path / "unlabelled.FCMacro")
+    s.export_freecad(path, component_models={"CHIP": {"mode": "model", "model_path": step_path}})
+    src = open(path).read()
+    compile(src, path, "exec")
+    assert "addObject('Part::Feature', 'CHIP_1')" in src
+    assert "addObject('Part::Feature', 'CHIP_2')" in src
+
+
 def test_match_freecad_components_requires_step_dir(tmp_path):
     s = Session(_design())
     s.use_cell("TOP")

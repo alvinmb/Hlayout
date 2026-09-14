@@ -110,13 +110,19 @@ def _walk_instances(library, cell_name, film_layers, comp_models):
     """Yield ``(kind, payload)`` for the flattened hierarchy of
     ``cell_name``:
 
-      ("component", (target_cell_name, entry, transform, rot_deg, mirrored))
+      ("component", (target_cell_name, entry, transform, rot_deg, mirrored, label))
       ("bond",      ((x0, y0), (x1, y1), width_dbu))
 
     ``transform`` maps a point in the component cell's own space to
     world (DBU). A cell is a "component" per is_component_cell() above.
     The walk does not descend into a component (its own shapes are its
-    guts, handled by the film pass / its own body)."""
+    guts, handled by the film pass / its own body). ``label`` is the
+    placed SRef's own ref designator (may be ""), carried along so the
+    macro can name each instance's FreeCAD object distinctly instead of
+    reusing the same cell name for every placement (see write_freecad_macro:
+    FreeCAD auto-disambiguates a repeated Part::Feature name by bumping its
+    own trailing digits, which for a name like "CAP_1210" makes repeat
+    instances of the very same part look like different EIA sizes)."""
     bond_layers = film_layers  # bonds are found by the caller's own layer test
 
     def walk(name, transform, rot_deg, mirrored, depth):
@@ -147,7 +153,8 @@ def _walk_instances(library, cell_name, film_layers, comp_models):
             if is_component_cell(library, ref.cell_name, film_layers, comp_models):
                 entry = comp_models.get(ref.cell_name, {"mode": "extrude"})
                 yield ("component",
-                       (ref.cell_name, entry, child_transform, child_rot, child_mirror))
+                       (ref.cell_name, entry, child_transform, child_rot, child_mirror,
+                        ref.label))
             else:
                 yield from walk(ref.cell_name, child_transform, child_rot,
                                 child_mirror, depth + 1)
@@ -377,10 +384,20 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
     # components -- extrude a body or substitute a model
     comp_dir = os.path.dirname(os.path.abspath(path))
     n_comp = 0
+    # FreeCAD disambiguates a repeated Part::Feature name by bumping its own
+    # trailing digits, so naming every instance of the same cell "CAP_1210"
+    # would turn a design with six 1210 caps into what LOOKS like six
+    # different EIA sizes (CAP_1210, CAP_1211, CAP_1212, ...) in the tree.
+    # Name each instance after its own ref designator instead (falling back
+    # to an explicit per-cell counter when a placement has none) so repeats
+    # of the same part stay recognizably the same part.
+    seen_counts: dict = {}
     for kind, payload in _walk_instances(library, cell_name, film_layers, comp_models):
         if kind != "component":
             continue
-        cn, entry, xf, rot_deg, mirrored = payload
+        cn, entry, xf, rot_deg, mirrored, label = payload
+        seen_counts[cn] = seen_counts.get(cn, 0) + 1
+        obj_name = f"{label}_{cn}" if label else f"{cn}_{seen_counts[cn]}"
         mode = entry.get("mode", "extrude")
         zoff = _mm(float(entry.get("z_offset_um", 0.0)))
         base_z = stack_top + zoff
@@ -402,7 +419,7 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
             lines.append(f"    _sh = Part.Shape(); _sh.read({mp!r})")
             if mirrored:
                 lines.append(f"    _sh = _sh.mirror(V(0,0,0), V(1,0,0))")
-            lines.append(f"    _o = _doc.addObject('Part::Feature', {cn!r})")
+            lines.append(f"    _o = _doc.addObject('Part::Feature', {obj_name!r})")
             lines.append("    _o.Shape = _sh")
             lines.append(f"    _o.Placement = App.Placement("
                          f"V({_mm(ox_dbu):.5f},{_mm(oy_dbu):.5f},{base_z:.5f}), "
@@ -420,7 +437,7 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
         corners = [xf((x0, y0)), xf((x1, y0)), xf((x1, y1)), xf((x0, y1))]
         h_mm = _mm(float(entry.get("height_um", 400.0)))
         lines.append(f"# --- component {cn} (extrude {h_mm:.4f} mm) ---")
-        lines.append(f"_add({cn!r}, Part.Face({_ring_literal(corners, base_z)})"
+        lines.append(f"_add({obj_name!r}, Part.Face({_ring_literal(corners, base_z)})"
                      f".extrude(V(0,0,{h_mm:.5f})), "
                      f"({_COMPONENT_RGB[0]},{_COMPONENT_RGB[1]},{_COMPONENT_RGB[2]}))")
         n_comp += 1
