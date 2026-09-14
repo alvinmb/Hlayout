@@ -100,6 +100,15 @@ class LayoutCanvas(tk.Canvas):
         # in the current cell; increments (numerically) after each click.
         # See increment_pin_str() and _pin_number_click().
         self.pin_number_next = "1"
+        # How many pads THIS pass of the tool has stamped -- shown in the
+        # status hint so a click's effect is never just "the number in the
+        # hint silently changed" (see _pin_number_hint()/_pin_number_click()).
+        self._pin_number_count = 0
+        # show_pin_numbers as it was before Number Pins... forced it on (see
+        # start_pin_numbering()) -- restored on exit (cancel_draw()) so the
+        # tool never permanently changes a user's View > Show Pin Numbers
+        # preference, it just guarantees a stamp is visible WHILE numbering.
+        self._pin_number_prev_show = None
         self.path_width = 2
         self.path_cap = "round"
         self.circle_segments = 32  # one of CIRCLE_SEGMENT_CHOICES
@@ -487,10 +496,6 @@ class LayoutCanvas(tk.Canvas):
         return (f"Create Cell {self._pending_cell_name!r}: click the point to use as "
                 f"the cell's origin -- it becomes local (0, 0); Esc cancels")
 
-    def _pin_number_hint(self):
-        return (f"Number Pins: click a pad to stamp pin {self.pin_number_next!r} "
-                f"(numbers auto-increment); Esc stops")
-
     def _route_hint(self):
         layer = self._route_active_layer
         return (f"Route (2-layer): routing on layer {layer}. Click points; "
@@ -512,11 +517,17 @@ class LayoutCanvas(tk.Canvas):
             # same as any other one-shot/modal tool (Zoom Window, ...).
             # Done directly here rather than via set_mode() (which itself
             # calls cancel_draw()) to avoid recursing.
+            count = self._pin_number_count
+            if self._pin_number_prev_show is not None:
+                self.show_pin_numbers = self._pin_number_prev_show
+                self._pin_number_prev_show = None
             self.draw_mode = "select"
             self.selected = None
             self.selected_multi = []
             self.redraw()
-            self.on_mode_status(self._mode_hint())
+            self.on_mode_status(
+                f"Number Pins: done -- {count} pad(s) stamped this pass." if count
+                else "Number Pins: cancelled -- no pads were stamped.")
             self.on_draw_mode_changed("select")
         if self.draw_mode == "cell_origin":
             # Esc aborts Create Cell from Selection without making a cell,
@@ -570,16 +581,35 @@ class LayoutCanvas(tk.Canvas):
         current cell stamps `start` on it, then increments (see
         increment_pin_str()) for the next click. Re-clicking an
         already-numbered pad asks for confirmation before overwriting.
-        Esc (cancel_draw()) exits back to Select."""
+        Esc (cancel_draw()) exits back to Select.
+
+        Forces View > Show Pin Numbers on for the duration (restored
+        on exit) so every stamp is immediately visible on the canvas
+        regardless of that toggle's prior state -- otherwise a
+        successful click could look like nothing happened at all."""
         self.pin_number_next = (start or "1").strip() or "1"
+        self._pin_number_count = 0
+        self._pin_number_prev_show = self.show_pin_numbers
+        self.show_pin_numbers = True
         self.set_mode("pin_number")
+
+    def _pin_number_hint(self):
+        return (f"Number Pins: click a pad to stamp pin {self.pin_number_next!r} "
+                f"({self._pin_number_count} stamped so far) -- numbers auto-increment; "
+                f"Esc stops")
 
     def _pin_number_click(self, e):
         item = self._pick_item_at(e.x, e.y)
         if item is None:
+            self.on_mode_status(
+                "Number Pins: nothing there -- click directly on a pad "
+                "(Rectangle/Polygon shape); Esc stops")
             return
         kind, shape = self._item_to_shape[item]
         if kind != "shape" or not isinstance(shape, (Rectangle, Polygon)):
+            self.on_mode_status(
+                "Number Pins: that's not a pad (only a Rectangle or Polygon can "
+                "take a pin number) -- try another shape; Esc stops")
             return
         if shape.pin and shape.pin != self.pin_number_next:
             if not messagebox.askyesno(
@@ -589,9 +619,11 @@ class LayoutCanvas(tk.Canvas):
             ):
                 return
         self.checkpoint()
+        stamped = self.pin_number_next
         shape.pin = self.pin_number_next
         self.pin_number_next = increment_pin_str(self.pin_number_next)
-        self.on_mode_status(self._pin_number_hint())
+        self._pin_number_count += 1
+        self.on_mode_status(f"Number Pins: stamped pin {stamped!r}. " + self._pin_number_hint())
         self._after_edit()
 
     def start_chip_pins(self, total: int):

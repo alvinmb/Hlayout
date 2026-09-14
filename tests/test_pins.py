@@ -273,6 +273,99 @@ def test_pin_number_appears_as_soon_as_the_tool_stamps_it():
         app.destroy()
 
 
+def test_pin_numbering_click_on_empty_canvas_gives_feedback_not_silence():
+    app, top = _make_app()
+    try:
+        app.canvas.start_pin_numbering("1")
+        statuses = []
+        app.canvas.on_mode_status = statuses.append
+        app.canvas._on_click(_ev(*app.canvas.to_px(50000, 50000)))  # nothing there
+        assert statuses, "an invalid click must say something, not do nothing"
+        assert "not there" in statuses[-1].lower() or "nothing there" in statuses[-1].lower()
+        assert app.canvas.pin_number_next == "1"   # nothing consumed
+    finally:
+        app.destroy()
+
+
+def test_pin_numbering_click_on_a_non_pad_shape_gives_feedback():
+    app, top = _make_app()
+    try:
+        top.add_path(0, [(0, 0), (1000, 0)], width=100)
+        app.canvas.redraw()
+        app.canvas.start_pin_numbering("1")
+        statuses = []
+        app.canvas.on_mode_status = statuses.append
+        app.canvas._on_click(_ev(*app.canvas.to_px(500, 0)))
+        assert statuses and "not a pad" in statuses[-1].lower()
+        assert app.canvas.pin_number_next == "1"
+    finally:
+        app.destroy()
+
+
+def test_pin_numbering_hint_and_status_report_progress():
+    app, top = _make_app()
+    try:
+        r1 = top.add_rectangle(0, 0, 0, 1000, 1000)
+        r2 = top.add_rectangle(0, 2000, 0, 3000, 1000)
+        app.canvas.redraw()
+        app.canvas.start_pin_numbering("1")
+        assert "0 stamped so far" in app.canvas._pin_number_hint()
+
+        cx, cy = 500, 500
+        statuses = []
+        app.canvas.on_mode_status = statuses.append
+        app.canvas._on_click(_ev(*app.canvas.to_px(cx, cy)))
+        assert "stamped pin '1'" in statuses[-1]
+        assert "1 stamped so far" in statuses[-1]
+        assert app.canvas._pin_number_count == 1
+    finally:
+        app.destroy()
+
+
+def test_pin_numbering_forces_show_pin_numbers_on_and_restores_it():
+    app, top = _make_app()
+    try:
+        app.show_pins_var.set(False)
+        app._on_show_pins_change()
+        assert app.canvas.show_pin_numbers is False
+
+        app.canvas.start_pin_numbering("1")
+        assert app.canvas.show_pin_numbers is True    # forced on for the tool
+
+        app.canvas.cancel_draw()
+        assert app.canvas.show_pin_numbers is False   # restored afterward
+    finally:
+        app.destroy()
+
+
+def test_pin_numbering_done_message_reports_count():
+    app, top = _make_app()
+    try:
+        r = top.add_rectangle(0, 0, 0, 1000, 1000)
+        app.canvas.redraw()
+        app.canvas.start_pin_numbering("1")
+        app.canvas._on_click(_ev(*app.canvas.to_px(500, 500)))
+
+        statuses = []
+        app.canvas.on_mode_status = statuses.append
+        app.canvas.cancel_draw()
+        assert "1 pad(s) stamped" in statuses[-1]
+    finally:
+        app.destroy()
+
+
+def test_pin_numbering_cancelled_with_none_stamped_says_so():
+    app, top = _make_app()
+    try:
+        app.canvas.start_pin_numbering("1")
+        statuses = []
+        app.canvas.on_mode_status = statuses.append
+        app.canvas.cancel_draw()
+        assert "no pads were stamped" in statuses[-1].lower()
+    finally:
+        app.destroy()
+
+
 def test_pin_numbering_tool_escape_returns_to_select():
     app, top = _make_app()
     try:
