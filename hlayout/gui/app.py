@@ -2710,8 +2710,11 @@ class App(tk.Tk):
         Session.match_freecad_components()/hlayout.io.component_match:
         a passive cell by its name's size code, a SOT/PKG20-style part
         by its pad footprint. If there's anything to report, a preview
-        lists it and lets you cancel before anything is written; a
-        manual override always wins over an auto-match."""
+        shows it first -- purely informational, it never blocks the
+        export: a component nothing matched (or with no STEP file
+        built yet) just renders as today's flat extruded box, same as
+        it always has, so an incomplete match never means no output at
+        all. A manual override always wins over an auto-match."""
         name = self.session.current_cell_name or ""
         out_dir = self.default_export_dir("freecad")
         if out_dir is None:
@@ -2729,12 +2732,8 @@ class App(tk.Tk):
             return
 
         if report.matches or report.unmatched:
-            proceed = dialogs.show_scrollable_text(
-                "Auto-Matched Components", report.summary_lines(), parent=self,
-                ok_label="Export", cancel_label="Cancel")
-            if not proceed:
-                self.status.set("Export to FreeCAD cancelled.")
-                return
+            dialogs.show_scrollable_text(
+                "Auto-Matched Components", report.summary_lines(), parent=self, ok_label="OK")
 
         try:
             written = self.session.export_freecad(path, component_models=report.component_models())

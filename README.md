@@ -666,8 +666,10 @@ A manual `component_models` entry always wins over an auto-match, and
 a matched package whose STEP file hasn't actually been built yet is
 left as today's flat-extruded box rather than a broken reference. File
 > Export to FreeCAD (3D Macro)... shows a preview of what auto-matched
-to what (and what didn't, and why) before anything is written, with a
-Cancel option. Available from scripting as
+to what (and what didn't, and why) — purely informational: dismissing
+it always proceeds with the export, since a component nothing matched
+still renders fine as a flat box, so an incomplete match is never a
+reason to produce no output at all. Available from scripting as
 `session.export_freecad(path, cell_name=None, component_models=None, ...)`
 and `session.match_freecad_components(cell_name=None, step_dir=None)`
 (returns a `hlayout.io.component_match.MatchReport` — pass its

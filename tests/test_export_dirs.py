@@ -55,10 +55,13 @@ def test_default_export_dir_reuses_an_existing_folder(tmp_path):
         app.destroy()
 
 
-def test_export_freecad_macro_cancel_on_match_report_aborts_write(tmp_path):
-    """File > Export to FreeCAD (3D Macro)...: when there's an auto-
-    match report to show (a placed component cell, matched or not),
-    Cancel on that preview must abort before anything is written."""
+def test_export_freecad_macro_writes_even_with_unmatched_components(tmp_path):
+    """File > Export to FreeCAD (3D Macro)...: an unmatched component
+    (or one whose STEP file isn't built yet) must never block the
+    export -- the match report is purely informational, and the file
+    is always written (the unmatched cell just renders as a flat
+    extruded box, same as always) regardless of how the report dialog
+    is dismissed."""
     pytest.importorskip("shapely")
     from hlayout.gui import dialogs
     from hlayout.io.techfile import save_layer_thickness
@@ -73,42 +76,16 @@ def test_export_freecad_macro_cancel_on_match_report_aborts_write(tmp_path):
         app.session.sref("MYSTERY", (0, 0))
         save_layer_thickness(app.session.library, {"0": 10})
 
+        shown = []
         orig = dialogs.show_scrollable_text
-        dialogs.show_scrollable_text = lambda *a, **kw: False
+        dialogs.show_scrollable_text = lambda title, lines, parent, **kw: shown.append(lines)
         try:
             app.export_freecad_macro()
         finally:
             dialogs.show_scrollable_text = orig
 
-        assert "cancelled" in app.status.get().lower()
-        assert not os.listdir(os.path.join(str(tmp_path), "freecad"))
-    finally:
-        app.destroy()
-
-
-def test_export_freecad_macro_proceed_on_match_report_writes(tmp_path):
-    pytest.importorskip("shapely")
-    from hlayout.gui import dialogs
-    from hlayout.io.techfile import save_layer_thickness
-
-    app = _make_app()
-    try:
-        app.current_path = str(tmp_path / "board1.gds")
-        app.session.new_cell("MYSTERY")
-        app.session.use_cell("MYSTERY")
-        app.session.path(61, [(-50, -50), (50, -50)], width=500)
-        app.session.use_cell("TOP")
-        app.session.sref("MYSTERY", (0, 0))
-        save_layer_thickness(app.session.library, {"0": 10})
-
-        orig = dialogs.show_scrollable_text
-        dialogs.show_scrollable_text = lambda *a, **kw: True
-        try:
-            app.export_freecad_macro()
-        finally:
-            dialogs.show_scrollable_text = orig
-
+        assert shown and any("MYSTERY" in line for line in shown[0])   # still reported
         written = os.listdir(os.path.join(str(tmp_path), "freecad"))
-        assert any(f.endswith(".FCMacro") for f in written)
+        assert any(f.endswith(".FCMacro") for f in written)   # but still exported
     finally:
         app.destroy()
