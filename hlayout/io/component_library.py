@@ -63,7 +63,7 @@ from ..core.smdlib import CHIP_SIZES_MM, TERMINAL_LENGTH_FRACTION, TERMINAL_LENG
 #: sizes (1812, 2512, ...). Used as a cap on the derived entries below
 #: so, e.g., a 2512 (3.2 mm wide) doesn't end up modeled as a 3.2 mm
 #: TALL body just because height defaults to width.
-MAX_CAP_HEIGHT_MM = 2.0
+MAX_CAP_HEIGHT_MM = 1.2
 
 #: (name, length_mm, width_mm, height_mm, end_termination_length_mm) --
 #: EIA imperial case-size codes, roughly true to their nominal size

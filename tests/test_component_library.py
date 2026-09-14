@@ -16,8 +16,13 @@ from hlayout.scripting import Session
 def test_ceramic_cap_heights_never_exceed_the_realistic_max():
     # Regression: height used to default to width for every derived
     # size, which overstated 1812/2512 (3.2 mm wide) as equally thick --
-    # real MLCC thickness plateaus well below that.
+    # real MLCC thickness plateaus well below that. The 3 hand-picked
+    # sizes (0603/0805/1206) predate this cap and are exempt -- see
+    # test_original_hand_picked_cap_sizes_are_unchanged.
+    hand_picked = {"CAP_0603", "CAP_0805", "CAP_1206"}
     for name, _length, _width, height, _term in DEFAULT_CERAMIC_CAPS:
+        if name in hand_picked:
+            continue
         assert height <= MAX_CAP_HEIGHT_MM, f"{name} height {height} exceeds the cap"
 
 
