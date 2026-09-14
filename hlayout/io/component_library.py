@@ -34,6 +34,13 @@ placeholder body for 3D visualization/interference-checking has no
 need to be watertight-fused; ``Part.Shape().read()`` reads a compound
 back exactly as readily as a solid.
 
+A package whose STEP file already exists in the output folder is left
+alone rather than regenerated -- so hand-replacing a generic
+placeholder with a real vendor STEP model (or a manually-tweaked one)
+survives re-running the macro later, e.g. after this library gains a
+new package and the user wants just the new one built. Delete a file
+to force it to be rebuilt from the generic geometry again.
+
 Verified against FreeCAD 1.1 (freecadcmd, headless): every part below
 exports and reads back with the expected bounding box and solid count.
 """
@@ -242,6 +249,9 @@ def make_sot(L, W, H, lead_t, lead_out, lead_foot,
 
 def export(shape, name, out_dir):
     path = os.path.join(out_dir, name + ".step")
+    if os.path.isfile(path):
+        App.Console.PrintMessage("HLayout: %s already exists, leaving it alone\\n" % path)
+        return
     shape.exportStep(path)
     App.Console.PrintMessage("HLayout: wrote %s (%d solids)\\n" % (path, len(shape.Solids)))
 '''
@@ -276,7 +286,11 @@ def write_component_library_macro(
     Returns ``path``. The STEP files themselves only exist once the
     macro is actually run inside FreeCAD -- this function only writes
     the macro text, the same "this module only emits text" convention
-    hlayout.io.freecadio's design-export macro follows."""
+    hlayout.io.freecadio's design-export macro follows. Running the
+    macro never overwrites a ``<name>.step`` that already exists in
+    ``out_dir`` (see this module's own docstring) -- safe to re-run
+    after adding a new package, or after hand-replacing one file with
+    a real vendor model."""
     if path is None:
         path = os.path.join(out_dir, "build_component_library.FCMacro")
     caps = DEFAULT_CERAMIC_CAPS if ceramic_caps is None else ceramic_caps

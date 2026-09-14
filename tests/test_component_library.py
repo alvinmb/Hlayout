@@ -39,6 +39,20 @@ def test_macro_contains_freecad_boilerplate_and_output_dir(tmp_path):
     assert "def make_sot(" in text
 
 
+def test_macro_export_skips_a_step_file_that_already_exists(tmp_path):
+    """Re-running the macro must never clobber a STEP file someone
+    hand-replaced with a real vendor model (or a manual edit) -- see
+    the module docstring. This only checks the generated TEXT has the
+    guard (the actual skip-on-disk behavior needs FreeCAD to run, and
+    is verified separately via freecadcmd -- see the module docstring's
+    note on that)."""
+    out_dir = str(tmp_path / "complib")
+    path = write_component_library_macro(out_dir)
+    text = open(path).read()
+    assert "if os.path.isfile(path):" in text
+    assert "already exists, leaving it alone" in text
+
+
 def test_macro_emits_one_export_call_per_default_ceramic_cap(tmp_path):
     out_dir = str(tmp_path / "complib")
     path = write_component_library_macro(out_dir)

@@ -709,6 +709,13 @@ placeholder (right case size, pin count, and lead arrangement, not any
 one manufacturer's exact outline) — useful for visualization and
 interference-checking, not for manufacturing drawings.
 
+Running the macro again — after this library gains a new package, say
+— never overwrites a `<name>.step` that's already there: if you've
+replaced a generic placeholder with a real vendor STEP model (or
+tweaked one by hand), it's left alone; only genuinely missing files
+get (re)built. Delete a file yourself first to force it to be rebuilt
+from the generic geometry.
+
 Available from scripting as
 `session.generate_component_library(out_dir, path=None, ceramic_caps=None, pkg20=None, sot_packages=None)`
 (see `hlayout/io/component_library.py`) — pass a custom `ceramic_caps`
