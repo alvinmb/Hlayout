@@ -2,7 +2,7 @@
 
 GDSII (hlayout/io/gdsio.py) is the tool's native on-disk database
 format; Gerber is a manufacturing *output* format for photoplotters/PCB
-and thick/thin-film fabrication, so this writes flattened, per-layer
+and thick-film fabrication, so this writes flattened, per-layer
 files rather than round-tripping the hierarchical design. Every Sref is
 flattened (its shapes copied out with the placement's rotation/
 magnification/mirror/offset applied), so a Gerber file never contains

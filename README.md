@@ -1,6 +1,6 @@
-# HLayout — Thick & Thin Film Hybrid Layout CAD Tool
+# HLayout — Thick-Film Hybrid Layout CAD Tool
 
-A layout editor for thick-and-thin-film hybrid microelectronics, built to
+A layout editor for thick-film hybrid microelectronics, built to
 the requirements captured in `spec.odt`:
 
 - Database units: **1 micron (0.001 mm)** — matches the database unit
@@ -1658,7 +1658,7 @@ s.save("out.gds")
 ```
 
 See `examples/demo_script.py` for a fuller example (a small hybrid
-circuit with pads, a thick-film resistor, and thin-film traces), and
+circuit with pads and a thick-film resistor), and
 `hlayout/scripting/api.py` for the full `Session` API. Loading an
 existing file: `Session.open("design.gds")`.
 

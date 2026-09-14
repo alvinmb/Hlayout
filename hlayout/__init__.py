@@ -1,4 +1,4 @@
-"""hlayout: Thick & Thin Film Hybrid Layout CAD tool.
+"""hlayout: Thick-Film Hybrid Layout CAD tool.
 
 Core package. See spec.odt (project spec) for the original requirements:
   - Database units: 1 micron (0.001 mm)

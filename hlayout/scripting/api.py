@@ -1931,7 +1931,7 @@ class Session:
                   min_length=None, max_length=None,
                   cell_name: Optional[str] = None):
         """Draw a chip-and-wire assembly WIRE BOND between two points --
-        the jumper that ties a bare-die pad to a thick/thin-film
+        the jumper that ties a bare-die pad to a thick-film
         conductor pad, a conductor pad to a package pin, or one
         conductor pad to another.
 
