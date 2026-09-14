@@ -7,9 +7,32 @@ from hlayout.io.component_library import (
     DEFAULT_CERAMIC_CAPS,
     DEFAULT_PKG20,
     DEFAULT_SOT_PACKAGES,
+    MAX_CAP_HEIGHT_MM,
     write_component_library_macro,
 )
 from hlayout.scripting import Session
+
+
+def test_ceramic_cap_heights_never_exceed_the_realistic_max():
+    # Regression: height used to default to width for every derived
+    # size, which overstated 1812/2512 (3.2 mm wide) as equally thick --
+    # real MLCC thickness plateaus well below that.
+    for name, _length, _width, height, _term in DEFAULT_CERAMIC_CAPS:
+        assert height <= MAX_CAP_HEIGHT_MM, f"{name} height {height} exceeds the cap"
+
+
+def test_ceramic_cap_1812_and_2512_are_capped_not_as_wide_as_tall():
+    heights = {name: height for name, _l, _w, height, _t in DEFAULT_CERAMIC_CAPS}
+    assert heights["CAP_1812"] == MAX_CAP_HEIGHT_MM
+    assert heights["CAP_2512"] == MAX_CAP_HEIGHT_MM
+
+
+def test_original_hand_picked_cap_sizes_are_unchanged():
+    by_name = {name: (length, width, height, term)
+               for name, length, width, height, term in DEFAULT_CERAMIC_CAPS}
+    assert by_name["CAP_0603"] == (1.6, 0.8, 0.8, 0.3)
+    assert by_name["CAP_0805"] == (2.0, 1.25, 1.25, 0.4)
+    assert by_name["CAP_1206"] == (3.2, 1.6, 1.6, 0.5)
 
 
 def test_write_component_library_macro_default_path(tmp_path):

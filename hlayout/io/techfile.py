@@ -1035,7 +1035,16 @@ def save_layer_thickness(library: Library, thickness: dict) -> None:
 # Each placed cell instance is shown in the 3D export as either a flat
 # extrusion of a fixed body height ("extrude") or by substituting an
 # external STEP/IGES model FreeCAD imports and positions ("model").
-# {cell_name: {"mode","height_um","z_offset_um","model_path"}}.
+# {cell_name: {"mode","height_um","z_offset_um","model_path","rotation_deg"}}.
+# rotation_deg (degrees, default 0.0) is an extra correction applied ON
+# TOP of the placement's own rotation in "model" mode -- see
+# hlayout.io.freecadio's model-substitution block and
+# hlayout.io.component_match's _gullwing_rotation_correction() (the
+# footprint matcher is deliberately orientation-independent when
+# DETECTING a package, so an auto-matched substitution can come out 90
+# degrees off from the real footprint's lead direction; this field is
+# how that gets corrected, whether set automatically or by hand via
+# the Component Library Manager).
 
 COMPONENT_MODELS_KEY = "component_models"
 
@@ -1061,7 +1070,8 @@ def load_component_models(library: Library) -> dict:
             entry = {"mode": mode,
                      "height_um": float(d.get("height_um", DEFAULT_COMPONENT_HEIGHT_UM)),
                      "z_offset_um": float(d.get("z_offset_um", 0.0)),
-                     "model_path": str(d.get("model_path", "") or "")}
+                     "model_path": str(d.get("model_path", "") or ""),
+                     "rotation_deg": float(d.get("rotation_deg", 0.0))}
             out[str(name)] = entry
     return out
 
@@ -1077,6 +1087,7 @@ def save_component_models(library: Library, models: dict) -> None:
             "height_um": float(d.get("height_um", DEFAULT_COMPONENT_HEIGHT_UM)),
             "z_offset_um": float(d.get("z_offset_um", 0.0)),
             "model_path": str(d.get("model_path", "") or ""),
+            "rotation_deg": float(d.get("rotation_deg", 0.0)),
         }
     library.tech_params[COMPONENT_MODELS_KEY] = json.dumps(payload)
 

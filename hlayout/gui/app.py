@@ -39,6 +39,7 @@ from .canvas import LayoutCanvas, describe_selection
 from .commands import COMMAND_REFERENCE, CommandError, CommandInterpreter, _parse_point
 from .layer_panel import LayerPanel
 from .line_editing import bind_console_style_editing
+from .component_library_window import open_component_library_window
 from .drc_window import open_drc_window
 from .dxf_batch_window import open_dxf_batch_window
 from .gerber_batch_window import open_gerber_batch_window
@@ -358,6 +359,8 @@ class App(tk.Tk):
         filem.add_command(label="Export to FreeCAD (3D Macro)...", command=self.export_freecad_macro)
         filem.add_command(label="Build FreeCAD Component Library...",
                           command=self.build_component_library_macro)
+        filem.add_command(label="Component Library Manager...",
+                          command=lambda: open_component_library_window(self))
         filem.add_command(label="Print...", command=self.print_current_view, accelerator="Ctrl+P")
         filem.add_separator()
         filem.add_command(label="Exit", command=self._on_quit)

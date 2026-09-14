@@ -15,6 +15,7 @@ from hlayout.io.component_match import (
     Match,
     MatchReport,
     Unmatched,
+    _gullwing_rotation_correction,
     build_match_report,
     eia_size_tokens,
     find_step_file,
@@ -227,6 +228,54 @@ def test_match_gullwing_by_footprint_ambiguous_returns_none():
     }
     assert match_gullwing_by_footprint({"pin_count": 4, "x_span_mm": 1.0, "y_span_mm": 1.0},
                                         table) is None
+
+
+# --- _gullwing_rotation_correction -------------------------------------------
+
+def test_rotation_correction_zero_when_x_axis_matched():
+    table = gullwing_package_table()
+    stats = {"pin_count": 3, "x_span_mm": 0.95, "y_span_mm": 5.0}  # X is the real signal
+    assert _gullwing_rotation_correction(stats, table, "SOT_23") == 0.0
+
+
+def test_rotation_correction_90_when_only_y_axis_matched():
+    table = gullwing_package_table()
+    # mirrors the real examples/generate_sot_packages.py SOT-23 numbers:
+    # row separation (2.3) on X, real pitch (0.95) on Y
+    stats = {"pin_count": 3, "x_span_mm": 2.3, "y_span_mm": 0.95}
+    assert _gullwing_rotation_correction(stats, table, "SOT_23") == 90.0
+
+
+def test_rotation_correction_zero_when_both_axes_happen_to_match():
+    table = gullwing_package_table()
+    stats = {"pin_count": 3, "x_span_mm": 0.95, "y_span_mm": 0.95}
+    assert _gullwing_rotation_correction(stats, table, "SOT_23") == 0.0
+
+
+def test_build_match_report_sets_rotation_deg_for_a_y_axis_footprint(tmp_path):
+    """End-to-end: a footprint drawn with its pitch along Y (the
+    examples/generate_sot_packages.py convention) still matches SOT_23
+    by footprint, and the resulting Match carries the 90-degree
+    correction write_freecad_macro() needs to render it right-side-round."""
+    lib = Library("ROTTEST")
+    top = lib.new_cell("TOP")
+    q1 = lib.new_cell("Q1")
+    # 3 pads: 2 in a row along Y at x=-1.15 (pitch 0.95), 1 alone at x=+1.15
+    q1.add_rectangle(0, mm_to_dbu(-1.15) - mm_to_dbu(0.2), mm_to_dbu(-0.475) - mm_to_dbu(0.2),
+                      mm_to_dbu(-1.15) + mm_to_dbu(0.2), mm_to_dbu(-0.475) + mm_to_dbu(0.2), pin="1")
+    q1.add_rectangle(0, mm_to_dbu(-1.15) - mm_to_dbu(0.2), mm_to_dbu(0.475) - mm_to_dbu(0.2),
+                      mm_to_dbu(-1.15) + mm_to_dbu(0.2), mm_to_dbu(0.475) + mm_to_dbu(0.2), pin="2")
+    q1.add_rectangle(0, mm_to_dbu(1.15) - mm_to_dbu(0.2), -mm_to_dbu(0.2),
+                      mm_to_dbu(1.15) + mm_to_dbu(0.2), mm_to_dbu(0.2), pin="3")
+    q1.add_path(61, [(-100, -100), (100, -100)], width=1000)
+    top.add_sref("Q1", (0, 0))
+    save_layer_thickness(lib, {"0": 10})
+
+    step_dir = _step_dir_with(tmp_path, "SOT_23")
+    report = build_match_report(lib, "TOP", step_dir)
+    match = next(m for m in report.matches if m.cell_name == "Q1")
+    assert match.package == "SOT_23"
+    assert match.entry["rotation_deg"] == 90.0
 
 
 # --- against the real examples/generate_sot_packages.py fixture -------------

@@ -309,6 +309,30 @@ def match_gullwing_by_footprint(stats: dict, table: Optional[dict] = None,
     return next(iter(found)) if len(found) == 1 else None
 
 
+def _gullwing_rotation_correction(stats: dict, table: dict, package: str,
+                                   tolerance: float = X_SPAN_TOLERANCE) -> float:
+    """0.0 if ``stats``'s own x_span_mm is what put ``package`` within
+    tolerance, else 90.0 if it was y_span_mm instead -- see
+    match_gullwing_by_footprint()'s docstring on why either axis can
+    match. The 3D model built by component_library.py always has its
+    lead pitch along its own local X axis, so a footprint whose pitch
+    runs along its local Y needs this extra rotation on top of its
+    placement's own, or the correctly-identified model would render
+    with its leads pointing the wrong way relative to the real pads.
+    Defaults to 0.0 (no correction) when x_span_mm itself matched, or
+    in the rare case both axes happen to -- an ambiguous case where
+    "no correction" is as reasonable a default as any."""
+    expected = table[package]["x_span_mm"]
+    if expected <= 0:
+        return 0.0
+    lo, hi = expected * (1 - tolerance), expected * (1 + tolerance)
+    if lo <= stats["x_span_mm"] <= hi:
+        return 0.0
+    if lo <= stats.get("y_span_mm", stats["x_span_mm"]) <= hi:
+        return 90.0
+    return 0.0
+
+
 def find_step_file(step_dir: str, package_name: str) -> Optional[str]:
     """Absolute path to ``<step_dir>/<package_name>.step`` if it
     already exists, else None -- the point at which a match is
@@ -376,12 +400,15 @@ def build_match_report(library: Library, cell_name: str, step_dir: str, *,
 
         package = match_passive_by_name(cn, tokens)
         category = "passive"
+        rotation_deg = 0.0
         if package is None:
             c = library.cells.get(cn)
             stats = footprint_pin_stats(c) if c is not None else None
             if stats is not None:
                 package = match_gullwing_by_footprint(stats, table, tolerance)
                 category = "gullwing"
+                if package is not None:
+                    rotation_deg = _gullwing_rotation_correction(stats, table, package, tolerance)
 
         if package is None:
             report.unmatched.append(Unmatched(
@@ -396,10 +423,13 @@ def build_match_report(library: Library, cell_name: str, step_dir: str, *,
             continue
 
         reason = "name" if category == "passive" else "footprint"
+        entry = {"mode": "model", "model_path": step_path}
+        if rotation_deg:
+            entry["rotation_deg"] = rotation_deg
         report.matches.append(Match(
             cell_name=cn, package=package, category=category,
             reason=f"matched by {reason}",
-            entry={"mode": "model", "model_path": step_path},
+            entry=entry,
         ))
 
     return report

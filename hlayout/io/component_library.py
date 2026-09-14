@@ -51,6 +51,14 @@ from typing import List, Optional, Tuple
 
 from ..core.smdlib import CHIP_SIZES_MM, TERMINAL_LENGTH_FRACTION, TERMINAL_LENGTH_MAX_MM
 
+#: Real MLCC (multilayer ceramic chip capacitor) thickness does NOT keep
+#: growing with body length/width the way EIA case codes do -- it
+#: plateaus at roughly this figure even for the largest common case
+#: sizes (1812, 2512, ...). Used as a cap on the derived entries below
+#: so, e.g., a 2512 (3.2 mm wide) doesn't end up modeled as a 3.2 mm
+#: TALL body just because height defaults to width.
+MAX_CAP_HEIGHT_MM = 2.5
+
 #: (name, length_mm, width_mm, height_mm, end_termination_length_mm) --
 #: EIA imperial case-size codes, roughly true to their nominal size
 #: (real vendor dimensions vary a little around these). 0603/0805/1206
@@ -62,17 +70,17 @@ from ..core.smdlib import CHIP_SIZES_MM, TERMINAL_LENGTH_FRACTION, TERMINAL_LENG
 #: library can never drift out of sync on which sizes exist or what
 #: their body envelope is, and Session.match_freecad_components() can
 #: recognize a cell named after any of them (see
-#: hlayout.io.component_match.eia_size_tokens()). Height = width and
-#: termination length = smdlib's own TERMINAL_LENGTH_FRACTION/_MAX_MM
-#: formula, matching the proportions the 3 hand-picked sizes already
-#: happen to follow (H equals W for all three; term length is a
-#: quarter of body length, capped at 0.6 mm).
+#: hlayout.io.component_match.eia_size_tokens()). Height = width capped
+#: at MAX_CAP_HEIGHT_MM (matching the proportions the 3 hand-picked
+#: sizes already happen to follow -- H equals W for all three, and all
+#: three are already under the cap) and termination length =
+#: smdlib's own TERMINAL_LENGTH_FRACTION/_MAX_MM formula.
 DEFAULT_CERAMIC_CAPS: Tuple[Tuple[str, float, float, float, float], ...] = (
     ("CAP_0603", 1.6, 0.8, 0.8, 0.3),
     ("CAP_0805", 2.0, 1.25, 1.25, 0.4),
     ("CAP_1206", 3.2, 1.6, 1.6, 0.5),
 ) + tuple(
-    (f"CAP_{size}", length_mm, width_mm, width_mm,
+    (f"CAP_{size}", length_mm, width_mm, min(width_mm, MAX_CAP_HEIGHT_MM),
      round(min(length_mm * TERMINAL_LENGTH_FRACTION, TERMINAL_LENGTH_MAX_MM), 4))
     for size, (length_mm, width_mm) in CHIP_SIZES_MM.items()
     if size not in {"0603", "0805", "1206"}

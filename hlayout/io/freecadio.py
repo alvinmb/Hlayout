@@ -390,6 +390,13 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
             if not os.path.isabs(mp):
                 mp = os.path.join(comp_dir, mp)
             ox_dbu, oy_dbu = xf((0.0, 0.0))
+            # entry["rotation_deg"] is an extra correction ON TOP OF the
+            # placement's own rot_deg -- e.g. from an auto-match that
+            # identified this package via its footprint's Y axis instead
+            # of the library model's own local X-axis lead-pitch
+            # convention (see hlayout.io.component_match's
+            # _gullwing_rotation_correction()) -- not a substitute for it.
+            total_rot_deg = rot_deg + float(entry.get("rotation_deg", 0.0))
             lines.append(f"# --- component {cn} (model) ---")
             lines.append("try:")
             lines.append(f"    _sh = Part.Shape(); _sh.read({mp!r})")
@@ -399,7 +406,7 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
             lines.append("    _o.Shape = _sh")
             lines.append(f"    _o.Placement = App.Placement("
                          f"V({_mm(ox_dbu):.5f},{_mm(oy_dbu):.5f},{base_z:.5f}), "
-                         f"App.Rotation(V(0,0,1), {rot_deg:.4f}))")
+                         f"App.Rotation(V(0,0,1), {total_rot_deg:.4f}))")
             lines.append("except Exception as _e:")
             lines.append(f"    App.Console.PrintWarning('HLayout: could not read "
                          f"{os.path.basename(mp)} for {cn}: %s\\n' % _e)")

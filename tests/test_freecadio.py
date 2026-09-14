@@ -70,6 +70,15 @@ def test_component_models_round_trip():
     got = load_component_models(lib)
     assert got["CHIP"]["mode"] == "model" and got["CHIP"]["model_path"] == "p/chip.step"
     assert got["CAP"]["mode"] == "extrude"     # bad mode normalised
+    assert got["CHIP"]["rotation_deg"] == 0.0  # default when not given
+
+
+def test_component_models_round_trips_rotation_deg():
+    lib = Library("X")
+    save_component_models(lib, {"Q1": {"mode": "model", "model_path": "sot23.step",
+                                        "rotation_deg": 90.0}})
+    got = load_component_models(lib)
+    assert got["Q1"]["rotation_deg"] == 90.0
 
 
 # --- the macro ---------------------------------------------------------------
@@ -144,6 +153,37 @@ def test_export_freecad_forwards_component_models_override(tmp_path):
     compile(src, path, "exec")
     assert "# --- component CHIP (model) ---" in src
     assert step_path.replace("\\", "\\\\") in src or step_path in src
+
+
+def test_export_freecad_applies_rotation_deg_on_top_of_placement_rotation(tmp_path):
+    """A component_models entry's rotation_deg (the auto-matcher's
+    orientation correction for a footprint whose pitch runs along the
+    "swapped" axis -- see hlayout.io.component_match) must ADD to the
+    placement's own rotation, not replace it."""
+    lib = _design()
+    lib.cells["TOP"].srefs[0].rotation = 45.0   # the CHIP instance
+    s = Session(lib)
+    s.use_cell("TOP")
+    step_path = str(tmp_path / "CHIP.step")
+    open(step_path, "w").close()
+    path = str(tmp_path / "rotated.FCMacro")
+    s.export_freecad(path, component_models={
+        "CHIP": {"mode": "model", "model_path": step_path, "rotation_deg": 90.0}})
+    src = open(path).read()
+    compile(src, path, "exec")
+    assert "App.Rotation(V(0,0,1), 135.0000)" in src
+
+
+def test_export_freecad_model_mode_defaults_to_zero_rotation_correction(tmp_path):
+    lib = _design()
+    s = Session(lib)
+    s.use_cell("TOP")
+    step_path = str(tmp_path / "CHIP.step")
+    open(step_path, "w").close()
+    path = str(tmp_path / "no_correction.FCMacro")
+    s.export_freecad(path, component_models={"CHIP": {"mode": "model", "model_path": step_path}})
+    src = open(path).read()
+    assert "App.Rotation(V(0,0,1), 0.0000)" in src
 
 
 def test_match_freecad_components_requires_step_dir(tmp_path):

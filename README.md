@@ -662,6 +662,17 @@ before that shared folder existed. A two-part strategy:
   package already assumes (e.g. SOT-23 is always ~1.1 mm tall) — there's
   no attempt to infer height from a 2D footprint.
 
+Recognizing a package by footprint works regardless of which local axis
+a real design lays its lead pitch out on (checked against this repo's
+own `examples/generate_sot_packages.py`, which uses the opposite
+convention from the 3D library's own models) — but the SUBSTITUTED body
+still only exists in the library's own default orientation, so a
+footprint drawn the "other" way gets a correctly-identified model
+rotated 90° from its actual leads. Auto-matching detects this and adds
+a `rotation_deg` correction to the entry automatically; if it guesses
+the wrong direction (a real possibility for an asymmetric lead split),
+fix it visually in the Component Library Manager, below.
+
 A manual `component_models` entry always wins over an auto-match, and
 a matched package whose STEP file hasn't actually been built yet is
 left as today's flat-extruded box rather than a broken reference. File
@@ -692,7 +703,10 @@ folder:
 - The standard EIA ceramic chip-capacitor case sizes: 0201, 0402, 0603,
   0805, 1206, 1210, 1812, 2010, 2512 (the same sizes
   `hlayout.core.smdlib`'s 2D footprint library covers, so a size added
-  there is buildable here too).
+  there is buildable here too). Height defaults to width, capped at
+  `MAX_CAP_HEIGHT_MM` (2.5 mm) — real MLCC thickness plateaus well
+  below that even at the largest common case sizes, unlike length/width
+  which keep growing with the EIA code.
 - A 20-pin sealed metal/ceramic hybrid flatpack (10 gull-wing leads per
   long side at 1.27 mm pitch).
 - The common **SOT** (small-outline-transistor) gull-wing package
@@ -731,6 +745,19 @@ list to generate different case sizes, `pkg20` overrides (e.g.
 it), or a custom `sot_packages` dict (see `DEFAULT_SOT_PACKAGES`) to
 add/replace SOT variants (e.g. a SOT-23-5), or `{}` to skip the family
 entirely.
+
+**File > Component Library Manager...** is the visual manager for the
+cell-to-STEP-file mapping above: one row per placed component cell in
+the current design, showing the STEP file it's tied to (a manual pin,
+or whatever auto-matched — a **Source** column says which) and its
+**Rotation** correction. **Set STEP File...** opens a small dialog to
+browse to a `.step` file and set its rotation, pinning that cell as a
+manual override (always wins over auto-match from then on); **Clear
+Override** reverts it back to auto-matching. **Refresh** re-runs
+matching, e.g. after building more STEP files or placing a new
+component. This is also the first GUI way to set a manual
+`component_models` entry at all — previously only possible by hand-
+editing a saved technology file's JSON.
 
 ### Technology files
 
