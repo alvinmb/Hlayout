@@ -651,11 +651,16 @@ before that shared folder existed. A two-part strategy:
   the same generic placeholder shape).
 - A **chip semiconductor / multi-lead package** (the SOT family, and
   PKG20) is matched by its own **pad footprint** instead — the number
-  of distinct numbered pads (`Rectangle`/`Polygon.pin`) plus their
-  spacing is compared against each library package's own lead layout.
-  Body height then comes from whatever the matched package already
-  assumes (e.g. SOT-23 is always ~1.1 mm tall) — there's no attempt to
-  infer height from a 2D footprint.
+  of distinct numbered pads plus their spacing is compared against each
+  library package's own lead layout. A numbered pad is either a
+  `Rectangle`/`Polygon.pin` (a plain pad shape) or an `SRef.pin` (a
+  round lead placed from a shared via-cell template — the Via Wizard's
+  usual way of drawing one, since the round geometry lives once in the
+  template and each placement needs its own number, set via Edit >
+  Number Pins... same as any other pad). Body height then comes from
+  whatever the matched
+  package already assumes (e.g. SOT-23 is always ~1.1 mm tall) — there's
+  no attempt to infer height from a 2D footprint.
 
 A manual `component_models` entry always wins over an auto-match, and
 a matched package whose STEP file hasn't actually been built yet is

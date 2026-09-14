@@ -229,7 +229,23 @@ class SRef:
     adjustable per instance. Persisted through GDSII round-trips as GDS
     element properties (see io/gdsio.py's SREF_LABEL_PROPATTR /
     SREF_LABEL_HEIGHT_PROPATTR / SREF_LABEL_OFFSET_PROPATTR) since GDSII
-    SREF elements have no native text field of their own."""
+    SREF elements have no native text field of their own.
+
+    `pin` identifies THIS placement as a specific numbered lead/pin of
+    whatever larger footprint it's part of -- e.g. a round lead built
+    via the Via Wizard (Session.create_via_cell()), where the round
+    geometry lives once in a shared via-cell template and gets placed
+    as an SRef wherever a lead is needed, so a per-shape
+    Rectangle.pin/Polygon.pin (which would be shared by every instance
+    of that template) can't tell one placed lead's number from
+    another's the way each SRef's own `pin` can. Distinct from
+    `label`: `label` is a ref-designator annotation drawn next to the
+    instance (e.g. "R1"), `pin` is electrical pin identity feeding
+    hlayout.core.netlist extraction and
+    hlayout.io.component_match.footprint_pin_stats() the same way
+    Rectangle.pin/Polygon.pin do -- empty string means "not a pin".
+    Persisted through GDSII round-trips as a GDS element property (see
+    io/gdsio.py's SREF_PIN_PROPATTR)."""
 
     cell_name: str
     origin: Point
@@ -243,6 +259,7 @@ class SRef:
     #: clear of the part it names without moving the part. Persisted as a
     #: GDS element property (io/gdsio.py SREF_LABEL_OFFSET_PROPATTR).
     label_offset: Point = (0, 0)
+    pin: str = ""
 
     def __post_init__(self):
         x, y = self.origin

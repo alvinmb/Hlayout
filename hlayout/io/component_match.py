@@ -23,10 +23,13 @@ Two independent strategies, chosen by category:
   * Multi-lead gull-wing packages (the SOT family, and PKG20 -- both
     share the same "N leads per side at a pitch" shape): the placed
     cell's own footprint is inspected -- every own-shape Rectangle/
-    Polygon carrying a non-empty ``pin`` is grouped by pin string, and
-    the resulting pin count + span is compared against a table built
-    from DEFAULT_SOT_PACKAGES'/DEFAULT_PKG20's own lead-position
-    kwargs (not a hand-duplicated table). A real footprint may lay its
+    Polygon carrying a non-empty ``pin``, PLUS every own SRef instance
+    carrying a non-empty ``pin`` (a round lead built from a shared
+    via-cell template -- see hlayout.core.shapes.SRef.pin), is grouped
+    by pin string, and the resulting pin count + span is compared
+    against a table built from DEFAULT_SOT_PACKAGES'/DEFAULT_PKG20's
+    own lead-position kwargs (not a hand-duplicated table). A real
+    footprint may lay its
     two pad rows out along either local axis (this repo's own
     examples/generate_sot_packages.py puts the pitch along Y where
     component_library.py's 3D generator puts it along X, for the same
@@ -235,10 +238,14 @@ def gullwing_package_table(sot_packages=None, pkg20=None) -> Dict[str, dict]:
 def footprint_pin_stats(cell) -> Optional[dict]:
     """{"pin_count", "x_span_mm", "y_span_mm"} from ``cell``'s own
     (non-recursive) Rectangle/Polygon shapes carrying a non-empty
-    ``pin`` -- one centroid per DISTINCT pin string (so more than one
-    shape sharing a pin label, e.g. a wide tab lead drawn as two
-    rectangles, still counts once), or None if fewer than 2 distinct
-    pins (not enough signal to mean anything)."""
+    ``pin``, PLUS its own SRef instances carrying a non-empty ``pin``
+    (a round lead built from a shared via-cell template -- see
+    hlayout.core.shapes.SRef.pin's own docstring for why the pin lives
+    on the placement rather than the template's shapes) -- one
+    centroid per DISTINCT pin string (so more than one shape/instance
+    sharing a pin label, e.g. a wide tab lead drawn as two rectangles,
+    still counts once), or None if fewer than 2 distinct pins (not
+    enough signal to mean anything)."""
     centroids: Dict[str, List[Tuple[float, float]]] = {}
     for sh in cell.shapes:
         if not isinstance(sh, (Rectangle, Polygon)):
@@ -248,6 +255,11 @@ def footprint_pin_stats(cell) -> Optional[dict]:
             continue
         x0, y0, x1, y1 = sh.bbox()
         centroids.setdefault(pin, []).append(((x0 + x1) / 2.0, (y0 + y1) / 2.0))
+    for ref in cell.srefs:
+        pin = getattr(ref, "pin", "")
+        if not pin:
+            continue
+        centroids.setdefault(pin, []).append((float(ref.origin[0]), float(ref.origin[1])))
 
     if len(centroids) < 2:
         return None

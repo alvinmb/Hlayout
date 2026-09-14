@@ -1393,7 +1393,8 @@ class Session:
         return shape
 
     def sref(self, cell_name: str, origin, rotation: float = 0.0,
-             magnification: float = 1.0, x_reflection: bool = False, label: str = ""):
+             magnification: float = 1.0, x_reflection: bool = False, label: str = "",
+             pin: str = ""):
         # Checked before any mutation (and before the undo checkpoint,
         # so a rejected placement doesn't leave a spurious undo step):
         # a cell instancing itself, directly or by way of one of its
@@ -1410,13 +1411,13 @@ class Session:
         self._checkpoint()
         ref = self.cell.add_sref(cell_name, origin, rotation=rotation,
                                   magnification=magnification, x_reflection=x_reflection,
-                                  label=label)
+                                  label=label, pin=pin)
         self._notify()
         return ref
 
     def place_cell(self, cell_name: str, origin, source: Union[str, int, None] = None,
                     rotation: float = 0.0, magnification: float = 1.0, x_reflection: bool = False,
-                    label: str = ""):
+                    label: str = "", pin: str = ""):
         """Search for a cell by exact name and place an Sref to it in the
         current cell — the normal way to place a symbol/part found via
         find_cells() or attached from another library.
@@ -1431,7 +1432,12 @@ class Session:
 
         `label`, if given, sets the placed instance's ref designator
         (SRef.label) directly -- e.g. for a netlist-ready placement --
-        the same field Edit Selected... calls "Label".
+        the same field Edit Selected... calls "Label". `pin`, if given,
+        sets this placement's own pin number (SRef.pin) -- for a round
+        lead placed from a shared via-cell template (Session.
+        create_via_cell()/the Via Wizard), where the pin number can't
+        live on the template's own shapes since every placement of it
+        would share that number.
         """
         with self._batch():
             if source is None:
@@ -1462,7 +1468,7 @@ class Session:
 
             return self.sref(local_name, origin, rotation=rotation,
                               magnification=magnification, x_reflection=x_reflection,
-                              label=label)
+                              label=label, pin=pin)
 
     def place_cell_array(self, cell_name: str, origin, columns: int = 1, rows: int = 1,
                           col_spacing: float = 0.0, row_spacing: float = 0.0,

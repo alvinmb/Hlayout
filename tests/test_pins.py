@@ -273,6 +273,95 @@ def test_pin_number_appears_as_soon_as_the_tool_stamps_it():
         app.destroy()
 
 
+def _add_via_cell(app):
+    """A round via-cell template (Session.create_via_cell()'s shape,
+    hand-built here to avoid needing an attached library) -- SRef
+    instances of this are what a Via Wizard-built round lead actually
+    is, per hlayout.core.shapes.SRef.pin's own docstring."""
+    via = app.session.library.new_cell("VIA")
+    via.add_circle(0, (0, 0), 500, segments=32)
+    app.session.library.layers.set_style(0, fill=True, visible=True)
+    return via
+
+
+def test_pin_numbering_tool_stamps_a_placed_cell_instance():
+    app, top = _make_app()
+    try:
+        _add_via_cell(app)
+        ref = top.add_sref("VIA", (500, 500))
+        app.canvas.redraw()
+        app.canvas.start_pin_numbering("1")
+
+        cx, cy = app.canvas.to_px(500, 500)
+        app.canvas._on_click(_ev(cx, cy))
+        assert ref.pin == "1"
+    finally:
+        app.destroy()
+
+
+def test_pin_numbering_tool_stamps_several_instances_of_the_same_via_cell():
+    """The whole point of SRef.pin: several placements of ONE shared
+    via-cell template must each take a DIFFERENT pin number -- the
+    template's own geometry has no pin field of its own to conflict
+    over."""
+    app, top = _make_app()
+    try:
+        _add_via_cell(app)
+        ref1 = top.add_sref("VIA", (0, 0))
+        ref2 = top.add_sref("VIA", (2000, 0))
+        app.canvas.redraw()
+        app.canvas.start_pin_numbering("1")
+
+        for ref, expected, (x, y) in [(ref1, "1", (0, 0)), (ref2, "2", (2000, 0))]:
+            cx, cy = app.canvas.to_px(x, y)
+            app.canvas._on_click(_ev(cx, cy))
+            assert ref.pin == expected
+    finally:
+        app.destroy()
+
+
+def test_pin_numbering_tool_reclicking_a_numbered_instance_asks_for_confirmation(monkeypatch):
+    from hlayout.gui import canvas as canvas_module
+
+    app, top = _make_app()
+    try:
+        _add_via_cell(app)
+        ref = top.add_sref("VIA", (500, 500), pin="5")
+        app.canvas.redraw()
+        app.canvas.start_pin_numbering("1")
+
+        asked = {"called": False}
+
+        def fake_askyesno(title, message):
+            asked["called"] = True
+            return False   # decline the overwrite
+
+        monkeypatch.setattr(canvas_module.messagebox, "askyesno", fake_askyesno)
+
+        cx, cy = app.canvas.to_px(500, 500)
+        app.canvas._on_click(_ev(cx, cy))
+        assert asked["called"] is True
+        assert ref.pin == "5"   # unchanged, confirmation declined
+    finally:
+        app.destroy()
+
+
+def test_describe_selection_reports_pin_on_a_selected_instance():
+    from hlayout.gui.canvas import describe_selection
+
+    lib = Library("L")
+    via = lib.new_cell("VIA")
+    via.add_circle(0, (0, 0), 500, segments=32)
+    top = lib.new_cell("TOP")
+    ref = top.add_sref("VIA", (0, 0), pin="4")
+
+    fake_canvas = types.SimpleNamespace(
+        library=lib, selected_multi=[], selected=("sref", ref),
+    )
+    text = describe_selection(fake_canvas)
+    assert "pin='4'" in text
+
+
 def test_pin_numbering_click_on_empty_canvas_gives_feedback_not_silence():
     app, top = _make_app()
     try:

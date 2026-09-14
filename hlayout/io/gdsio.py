@@ -55,6 +55,11 @@ SREF_LABEL_OFFSET_PROPATTR = 122
 RECT_PIN_PROPATTR = 124
 POLY_PIN_PROPATTR = 123
 
+# Same idea again, for SRef.pin -- a placed instance's own pin number
+# (e.g. a Via Wizard-built round lead), distinct from SREF_LABEL_PROPATTR
+# (the ref-designator annotation) -- see SRef.pin's own docstring.
+SREF_PIN_PROPATTR = 121
+
 _CAP_TO_GDSTK = {
     PathCap.ROUND: "round",
     PathCap.SQUARE: "extended",
@@ -116,6 +121,8 @@ def save_gds(library: Library, path: str) -> None:
                 lx, ly = ref.label_offset
                 if lx or ly:
                     gref.set_gds_property(SREF_LABEL_OFFSET_PROPATTR, f"{int(lx)},{int(ly)}")
+            if ref.pin:
+                gref.set_gds_property(SREF_PIN_PROPATTR, ref.pin)
             gcell.add(gref)
 
         for ref in cell.arefs:
@@ -252,6 +259,7 @@ def load_gds(path: str, library_name: Optional[str] = None) -> Library:
                         label_offset = (int(lx), int(ly))
                     except ValueError:
                         label_offset = (0, 0)
+                pin = (ref.get_gds_property(SREF_PIN_PROPATTR) or "").rstrip("\x00")
                 cell.srefs.append(SRef(
                     cell_name=ref.cell_name,
                     origin=ref.origin,
@@ -261,6 +269,7 @@ def load_gds(path: str, library_name: Optional[str] = None) -> Library:
                     label=label,
                     label_height=label_height,
                     label_offset=label_offset,
+                    pin=pin,
                 ))
 
     top = gdslib.top_level()

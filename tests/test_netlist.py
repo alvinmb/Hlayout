@@ -95,6 +95,57 @@ def test_extract_netlist_uses_the_immediate_parent_srefs_label():
     assert "ASSY1" not in ref_des_values
 
 
+def _two_vias_bridged(s, pin1="1", pin2="2"):
+    """A round via-cell template (the shape a Via Wizard-built round
+    lead actually is -- see SRef.pin's own docstring) placed twice
+    inside a labelled part-cell "U1DEV", each instance given its own
+    SRef.pin (the template's own circle carries no pin of its own,
+    since both placements share it), bridged by a trace on the same
+    conductor layer -- mirrors _two_resistors_bridged() above but for
+    SRef-based pins instead of Rectangle-based ones."""
+    s.new_cell("VIA")
+    s.use_cell("VIA")
+    s.circle(31, (0, 0), 300, segments=16)
+    s.new_cell("U1DEV")
+    s.use_cell("U1DEV")
+    ref1 = s.sref("VIA", (0, 0), pin=pin1)
+    ref2 = s.sref("VIA", (3000, 0), pin=pin2)
+    s.rect(31, -300, -150, 3300, 150)
+    s.use_cell("TOP")
+    s.sref("U1DEV", (0, 0), label="U1")
+    return ref1, ref2
+
+
+def test_extract_netlist_recognizes_an_srefs_own_pin():
+    s = _fresh_session()
+    _two_vias_bridged(s)
+
+    nets = extract_netlist(s.library, s.cell, [31])
+    by_pins = _nets_by_pins(nets)
+    assert [("U1", "1"), ("U1", "2")] in list(by_pins.values())
+    assert all(n.unresolved_count == 0 for n in nets)
+
+
+def test_extract_netlist_keeps_two_unbridged_via_instances_as_separate_nets():
+    s = _fresh_session()
+    s.new_cell("VIA")
+    s.use_cell("VIA")
+    s.circle(31, (0, 0), 300, segments=16)
+    s.new_cell("U1DEV")
+    s.use_cell("U1DEV")
+    s.sref("VIA", (0, 0), pin="1")
+    s.sref("VIA", (30000, 0), pin="2")   # far apart -- no bridging trace
+    s.use_cell("TOP")
+    s.sref("U1DEV", (0, 0), label="U1")
+
+    nets = extract_netlist(s.library, s.cell, [31])
+    by_pins = _nets_by_pins(nets)
+    net_ids = list(by_pins.values())
+    assert [("U1", "1")] in net_ids
+    assert [("U1", "2")] in net_ids
+    assert len(nets) == 2
+
+
 def test_extract_netlist_with_no_conductor_geometry_returns_no_nets():
     s = _fresh_session()
     nets = extract_netlist(s.library, s.cell, [31])

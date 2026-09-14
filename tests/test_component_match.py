@@ -123,6 +123,39 @@ def test_footprint_pin_stats_on_a_sot23_like_cell():
     assert stats["x_span_mm"] == pytest.approx(0.95, abs=0.01)
 
 
+def _sot23_like_cell_via_srefs():
+    """Same SOT-23-like pin layout as _sot23_like_cell(), but built the
+    way a Via Wizard round lead actually is: SRef instances of a
+    SHARED via-cell template, each carrying its own SRef.pin, rather
+    than Rectangle.pin on shapes owned directly by the cell -- proves
+    footprint_pin_stats() picks up this path independently."""
+    lib = Library("T")
+    via = lib.new_cell("VIA")
+    via.add_circle(0, (0, 0), mm_to_dbu(0.2), segments=16)
+    cell = lib.new_cell("Q1")
+    cell.add_sref("VIA", (mm_to_dbu(-0.475), mm_to_dbu(-0.55)), pin="1")
+    cell.add_sref("VIA", (mm_to_dbu(0.475), mm_to_dbu(-0.55)), pin="2")
+    cell.add_sref("VIA", (0, mm_to_dbu(0.55)), pin="3")
+    cell.add_path(61, [(-100, -100), (100, -100)], width=1000)
+    return lib, cell
+
+
+def test_footprint_pin_stats_on_a_sot23_like_cell_built_from_via_srefs():
+    _lib, cell = _sot23_like_cell_via_srefs()
+    stats = footprint_pin_stats(cell)
+    assert stats["pin_count"] == 3
+    assert stats["x_span_mm"] == pytest.approx(0.95, abs=0.01)
+
+
+def test_footprint_pin_stats_ignores_an_unpinned_sref():
+    lib = Library("T")
+    lib.new_cell("VIA")
+    cell = lib.new_cell("Q1")
+    cell.add_sref("VIA", (0, 0))            # no pin
+    cell.add_rectangle(0, -100, -100, 100, 100, pin="1")
+    assert footprint_pin_stats(cell) is None   # only 1 distinct pin total
+
+
 def test_footprint_pin_stats_none_with_fewer_than_two_pins():
     lib = Library("T")
     cell = lib.new_cell("C")
@@ -260,6 +293,27 @@ def _step_dir_with(tmp_path, *names):
     for n in names:
         (tmp_path / f"{n}.step").write_text("")
     return str(tmp_path)
+
+
+def test_build_match_report_matches_a_via_sref_based_footprint(tmp_path):
+    """Same scenario as test_build_match_report_matches_by_name_and_footprint's
+    Q1 -> SOT_23 match, but Q1's leads are SRef instances of a shared
+    via-cell template (SRef.pin) instead of Rectangle.pin shapes --
+    the actual shape a Via Wizard-built round lead takes. Proves the
+    whole pipeline (not just footprint_pin_stats() in isolation) sees
+    SRef-based pins."""
+    lib = Library("MATCHTEST2")
+    top = lib.new_cell("TOP")
+    _sot_lib, q1 = _sot23_like_cell_via_srefs()
+    lib.cells["VIA"] = _sot_lib.cells["VIA"]
+    lib.cells["Q1"] = q1
+    top.add_sref("Q1", (0, 0))
+    save_layer_thickness(lib, {"0": 10})
+
+    step_dir = _step_dir_with(tmp_path, "SOT_23")
+    report = build_match_report(lib, "TOP", step_dir)
+    matched = {m.cell_name: m.package for m in report.matches}
+    assert matched == {"Q1": "SOT_23"}
 
 
 def test_build_match_report_matches_by_name_and_footprint(tmp_path):

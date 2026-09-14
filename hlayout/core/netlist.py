@@ -26,6 +26,15 @@ SRef that placed it -- specifically the *immediate* parent SRef's
 placement that actually corresponds to "this physical part" (a
 resistor's own Sref, a footprint's own Sref -- not some outer
 assembly-level Sref wrapping several parts together).
+
+A placed SRef can ALSO be a pin in its own right (SRef.pin), for a
+round lead built from a shared via-cell template (Session.
+create_via_cell()/the Via Wizard): the template's own shapes are
+reused by every placement, so a per-shape pin field would be shared
+by all of them -- SRef.pin instead lives on the placement, one number
+per instance. Such a pin is attributed to the *enclosing* part's ref
+designator (not the via instance's own -- it doesn't have one), since
+it's one lead of the part the level above identifies.
 """
 
 from dataclasses import dataclass, field
@@ -126,6 +135,20 @@ def _flatten(library, cell, conductor_layers, ref_des: str = "", point_transform
         )
         geoms.extend(child_geoms)
         pinned.extend(child_pinned)
+        if ref.pin and child_geoms:
+            # This SRef instance is itself a numbered pin -- e.g. a
+            # round lead built from a shared via-cell template
+            # (Session.create_via_cell()/the Via Wizard), where the pin
+            # number lives on the PLACEMENT (SRef.pin), not on the
+            # template's own shapes (which are shared by every
+            # placement and so can't carry a distinct number). Attribute
+            # the union of whatever conductor-layer copper this
+            # instance's own cell draws to it, under the CURRENT
+            # (enclosing-part) ref_des -- not child_ref_des -- since a
+            # via instance doesn't carry its own separate ref
+            # designator; it's one lead of the part the *enclosing*
+            # SRef's label identifies.
+            pinned.append((unary_union(child_geoms), ref_des, ref.pin, True))
 
     for ref in cell.srefs:
         _descend(ref, ref.label)

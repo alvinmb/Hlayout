@@ -603,13 +603,15 @@ class LayoutCanvas(tk.Canvas):
         if item is None:
             self.on_mode_status(
                 "Number Pins: nothing there -- click directly on a pad "
-                "(Rectangle/Polygon shape); Esc stops")
+                "(Rectangle/Polygon shape, or a placed cell instance); Esc stops")
             return
         kind, shape = self._item_to_shape[item]
-        if kind != "shape" or not isinstance(shape, (Rectangle, Polygon)):
+        is_pad_shape = kind == "shape" and isinstance(shape, (Rectangle, Polygon))
+        is_instance = kind == "sref" and isinstance(shape, SRef)
+        if not (is_pad_shape or is_instance):
             self.on_mode_status(
-                "Number Pins: that's not a pad (only a Rectangle or Polygon can "
-                "take a pin number) -- try another shape; Esc stops")
+                "Number Pins: that's not a pad (a Rectangle, Polygon, or placed cell "
+                "instance can take a pin number) -- try another shape; Esc stops")
             return
         if shape.pin and shape.pin != self.pin_number_next:
             if not messagebox.askyesno(
@@ -3188,10 +3190,11 @@ def _describe_one(kind, shape, library):
     if kind == "sref" or isinstance(shape, SRef):
         mirror = "yes" if shape.x_reflection else "no"
         label_part = f"  label={shape.label!r}" if shape.label else ""
+        pin_part = f"  pin={shape.pin!r}" if shape.pin else ""
         return (f"Cell Instance  cell={shape.cell_name!r}  "
                 f"origin=({shape.origin[0]},{shape.origin[1]})  "
                 f"rotation={shape.rotation:g}°  magnification={shape.magnification:g}  "
-                f"mirror={mirror}{label_part}")
+                f"mirror={mirror}{label_part}{pin_part}")
     if kind == "aref" or isinstance(shape, ARef):
         mirror = "yes" if shape.x_reflection else "no"
         return (f"Array Instance  cell={shape.cell_name!r}  "

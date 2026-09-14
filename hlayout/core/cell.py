@@ -48,10 +48,10 @@ class Cell:
 
     def add_sref(self, cell_name: str, origin, rotation: float = 0.0,
                  magnification: float = 1.0, x_reflection: bool = False,
-                 label: str = "") -> SRef:
+                 label: str = "", pin: str = "") -> SRef:
         ref = SRef(cell_name=cell_name, origin=origin, rotation=rotation,
                    magnification=magnification, x_reflection=x_reflection,
-                   label=label)
+                   label=label, pin=pin)
         self.srefs.append(ref)
         return ref
 
