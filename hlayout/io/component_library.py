@@ -23,10 +23,16 @@ the standard library; FreeCAD itself is needed only to *run* the
 macro it writes, exactly like the design-export macro.
 
 Geometry conventions (matching what freecadio.py's "model" substitution
-expects -- see its ``_sh.read(model_path)`` / Placement code): each
-part is centred at the origin in X/Y and sits on Z=0 (the surface it's
+expects -- see its ``_sh.read(model_path)`` / Placement code, and
+hlayout.core.smdlib's 2D footprint library, which uses the same
+convention for the same reason): each part's origin (0, 0) is the
+BOTTOM-LEFT corner of its body footprint in X/Y -- the body spans
+(0, 0) to (length_mm, width_mm) -- and it sits on Z=0 (the surface it's
 placed on) -- a capacitor's body rises from Z=0 to its height, and the
-20-pin package's leads have their feet AT Z=0 so it sits flat. Every
+20-pin package's leads have their feet AT Z=0 so it sits flat. A 2D GDS
+cell and a 3D STEP model sharing the same name therefore substitute
+correctly in File > Export to FreeCAD: the 3D body lands exactly on
+the real footprint instead of offset by the body size. Every
 part is exported as a Part compound of simple boxes (not a single
 boolean-fused solid) -- fusing dozens of coincident-face boxes is a
 common source of flaky FreeCAD boolean failures, and a coarse
@@ -153,22 +159,26 @@ DEFAULT_SOT_PACKAGES = {
 _GEOMETRY_FUNCTIONS = '''\
 def make_ceramic_cap(L, W, H, term_len, over=0.02):
     """A rectangular ceramic chip capacitor body with two metallised end
-    terminations. Centred at the origin in X/Y, sitting on Z=0 (the
-    substrate surface) up to Z=H -- long axis along X."""
+    terminations. Origin at the bottom-left corner in X/Y (body spans
+    (0, 0) to (L, W)), sitting on Z=0 (the substrate surface) up to
+    Z=H -- long axis along X."""
     body = Part.makeBox(L, W, H, V(-L / 2.0, -W / 2.0, 0))
     term1 = Part.makeBox(term_len, W + 2 * over, H + 2 * over,
                           V(-L / 2.0, -W / 2.0 - over, -over))
     term2 = Part.makeBox(term_len, W + 2 * over, H + 2 * over,
                           V(L / 2.0 - term_len, -W / 2.0 - over, -over))
-    return Part.makeCompound([body, term1, term2])
+    shape = Part.makeCompound([body, term1, term2])
+    shape.translate(V(L / 2.0, W / 2.0, 0))
+    return shape
 
 
 def make_pkg20(L, W, H_body, H_lid, lid_margin, n_per_side, pitch,
                lead_w, lead_t, lead_out, lead_foot):
     """A sealed metal/ceramic 20-pin hybrid flatpack: a rectangular base
     with an inset lid, and n_per_side gull-wing leads per long side.
-    Centred at the origin in X/Y, sitting on Z=0 -- each lead's foot
-    rests on Z=0 for a realistic seated placement."""
+    Origin at the bottom-left corner in X/Y (body spans (0, 0) to
+    (L, W)), sitting on Z=0 -- each lead's foot rests on Z=0 for a
+    realistic seated placement."""
     shapes = [
         Part.makeBox(L, W, H_body, V(-L / 2.0, -W / 2.0, 0)),
         Part.makeBox(L - 2 * lid_margin, W - 2 * lid_margin, H_lid,
@@ -200,7 +210,9 @@ def make_pkg20(L, W, H_body, H_lid, lid_margin, n_per_side, pitch,
             shapes.append(Part.makeBox(lead_w, foot_y1 - foot_y0, lead_t,
                                         V(x - lead_w / 2.0, foot_y0, 0)))
 
-    return Part.makeCompound(shapes)
+    shape = Part.makeCompound(shapes)
+    shape.translate(V(L / 2.0, W / 2.0, 0))
+    return shape
 
 
 def _gullwing_side(y_wall, y_dir, leads, lead_out, lead_t, lead_mid_z, lead_foot):
@@ -234,8 +246,9 @@ def make_sot(L, W, H, lead_t, lead_out, lead_foot,
     rectangular body with independently configurable leads on its -Y
     and +Y sides (each a list of (x_mm, lead_width_mm) pairs) -- covers
     SOT-23/SOT-323's 2-leads/1-lead split and SOT-223's 3 leads + 1
-    wide tab lead with the same shape generator. Centred at the origin
-    in X/Y, sitting on Z=0.
+    wide tab lead with the same shape generator. Origin at the
+    bottom-left corner in X/Y (body spans (0, 0) to (L, W)), sitting
+    on Z=0.
 
     heat_tab, if given, is (y_dir, tab_width, tab_thickness, overhang)
     for a flat metal area flush with the body's top on the y_dir side
@@ -252,7 +265,9 @@ def make_sot(L, W, H, lead_t, lead_out, lead_foot,
         y0 = min(y_wall, y_outer)
         y1 = max(y_wall, y_outer)
         shapes.append(Part.makeBox(tab_w, y1 - y0, tab_t, V(-tab_w / 2.0, y0, H - tab_t)))
-    return Part.makeCompound(shapes)
+    shape = Part.makeCompound(shapes)
+    shape.translate(V(L / 2.0, W / 2.0, 0))
+    return shape
 
 
 def export(shape, name, out_dir):

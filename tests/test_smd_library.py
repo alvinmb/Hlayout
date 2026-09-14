@@ -102,12 +102,12 @@ def test_each_package_gets_one_lead_per_pin_on_layer_63():
 def test_soic_leads_sit_outside_the_body_on_both_long_sides():
     lib = generate_smd_library()
     length_mm, width_mm = 9.90, 3.90  # IC_SOIC16
-    half_w = mm_to_dbu(width_mm) / 2
+    W = mm_to_dbu(width_mm)
     cell = lib.cells["IC_SOIC16"]
     leads = [s for s in cell.shapes if isinstance(s, Rectangle) and s.layer == LEAD_LAYER]
     assert len(leads) == 16
-    top = [l for l in leads if min(p[1] for p in l.points) >= half_w]
-    bottom = [l for l in leads if max(p[1] for p in l.points) <= -half_w]
+    top = [l for l in leads if min(p[1] for p in l.points) >= W]
+    bottom = [l for l in leads if max(p[1] for p in l.points) <= 0]
     assert len(top) == 8
     assert len(bottom) == 8
 
@@ -115,24 +115,24 @@ def test_soic_leads_sit_outside_the_body_on_both_long_sides():
 def test_sot23_leads_are_2_plus_1():
     lib = generate_smd_library()
     width_mm = 1.30
-    half_w = mm_to_dbu(width_mm) / 2
+    W = mm_to_dbu(width_mm)
     cell = lib.cells["T_SOT23"]
     leads = [s for s in cell.shapes if isinstance(s, Rectangle) and s.layer == LEAD_LAYER]
     assert len(leads) == 3
-    one_side = [l for l in leads if min(p[1] for p in l.points) >= half_w]
-    other_side = [l for l in leads if max(p[1] for p in l.points) <= -half_w]
+    one_side = [l for l in leads if min(p[1] for p in l.points) >= W]
+    other_side = [l for l in leads if max(p[1] for p in l.points) <= 0]
     assert {len(one_side), len(other_side)} == {1, 2}
 
 
 def test_sod123_leads_are_at_each_end():
     lib = generate_smd_library()
     length_mm = 3.70
-    half_l = mm_to_dbu(length_mm) / 2
+    L = mm_to_dbu(length_mm)
     cell = lib.cells["D_SOD123"]
     leads = [s for s in cell.shapes if isinstance(s, Rectangle) and s.layer == LEAD_LAYER]
     assert len(leads) == 2
-    left = [l for l in leads if max(p[0] for p in l.points) <= -half_l]
-    right = [l for l in leads if min(p[0] for p in l.points) >= half_l]
+    left = [l for l in leads if max(p[0] for p in l.points) <= 0]
+    right = [l for l in leads if min(p[0] for p in l.points) >= L]
     assert len(left) == 1
     assert len(right) == 1
 
@@ -145,14 +145,14 @@ def test_terminals_span_full_body_width_and_sit_at_each_end():
     if left.points[0][0] > right.points[0][0]:
         left, right = right, left
 
-    half_l = mm_to_dbu(length_mm) / 2
-    half_w = mm_to_dbu(width_mm) / 2
+    L = mm_to_dbu(length_mm)
+    W = mm_to_dbu(width_mm)
     xs_left = [p[0] for p in left.points]
     ys_left = [p[1] for p in left.points]
     xs_right = [p[0] for p in right.points]
 
-    assert min(xs_left) == -half_l
-    assert max(xs_right) == half_l
-    assert min(ys_left) == -half_w and max(ys_left) == half_w
+    assert min(xs_left) == 0
+    assert max(xs_right) == L
+    assert min(ys_left) == 0 and max(ys_left) == W
     # the two terminals don't overlap in the middle of the body
     assert max(xs_left) <= min(xs_right)

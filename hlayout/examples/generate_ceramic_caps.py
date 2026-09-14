@@ -14,7 +14,12 @@ One cell per standard EIA chip size (0201 .. 2512). Each cell has:
 
 Component origin is the BOTTOM-LEFT corner of the body outline: the
 body spans (0, 0) to (L, W); the epoxy pads poke EPOXY_OVERSIZE_MM
-past that, as a real epoxy print does.
+past that, as a real epoxy print does. This matches
+hlayout.io.component_library's 3D STEP models exactly (also
+bottom-left origin in X/Y), so a cell built here and one built there
+sharing the same name (e.g. CAP_1210) substitute correctly in File >
+Export to FreeCAD: the 3D body lands on the real footprint instead of
+offset by the body size.
 
 Run:  python hlayout/examples/generate_ceramic_caps.py
 """

@@ -7,7 +7,7 @@ Every cell gets:
   * a reference-designator placeholder Text on layer 61 (REFDES_LAYER),
     using the standard prefix letter(s) for that component family
     (C=capacitor, R=resistor, T=transistor, D=diode, IC=integrated
-    circuit), centred on the cell origin.
+    circuit), centred on the body.
   * leg/lead geometry, so every component shows how it actually contacts
     the board, not just a bare outline:
       - chip R/C: two filled terminal/end-cap Rectangles on layer 62
@@ -16,6 +16,12 @@ Every cell gets:
       - SOT-23 / SOD-123 / SOIC: filled gull-wing lead Rectangles on layer
         63 (LEAD_LAYER), one per pin, projecting outward from the body
         edge. See _add_gullwing_leads() and _SOT23_PINS/_SOD123_PINS.
+
+Every cell's own origin (0, 0) is the BOTTOM-LEFT corner of its body
+outline -- the body spans (0, 0) to (length_mm, width_mm) -- matching
+hlayout.io.component_library's 3D STEP models exactly, so a 2D cell and
+a 3D model sharing the same name substitute correctly in File > Export
+to FreeCAD instead of landing offset by the body size.
 
 Package set covered:
   * Standard EIA chip resistor/capacitor body sizes (0201..2512) -- both
@@ -98,90 +104,93 @@ OTHER_PACKAGES_MM = {
 
 
 def _add_body_and_refdes(cell, prefix, length_mm, width_mm):
-    """Draw a centred rectangular body-outline Path (layer 60) and a
-    refdes-prefix Text (layer 61) into `cell`."""
-    half_l = mm_to_dbu(length_mm) / 2
-    half_w = mm_to_dbu(width_mm) / 2
-    x0, x1 = -half_l, half_l
-    y0, y1 = -half_w, half_w
-    points = [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)]
+    """Draw a rectangular body-outline Path (layer 60) and a
+    refdes-prefix Text (layer 61) into `cell`. Origin at the
+    bottom-left corner: body spans (0, 0) to (length_mm, width_mm)."""
+    L = mm_to_dbu(length_mm)
+    W = mm_to_dbu(width_mm)
+    points = [(0, 0), (L, 0), (L, W), (0, W), (0, 0)]
     width = mm_to_dbu(BODY_OUTLINE_WIDTH_MM)
     cell.add_path(BODY_OUTLINE_LAYER, points, width, cap="flush")
 
     text_height = max(mm_to_dbu(0.3), min(mm_to_dbu(width_mm * 0.4), mm_to_dbu(1.0)))
-    cell.add_text(REFDES_LAYER, (0, 0), prefix, height=int(text_height))
+    cell.add_text(REFDES_LAYER, (L // 2, W // 2), prefix, height=int(text_height))
 
 
 def _add_chip_terminals(cell, length_mm, width_mm):
     """Draw the two wraparound end-cap terminals (layer 62) a chip R/C
     has at each end of its body, full body width, extending inward from
     each end by TERMINAL_LENGTH_FRACTION of the body length (capped at
-    TERMINAL_LENGTH_MAX_MM)."""
+    TERMINAL_LENGTH_MAX_MM). Body spans (0, 0) to (length_mm, width_mm)."""
     term_len_mm = min(length_mm * TERMINAL_LENGTH_FRACTION, TERMINAL_LENGTH_MAX_MM)
-    half_l = mm_to_dbu(length_mm) / 2
-    half_w = mm_to_dbu(width_mm) / 2
+    L = mm_to_dbu(length_mm)
+    W = mm_to_dbu(width_mm)
     term_len = mm_to_dbu(term_len_mm)
 
-    cell.add_rectangle(TERMINAL_LAYER, -half_l, -half_w, -half_l + term_len, half_w)
-    cell.add_rectangle(TERMINAL_LAYER, half_l - term_len, -half_w, half_l, half_w)
+    cell.add_rectangle(TERMINAL_LAYER, 0, 0, term_len, W)
+    cell.add_rectangle(TERMINAL_LAYER, L - term_len, 0, L, W)
 
 
 def _side_lead_positions(n, pitch_mm):
-    """x-offsets (mm) for `n` leads centred on 0 at `pitch_mm` spacing."""
+    """x-offsets (mm) for `n` leads centred on 0 at `pitch_mm` spacing --
+    relative to the body's own centreline, added to half the body length
+    by the caller to land in the cell's bottom-left-origin frame."""
     return [(k - (n - 1) / 2) * pitch_mm for k in range(n)]
 
 
-def _add_side_leads(cell, xs_mm, y_edge, extension, lead_width):
-    """Add gull-wing lead Rectangles projecting outward (+y direction if
-    y_edge > 0, else -y direction) from a body edge at `y_edge`, one per
-    x-offset in `xs_mm` (DBU)."""
+def _add_side_leads(cell, xs_mm, y_edge, y_dir, extension, lead_width):
+    """Add gull-wing lead Rectangles projecting outward from a body edge
+    at `y_edge` (DBU) -- in the +y direction if y_dir > 0, else -y --
+    one per absolute x-position in `xs_mm` (mm)."""
     half_w = mm_to_dbu(lead_width) / 2
     ext = mm_to_dbu(extension)
     for x_mm in xs_mm:
         x = mm_to_dbu(x_mm)
-        if y_edge > 0:
+        if y_dir > 0:
             cell.add_rectangle(LEAD_LAYER, x - half_w, y_edge, x + half_w, y_edge + ext)
         else:
             cell.add_rectangle(LEAD_LAYER, x - half_w, y_edge - ext, x + half_w, y_edge)
 
 
-def _add_end_leads(cell, ys_mm, x_edge, extension, lead_width):
+def _add_end_leads(cell, ys_mm, x_edge, x_dir, extension, lead_width):
     """Add gull-wing lead Rectangles projecting outward from a body end
-    at `x_edge` (+x direction if x_edge > 0, else -x direction), one per
-    y-offset in `ys_mm` (DBU)."""
+    at `x_edge` (DBU) -- in the +x direction if x_dir > 0, else -x --
+    one per absolute y-position in `ys_mm` (mm)."""
     half_w = mm_to_dbu(lead_width) / 2
     ext = mm_to_dbu(extension)
     for y_mm in ys_mm:
         y = mm_to_dbu(y_mm)
-        if x_edge > 0:
+        if x_dir > 0:
             cell.add_rectangle(LEAD_LAYER, x_edge, y - half_w, x_edge + ext, y + half_w)
         else:
             cell.add_rectangle(LEAD_LAYER, x_edge - ext, y - half_w, x_edge, y + half_w)
 
 
 def _add_leads(cell, kind, length_mm, width_mm, pins):
-    half_l = mm_to_dbu(length_mm) / 2
-    half_w = mm_to_dbu(width_mm) / 2
+    L = mm_to_dbu(length_mm)
+    W = mm_to_dbu(width_mm)
+    cx_mm = length_mm / 2.0
+    cy_mm = width_mm / 2.0
 
     if kind == "sot23":
         # 2 leads on one long side (pitch SOT23_PIN_PITCH_MM), 1 lead
         # centred on the opposite side -- standard TO-236 pinout.
-        xs = _side_lead_positions(2, SOT23_PIN_PITCH_MM)
-        _add_side_leads(cell, xs, -half_w, SOT23_LEAD_EXTENSION_MM, SOT23_LEAD_WIDTH_MM)
-        _add_side_leads(cell, [0.0], half_w, SOT23_LEAD_EXTENSION_MM, SOT23_LEAD_WIDTH_MM)
+        xs = [cx_mm + dx for dx in _side_lead_positions(2, SOT23_PIN_PITCH_MM)]
+        _add_side_leads(cell, xs, 0, -1, SOT23_LEAD_EXTENSION_MM, SOT23_LEAD_WIDTH_MM)
+        _add_side_leads(cell, [cx_mm], W, 1, SOT23_LEAD_EXTENSION_MM, SOT23_LEAD_WIDTH_MM)
 
     elif kind == "sod123":
         # 1 gull-wing lead at each end.
-        _add_end_leads(cell, [0.0], half_l, SOD123_LEAD_EXTENSION_MM, SOD123_LEAD_WIDTH_MM)
-        _add_end_leads(cell, [0.0], -half_l, SOD123_LEAD_EXTENSION_MM, SOD123_LEAD_WIDTH_MM)
+        _add_end_leads(cell, [cy_mm], L, 1, SOD123_LEAD_EXTENSION_MM, SOD123_LEAD_WIDTH_MM)
+        _add_end_leads(cell, [cy_mm], 0, -1, SOD123_LEAD_EXTENSION_MM, SOD123_LEAD_WIDTH_MM)
 
     elif kind == "soic":
         # N/2 leads per long side, 1.27 mm pitch, standard SOIC pinout.
         n_per_side = pins // 2
-        xs = _side_lead_positions(n_per_side, SOIC_PIN_PITCH_MM)
+        xs = [cx_mm + dx for dx in _side_lead_positions(n_per_side, SOIC_PIN_PITCH_MM)]
         extension = SOIC_LEAD_EXTENSION_WIDE_MM if width_mm > 5.0 else SOIC_LEAD_EXTENSION_NARROW_MM
-        _add_side_leads(cell, xs, -half_w, extension, SOIC_LEAD_WIDTH_MM)
-        _add_side_leads(cell, xs, half_w, extension, SOIC_LEAD_WIDTH_MM)
+        _add_side_leads(cell, xs, 0, -1, extension, SOIC_LEAD_WIDTH_MM)
+        _add_side_leads(cell, xs, W, 1, extension, SOIC_LEAD_WIDTH_MM)
 
 
 def generate_smd_library(name="SMD_LIBRARY") -> Library:
