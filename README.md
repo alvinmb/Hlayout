@@ -634,12 +634,19 @@ touching the design's own geometry.
 
 Before writing the macro, hlayout also **auto-matches** any placed
 component cell that has no manual `component_models` entry against
-whatever STEP library already exists in the same `freecad` folder (see
-Build FreeCAD Component Library..., below) — a two-part strategy:
+whatever STEP library already exists in the **remembered component
+library folder** (Setup > FreeCAD Component Library Folder..., see
+Build FreeCAD Component Library... below — a single folder shared
+across every design, not tied to whichever one is currently open,
+since a parts library only needs building once) — falling back to
+this design's own `freecad` subfolder for STEP files built there
+before that shared folder existed. A two-part strategy:
 
 - A **passive** (chip cap/resistor/etc.) is matched by its cell **name**:
-  a known EIA size code (0603/0805/1206) found as a standalone token in
-  the name (e.g. `C1_0805`) picks the matching ceramic-cap body,
+  a known EIA size code found as a standalone token in the name (e.g.
+  `C1_0805`) picks the matching ceramic-cap body — every size
+  `hlayout.core.smdlib`'s 2D footprint library knows (0201, 0402, 0603,
+  0805, 1206, 1210, 1812, 2010, 2512), not just the common three —
   regardless of whether it's really a resistor or a capacitor (both use
   the same generic placeholder shape).
 - A **chip semiconductor / multi-lead package** (the SOT family, and
@@ -663,13 +670,22 @@ and `session.match_freecad_components(cell_name=None, step_dir=None)`
 `component_models=`). See `hlayout/io/component_match.py` for the
 matching details.
 
-**File > Build FreeCAD Component Library...** writes a second,
-independent `.FCMacro` into that same `freecad` subfolder (same
-fallback-to-asking rule when the design has never been saved) that,
-run inside FreeCAD, builds a small set of generic 3D component bodies
-and exports each as its own `.step` file alongside it:
+**File > Build FreeCAD Component Library...** writes a `.FCMacro` into
+the **remembered component library folder** — a single location shared
+by every design, not this design's own folder, since the library only
+ever needs building once. The first time this runs (nothing remembered
+yet) it asks where to put the library and remembers the answer for
+every design from then on; **Setup > FreeCAD Component Library
+Folder...** views or changes that folder later (e.g. to point every
+design at a library already built elsewhere, without rebuilding it).
+Run inside FreeCAD, the macro builds a small set of generic 3D
+component bodies and exports each as its own `.step` file into that
+folder:
 
-- The standard EIA ceramic chip-capacitor case sizes (0603/0805/1206).
+- The standard EIA ceramic chip-capacitor case sizes: 0201, 0402, 0603,
+  0805, 1206, 1210, 1812, 2010, 2512 (the same sizes
+  `hlayout.core.smdlib`'s 2D footprint library covers, so a size added
+  there is buildable here too).
 - A 20-pin sealed metal/ceramic hybrid flatpack (10 gull-wing leads per
   long side at 1.27 mm pitch).
 - The common **SOT** (small-outline-transistor) gull-wing package

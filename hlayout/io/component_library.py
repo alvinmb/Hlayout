@@ -42,13 +42,33 @@ import os
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
+from ..core.smdlib import CHIP_SIZES_MM, TERMINAL_LENGTH_FRACTION, TERMINAL_LENGTH_MAX_MM
+
 #: (name, length_mm, width_mm, height_mm, end_termination_length_mm) --
 #: EIA imperial case-size codes, roughly true to their nominal size
-#: (real vendor dimensions vary a little around these).
+#: (real vendor dimensions vary a little around these). 0603/0805/1206
+#: are hand-picked (their exact numbers predate this table and are
+#: covered by existing tests/shipped models); every OTHER EIA size
+#: hlayout.core.smdlib's 2D footprint library already knows about
+#: (0201/0402/1210/1812/2010/2512) is derived from its own
+#: CHIP_SIZES_MM -- so the 2D footprint library and this 3D model
+#: library can never drift out of sync on which sizes exist or what
+#: their body envelope is, and Session.match_freecad_components() can
+#: recognize a cell named after any of them (see
+#: hlayout.io.component_match.eia_size_tokens()). Height = width and
+#: termination length = smdlib's own TERMINAL_LENGTH_FRACTION/_MAX_MM
+#: formula, matching the proportions the 3 hand-picked sizes already
+#: happen to follow (H equals W for all three; term length is a
+#: quarter of body length, capped at 0.6 mm).
 DEFAULT_CERAMIC_CAPS: Tuple[Tuple[str, float, float, float, float], ...] = (
     ("CAP_0603", 1.6, 0.8, 0.8, 0.3),
     ("CAP_0805", 2.0, 1.25, 1.25, 0.4),
     ("CAP_1206", 3.2, 1.6, 1.6, 0.5),
+) + tuple(
+    (f"CAP_{size}", length_mm, width_mm, width_mm,
+     round(min(length_mm * TERMINAL_LENGTH_FRACTION, TERMINAL_LENGTH_MAX_MM), 4))
+    for size, (length_mm, width_mm) in CHIP_SIZES_MM.items()
+    if size not in {"0603", "0805", "1206"}
 )
 
 #: A 20-pin sealed metal/ceramic hybrid flatpack -- 10 gull-wing leads

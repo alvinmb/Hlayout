@@ -382,6 +382,9 @@ class App(tk.Tk):
         setupm.add_separator()
         setupm.add_command(label="Remap Layers...", command=self.show_remap_layers_dialog)
         setupm.add_separator()
+        setupm.add_command(label="FreeCAD Component Library Folder...",
+                           command=self.change_component_library_dir)
+        setupm.add_separator()
         setupm.add_command(label="Load Technology File...", command=self.load_technology_file)
         setupm.add_command(label="Save Technology File...", command=self.save_technology_file)
 
@@ -2659,6 +2662,34 @@ class App(tk.Tk):
         os.makedirs(out_dir, exist_ok=True)
         return out_dir
 
+    def component_library_dir(self, ask_if_unset: bool = True):
+        """The FreeCAD component STEP library folder -- a single
+        location REMEMBERED across every design (see
+        hlayout.io.app_settings), unlike default_export_dir(), since a
+        parts library is meant to be built once and reused everywhere,
+        not regenerated next to whichever design happens to be open.
+
+        If none is configured yet: with ask_if_unset (the default),
+        prompts to choose/create one and remembers the choice for
+        every design from now on; otherwise just returns None so a
+        caller can skip straight to "nothing configured" behavior
+        without a forced prompt (e.g. during a plain export)."""
+        from ..io.app_settings import get_component_library_dir, set_component_library_dir
+        existing = get_component_library_dir()
+        if existing:
+            os.makedirs(existing, exist_ok=True)
+            return existing
+        if not ask_if_unset:
+            return None
+        chosen = filedialog.askdirectory(
+            title="Choose a Folder for the FreeCAD Component Library "
+                  "(remembered for every design from now on)")
+        if not chosen:
+            return None
+        os.makedirs(chosen, exist_ok=True)
+        set_component_library_dir(chosen)
+        return chosen
+
     def export_freecad_macro(self):
         """File > Export to FreeCAD (3D Macro)...: write a .FCMacro that
         rebuilds the current cell as a 3D solid stack when run inside
@@ -2672,12 +2703,15 @@ class App(tk.Tk):
 
         Before writing, placed component cells with no manual
         component_models entry are auto-matched against whatever STEP
-        library already exists in that same folder (see
-        Session.match_freecad_components()/hlayout.io.component_match)
-        -- a passive cell by its name's size code, a SOT/PKG20-style
-        part by its pad footprint. If there's anything to report, a
-        preview lists it and lets you cancel before anything is
-        written; a manual override always wins over an auto-match."""
+        library already exists in the remembered component library
+        folder (component_library_dir() -- falling back to this
+        design's own <home>/freecad, for STEP files built there before
+        that folder existed) -- see
+        Session.match_freecad_components()/hlayout.io.component_match:
+        a passive cell by its name's size code, a SOT/PKG20-style part
+        by its pad footprint. If there's anything to report, a preview
+        lists it and lets you cancel before anything is written; a
+        manual override always wins over an auto-match."""
         name = self.session.current_cell_name or ""
         out_dir = self.default_export_dir("freecad")
         if out_dir is None:
@@ -2687,8 +2721,9 @@ class App(tk.Tk):
         filename = f"{self.session.library.name}_{name}.FCMacro" if name else "design.FCMacro"
         path = os.path.join(out_dir, filename)
 
+        step_dir = self.component_library_dir(ask_if_unset=False) or out_dir
         try:
-            report = self.session.match_freecad_components(step_dir=out_dir)
+            report = self.session.match_freecad_components(step_dir=step_dir)
         except LayoutError as e:
             dialogs.show_error("Export to FreeCAD", str(e), parent=self)
             return
@@ -2719,14 +2754,16 @@ class App(tk.Tk):
         Technology Properties...) so export_freecad() can substitute a
         real 3D body for that instance.
 
-        Writes into <home>/freecad (same subfolder export_freecad_macro
-        uses) with no prompt; falls back to asking for a folder only
-        when the design has never been saved yet."""
-        out_dir = self.default_export_dir("freecad")
+        Writes into component_library_dir() -- a single folder
+        REMEMBERED across every design, not this design's own folder
+        -- so the library only ever needs building once, in FreeCAD,
+        no matter which design is open afterwards. The first time
+        this runs (nothing remembered yet) it asks where to put the
+        library and remembers the answer from then on; Setup > FreeCAD
+        Component Library Folder... changes it later."""
+        out_dir = self.component_library_dir()
         if out_dir is None:
-            out_dir = filedialog.askdirectory(title="Build FreeCAD Component Library -- Output Folder")
-            if not out_dir:
-                return
+            return
         try:
             written = self.session.generate_component_library(out_dir)
         except OSError as e:
@@ -2734,6 +2771,21 @@ class App(tk.Tk):
             return
         self.status.set(f"Component library macro written to {written} "
                         f"-- run it inside FreeCAD to generate the STEP files")
+
+    def change_component_library_dir(self):
+        """Setup > FreeCAD Component Library Folder...: view/change the
+        remembered STEP library folder (component_library_dir()) --
+        e.g. to point every design at a library already built
+        elsewhere, without rebuilding it."""
+        from ..io.app_settings import get_component_library_dir, set_component_library_dir
+        current = get_component_library_dir()
+        chosen = filedialog.askdirectory(
+            title="FreeCAD Component Library Folder",
+            initialdir=current or None)
+        if not chosen:
+            return
+        set_component_library_dir(chosen)
+        self.status.set(f"FreeCAD component library folder set to {chosen}")
 
     def print_current_view(self):
         """File > Print... (Ctrl+P): render the current cell as a

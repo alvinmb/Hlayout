@@ -30,13 +30,30 @@ from hlayout.io.techfile import save_component_models, save_layer_thickness
 
 def test_eia_size_tokens_derived_from_ceramic_caps():
     tokens = eia_size_tokens()
-    assert tokens == {"0603": "CAP_0603", "0805": "CAP_0805", "1206": "CAP_1206"}
+    # every EIA size hlayout.core.smdlib's 2D footprint library knows
+    # about must be matchable, not just the 3 hand-picked ones
+    assert tokens == {
+        "0201": "CAP_0201", "0402": "CAP_0402", "0603": "CAP_0603",
+        "0805": "CAP_0805", "1206": "CAP_1206", "1210": "CAP_1210",
+        "1812": "CAP_1812", "2010": "CAP_2010", "2512": "CAP_2512",
+    }
 
 
 def test_match_passive_by_name_simple_cases():
     assert match_passive_by_name("R1_0805") == "CAP_0805"
     assert match_passive_by_name("C3-1206-X") == "CAP_1206"
     assert match_passive_by_name("no size here") is None
+
+
+def test_match_passive_by_name_matches_every_eia_size_smdlib_knows():
+    # regression: 1210 (and every other size beyond the original
+    # 0603/0805/1206) must be recognized, not just the 3 hand-picked
+    # sizes the library started with -- see component_library.py's
+    # DEFAULT_CERAMIC_CAPS, derived from hlayout.core.smdlib's own
+    # CHIP_SIZES_MM so the two libraries can't drift apart on which
+    # sizes exist.
+    for size in ("0201", "0402", "0603", "0805", "1206", "1210", "1812", "2010", "2512"):
+        assert match_passive_by_name(f"C1_{size}") == f"CAP_{size}"
 
 
 def test_match_passive_by_name_rejects_an_embedded_digit_run():
