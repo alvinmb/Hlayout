@@ -732,6 +732,36 @@ def test_top_view_component_recognition_needs_no_layer_thickness_at_all():
     assert _min_dist_to_paths((300, 600), paths) > 10  # conductor cut under the cap
 
 
+def test_top_view_component_footprint_hole_from_a_stroked_outline_path_is_filled():
+    # Regression: a component's body outline is often a thin PATH (a
+    # stroked ring, not a filled area -- see
+    # hlayout/examples/generate_ceramic_caps.py's OUTLINE_LAYER), which
+    # shape_to_shapely() correctly turns into a "picture frame" polygon
+    # WITH A HOLE for real mask-op purposes. Used directly as an
+    # occluding footprint, that hole made the hidden-line result show
+    # BOTH the frame's outer edge and its inner hole edge -- two
+    # concentric, disconnected squares instead of one solid component
+    # silhouette.
+    from hlayout.io.techfile import save_resistor_geometry_rules
+    s = _fresh_session()
+    s.new_cell("CAP_1210")
+    s.path(61, [(0, 0), (400, 0), (400, 400), (0, 400), (0, 0)], 50, cap="flush")
+    s.rect(20, -50, 100, 50, 300)    # epoxy pad, end 1
+    s.rect(20, 350, 100, 450, 300)   # epoxy pad, end 2
+    s.use_cell("TOP")
+    save_resistor_geometry_rules(s.library, {
+        "overlap_a": 200, "pad_b": 500, "space_c": 200, "glaze_oversize": 50,
+        "keepout_oversize": 0, "resistor_layer": -1, "conductor_layer": 5,
+        "glaze_layer": -1, "doc_layer": -1, "keepout_layer": -1, "ink_layers": {},
+    })
+    s.sref("CAP_1210", (0, 0))
+    from hlayout.io.techfile import load_component_models
+    from hlayout.scripting.api import _matched_component_footprint
+    geom = _matched_component_footprint(s.library, "TOP", load_component_models(s.library))
+    assert geom.geom_type == "Polygon"
+    assert len(geom.interiors) == 0, "component footprint must have no interior hole"
+
+
 def test_top_view_resistor_device_cell_with_extra_layers_is_not_a_component():
     # Regression: a resistor DEVICE cell can legitimately draw on more
     # layers than just resistor_layer/conductor_layer/glaze_layer (e.g.

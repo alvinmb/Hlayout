@@ -111,6 +111,18 @@ def _matched_component_footprint(library, cell_name, component_models):
     (pads included) to occlude what's underneath it, and has no use
     for a film/non-film split at all.
 
+    A component's own body-outline shape is often a thin PATH (a
+    stroked ring around the body, not a filled area -- see
+    hlayout.core.smdlib/examples/generate_ceramic_caps.py), which
+    shape_to_shapely() correctly turns into a "picture frame" polygon
+    WITH A HOLE for real mask-op purposes (a printed outline trace
+    really is just a thin ring of ink). For an occluding FOOTPRINT
+    that's wrong: the component's physical body is solid, so its hole
+    is filled in before use here -- otherwise the hidden-line result
+    would show both the outer edge of the frame and the inner edge of
+    its hole, looking like two concentric, disconnected outlines
+    instead of one component silhouette.
+
     Recursing stops at the first recognized component along each
     branch (its own internals aren't decomposed further); an
     unrecognized cell is walked into looking for components placed
@@ -130,7 +142,18 @@ def _matched_component_footprint(library, cell_name, component_models):
         match_gullwing_by_footprint,
         match_passive_by_name,
     )
+    from shapely.geometry import MultiPolygon, Polygon
     from shapely.ops import unary_union
+
+    def _fill_holes(geom):
+        """Rebuild a (Multi)Polygon from just its exterior ring(s),
+        dropping any interior holes -- a stroked outline PATH's own
+        thin frame shape becomes the solid area it actually bounds."""
+        if geom.geom_type == "Polygon":
+            return Polygon(geom.exterior) if geom.interiors else geom
+        if geom.geom_type == "MultiPolygon":
+            return unary_union([_fill_holes(p) for p in geom.geoms])
+        return geom
 
     _require_shapely()
     tokens = eia_size_tokens()
@@ -165,7 +188,7 @@ def _matched_component_footprint(library, cell_name, component_models):
                 walk(ref.cell_name, child_transform, depth + 1)
 
     walk(cell_name, None)
-    return unary_union(geoms) if geoms else unary_union([])
+    return _fill_holes(unary_union(geoms)) if geoms else unary_union([])
 
 
 class Session:
