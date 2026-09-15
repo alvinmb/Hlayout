@@ -255,8 +255,8 @@ to its stroked-outline polygon first; requires the shapely package):
                                        the 200-point-per-polygon limit on a heavily
                                        sized/booleaned result; also available as
                                        Session.mask_op()
-    TOPVIEW result=<layer> [layers=<n,n,...>] [width=<dbu>] [cell=<name>]
-            [flatten=0|1] [simplify=<dbu>]
+    TOPVIEW result=<layer> [layers=<n,n,...>] [exclude=<n,n,...>] [width=<dbu>]
+            [cell=<name>] [flatten=0|1] [simplify=<dbu>]
                                        draw a top-down, hidden-line-removal
                                        pictorial view of the hybrid circuit onto
                                        result_layer -- the visible OUTLINE edges
@@ -266,23 +266,29 @@ to its stroked-outline polygon first; requires the shapely package):
                                        entry's filled footprint actually removed;
                                        with no layers=, stacking follows the real
                                        fab process order by ROLE regardless of
-                                       layer numbers -- placed components/epoxy
-                                       footprints topmost, then resistor ink,
-                                       then conductor (incl. Route/Wire Bond
-                                       layers), then any other layer with real
-                                       geometry, then substrate; an unclassified
-                                       "other" layer can never occlude conductor/
-                                       resistor/a component just for having a
-                                       higher number; glaze is a non-occluding
-                                       outline overlay, always fully shown; no
-                                       fired-film thickness is needed anywhere in
-                                       this -- pass layers= to bypass all of that
-                                       and get the simpler "every given layer
-                                       occludes equally by plain number" behaviour
-                                       instead; width=<dbu> sets the drawn outline
-                                       width (default 100 = 0.1mm); writes Path
-                                       shapes, not filled polygons -- also
-                                       available as Session.mask_op_top_view()
+                                       layer numbers -- a cell counts as a
+                                       component by NAME (an EIA size code) or
+                                       FOOTPRINT (a known pin pattern), not by
+                                       which layer it draws on, and sits topmost;
+                                       then resistor ink, then conductor (incl.
+                                       Route/Wire Bond layers), then any other
+                                       layer with real geometry, then substrate;
+                                       an unclassified "other" layer can never
+                                       occlude conductor/resistor/a component just
+                                       for having a higher number; glaze is a
+                                       non-occluding outline overlay, always fully
+                                       shown; no fired-film thickness is needed
+                                       anywhere in any of this; exclude=<n,n,...>
+                                       drops specific layers out of the role-based
+                                       default (ignored once layers= is given
+                                       explicitly); pass layers= to bypass all of
+                                       the role logic and get the simpler "every
+                                       given layer occludes equally by plain
+                                       number" behaviour instead; width=<dbu> sets
+                                       the drawn outline width (default 100 =
+                                       0.1mm); writes Path shapes, not filled
+                                       polygons -- also available as
+                                       Session.mask_op_top_view()
 
 Design Rule Check (DRC -- single-layer and between-layer geometric checks;
 requires the shapely package; also available as Tools > DRC...):
@@ -1141,8 +1147,8 @@ class CommandInterpreter:
         return f"{op} wrote {total} polygon(s) to layer {result_layer}{suffix}"
 
     def _cmd_topview(self, args):
-        usage = ("usage: TOPVIEW result=<layer> [layers=<n,n,...>] [width=<dbu>] "
-                 "[cell=<name>] [flatten=0|1] [simplify=<dbu>]")
+        usage = ("usage: TOPVIEW result=<layer> [layers=<n,n,...>] [exclude=<n,n,...>] "
+                 "[width=<dbu>] [cell=<name>] [flatten=0|1] [simplify=<dbu>]")
         kwargs = {}
         for a in args:
             if "=" not in a:
@@ -1153,6 +1159,8 @@ class CommandInterpreter:
                 kwargs["result_layer"] = v
             elif k == "layers":
                 kwargs["layers"] = [tok.strip() for tok in v.split(",") if tok.strip()]
+            elif k == "exclude":
+                kwargs["exclude_layers"] = [tok.strip() for tok in v.split(",") if tok.strip()]
             elif k == "width":
                 kwargs["line_width"] = float(v)
             elif k == "cell":

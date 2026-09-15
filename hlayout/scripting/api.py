@@ -1744,6 +1744,7 @@ class Session:
         return written
 
     def mask_op_top_view(self, result_layer, layers: Optional[List] = None,
+                          exclude_layers: Optional[List] = None,
                           line_width: float = 100.0,
                           cell_names: Optional[List[str]] = None,
                           datatype: int = 0, flatten: bool = True,
@@ -1794,6 +1795,13 @@ class Session:
         in this pictorial convention. Layer roles come from the same
         Setup accessors export_freecad()'s heuristic uses
         (hlayout.io.techfile's resistor/route/bond/dielectric rules).
+
+        `exclude_layers` (numbers or names) drops specific layers out of
+        the role-based default without having to rebuild the whole
+        layer set by hand -- e.g. a documentation or debug layer that
+        happens to have real geometry and would otherwise show up in
+        the "other" tier. Ignored when `layers` is given explicitly
+        (there, just leave the layer out of the list instead).
 
         Pass an explicit `layers` list (numbers or names) to bypass all
         of that and get the older, simpler behaviour instead: every
@@ -1891,7 +1899,17 @@ class Session:
                        for w in ("substrate", "alumina", "ceramic"))
             }
             other_layers = generic_layers - role_layers - substrate_layers
-            all_considered_layers = role_layers | generic_layers
+
+            if exclude_layers:
+                excluded = {resolve(n) for n in exclude_layers}
+                resistor_layers -= excluded
+                conductor_layers -= excluded
+                glaze_layers -= excluded
+                substrate_layers -= excluded
+                other_layers -= excluded
+
+            all_considered_layers = resistor_layers | conductor_layers | glaze_layers \
+                | substrate_layers | other_layers
 
             if not all_considered_layers:
                 raise LayoutError(

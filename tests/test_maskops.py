@@ -769,6 +769,37 @@ def test_top_view_resistor_device_cell_with_extra_layers_is_not_a_component():
     assert _min_dist_to_paths((200, 20), paths) < 1
 
 
+def test_top_view_exclude_layers_drops_a_layer_from_the_role_based_default():
+    from hlayout.io.techfile import save_resistor_geometry_rules
+    s = _fresh_session()
+    save_resistor_geometry_rules(s.library, {
+        "overlap_a": 200, "pad_b": 500, "space_c": 200, "glaze_oversize": 50,
+        "keepout_oversize": 0, "resistor_layer": 30, "conductor_layer": 3,
+        "glaze_layer": 19, "doc_layer": -1, "keepout_layer": -1, "ink_layers": {},
+    })
+    s.rect(3, 0, 0, 500, 500)
+    s.rect(7, 600, 600, 900, 900)  # an unrelated "other" layer, off to the side
+    written = s.mask_op_top_view(63, exclude_layers=[7])
+    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    # layer 7 must not appear anywhere in the output...
+    assert _min_dist_to_paths((750, 750), paths) > 10
+    # ...but conductor (not excluded) is unaffected.
+    assert _min_dist_to_paths((0, 0), paths) < 1
+
+
+def test_top_view_exclude_layers_ignored_when_layers_given_explicitly():
+    from hlayout.io.techfile import save_resistor_geometry_rules
+    s = _fresh_session()
+    save_resistor_geometry_rules(s.library, {
+        "overlap_a": 200, "pad_b": 500, "space_c": 200, "glaze_oversize": 50,
+        "keepout_oversize": 0, "resistor_layer": 30, "conductor_layer": 3,
+        "glaze_layer": 19, "doc_layer": -1, "keepout_layer": -1, "ink_layers": {},
+    })
+    s.rect(3, 0, 0, 500, 500)
+    written = s.mask_op_top_view(63, layers=[3], exclude_layers=[3])
+    assert written  # exclude_layers has no effect once layers= is given explicitly
+
+
 def test_top_view_explicit_layers_bypasses_role_order():
     # Passing layers= explicitly reverts to the older, simpler behaviour:
     # every given layer occludes equally, ordered by plain layer number.
