@@ -43,6 +43,7 @@ from ..core.maskops import (
 from ..core.shapes import Path, expand_arefs_to_srefs
 from ..core.units import DBU_MM
 from .techfile import (
+    DEFAULT_COMPONENT_HEIGHT_UM,
     default_component_models,
     default_layer_thickness,
     load_bond_rules,
@@ -475,7 +476,7 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
             continue
         x0, y0, x1, y1 = bb
         corners = [xf((x0, y0)), xf((x1, y0)), xf((x1, y1)), xf((x0, y1))]
-        h_mm = _mm(float(entry.get("height_um", 400.0)))
+        h_mm = _mm(float(entry.get("height_um", DEFAULT_COMPONENT_HEIGHT_UM)))
         lines.append(f"# --- component {cn} (extrude {h_mm:.4f} mm) ---")
         lines.append(f"_add({obj_name!r}, Part.Face({_ring_literal(corners, base_z)})"
                      f".extrude(V(0,0,{h_mm:.5f})), "

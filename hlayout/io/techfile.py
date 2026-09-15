@@ -1048,7 +1048,12 @@ def save_layer_thickness(library: Library, thickness: dict) -> None:
 
 COMPONENT_MODELS_KEY = "component_models"
 
-DEFAULT_COMPONENT_HEIGHT_UM = 400
+#: Fixed extruded height for a "bare chip" component -- one with no
+#: matched or manually-assigned STEP model, shown in the 3D export as a
+#: flat box of its own 2D footprint instead. 1mm is a generic stand-in
+#: for an unpackaged/unknown part's real height, not a measurement of
+#: any specific device.
+DEFAULT_COMPONENT_HEIGHT_UM = 1000
 
 
 def load_component_models(library: Library) -> dict:
