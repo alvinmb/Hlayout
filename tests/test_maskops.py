@@ -704,6 +704,42 @@ def test_top_view_role_order_components_and_epoxy_occlude_conductor():
     assert _min_dist_to_paths((0, 300), paths) < 1
 
 
+def test_top_view_resistor_device_cell_with_extra_thickness_layers_is_not_a_component():
+    # Regression: a resistor DEVICE cell can legitimately draw on more
+    # layers than just resistor_layer/conductor_layer/glaze_layer (e.g.
+    # a doc or keep-out sub-layer) -- if the design has explicitly given
+    # those extra layers a fired-film thickness in Setup, that's the
+    # correct signal that they're real board film, not a component's
+    # own outline/keep-out marker. Using only the narrow role-configured
+    # layer set here would wrongly treat every resistor device cell as
+    # "a component" the moment it draws on one extra layer.
+    from hlayout.io.techfile import save_layer_thickness, save_resistor_geometry_rules
+    s = _fresh_session()
+    s.new_cell("R1_DEVICE")
+    s.rect(3, 0, 0, 100, 100)      # conductor pad
+    s.rect(4, 150, 0, 250, 20)     # extra resistor sub-layer, off to the
+                                    # side so it isn't simply covered by
+                                    # the conductor pad above -- NOT a
+                                    # Setup role layer
+    s.rect(19, 0, 0, 100, 100)     # glaze
+    s.use_cell("TOP")
+    save_resistor_geometry_rules(s.library, {
+        "overlap_a": 200, "pad_b": 500, "space_c": 200, "glaze_oversize": 50,
+        "keepout_oversize": 0, "resistor_layer": 30, "conductor_layer": 3,
+        "glaze_layer": 19, "doc_layer": -1, "keepout_layer": -1, "ink_layers": {},
+    })
+    save_layer_thickness(s.library, {"3": 12.0, "4": 10.0, "19": 20.0})
+    s.rect(3, 500, 500, 900, 900)  # the board's own conductor, apart from R1
+    s.sref("R1_DEVICE", (0, 0))
+    s.mask_op_top_view(63)
+    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    # R1_DEVICE's own layer-4 shape (150,0)-(250,20) must show up as
+    # part of the ordinary "conductor and other" tier's output, not be
+    # swallowed into a wrongly-topmost "component" footprint that never
+    # gets composited at all.
+    assert _min_dist_to_paths((200, 20), paths) < 1
+
+
 def test_top_view_explicit_layers_bypasses_role_order():
     # Passing layers= explicitly reverts to the older, simpler behaviour:
     # every given layer occludes equally, ordered by plain layer number.

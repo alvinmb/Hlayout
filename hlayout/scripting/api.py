@@ -1740,7 +1740,7 @@ class Session:
         considered here."""
         from ..io.freecadio import component_outline_flattened
         from ..io.techfile import load_bond_rules, load_dielectric_rules, \
-            load_resistor_geometry_rules, load_route_rules
+            load_layer_thickness, load_resistor_geometry_rules, load_route_rules
 
         resolve = self.library.layers.resolve
         r_layer = resolve(result_layer)
@@ -1817,6 +1817,24 @@ class Session:
                     "glaze/route/bond layers in Setup"
                 )
 
+            # is_component_cell()'s own "film" concept means something
+            # narrower than "every layer TOPVIEW considers": a
+            # component's own outline/keep-out layer is usually a
+            # normal, visible, filled, drawn layer too (that's how you
+            # see it on the canvas), so all_considered_layers can't tell
+            # it apart from a real board film -- but a resistor DEVICE
+            # cell can legitimately draw on several extra layers beyond
+            # just resistor_layer/conductor_layer/glaze_layer (a doc or
+            # keep-out sub-layer, say), which role_layers alone doesn't
+            # know about either. The design's own EXPLICITLY saved
+            # layer_thickness (Setup) already settles this correctly in
+            # practice -- a real board film normally gets a thickness
+            # assigned there, an outline/keep-out marker normally
+            # doesn't -- so prefer it, falling back to role_layers only
+            # when nothing has been saved at all.
+            explicit_thickness_layers = {int(k) for k in load_layer_thickness(self.library)}
+            component_film_layers = explicit_thickness_layers or role_layers
+
         self._checkpoint()
         cells = ([self.library.get_cell(n) for n in cell_names] if cell_names
                  else [self.cell])
@@ -1828,19 +1846,8 @@ class Session:
                 return layer_to_shapely(cell.shapes_on_layer(layer))
 
             if role_based:
-                # is_component_cell()'s own "film" concept means something
-                # narrower than "every layer TOPVIEW considers": a
-                # component's own outline/keep-out layer usually IS a
-                # normal, visible, filled, drawn layer too (that's how you
-                # see it on the canvas), so the broad
-                # all_considered_layers set can't tell it apart from a
-                # real board film. Only the EXPLICITLY role-configured
-                # layers (resistor/conductor/glaze, from Setup) are a
-                # reliable proxy for "real film" here -- an outline/
-                # keep-out layer is essentially never assigned as one of
-                # those roles.
                 comp_geom = component_outline_flattened(
-                    self.library, cell.name, role_layers,
+                    self.library, cell.name, component_film_layers,
                     load_component_models(self.library))
                 layer_geoms = [(comp_geom, True)]
                 for n in sorted(resistor_layers, reverse=True):
