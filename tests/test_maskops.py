@@ -679,9 +679,13 @@ def test_top_view_role_order_unclassified_other_layer_cannot_occlude_conductor()
 
 
 def test_top_view_role_order_components_and_epoxy_occlude_conductor():
+    # Component recognition is by NAME (a known EIA size code, matching
+    # Session.match_freecad_components()'s own matcher) or FOOTPRINT, not
+    # by which layer the cell draws on -- so the cell must be named like
+    # a real part (e.g. CAP_1210) for this test to exercise it honestly.
     from hlayout.io.techfile import save_layer_thickness, save_resistor_geometry_rules
     s = _fresh_session()
-    s.new_cell("CAP")
+    s.new_cell("CAP_1210")
     s.rect(61, 0, 0, 400, 550)  # non-film outline/epoxy footprint
     s.use_cell("TOP")
     save_resistor_geometry_rules(s.library, {
@@ -691,7 +695,7 @@ def test_top_view_role_order_components_and_epoxy_occlude_conductor():
     })
     save_layer_thickness(s.library, {"50": 12.0})
     s.rect(50, 0, 0, 600, 600)
-    s.sref("CAP", (100, 100))  # component footprint now (100,100)-(500,650)
+    s.sref("CAP_1210", (100, 100))  # component footprint now (100,100)-(500,650)
     s.mask_op_top_view(63)
     paths = [sh for sh in s.cell.shapes if sh.layer == 63]
     # the component's own full outline is present...
@@ -704,16 +708,42 @@ def test_top_view_role_order_components_and_epoxy_occlude_conductor():
     assert _min_dist_to_paths((0, 300), paths) < 1
 
 
-def test_top_view_resistor_device_cell_with_extra_thickness_layers_is_not_a_component():
+def test_top_view_component_recognition_needs_no_layer_thickness_at_all():
+    # Component recognition (by EIA-size name here) works with NOTHING
+    # saved in layer_thickness anywhere in the design -- it has no
+    # bearing on this at all, unlike is_component_cell()'s film/non-film
+    # split (used elsewhere, by the 3D FreeCAD export).
+    from hlayout.io.techfile import save_resistor_geometry_rules
+    s = _fresh_session()
+    s.new_cell("CAP_1210")
+    s.rect(61, 0, 0, 400, 550)
+    s.use_cell("TOP")
+    save_resistor_geometry_rules(s.library, {
+        "overlap_a": 200, "pad_b": 500, "space_c": 200, "glaze_oversize": 50,
+        "keepout_oversize": 0, "resistor_layer": -1, "conductor_layer": 50,
+        "glaze_layer": -1, "doc_layer": -1, "keepout_layer": -1, "ink_layers": {},
+    })
+    s.rect(50, 0, 0, 600, 600)
+    s.sref("CAP_1210", (100, 100))
+    written = s.mask_op_top_view(63)
+    assert written  # produced output despite no layer_thickness ever saved
+    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    assert _min_dist_to_paths((100, 100), paths) < 1
+    assert _min_dist_to_paths((300, 600), paths) > 10  # conductor cut under the cap
+
+
+def test_top_view_resistor_device_cell_with_extra_layers_is_not_a_component():
     # Regression: a resistor DEVICE cell can legitimately draw on more
     # layers than just resistor_layer/conductor_layer/glaze_layer (e.g.
-    # a doc or keep-out sub-layer) -- if the design has explicitly given
-    # those extra layers a fired-film thickness in Setup, that's the
-    # correct signal that they're real board film, not a component's
-    # own outline/keep-out marker. Using only the narrow role-configured
-    # layer set here would wrongly treat every resistor device cell as
-    # "a component" the moment it draws on one extra layer.
-    from hlayout.io.techfile import save_layer_thickness, save_resistor_geometry_rules
+    # a doc or keep-out sub-layer). Component recognition is by NAME (a
+    # known EIA size code) or FOOTPRINT (a known pin pattern), not by
+    # which layer a cell draws on and NOT by layer thickness (confirmed
+    # here by never saving any layer_thickness at all) -- so a resistor
+    # device cell named "R1_DEVICE", matching neither, is correctly
+    # walked into and contributes its own layers to the ordinary tiers
+    # instead of being swallowed into a wrongly-topmost "component"
+    # footprint.
+    from hlayout.io.techfile import save_resistor_geometry_rules
     s = _fresh_session()
     s.new_cell("R1_DEVICE")
     s.rect(3, 0, 0, 100, 100)      # conductor pad
@@ -728,7 +758,6 @@ def test_top_view_resistor_device_cell_with_extra_thickness_layers_is_not_a_comp
         "keepout_oversize": 0, "resistor_layer": 30, "conductor_layer": 3,
         "glaze_layer": 19, "doc_layer": -1, "keepout_layer": -1, "ink_layers": {},
     })
-    save_layer_thickness(s.library, {"3": 12.0, "4": 10.0, "19": 20.0})
     s.rect(3, 500, 500, 900, 900)  # the board's own conductor, apart from R1
     s.sref("R1_DEVICE", (0, 0))
     s.mask_op_top_view(63)

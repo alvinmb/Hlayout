@@ -90,6 +90,84 @@ def _segments_cross(p1, p2, p3, p4) -> bool:
         and d1 != 0 and d2 != 0 and d3 != 0 and d4 != 0
 
 
+def _matched_component_footprint(library, cell_name, component_models):
+    """The union, in world DBU coordinates, of every placed instance's
+    OWN shapes (every layer -- pads included, not just an outline)
+    whose cell is a recognized real component: an explicit
+    component_models entry (manual or already auto-matched), a name
+    carrying a known EIA size code (component_match.match_passive_by_name()),
+    or a footprint matching a known gull-wing package's pin pattern
+    (component_match.match_gullwing_by_footprint()) -- the SAME name/
+    footprint matching Session.match_freecad_components() uses to build
+    its own report.
+
+    Deliberately has nothing to do with layer thickness, or any other
+    film/non-film layer distinction: unlike
+    hlayout.io.freecadio.is_component_cell() (used by the 3D FreeCAD
+    export, which genuinely needs to know which shapes are real
+    printed film to extrude), this is purely "was this CELL placed and
+    does it look like a real part," for Session.mask_op_top_view()'s
+    role-based stacking, which wants a component's whole footprint
+    (pads included) to occlude what's underneath it, and has no use
+    for a film/non-film split at all.
+
+    Recursing stops at the first recognized component along each
+    branch (its own internals aren't decomposed further); an
+    unrecognized cell is walked into looking for components placed
+    deeper inside it. Requires shapely."""
+    from ..core.maskops import (
+        _compose_transforms,
+        _require_shapely,
+        _sref_point_transform,
+        _transform_geom,
+        shape_to_shapely,
+    )
+    from ..core.shapes import expand_arefs_to_srefs
+    from ..io.component_match import (
+        eia_size_tokens,
+        footprint_pin_stats,
+        gullwing_package_table,
+        match_gullwing_by_footprint,
+        match_passive_by_name,
+    )
+    from shapely.ops import unary_union
+
+    _require_shapely()
+    tokens = eia_size_tokens()
+    table = gullwing_package_table()
+    base_models = dict(component_models) if component_models else {}
+
+    def is_recognized(cn):
+        if cn in base_models:
+            return True
+        if match_passive_by_name(cn, tokens) is not None:
+            return True
+        c = library.cells.get(cn)
+        stats = footprint_pin_stats(c) if c is not None else None
+        return stats is not None and match_gullwing_by_footprint(stats, table) is not None
+
+    geoms = []
+
+    def walk(name, transform, depth=0):
+        if depth > 64 or name not in library.cells:
+            return
+        cell = library.cells[name]
+        for ref in list(cell.srefs) + expand_arefs_to_srefs(cell.arefs):
+            child_transform = _compose_transforms(transform, _sref_point_transform(ref))
+            if is_recognized(ref.cell_name):
+                target = library.cells.get(ref.cell_name)
+                if target is not None:
+                    for shape in target.shapes:
+                        g = shape_to_shapely(shape)
+                        if g is not None and not g.is_empty:
+                            geoms.append(_transform_geom(g, child_transform))
+            else:
+                walk(ref.cell_name, child_transform, depth + 1)
+
+    walk(cell_name, None)
+    return unary_union(geoms) if geoms else unary_union([])
+
+
 class Session:
     # An "attached" library is a second (read-mostly) GDSII file kept
     # alongside the current design purely as a source of cells to search
@@ -1692,7 +1770,13 @@ class Session:
         process order by ROLE, regardless of what layer numbers your
         technology setup happens to use for each: placed components
         and their epoxy/keep-out footprints sit topmost (cutting into
-        everything under them), then the resistor ink layer(s), then
+        everything under them) -- a placed cell counts as "a
+        component" here by NAME (a known EIA size code) or FOOTPRINT
+        (a known gull-wing pin pattern) or an explicit component_models
+        entry, the same recognition Session.match_freecad_components()
+        uses, with no reference to which layer it draws on at all (see
+        _matched_component_footprint()) -- then the resistor ink
+        layer(s), then
         every conductor layer (Setup's own conductor_layer plus the
         Route Layers and Wire Bond layers), then any OTHER visible,
         filled layer not otherwise classified, then the substrate. An
@@ -1738,9 +1822,8 @@ class Session:
         know a layer's stacking ROLE and whether it has geometry, so a
         layer with no thickness saved in Setup is still fully
         considered here."""
-        from ..io.freecadio import component_outline_flattened
         from ..io.techfile import load_bond_rules, load_dielectric_rules, \
-            load_layer_thickness, load_resistor_geometry_rules, load_route_rules
+            load_resistor_geometry_rules, load_route_rules
 
         resolve = self.library.layers.resolve
         r_layer = resolve(result_layer)
@@ -1817,24 +1900,6 @@ class Session:
                     "glaze/route/bond layers in Setup"
                 )
 
-            # is_component_cell()'s own "film" concept means something
-            # narrower than "every layer TOPVIEW considers": a
-            # component's own outline/keep-out layer is usually a
-            # normal, visible, filled, drawn layer too (that's how you
-            # see it on the canvas), so all_considered_layers can't tell
-            # it apart from a real board film -- but a resistor DEVICE
-            # cell can legitimately draw on several extra layers beyond
-            # just resistor_layer/conductor_layer/glaze_layer (a doc or
-            # keep-out sub-layer, say), which role_layers alone doesn't
-            # know about either. The design's own EXPLICITLY saved
-            # layer_thickness (Setup) already settles this correctly in
-            # practice -- a real board film normally gets a thickness
-            # assigned there, an outline/keep-out marker normally
-            # doesn't -- so prefer it, falling back to role_layers only
-            # when nothing has been saved at all.
-            explicit_thickness_layers = {int(k) for k in load_layer_thickness(self.library)}
-            component_film_layers = explicit_thickness_layers or role_layers
-
         self._checkpoint()
         cells = ([self.library.get_cell(n) for n in cell_names] if cell_names
                  else [self.cell])
@@ -1846,9 +1911,8 @@ class Session:
                 return layer_to_shapely(cell.shapes_on_layer(layer))
 
             if role_based:
-                comp_geom = component_outline_flattened(
-                    self.library, cell.name, component_film_layers,
-                    load_component_models(self.library))
+                comp_geom = _matched_component_footprint(
+                    self.library, cell.name, load_component_models(self.library))
                 layer_geoms = [(comp_geom, True)]
                 for n in sorted(resistor_layers, reverse=True):
                     layer_geoms.append((gather(n), True))
