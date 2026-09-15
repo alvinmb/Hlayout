@@ -1768,6 +1768,7 @@ class Session:
 
     def mask_op_top_view(self, result_layer, layers: Optional[List] = None,
                           exclude_layers: Optional[List] = None,
+                          hatch_conductor_pitch: Optional[float] = None,
                           line_width: float = 100.0,
                           cell_names: Optional[List[str]] = None,
                           datatype: int = 0, flatten: bool = True,
@@ -1825,6 +1826,15 @@ class Session:
         happens to have real geometry and would otherwise show up in
         the "other" tier. Ignored when `layers` is given explicitly
         (there, just leave the layer out of the list instead).
+
+        `hatch_conductor_pitch` (DBU, default None = no hatching), if
+        given, fills every conductor-tier layer's own VISIBLE region
+        (after occlusion, same region its notched outline comes from)
+        with a 45/-45 degree cross-hatch pattern at that pitch -- the
+        standard technical-drawing convention for a solid material in a
+        pictorial view (hlayout.core.maskops.cross_hatch_lines()).
+        Ignored when `layers` is given explicitly, and has no effect on
+        any other tier (resistor, substrate, components, glaze).
 
         Pass an explicit `layers` list (numbers or names) to bypass all
         of that and get the older, simpler behaviour instead: every
@@ -1958,7 +1968,7 @@ class Session:
                 for n in sorted(resistor_layers, reverse=True):
                     layer_geoms.append((gather(n), True))
                 for n in sorted(conductor_layers, reverse=True):
-                    layer_geoms.append((gather(n), True))
+                    layer_geoms.append((gather(n), True, hatch_conductor_pitch))
                 for n in sorted(other_layers, reverse=True):
                     layer_geoms.append((gather(n), True))
                 for n in sorted(substrate_layers, reverse=True):

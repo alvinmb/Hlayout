@@ -522,6 +522,68 @@ def test_top_view_line_width_sets_the_drawn_path_width():
     assert all(sh.width == 250 for sh in result)
 
 
+def test_cross_hatch_lines_stays_within_the_region_and_is_non_empty():
+    from hlayout.core.maskops import cross_hatch_lines
+    region = shapely.geometry.box(0, 0, 1000, 500)
+    result = cross_hatch_lines(region, 200)
+    assert not result.is_empty
+    minx, miny, maxx, maxy = result.bounds
+    assert minx >= 0 and miny >= 0 and maxx <= 1000 and maxy <= 500
+
+
+def test_cross_hatch_lines_empty_region_or_pitch_gives_empty_result():
+    from hlayout.core.maskops import cross_hatch_lines
+    region = shapely.geometry.box(0, 0, 1000, 500)
+    assert cross_hatch_lines(shapely.geometry.Polygon(), 200).is_empty
+    assert cross_hatch_lines(region, 0).is_empty
+
+
+def _resistor_rules_conductor_only(conductor_layer=3):
+    return {
+        "overlap_a": 200, "pad_b": 500, "space_c": 200, "glaze_oversize": 50,
+        "keepout_oversize": 0, "resistor_layer": -1, "conductor_layer": conductor_layer,
+        "glaze_layer": -1, "doc_layer": -1, "keepout_layer": -1, "ink_layers": {},
+    }
+
+
+def test_top_view_hatch_conductor_pitch_fills_conductor_with_a_cross_hatch():
+    from hlayout.io.techfile import save_resistor_geometry_rules
+
+    s1 = _fresh_session()
+    save_resistor_geometry_rules(s1.library, _resistor_rules_conductor_only())
+    s1.rect(3, 0, 0, 1000, 800)
+    without_hatch = s1.mask_op_top_view(63)
+
+    s2 = _fresh_session()
+    save_resistor_geometry_rules(s2.library, _resistor_rules_conductor_only())
+    s2.rect(3, 0, 0, 1000, 800)
+    with_hatch = s2.mask_op_top_view(63, hatch_conductor_pitch=100)
+
+    # hatching adds a lot of extra line segments beyond the plain outline
+    assert with_hatch["TOP"] > without_hatch["TOP"] * 5
+    # every hatch/outline point must stay within the conductor's own bounds
+    paths = [sh for sh in s2.cell.shapes if sh.layer == 63]
+    xs = [p[0] for path in paths for p in path.points]
+    ys = [p[1] for path in paths for p in path.points]
+    assert min(xs) >= 0 and max(xs) <= 1000 and min(ys) >= 0 and max(ys) <= 800
+
+
+def test_top_view_hatch_conductor_pitch_ignored_with_explicit_layers():
+    from hlayout.io.techfile import save_resistor_geometry_rules
+
+    s1 = _fresh_session()
+    save_resistor_geometry_rules(s1.library, _resistor_rules_conductor_only())
+    s1.rect(3, 0, 0, 1000, 800)
+    without = s1.mask_op_top_view(63, layers=[3])
+
+    s2 = _fresh_session()
+    save_resistor_geometry_rules(s2.library, _resistor_rules_conductor_only())
+    s2.rect(3, 0, 0, 1000, 800)
+    with_ignored = s2.mask_op_top_view(63, layers=[3], hatch_conductor_pitch=100)
+
+    assert without == with_ignored  # hatch_conductor_pitch has no effect here
+
+
 def test_top_view_command_bar():
     from hlayout.gui.commands import CommandInterpreter
     from hlayout.scripting import ScriptConsole

@@ -255,8 +255,8 @@ to its stroked-outline polygon first; requires the shapely package):
                                        the 200-point-per-polygon limit on a heavily
                                        sized/booleaned result; also available as
                                        Session.mask_op()
-    TOPVIEW result=<layer> [layers=<n,n,...>] [exclude=<n,n,...>] [width=<dbu>]
-            [cell=<name>] [flatten=0|1] [simplify=<dbu>]
+    TOPVIEW result=<layer> [layers=<n,n,...>] [exclude=<n,n,...>] [hatch=<dbu>]
+            [width=<dbu>] [cell=<name>] [flatten=0|1] [simplify=<dbu>]
                                        draw a top-down, hidden-line-removal
                                        pictorial view of the hybrid circuit onto
                                        result_layer -- the visible OUTLINE edges
@@ -281,11 +281,17 @@ to its stroked-outline polygon first; requires the shapely package):
                                        anywhere in any of this; exclude=<n,n,...>
                                        drops specific layers out of the role-based
                                        default (ignored once layers= is given
-                                       explicitly); pass layers= to bypass all of
-                                       the role logic and get the simpler "every
-                                       given layer occludes equally by plain
-                                       number" behaviour instead; width=<dbu> sets
-                                       the drawn outline width (default 100 =
+                                       explicitly); hatch=<dbu> fills every
+                                       conductor-tier layer's own visible region
+                                       with a 45/-45 degree cross-hatch at that
+                                       pitch, the standard technical-drawing
+                                       convention for a solid material (also
+                                       ignored once layers= is given explicitly);
+                                       pass layers= to bypass all of the role
+                                       logic and get the simpler "every given
+                                       layer occludes equally by plain number"
+                                       behaviour instead; width=<dbu> sets the
+                                       drawn outline width (default 100 =
                                        0.1mm); writes Path shapes, not filled
                                        polygons -- also available as
                                        Session.mask_op_top_view()
@@ -1148,7 +1154,7 @@ class CommandInterpreter:
 
     def _cmd_topview(self, args):
         usage = ("usage: TOPVIEW result=<layer> [layers=<n,n,...>] [exclude=<n,n,...>] "
-                 "[width=<dbu>] [cell=<name>] [flatten=0|1] [simplify=<dbu>]")
+                 "[hatch=<dbu>] [width=<dbu>] [cell=<name>] [flatten=0|1] [simplify=<dbu>]")
         kwargs = {}
         for a in args:
             if "=" not in a:
@@ -1161,6 +1167,8 @@ class CommandInterpreter:
                 kwargs["layers"] = [tok.strip() for tok in v.split(",") if tok.strip()]
             elif k == "exclude":
                 kwargs["exclude_layers"] = [tok.strip() for tok in v.split(",") if tok.strip()]
+            elif k == "hatch":
+                kwargs["hatch_conductor_pitch"] = float(v)
             elif k == "width":
                 kwargs["line_width"] = float(v)
             elif k == "cell":
