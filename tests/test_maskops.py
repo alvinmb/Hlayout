@@ -536,6 +536,40 @@ def test_cross_hatch_lines_empty_region_or_pitch_gives_empty_result():
     region = shapely.geometry.box(0, 0, 1000, 500)
     assert cross_hatch_lines(shapely.geometry.Polygon(), 200).is_empty
     assert cross_hatch_lines(region, 0).is_empty
+    assert cross_hatch_lines(region, 200, angles=()).is_empty
+
+
+def test_cross_hatch_lines_supports_arbitrary_angles():
+    from hlayout.core.maskops import cross_hatch_lines
+    region = shapely.geometry.box(0, 0, 1000, 1000)
+    result_60 = cross_hatch_lines(region, 100, angles=(60, -60))
+    assert not result_60.is_empty
+    minx, miny, maxx, maxy = result_60.bounds
+    assert minx >= 0 and miny >= 0 and maxx <= 1000 and maxy <= 1000
+    # a single-angle hatch (one direction only) is also supported
+    result_single = cross_hatch_lines(region, 100, angles=(30,))
+    assert not result_single.is_empty
+    # different angle sets produce genuinely different line geometry
+    result_45 = cross_hatch_lines(region, 100, angles=(45, -45))
+    assert not result_45.equals(result_60)
+
+
+def test_top_view_hatch_conductor_angles_produces_a_different_pattern_than_default():
+    from hlayout.io.techfile import save_resistor_geometry_rules
+
+    def _make(**hatch_kwargs):
+        s = _fresh_session()
+        save_resistor_geometry_rules(s.library, _resistor_rules_conductor_only())
+        s.rect(3, 0, 0, 1000, 1000)
+        s.mask_op_top_view(63, hatch_conductor_pitch=100, **hatch_kwargs)
+        return [sh for sh in s.cell.shapes if sh.layer == 63]
+
+    default_paths = _make()
+    angled_paths = _make(hatch_conductor_angles=(60, -60))
+    # both produce a real hatch fill, but at different angles the exact
+    # set of drawn segments differs
+    assert len(default_paths) > 4 and len(angled_paths) > 4
+    assert {tuple(p.points) for p in default_paths} != {tuple(p.points) for p in angled_paths}
 
 
 def _resistor_rules_conductor_only(conductor_layer=3):

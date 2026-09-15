@@ -1154,7 +1154,8 @@ class CommandInterpreter:
 
     def _cmd_topview(self, args):
         usage = ("usage: TOPVIEW result=<layer> [layers=<n,n,...>] [exclude=<n,n,...>] "
-                 "[hatch=<dbu>] [width=<dbu>] [cell=<name>] [flatten=0|1] [simplify=<dbu>]")
+                 "[hatch=<dbu>] [hatch_angle=<deg>[,<deg>]] [width=<dbu>] [cell=<name>] "
+                 "[flatten=0|1] [simplify=<dbu>]")
         kwargs = {}
         for a in args:
             if "=" not in a:
@@ -1169,6 +1170,9 @@ class CommandInterpreter:
                 kwargs["exclude_layers"] = [tok.strip() for tok in v.split(",") if tok.strip()]
             elif k == "hatch":
                 kwargs["hatch_conductor_pitch"] = float(v)
+            elif k == "hatch_angle":
+                kwargs["hatch_conductor_angles"] = tuple(
+                    float(tok.strip()) for tok in v.split(",") if tok.strip())
             elif k == "width":
                 kwargs["line_width"] = float(v)
             elif k == "cell":

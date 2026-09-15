@@ -250,44 +250,46 @@ def boolean_op(geom_a, geom_b, op: str):
     raise GeometryError(f"unknown boolean mask op {op!r}; expected one of {', '.join(MASK_OPS[2:])}")
 
 
-def cross_hatch_lines(region, pitch: float):
-    """A 45-degree / -45-degree cross-hatch pattern -- the standard
-    technical-drawing convention for a solid material in a pictorial/
-    sectioned view -- clipped to ``region``, as a single shapely
-    (Multi)LineString (empty if ``region`` is empty or ``pitch`` isn't
-    positive).
+#: Default cross-hatch angles (degrees from the X axis) -- the standard
+#: technical-drawing convention for a solid material in a pictorial/
+#: sectioned view.
+DEFAULT_HATCH_ANGLES = (45.0, -45.0)
 
-    ``pitch`` is the DBU spacing between adjacent parallel lines in
-    EACH direction (measured perpendicular to those lines, not along
-    the diagonal) -- the two directions are independent, so the result
-    is a grid of diamonds, not a single set of parallel lines."""
+
+def cross_hatch_lines(region, pitch: float, angles=DEFAULT_HATCH_ANGLES):
+    """One evenly-spaced set of parallel lines PER angle in ``angles``
+    (degrees from the X axis, e.g. the default 45/-45 for a standard
+    cross-hatch, or any other combination such as 60/-60), clipped to
+    ``region``, as a single shapely (Multi)LineString (empty if
+    ``region`` is empty, ``pitch`` isn't positive, or ``angles`` is
+    empty).
+
+    ``pitch`` is the DBU spacing between adjacent parallel lines,
+    measured perpendicular to them -- each angle's own set is
+    independent, so two angles produce a grid (diamonds for 45/-45,
+    parallelograms otherwise), not a single set of parallel lines."""
     _require_shapely()
-    if region is None or region.is_empty or pitch <= 0:
+    if region is None or region.is_empty or pitch <= 0 or not angles:
         return LineString()
 
     x0, y0, x1, y1 = region.bounds
+    cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
     diag = math.hypot(x1 - x0, y1 - y0) + pitch
-    step = pitch * math.sqrt(2)  # spacing along a 45-degree line's own c-axis
+    n_steps = int(diag / pitch) + 1
 
     lines = []
-    # +45 direction: lines of the form y - x = c
-    c = (y0 - x1) - step
-    c_max = (y1 - x0) + step
-    while c <= c_max:
-        seg = LineString([(x0 - diag, x0 - diag + c), (x1 + diag, x1 + diag + c)])
-        clipped = seg.intersection(region)
-        if not clipped.is_empty:
-            lines.append(clipped)
-        c += step
-    # -45 direction: lines of the form y + x = c
-    c = (x0 + y0) - step
-    c_max = (x1 + y1) + step
-    while c <= c_max:
-        seg = LineString([(x0 - diag, c - (x0 - diag)), (x1 + diag, c - (x1 + diag))])
-        clipped = seg.intersection(region)
-        if not clipped.is_empty:
-            lines.append(clipped)
-        c += step
+    for angle_deg in angles:
+        theta = math.radians(angle_deg)
+        dx, dy = math.cos(theta), math.sin(theta)  # unit direction along the line
+        nx, ny = -dy, dx                            # unit normal (perpendicular)
+        for i in range(-n_steps, n_steps + 1):
+            c = i * pitch
+            ox, oy = cx + nx * c, cy + ny * c
+            seg = LineString([(ox - dx * diag, oy - dy * diag),
+                               (ox + dx * diag, oy + dy * diag)])
+            clipped = seg.intersection(region)
+            if not clipped.is_empty:
+                lines.append(clipped)
 
     if not lines:
         return LineString()
@@ -351,13 +353,15 @@ def hidden_line_top_view(layer_geoms):
     untouched, and it never contributes to what's covered for anything
     below it.
 
-    A third tuple element, ``hatch_pitch`` (DBU, omit or None for no
-    hatching), draws a 45/-45 degree cross-hatch fill
-    (cross_hatch_lines()) across this entry's own VISIBLE region (the
-    same region its notched boundary comes from) at that pitch -- the
-    standard technical-drawing convention for a solid material in a
+    A third tuple element (omit or None for no hatching) draws a
+    cross-hatch fill (cross_hatch_lines()) across this entry's own
+    VISIBLE region (the same region its notched boundary comes from) --
+    the standard technical-drawing convention for a solid material in a
     pictorial view, e.g. Session.mask_op_top_view()'s conductor tier.
-    Has no effect on a non-occluding (``occludes=False``) entry.
+    Either a plain DBU pitch (using cross_hatch_lines()'s own default
+    45/-45 degree angles), or a ``(pitch, angles)`` tuple to hatch at
+    different angles. Has no effect on a non-occluding
+    (``occludes=False``) entry.
 
     Returns a single shapely (Multi)LineString (empty if every geometry
     given is empty), ready for shapely_lines_to_paths()."""
@@ -367,7 +371,11 @@ def hidden_line_top_view(layer_geoms):
     visible_edges = []
     for entry in layer_geoms:
         geom, occludes = entry[0], entry[1]
-        hatch_pitch = entry[2] if len(entry) > 2 else None
+        hatch_spec = entry[2] if len(entry) > 2 else None
+        if isinstance(hatch_spec, tuple):
+            hatch_pitch, hatch_angles = hatch_spec
+        else:
+            hatch_pitch, hatch_angles = hatch_spec, DEFAULT_HATCH_ANGLES
         if geom is None or geom.is_empty:
             continue
         # Snap to the integer-DBU grid before this geometry is used in
@@ -387,7 +395,7 @@ def hidden_line_top_view(layer_geoms):
         if not visible_region.is_empty:
             visible_edges.append(set_precision(visible_region.boundary, grid_size=1.0))
             if hatch_pitch:
-                hatch = cross_hatch_lines(visible_region, hatch_pitch)
+                hatch = cross_hatch_lines(visible_region, hatch_pitch, hatch_angles)
                 if not hatch.is_empty:
                     visible_edges.append(hatch)
         covered = geom if covered.is_empty else set_precision(covered.union(geom), grid_size=1.0)
