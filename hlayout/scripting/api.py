@@ -96,20 +96,18 @@ def _matched_component_footprint(library, cell_name, component_models):
     whose cell is a recognized real component: an explicit
     component_models entry (manual or already auto-matched), a name
     carrying a known EIA size code (component_match.match_passive_by_name()),
-    or a footprint matching a known gull-wing package's pin pattern
-    (component_match.match_gullwing_by_footprint()) -- the SAME name/
-    footprint matching Session.match_freecad_components() uses to build
-    its own report.
-
-    Deliberately has nothing to do with layer thickness, or any other
-    film/non-film layer distinction: unlike
-    hlayout.io.freecadio.is_component_cell() (used by the 3D FreeCAD
-    export, which genuinely needs to know which shapes are real
-    printed film to extrude), this is purely "was this CELL placed and
-    does it look like a real part," for Session.mask_op_top_view()'s
-    role-based stacking, which wants a component's whole footprint
-    (pads included) to occlude what's underneath it, and has no use
-    for a film/non-film split at all.
+    a footprint matching a known gull-wing package's pin pattern
+    (component_match.match_gullwing_by_footprint()), or -- for a "bare"
+    part that name/footprint matching can't identify at all (an IC with
+    no size code and no catalogued pin-pattern table entry, e.g. an
+    8-pin op-amp) -- the exact same film/non-film layer test
+    hlayout.io.freecadio.is_component_cell() already uses, which is
+    what Session.match_freecad_components()/the Component Library
+    Manager already lists it under. Reusing that (rather than
+    rebuilding a separate, parallel "is this a component" answer) means
+    a cell you can already see listed as a component in the Component
+    Library Manager is treated as one here too, even before it has (or
+    ever gets) a matched or manually-assigned 3D model.
 
     A component's own body-outline shape is often a thin PATH (a
     stroked ring around the body, not a filled area -- see
@@ -142,6 +140,8 @@ def _matched_component_footprint(library, cell_name, component_models):
         match_gullwing_by_footprint,
         match_passive_by_name,
     )
+    from ..io.freecadio import is_component_cell
+    from ..io.techfile import default_layer_thickness, load_layer_thickness
     from shapely.geometry import MultiPolygon, Polygon
     from shapely.ops import unary_union
 
@@ -159,6 +159,8 @@ def _matched_component_footprint(library, cell_name, component_models):
     tokens = eia_size_tokens()
     table = gullwing_package_table()
     base_models = dict(component_models) if component_models else {}
+    thick = load_layer_thickness(library) or default_layer_thickness(library)
+    fallback_film_layers = {int(k) for k in thick}
 
     def is_recognized(cn):
         if cn in base_models:
@@ -167,7 +169,13 @@ def _matched_component_footprint(library, cell_name, component_models):
             return True
         c = library.cells.get(cn)
         stats = footprint_pin_stats(c) if c is not None else None
-        return stats is not None and match_gullwing_by_footprint(stats, table) is not None
+        if stats is not None and match_gullwing_by_footprint(stats, table) is not None:
+            return True
+        # Bare part fallback: neither a size code nor a catalogued pin
+        # pattern identifies it, but it's still listed as a component
+        # by Session.match_freecad_components()/the Component Library
+        # Manager -- treat it the same way here.
+        return is_component_cell(library, cn, fallback_film_layers, base_models)
 
     geoms = []
 

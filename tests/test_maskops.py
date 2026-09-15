@@ -794,6 +794,64 @@ def test_top_view_component_recognition_needs_no_layer_thickness_at_all():
     assert _min_dist_to_paths((300, 600), paths) > 10  # conductor cut under the cap
 
 
+def test_top_view_bare_ic_with_no_name_or_footprint_match_falls_back_to_is_component_cell():
+    # Regression: a "bare" IC like an 8-pin op-amp has no EIA size code
+    # and no catalogued gull-wing pin-count table entry (that table only
+    # covers 3/14/16/18/20-pin packages), so name/footprint matching
+    # alone can never recognize it -- exactly the gap that made it show
+    # up correctly in the Component Library Manager (is_component_cell(),
+    # via the design's own explicitly saved layer_thickness) but not in
+    # TOPVIEW. Falling back to that same test when name/footprint
+    # matching fails closes the gap: a cell already listed as a
+    # component in the Component Library Manager is treated as one here
+    # too, even with no matched or manually-assigned 3D model.
+    from hlayout.io.techfile import save_layer_thickness, save_resistor_geometry_rules
+    s = _fresh_session()
+    s.new_cell("LM741")
+    s.rect(20, 0, 0, 800, 800)   # a pad footprint, no pin= tags at all
+    s.rect(58, 0, 0, 800, 800)   # some other layer the design gives a
+                                  # thickness to (e.g. lid/case marking)
+    s.use_cell("TOP")
+    save_resistor_geometry_rules(s.library, {
+        "overlap_a": 200, "pad_b": 500, "space_c": 200, "glaze_oversize": 50,
+        "keepout_oversize": 0, "resistor_layer": -1, "conductor_layer": 3,
+        "glaze_layer": -1, "doc_layer": -1, "keepout_layer": -1, "ink_layers": {},
+    })
+    save_layer_thickness(s.library, {"3": 12.0, "58": 5.0})  # 20 deliberately absent
+    s.rect(3, 0, 0, 2000, 2000)  # conductor under the whole chip
+    s.sref("LM741", (0, 0))
+    written = s.mask_op_top_view(63)
+    assert written
+    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    assert _min_dist_to_paths((0, 0), paths) < 1        # LM741's own outline present
+    assert _min_dist_to_paths((400, 400), paths) > 10   # conductor cut under LM741
+
+
+def test_top_view_resistor_device_cell_still_not_a_component_with_the_fallback_active():
+    # The is_component_cell() fallback must not resurrect the earlier
+    # regression: a resistor device cell whose every layer is covered by
+    # the design's own explicitly saved layer_thickness is still not a
+    # component, even though the fallback test runs for it too.
+    from hlayout.io.techfile import save_layer_thickness, save_resistor_geometry_rules
+    s = _fresh_session()
+    s.new_cell("R1_DEVICE")
+    s.rect(3, 0, 0, 100, 100)
+    s.rect(4, 150, 0, 250, 20)
+    s.rect(19, 0, 0, 100, 100)
+    s.use_cell("TOP")
+    save_resistor_geometry_rules(s.library, {
+        "overlap_a": 200, "pad_b": 500, "space_c": 200, "glaze_oversize": 50,
+        "keepout_oversize": 0, "resistor_layer": 30, "conductor_layer": 3,
+        "glaze_layer": 19, "doc_layer": -1, "keepout_layer": -1, "ink_layers": {},
+    })
+    save_layer_thickness(s.library, {"3": 12.0, "4": 10.0, "19": 20.0})
+    s.rect(3, 500, 500, 900, 900)
+    s.sref("R1_DEVICE", (0, 0))
+    s.mask_op_top_view(63)
+    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    assert _min_dist_to_paths((200, 20), paths) < 1
+
+
 def test_top_view_component_footprint_hole_from_a_stroked_outline_path_is_filled():
     # Regression: a component's body outline is often a thin PATH (a
     # stroked ring, not a filled area -- see
