@@ -473,18 +473,31 @@ def test_top_view_removes_the_occluded_part_of_a_lower_layers_outline():
     assert drawn.buffer(5).contains(visible_point)
 
 
-def test_top_view_defaults_to_every_layer_with_a_fired_film_thickness():
-    from hlayout.io.techfile import save_layer_thickness
+def test_top_view_default_ignores_fired_film_thickness_entirely():
+    # A top-down occlusion view has no use for a layer's THICKNESS
+    # (unlike export_freecad()'s 3D stack, which needs a Z-height) --
+    # a layer with real drawn geometry is considered regardless of
+    # whether it has a fired-film thickness saved in Setup at all.
     s = _fresh_session()
     s.rect(5, 0, 0, 100, 100)
-    s.rect(6, 200, 200, 300, 300)  # not given a thickness -- excluded by default
-    save_layer_thickness(s.library, {"5": 12.0})
+    s.rect(6, 200, 200, 300, 300)  # no thickness saved anywhere -- still included
     written = s.mask_op_top_view(63)
-    assert written == {"TOP": 1}  # just layer 5's own single closed-ring outline
+    assert written == {"TOP": 2}  # both layer 5's and layer 6's own outlines
     paths = [sh for sh in s.cell.shapes if sh.layer == 63]
     xs = [p[0] for path in paths for p in path.points]
-    ys = [p[1] for path in paths for p in path.points]
-    assert max(xs) <= 100 and max(ys) <= 100  # layer 6's box never appears
+    assert max(xs) == 300  # layer 6's box (up to x=300) is present
+
+
+def test_top_view_default_excludes_a_hidden_or_unfilled_layer():
+    s = _fresh_session()
+    s.rect(5, 0, 0, 100, 100)
+    s.rect(6, 200, 200, 300, 300)
+    s.library.layers[6].visible = False
+    written = s.mask_op_top_view(63)
+    assert written == {"TOP": 1}  # only layer 5 -- layer 6 is hidden
+    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    xs = [p[0] for path in paths for p in path.points]
+    assert max(xs) == 100
 
 
 def test_top_view_raises_without_any_layers_to_composite():

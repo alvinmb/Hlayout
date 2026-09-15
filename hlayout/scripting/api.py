@@ -1722,34 +1722,95 @@ class Session:
         `simplify` but operating on lines instead of polygon area.
 
         Returns {cell_name: paths_written} for cells that actually
-        produced output (empty results are omitted). Requires shapely."""
+        produced output (empty results are omitted). Requires shapely.
+
+        Note this has nothing to do with fired-film THICKNESS (unlike
+        export_freecad()'s 3D stack, which needs a Z-height to extrude
+        each layer by) -- a 2D top-down occlusion view only needs to
+        know a layer's stacking ROLE and whether it has geometry, so a
+        layer with no thickness saved in Setup is still fully
+        considered here."""
         from ..io.freecadio import component_outline_flattened
-        from ..io.techfile import (
-            default_layer_thickness,
-            load_bond_rules,
-            load_dielectric_rules,
-            load_layer_thickness,
-            load_resistor_geometry_rules,
-            load_route_rules,
-        )
+        from ..io.techfile import load_bond_rules, load_dielectric_rules, \
+            load_resistor_geometry_rules, load_route_rules
 
         resolve = self.library.layers.resolve
         r_layer = resolve(result_layer)
         width_dbu = int(round(line_width))
-
-        thick = load_layer_thickness(self.library) or default_layer_thickness(self.library)
-        film_layers = {int(k) for k in thick}
-        if not film_layers and layers is None:
-            raise LayoutError(
-                "no layers to composite -- pass layers=, or set fired-film "
-                "thicknesses in Setup so the heuristic can seed them"
-            )
 
         role_based = layers is None
         if not role_based:
             layer_set = sorted({resolve(n) for n in layers})
             if not layer_set:
                 raise LayoutError("no layers to composite -- pass a non-empty layers=")
+        else:
+            resistor_layers, conductor_layers, glaze_layers = set(), set(), set()
+            try:
+                rg = load_resistor_geometry_rules(self.library)
+                if isinstance(rg.get("resistor_layer"), int) and rg["resistor_layer"] >= 0:
+                    resistor_layers.add(rg["resistor_layer"])
+                for n in (rg.get("ink_layers") or {}).values():
+                    if isinstance(n, int) and n >= 0:
+                        resistor_layers.add(n)
+                if isinstance(rg.get("conductor_layer"), int) and rg["conductor_layer"] >= 0:
+                    conductor_layers.add(rg["conductor_layer"])
+                if isinstance(rg.get("glaze_layer"), int) and rg["glaze_layer"] >= 0:
+                    glaze_layers.add(rg["glaze_layer"])
+            except Exception:
+                pass
+            try:
+                rr = load_route_rules(self.library)
+                for n in (rr.get("layer_a"), rr.get("layer_b")):
+                    if isinstance(n, int) and n >= 0:
+                        conductor_layers.add(n)
+            except Exception:
+                pass
+            try:
+                b = int(load_bond_rules(self.library)["layer"])
+                if b >= 0:
+                    conductor_layers.add(b)
+            except Exception:
+                pass
+            try:
+                d = int(load_dielectric_rules(self.library)["layer"])
+                if d >= 0:
+                    conductor_layers.add(d)
+            except Exception:
+                pass
+
+            # Every OTHER layer that actually has drawn, visible, filled
+            # geometry anywhere in the library -- no thickness lookup,
+            # just "is there really something here worth showing" (same
+            # idea hlayout.io.techfile.default_layer_thickness() uses for
+            # its own generic-film catch-all, minus the thickness
+            # requirement -- see this method's own docstring for why).
+            drawn = set()
+            for c in self.library.cells.values():
+                for sh in c.shapes:
+                    drawn.add(sh.layer)
+            role_layers = resistor_layers | conductor_layers | glaze_layers
+            generic_layers = {
+                n for n in drawn
+                if 0 <= n < len(self.library.layers)
+                and self.library.layers[n].visible and self.library.layers[n].fill
+            }
+            substrate_layers = {
+                n for n in generic_layers
+                if any(w in self.library.layers[n].name.lower()
+                       for w in ("substrate", "alumina", "ceramic"))
+            }
+            other_layers = generic_layers - role_layers - substrate_layers
+            # "film" for the purposes of component-footprint detection:
+            # everything considered a real physical layer above, as
+            # opposed to a component's own outline/keep-out marker.
+            film_layers = role_layers | generic_layers
+
+            if not film_layers:
+                raise LayoutError(
+                    "no layers to composite -- pass layers=, or draw something "
+                    "on a visible, filled layer, or set resistor/conductor/"
+                    "glaze/route/bond layers in Setup"
+                )
 
         self._checkpoint()
         cells = ([self.library.get_cell(n) for n in cell_names] if cell_names
@@ -1762,51 +1823,6 @@ class Session:
                 return layer_to_shapely(cell.shapes_on_layer(layer))
 
             if role_based:
-                resistor_layers, conductor_layers, glaze_layers = set(), set(), set()
-                try:
-                    rg = load_resistor_geometry_rules(self.library)
-                    if isinstance(rg.get("resistor_layer"), int) and rg["resistor_layer"] >= 0:
-                        resistor_layers.add(rg["resistor_layer"])
-                    for n in (rg.get("ink_layers") or {}).values():
-                        if isinstance(n, int) and n >= 0:
-                            resistor_layers.add(n)
-                    if isinstance(rg.get("conductor_layer"), int) and rg["conductor_layer"] >= 0:
-                        conductor_layers.add(rg["conductor_layer"])
-                    if isinstance(rg.get("glaze_layer"), int) and rg["glaze_layer"] >= 0:
-                        glaze_layers.add(rg["glaze_layer"])
-                except Exception:
-                    pass
-                try:
-                    rr = load_route_rules(self.library)
-                    for n in (rr.get("layer_a"), rr.get("layer_b")):
-                        if isinstance(n, int) and n >= 0:
-                            conductor_layers.add(n)
-                except Exception:
-                    pass
-                try:
-                    b = int(load_bond_rules(self.library)["layer"])
-                    if b >= 0:
-                        conductor_layers.add(b)
-                except Exception:
-                    pass
-                try:
-                    d = int(load_dielectric_rules(self.library)["layer"])
-                    if d >= 0:
-                        conductor_layers.add(d)
-                except Exception:
-                    pass
-                resistor_layers &= film_layers
-                conductor_layers &= film_layers
-                glaze_layers &= film_layers
-                substrate_layers = {
-                    n for n in film_layers
-                    if 0 <= n < len(self.library.layers)
-                    and any(w in self.library.layers[n].name.lower()
-                            for w in ("substrate", "alumina", "ceramic"))
-                }
-                other_layers = film_layers - resistor_layers - conductor_layers \
-                    - glaze_layers - substrate_layers
-
                 comp_geom = component_outline_flattened(
                     self.library, cell.name, film_layers,
                     load_component_models(self.library))
