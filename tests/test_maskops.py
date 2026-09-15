@@ -612,6 +612,31 @@ def test_top_view_role_order_glaze_is_a_non_occluding_outline():
     assert _min_dist_to_paths((400, 600), paths) < 1
 
 
+def test_top_view_role_order_unclassified_other_layer_cannot_occlude_conductor():
+    # Regression: an "other" (unclassified) layer with a HIGHER layer
+    # number than conductor must not occlude conductor -- lumping every
+    # unclassified layer into the same occlusion tier as conductor
+    # reproduced the exact number-ordering bug role-based stacking
+    # exists to avoid, one tier down.
+    from hlayout.io.techfile import save_resistor_geometry_rules
+    s = _fresh_session()
+    save_resistor_geometry_rules(s.library, {
+        "overlap_a": 200, "pad_b": 500, "space_c": 200, "glaze_oversize": 50,
+        "keepout_oversize": 0, "resistor_layer": -1, "conductor_layer": 3,
+        "glaze_layer": -1, "doc_layer": -1, "keepout_layer": -1, "ink_layers": {},
+    })
+    s.rect(3, 0, 0, 600, 600)        # conductor, an EXPLICITLY classified role
+    s.rect(58, 400, 400, 1000, 1000)  # an unclassified "other" layer, HIGHER number
+    s.mask_op_top_view(63)
+    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    # conductor's top edge, strictly inside the "other" layer's filled
+    # footprint, must survive -- an unclassified layer cannot occlude it.
+    assert _min_dist_to_paths((500, 600), paths) < 1
+    # the "other" layer's own outline is also fully present (nothing
+    # above IT in this design).
+    assert _min_dist_to_paths((1000, 700), paths) < 1
+
+
 def test_top_view_role_order_components_and_epoxy_occlude_conductor():
     from hlayout.io.techfile import save_layer_thickness, save_resistor_geometry_rules
     s = _fresh_session()

@@ -1694,13 +1694,21 @@ class Session:
         and their epoxy/keep-out footprints sit topmost (cutting into
         everything under them), then the resistor ink layer(s), then
         every conductor layer (Setup's own conductor_layer plus the
-        Route Layers and Wire Bond layers) and any other film not
-        otherwise classified, then the substrate. The glaze layer is
-        drawn as a non-occluding outline overlay -- always shown in
-        full, never hidden by or hiding anything else, since glaze is
-        a thin, largely transparent overprint rather than an opaque
-        film in this pictorial convention. Layer roles come from the
-        same Setup accessors export_freecad()'s heuristic uses
+        Route Layers and Wire Bond layers), then any OTHER visible,
+        filled layer not otherwise classified, then the substrate. An
+        unclassified "other" layer is its own tier, strictly below
+        conductor -- it never occludes conductor (or resistor, or a
+        component) just because it happens to have a higher layer
+        number, the exact number-ordering problem this role-based
+        stacking exists to avoid in the first place; two layers within
+        the SAME tier (e.g. two unclassified "other" layers) still
+        settle ties between themselves by plain layer number, since
+        nothing further distinguishes them. The glaze layer is drawn
+        as a non-occluding outline overlay -- always shown in full,
+        never hidden by or hiding anything else, since glaze is a
+        thin, largely transparent overprint rather than an opaque film
+        in this pictorial convention. Layer roles come from the same
+        Setup accessors export_freecad()'s heuristic uses
         (hlayout.io.techfile's resistor/route/bond/dielectric rules).
 
         Pass an explicit `layers` list (numbers or names) to bypass all
@@ -1800,12 +1808,9 @@ class Session:
                        for w in ("substrate", "alumina", "ceramic"))
             }
             other_layers = generic_layers - role_layers - substrate_layers
-            # "film" for the purposes of component-footprint detection:
-            # everything considered a real physical layer above, as
-            # opposed to a component's own outline/keep-out marker.
-            film_layers = role_layers | generic_layers
+            all_considered_layers = role_layers | generic_layers
 
-            if not film_layers:
+            if not all_considered_layers:
                 raise LayoutError(
                     "no layers to composite -- pass layers=, or draw something "
                     "on a visible, filled layer, or set resistor/conductor/"
@@ -1823,13 +1828,26 @@ class Session:
                 return layer_to_shapely(cell.shapes_on_layer(layer))
 
             if role_based:
+                # is_component_cell()'s own "film" concept means something
+                # narrower than "every layer TOPVIEW considers": a
+                # component's own outline/keep-out layer usually IS a
+                # normal, visible, filled, drawn layer too (that's how you
+                # see it on the canvas), so the broad
+                # all_considered_layers set can't tell it apart from a
+                # real board film. Only the EXPLICITLY role-configured
+                # layers (resistor/conductor/glaze, from Setup) are a
+                # reliable proxy for "real film" here -- an outline/
+                # keep-out layer is essentially never assigned as one of
+                # those roles.
                 comp_geom = component_outline_flattened(
-                    self.library, cell.name, film_layers,
+                    self.library, cell.name, role_layers,
                     load_component_models(self.library))
                 layer_geoms = [(comp_geom, True)]
                 for n in sorted(resistor_layers, reverse=True):
                     layer_geoms.append((gather(n), True))
-                for n in sorted(conductor_layers | other_layers, reverse=True):
+                for n in sorted(conductor_layers, reverse=True):
+                    layer_geoms.append((gather(n), True))
+                for n in sorted(other_layers, reverse=True):
                     layer_geoms.append((gather(n), True))
                 for n in sorted(substrate_layers, reverse=True):
                     layer_geoms.append((gather(n), True))

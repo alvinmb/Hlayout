@@ -262,18 +262,27 @@ to its stroked-outline polygon first; requires the shapely package):
                                        result_layer -- the visible OUTLINE edges
                                        of the design as seen from directly above
                                        (as in AutoCAD's HIDE), with the part of a
-                                       lower layer's edge buried under a higher
-                                       layer's filled footprint actually removed;
-                                       layers default to every layer with a fired-
-                                       film thickness (Setup, same set
-                                       export_freecad() uses), highest layer
-                                       number = printed last = physically on top;
-                                       pass layers= to restrict to a subset or add
-                                       a normally non-physical layer; width=<dbu>
-                                       sets the drawn outline width (default 100 =
-                                       0.1mm); writes Path shapes, not filled
-                                       polygons -- also available as
-                                       Session.mask_op_top_view()
+                                       lower entry's edge buried under a higher
+                                       entry's filled footprint actually removed;
+                                       with no layers=, stacking follows the real
+                                       fab process order by ROLE regardless of
+                                       layer numbers -- placed components/epoxy
+                                       footprints topmost, then resistor ink,
+                                       then conductor (incl. Route/Wire Bond
+                                       layers), then any other layer with real
+                                       geometry, then substrate; an unclassified
+                                       "other" layer can never occlude conductor/
+                                       resistor/a component just for having a
+                                       higher number; glaze is a non-occluding
+                                       outline overlay, always fully shown; no
+                                       fired-film thickness is needed anywhere in
+                                       this -- pass layers= to bypass all of that
+                                       and get the simpler "every given layer
+                                       occludes equally by plain number" behaviour
+                                       instead; width=<dbu> sets the drawn outline
+                                       width (default 100 = 0.1mm); writes Path
+                                       shapes, not filled polygons -- also
+                                       available as Session.mask_op_top_view()
 
 Design Rule Check (DRC -- single-layer and between-layer geometric checks;
 requires the shapely package; also available as Tools > DRC...):
