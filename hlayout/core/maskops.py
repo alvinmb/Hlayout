@@ -61,6 +61,7 @@ MASK_OPS = ("OVERSIZE", "UNDERSIZE", "AND", "OR", "NOT", "XOR")
 BOOLEAN_MASK_OPS = ("AND", "OR", "NOT", "XOR")
 
 try:
+    from shapely import set_precision
     from shapely.geometry import LineString
     from shapely.geometry import Polygon as _ShapelyPolygon
     from shapely.geometry import box as _box
@@ -73,6 +74,7 @@ except ImportError as _exc:  # pragma: no cover - exercised only without shapely
     _box = None
     unary_union = None
     _shapely_transform = None
+    set_precision = None
     _SHAPELY_IMPORT_ERROR = _exc
 
 # Path end cap -> shapely LineString.buffer() cap_style. ROUND is
@@ -256,18 +258,34 @@ def hidden_line_top_view(layer_geoms):
     a higher entry's filled footprint actually removed, not just drawn
     underneath it.
 
-    This is deliberately edge-based rather than solid-fill-based:
-    compositing FILLED regions front-to-back and merging the visible
-    remainders onto one output layer is a no-op -- their union is
-    always exactly the union of the original entries' own footprints,
-    regardless of stacking order (occlusion only changes which
-    individual piece contributed a given point, information a single
-    undifferentiated output layer throws away immediately). Working
-    with each entry's boundary LINES instead preserves the one thing
-    solid compositing loses: a lower entry's edge that would be
-    invisible in a real top-down view (fully enclosed by something
-    above it) is genuinely absent from the result, giving a true
-    hidden-line drawing rather than a plain union.
+    This is deliberately region-based, not a plain boundary subtraction:
+    each occluding entry's own VISIBLE REGION is computed first (its
+    filled footprint minus whatever a higher entry already covers), and
+    only THEN is that region's boundary taken -- so a lower entry that
+    gets a corner cut off by something above it comes out as one
+    properly CLOSED ring (outer edges plus a new "notch" edge exactly
+    where the covering entry cuts in), not an open, dangling arc.
+    Subtracting the covered AREA from the boundary LINE directly (the
+    obvious-looking shortcut) would leave exactly that open arc --
+    correct as far as total ink drawn goes (the covering entry's own
+    full outline happens to trace right along the missing piece), but
+    each entry's own contribution would then only look complete when
+    every entry above it is also present and drawn, rather than being
+    a self-contained closed shape on its own -- awkward for anything
+    that wants to isolate one entry's outline (a DXF/CAM export of just
+    that layer, say) and have it still be a valid, closed shape.
+
+    This is still meaningfully different from compositing FILLED
+    regions and merging what's visible onto one UNDIFFERENTIATED output
+    layer, which is a no-op (that union is always exactly the union of
+    the original entries' own footprints, regardless of stacking order
+    -- occlusion only changes which entry contributed a given point,
+    information a single output layer throws away immediately if nothing
+    keeps the per-entry boundaries distinct). Taking each entry's own
+    notched boundary keeps that information: a lower entry's edge that
+    would be invisible in a real top-down view is genuinely redrawn as
+    a closed shape reflecting what's actually visible of it, not merged
+    away into an undifferentiated blob.
 
     ``layer_geoms`` is an ordered sequence of ``(geometry, occludes)``
     pairs, from the TOP down -- gathering that geometry (by layer
@@ -279,13 +297,14 @@ def hidden_line_top_view(layer_geoms):
     then resistor, then conductor, then substrate, with glaze handled
     as a non-occluding overlay).
 
-    ``occludes=True`` clips this entry's own boundary to the part not
-    already covered by a higher entry before adding it to the result,
-    and adds its own filled footprint to what's covered for entries
-    below it. ``occludes=False`` marks a non-occluding overlay (e.g. a
-    glaze overprint, transparent in this pictorial convention) -- its
-    full boundary is always added, and it never contributes to what's
-    covered for anything below it.
+    ``occludes=True`` clips this entry's own FILLED region to the part
+    not already covered by a higher entry, then adds THAT region's own
+    boundary to the result -- and adds its own (uncut) filled footprint
+    to what's covered for entries below it. ``occludes=False`` marks a
+    non-occluding overlay (e.g. a glaze overprint, transparent in this
+    pictorial convention) -- its full boundary is always added
+    untouched, and it never contributes to what's covered for anything
+    below it.
 
     Returns a single shapely (Multi)LineString (empty if every geometry
     given is empty), ready for shapely_lines_to_paths()."""
@@ -296,18 +315,27 @@ def hidden_line_top_view(layer_geoms):
     for geom, occludes in layer_geoms:
         if geom is None or geom.is_empty:
             continue
-        boundary = geom.boundary
+        # Snap to the integer-DBU grid before this geometry is used in
+        # any difference/union -- GEOS's own boolean-op output can land
+        # a hair off-integer even when every input vertex was exactly
+        # integer DBU, and two pieces of what should be the SAME point
+        # can then round to different integers independently later (in
+        # shapely_lines_to_paths()), leaving a visible 1-DBU gap where
+        # a ring should be seamlessly closed. Snapping here, before any
+        # more geometry touches it, keeps shared points bit-for-bit
+        # identical across pieces.
+        geom = set_precision(geom, grid_size=1.0)
         if not occludes:
-            visible_edges.append(boundary)
+            visible_edges.append(geom.boundary)
             continue
-        visible_here = boundary.difference(covered) if not covered.is_empty else boundary
-        if not visible_here.is_empty:
-            visible_edges.append(visible_here)
-        covered = geom if covered.is_empty else covered.union(geom)
+        visible_region = geom.difference(covered) if not covered.is_empty else geom
+        if not visible_region.is_empty:
+            visible_edges.append(set_precision(visible_region.boundary, grid_size=1.0))
+        covered = geom if covered.is_empty else set_precision(covered.union(geom), grid_size=1.0)
 
     if not visible_edges:
         return LineString()
-    return unary_union(visible_edges)
+    return set_precision(unary_union(visible_edges), grid_size=1.0)
 
 
 def _signed_area(ring) -> float:

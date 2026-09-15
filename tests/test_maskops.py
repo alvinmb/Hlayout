@@ -557,6 +557,47 @@ def _min_dist_to_paths(point, paths):
                for p in paths)
 
 
+def _rings_from_lines(lines):
+    """Polygonize a set of (possibly fragmented) LineStrings back into
+    closed rings, for asserting an occluded entry's own outline forms a
+    genuinely closed shape rather than a dangling open arc."""
+    from shapely.ops import polygonize
+    return list(polygonize(lines))
+
+
+# --- hidden_line_top_view(): occluded outlines must be CLOSED rings --------
+
+def test_hidden_line_top_view_occluded_entry_forms_a_closed_notched_ring():
+    # Regression: subtracting a higher entry's covered AREA from a lower
+    # entry's boundary LINE leaves an open, dangling arc -- correct as
+    # far as total ink drawn (the higher entry's own outline happens to
+    # trace the missing piece), but the lower entry's own contribution
+    # isn't a closed shape by itself. It must be: subtracting from the
+    # FILLED region first, then taking that region's boundary, produces
+    # one closed ring with a notch cut where the higher entry covers it.
+    from hlayout.core.maskops import hidden_line_top_view
+    conductor = shapely.geometry.box(0, 0, 600, 600)
+    resistor = shapely.geometry.box(400, 400, 1000, 1000)
+    result = hidden_line_top_view([(resistor, True), (conductor, True)])
+    rings = _rings_from_lines(list(result.geoms))
+    # the L-shaped notched conductor area (600x600 minus the 200x200
+    # corner overlap) must polygonize back into a closed ring of exactly
+    # that area -- impossible if conductor's own contribution were an
+    # open arc with no closing edge along the notch.
+    expected_area = 600 * 600 - 200 * 200
+    assert any(abs(r.area - expected_area) < 1 for r in rings)
+
+
+def test_hidden_line_top_view_component_notch_in_conductor_is_closed():
+    from hlayout.core.maskops import hidden_line_top_view
+    conductor = shapely.geometry.box(0, 0, 600, 600)
+    component = shapely.geometry.box(100, 100, 500, 650)
+    result = hidden_line_top_view([(component, True), (conductor, True)])
+    rings = _rings_from_lines(list(result.geoms))
+    expected_area = conductor.difference(component).area
+    assert any(abs(r.area - expected_area) < 1 for r in rings)
+
+
 # --- TOPVIEW default (layers=None): fixed role-based stacking order --------
 
 def test_top_view_role_order_resistor_occludes_conductor_regardless_of_layer_number():
