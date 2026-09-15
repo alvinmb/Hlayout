@@ -1674,34 +1674,41 @@ class Session:
         hybrid circuit onto a single output layer -- the classic CAD/
         drafting sense of the term (as in AutoCAD's HIDE): the visible
         OUTLINE edges of the design as seen from directly above, with
-        the part of a lower layer's edge that's buried under a higher
-        layer's filled footprint actually removed rather than drawn
+        the part of a lower entry's edge that's buried under a higher
+        entry's filled footprint actually removed rather than drawn
         underneath it.
 
         This draws outlines, not filled silhouettes -- compositing
         FILLED regions and merging what's visible onto one
         undifferentiated output layer is a no-op (their union is always
-        exactly the union of the original layers regardless of
-        stacking order; occlusion only changes which layer contributed
-        a given point, information a single output layer throws away
-        immediately). Working with each layer's boundary line instead
-        preserves the one thing that matters: an edge fully enclosed by
-        something printed above it is genuinely absent from the
-        result, giving a true hidden-line drawing rather than a plain
-        multi-layer union of shapes.
+        exactly the union of the inputs regardless of stacking order;
+        occlusion only changes which entry contributed a given point,
+        information a single output layer throws away immediately).
+        Working with each entry's boundary line instead preserves the
+        one thing that matters: an edge fully enclosed by something
+        above it is genuinely absent from the result.
 
-        Layers are processed from the TOP down: the same "layer number
-        order is print/fire order" convention Session.export_freecad()
-        uses, so the HIGHEST layer number is printed/fired last and
-        sits physically on top.
+        With the default `layers=None`, stacking follows the real fab
+        process order by ROLE, regardless of what layer numbers your
+        technology setup happens to use for each: placed components
+        and their epoxy/keep-out footprints sit topmost (cutting into
+        everything under them), then the resistor ink layer(s), then
+        every conductor layer (Setup's own conductor_layer plus the
+        Route Layers and Wire Bond layers) and any other film not
+        otherwise classified, then the substrate. The glaze layer is
+        drawn as a non-occluding outline overlay -- always shown in
+        full, never hidden by or hiding anything else, since glaze is
+        a thin, largely transparent overprint rather than an opaque
+        film in this pictorial convention. Layer roles come from the
+        same Setup accessors export_freecad()'s heuristic uses
+        (hlayout.io.techfile's resistor/route/bond/dielectric rules).
 
-        `layers` (default: every layer with a fired-film thickness --
-        the design's saved layer_thickness tech-param, falling back to
-        hlayout.io.techfile.default_layer_thickness()'s role heuristic,
-        exactly like Session.export_freecad()) is the set of input
-        layers, by number or name -- pass your own list to restrict the
-        view to a subset, or include a normally non-physical layer
-        (e.g. a documentation outline) by naming it explicitly.
+        Pass an explicit `layers` list (numbers or names) to bypass all
+        of that and get the older, simpler behaviour instead: every
+        given layer treated as an equally-occluding film, ordered by
+        plain layer number (highest = top) -- e.g. to restrict the view
+        to a subset, or include a normally non-physical layer such as a
+        documentation outline.
 
         `line_width` (DBU, default 100 = 0.1mm, matching this tool's
         own body-outline-path convention) is the drawn width of every
@@ -1716,29 +1723,106 @@ class Session:
 
         Returns {cell_name: paths_written} for cells that actually
         produced output (empty results are omitted). Requires shapely."""
-        from ..io.techfile import default_layer_thickness, load_layer_thickness
+        from ..io.freecadio import component_outline_flattened
+        from ..io.techfile import (
+            default_layer_thickness,
+            load_bond_rules,
+            load_dielectric_rules,
+            load_layer_thickness,
+            load_resistor_geometry_rules,
+            load_route_rules,
+        )
 
         resolve = self.library.layers.resolve
         r_layer = resolve(result_layer)
         width_dbu = int(round(line_width))
 
-        if layers is None:
-            thick = load_layer_thickness(self.library) or default_layer_thickness(self.library)
-            layer_set = sorted(int(k) for k in thick)
-        else:
-            layer_set = sorted({resolve(n) for n in layers})
-        if not layer_set:
+        thick = load_layer_thickness(self.library) or default_layer_thickness(self.library)
+        film_layers = {int(k) for k in thick}
+        if not film_layers and layers is None:
             raise LayoutError(
                 "no layers to composite -- pass layers=, or set fired-film "
                 "thicknesses in Setup so the heuristic can seed them"
             )
+
+        role_based = layers is None
+        if not role_based:
+            layer_set = sorted({resolve(n) for n in layers})
+            if not layer_set:
+                raise LayoutError("no layers to composite -- pass a non-empty layers=")
 
         self._checkpoint()
         cells = ([self.library.get_cell(n) for n in cell_names] if cell_names
                  else [self.cell])
         written = {}
         for cell in cells:
-            result = hidden_line_top_view(self.library, cell, layer_set, flatten=flatten)
+            def gather(layer):
+                if flatten:
+                    return layer_to_shapely_flattened(self.library, cell, layer)
+                return layer_to_shapely(cell.shapes_on_layer(layer))
+
+            if role_based:
+                resistor_layers, conductor_layers, glaze_layers = set(), set(), set()
+                try:
+                    rg = load_resistor_geometry_rules(self.library)
+                    if isinstance(rg.get("resistor_layer"), int) and rg["resistor_layer"] >= 0:
+                        resistor_layers.add(rg["resistor_layer"])
+                    for n in (rg.get("ink_layers") or {}).values():
+                        if isinstance(n, int) and n >= 0:
+                            resistor_layers.add(n)
+                    if isinstance(rg.get("conductor_layer"), int) and rg["conductor_layer"] >= 0:
+                        conductor_layers.add(rg["conductor_layer"])
+                    if isinstance(rg.get("glaze_layer"), int) and rg["glaze_layer"] >= 0:
+                        glaze_layers.add(rg["glaze_layer"])
+                except Exception:
+                    pass
+                try:
+                    rr = load_route_rules(self.library)
+                    for n in (rr.get("layer_a"), rr.get("layer_b")):
+                        if isinstance(n, int) and n >= 0:
+                            conductor_layers.add(n)
+                except Exception:
+                    pass
+                try:
+                    b = int(load_bond_rules(self.library)["layer"])
+                    if b >= 0:
+                        conductor_layers.add(b)
+                except Exception:
+                    pass
+                try:
+                    d = int(load_dielectric_rules(self.library)["layer"])
+                    if d >= 0:
+                        conductor_layers.add(d)
+                except Exception:
+                    pass
+                resistor_layers &= film_layers
+                conductor_layers &= film_layers
+                glaze_layers &= film_layers
+                substrate_layers = {
+                    n for n in film_layers
+                    if 0 <= n < len(self.library.layers)
+                    and any(w in self.library.layers[n].name.lower()
+                            for w in ("substrate", "alumina", "ceramic"))
+                }
+                other_layers = film_layers - resistor_layers - conductor_layers \
+                    - glaze_layers - substrate_layers
+
+                comp_geom = component_outline_flattened(
+                    self.library, cell.name, film_layers,
+                    load_component_models(self.library))
+                layer_geoms = [(comp_geom, True)]
+                for n in sorted(resistor_layers, reverse=True):
+                    layer_geoms.append((gather(n), True))
+                for n in sorted(conductor_layers | other_layers, reverse=True):
+                    layer_geoms.append((gather(n), True))
+                for n in sorted(substrate_layers, reverse=True):
+                    layer_geoms.append((gather(n), True))
+                for n in sorted(glaze_layers):
+                    layer_geoms.append((gather(n), False))
+            else:
+                layer_geoms = [(gather(n), True) for n in sorted(layer_set, reverse=True)]
+
+            result = hidden_line_top_view(layer_geoms)
             if simplify:
                 result = result.simplify(simplify, preserve_topology=True)
             new_paths = shapely_lines_to_paths(result, r_layer, width_dbu, datatype=datatype)

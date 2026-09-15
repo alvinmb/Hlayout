@@ -248,51 +248,58 @@ def boolean_op(geom_a, geom_b, op: str):
     raise GeometryError(f"unknown boolean mask op {op!r}; expected one of {', '.join(MASK_OPS[2:])}")
 
 
-def hidden_line_top_view(library, cell, layer_numbers, flatten: bool = True):
-    """A top-down, hidden-line-removal pictorial view of the stack --
+def hidden_line_top_view(layer_geoms):
+    """A top-down, hidden-line-removal pictorial view of a stack --
     the classic CAD/drafting sense of the term (as in AutoCAD's HIDE):
     the visible OUTLINE edges of the design as seen from directly
-    above, with the portion of a lower layer's edge that's buried under
-    a higher layer's filled footprint actually removed, not just drawn
+    above, with the portion of a lower entry's edge that's buried under
+    a higher entry's filled footprint actually removed, not just drawn
     underneath it.
 
     This is deliberately edge-based rather than solid-fill-based:
     compositing FILLED regions front-to-back and merging the visible
     remainders onto one output layer is a no-op -- their union is
-    always exactly the union of the original layers' own footprints,
+    always exactly the union of the original entries' own footprints,
     regardless of stacking order (occlusion only changes which
     individual piece contributed a given point, information a single
     undifferentiated output layer throws away immediately). Working
-    with each layer's boundary LINES instead preserves the one thing
-    solid compositing loses: a lower layer's edge that would be
+    with each entry's boundary LINES instead preserves the one thing
+    solid compositing loses: a lower entry's edge that would be
     invisible in a real top-down view (fully enclosed by something
     above it) is genuinely absent from the result, giving a true
-    hidden-line drawing rather than a plain multi-layer union.
+    hidden-line drawing rather than a plain union.
 
-    ``layer_numbers`` are plain layer numbers, in the same "layer
-    number order is print/fire order" convention
-    hlayout.io.freecadio's 3D export uses -- the HIGHEST number is
-    printed/fired LAST and so sits physically on TOP. Layers are
-    processed from the top down: each layer's own boundary is clipped
-    to the part not already covered by a higher layer's filled area
-    before being added to the result.
+    ``layer_geoms`` is an ordered sequence of ``(geometry, occludes)``
+    pairs, from the TOP down -- gathering that geometry (by layer
+    number, by component footprint, or anything else) is entirely the
+    caller's job; this function only does the occlusion math, so it
+    has no opinion on where a piece of geometry came from or what
+    order counts as "top" (see Session.mask_op_top_view() for the
+    role-based ordering this tool actually uses: components/epoxy,
+    then resistor, then conductor, then substrate, with glaze handled
+    as a non-occluding overlay).
 
-    Returns a single shapely (Multi)LineString (empty if nothing is on
-    any of the given layers), ready for shapely_lines_to_paths()."""
+    ``occludes=True`` clips this entry's own boundary to the part not
+    already covered by a higher entry before adding it to the result,
+    and adds its own filled footprint to what's covered for entries
+    below it. ``occludes=False`` marks a non-occluding overlay (e.g. a
+    glaze overprint, transparent in this pictorial convention) -- its
+    full boundary is always added, and it never contributes to what's
+    covered for anything below it.
+
+    Returns a single shapely (Multi)LineString (empty if every geometry
+    given is empty), ready for shapely_lines_to_paths()."""
     _require_shapely()
-
-    def gather(layer):
-        if flatten:
-            return layer_to_shapely_flattened(library, cell, layer)
-        return layer_to_shapely(cell.shapes_on_layer(layer))
 
     covered = _ShapelyPolygon()  # nothing covered yet, working top-down
     visible_edges = []
-    for n in sorted(set(layer_numbers), reverse=True):  # highest (top) first
-        geom = gather(n)
-        if geom.is_empty:
+    for geom, occludes in layer_geoms:
+        if geom is None or geom.is_empty:
             continue
         boundary = geom.boundary
+        if not occludes:
+            visible_edges.append(boundary)
+            continue
         visible_here = boundary.difference(covered) if not covered.is_empty else boundary
         if not visible_here.is_empty:
             visible_edges.append(visible_here)

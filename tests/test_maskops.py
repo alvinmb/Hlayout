@@ -539,6 +539,113 @@ def test_top_view_command_bar_requires_result():
     assert "error" in out.lower()
 
 
+def _min_dist_to_paths(point, paths):
+    return min(shapely.geometry.Point(point).distance(shapely.geometry.LineString(p.points))
+               for p in paths)
+
+
+# --- TOPVIEW default (layers=None): fixed role-based stacking order --------
+
+def test_top_view_role_order_resistor_occludes_conductor_regardless_of_layer_number():
+    # conductor_layer (50) is a HIGHER number than resistor_layer (5) --
+    # deliberately backwards from plain layer-number order, to prove the
+    # default role-based stacking (components, then resistor, then
+    # conductor, then substrate) wins over layer number.
+    from hlayout.io.techfile import save_layer_thickness, save_resistor_geometry_rules
+    s = _fresh_session()
+    save_resistor_geometry_rules(s.library, {
+        "overlap_a": 200, "pad_b": 500, "space_c": 200, "glaze_oversize": 50,
+        "keepout_oversize": 0, "resistor_layer": 5, "conductor_layer": 50,
+        "glaze_layer": -1, "doc_layer": -1, "keepout_layer": -1, "ink_layers": {},
+    })
+    save_layer_thickness(s.library, {"50": 12.0, "5": 15.0})
+    s.rect(50, 0, 0, 600, 600)      # conductor
+    s.rect(5, 400, 400, 1000, 1000)  # resistor, overlapping conductor's corner
+    s.mask_op_top_view(63)
+    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    # conductor's own top edge, at a point strictly inside the resistor's
+    # filled footprint, must be genuinely absent (not just "drawn under").
+    assert _min_dist_to_paths((500, 600), paths) > 10
+    # resistor's own outline is never occluded by anything (nothing sits
+    # above it), so its far corner must still be exactly on the result.
+    assert _min_dist_to_paths((1000, 700), paths) < 1
+    # conductor's edge OUTSIDE the resistor's footprint is untouched.
+    assert _min_dist_to_paths((0, 300), paths) < 1
+
+
+def test_top_view_role_order_glaze_is_a_non_occluding_outline():
+    # Glaze fully covers both conductor and resistor here -- it must
+    # still show its own full outline (nothing hides it), AND it must
+    # not hide either layer underneath it (it's a non-occluding overlay).
+    from hlayout.io.techfile import save_layer_thickness, save_resistor_geometry_rules
+    s = _fresh_session()
+    save_resistor_geometry_rules(s.library, {
+        "overlap_a": 200, "pad_b": 500, "space_c": 200, "glaze_oversize": 50,
+        "keepout_oversize": 0, "resistor_layer": 10, "conductor_layer": 5,
+        "glaze_layer": 20, "doc_layer": -1, "keepout_layer": -1, "ink_layers": {},
+    })
+    save_layer_thickness(s.library, {"5": 12.0, "10": 15.0, "20": 20.0})
+    s.rect(5, 0, 0, 1000, 1000)     # conductor
+    s.rect(10, 400, 400, 800, 800)  # resistor, inside conductor
+    s.rect(20, 200, 200, 900, 900)  # glaze, covering both
+    s.mask_op_top_view(63)
+    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    # glaze's own corners, deep inside conductor+resistor's filled area,
+    # are still fully present -- glaze is never occluded.
+    assert _min_dist_to_paths((200, 200), paths) < 1
+    assert _min_dist_to_paths((900, 900), paths) < 1
+    # resistor's outline, though fully covered by glaze, is NOT hidden by
+    # it (glaze doesn't occlude what's underneath).
+    assert _min_dist_to_paths((400, 600), paths) < 1
+
+
+def test_top_view_role_order_components_and_epoxy_occlude_conductor():
+    from hlayout.io.techfile import save_layer_thickness, save_resistor_geometry_rules
+    s = _fresh_session()
+    s.new_cell("CAP")
+    s.rect(61, 0, 0, 400, 550)  # non-film outline/epoxy footprint
+    s.use_cell("TOP")
+    save_resistor_geometry_rules(s.library, {
+        "overlap_a": 200, "pad_b": 500, "space_c": 200, "glaze_oversize": 50,
+        "keepout_oversize": 0, "resistor_layer": -1, "conductor_layer": 50,
+        "glaze_layer": -1, "doc_layer": -1, "keepout_layer": -1, "ink_layers": {},
+    })
+    save_layer_thickness(s.library, {"50": 12.0})
+    s.rect(50, 0, 0, 600, 600)
+    s.sref("CAP", (100, 100))  # component footprint now (100,100)-(500,650)
+    s.mask_op_top_view(63)
+    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    # the component's own full outline is present...
+    assert _min_dist_to_paths((100, 100), paths) < 1
+    assert _min_dist_to_paths((500, 650), paths) < 1
+    # ...and conductor's top edge, strictly inside the component's
+    # footprint, is genuinely gone.
+    assert _min_dist_to_paths((300, 600), paths) > 10
+    # conductor's edge outside the component is untouched.
+    assert _min_dist_to_paths((0, 300), paths) < 1
+
+
+def test_top_view_explicit_layers_bypasses_role_order():
+    # Passing layers= explicitly reverts to the older, simpler behaviour:
+    # every given layer occludes equally, ordered by plain layer number.
+    from hlayout.io.techfile import save_resistor_geometry_rules
+    s = _fresh_session()
+    save_resistor_geometry_rules(s.library, {
+        "overlap_a": 200, "pad_b": 500, "space_c": 200, "glaze_oversize": 50,
+        "keepout_oversize": 0, "resistor_layer": 5, "conductor_layer": 50,
+        "glaze_layer": -1, "doc_layer": -1, "keepout_layer": -1, "ink_layers": {},
+    })
+    s.rect(50, 0, 0, 600, 600)       # "conductor" -- but higher layer number
+    s.rect(5, 400, 400, 1000, 1000)  # "resistor" -- but lower layer number
+    s.mask_op_top_view(63, layers=[5, 50])
+    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    # With plain layer-number order, layer 50 (conductor) is on top, so
+    # ITS outline survives in full and layer 5's edge under it is cut --
+    # the opposite of the role-based default above.
+    assert _min_dist_to_paths((600, 600), paths) < 1  # layer 50's own corner
+    assert _min_dist_to_paths((400, 500), paths) > 10  # layer 5's left edge, under layer 50, gone
+
+
 # --- low-level hlayout.core.maskops unit tests ------------------------------
 
 def test_shape_to_shapely_converts_rectangle_and_polygon():

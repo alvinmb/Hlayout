@@ -34,7 +34,12 @@ from typing import Optional
 
 from ..core.errors import LayoutError
 from ..core.library import Library
-from ..core.maskops import _require_shapely, layer_to_shapely_flattened
+from ..core.maskops import (
+    _require_shapely,
+    _transform_geom,
+    layer_to_shapely_flattened,
+    shape_to_shapely,
+)
 from ..core.shapes import Path, expand_arefs_to_srefs
 from ..core.units import DBU_MM
 from .techfile import (
@@ -160,6 +165,41 @@ def _walk_instances(library, cell_name, film_layers, comp_models):
                                 child_mirror, depth + 1)
 
     yield from walk(cell_name, lambda p: p, 0.0, False, 0)
+
+
+def component_outline_flattened(library, cell_name, film_layers, comp_models):
+    """The union, in world DBU coordinates, of every placed component
+    instance's own footprint -- everything drawn on a layer that isn't
+    a printed film (its outline/keep-out shapes, per is_component_cell()'s
+    own test), transformed by that instance's placement. A component's
+    pads on an actual film/conductor layer are already covered by that
+    layer's own flattened geometry elsewhere, so only the non-film
+    shapes are gathered here -- this is purely the physical body/
+    package footprint, for occluding what's underneath it in a
+    top-down pictorial view (see hlayout.core.maskops's
+    hidden_line_top_view() and Session.mask_op_top_view()).
+
+    Returns a single shapely geometry (empty if no component is placed
+    or none has any non-film geometry). Requires shapely."""
+    _require_shapely()
+    from shapely.ops import unary_union
+
+    geoms = []
+    for kind, payload in _walk_instances(library, cell_name, film_layers, comp_models):
+        if kind != "component":
+            continue
+        cn, _entry, xf, _rot, _mirrored, _label = payload
+        target = library.cells.get(cn)
+        if target is None:
+            continue
+        for shape in target.shapes:
+            if shape.layer in film_layers:
+                continue  # already covered by that film layer's own pass
+            g = shape_to_shapely(shape)
+            if g is None or g.is_empty:
+                continue
+            geoms.append(_transform_geom(g, xf))
+    return unary_union(geoms) if geoms else unary_union([])
 
 
 def _bond_segments(library, cell_name, bond_layer):
