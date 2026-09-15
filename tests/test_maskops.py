@@ -429,6 +429,116 @@ def test_maskop_command_does_not_mention_visibility_when_already_visible():
     assert "visibility" not in out
 
 
+# --- Session.mask_op_top_view() / TOPVIEW: hidden-line-removal top view ----
+
+def test_top_view_keeps_the_full_outline_of_the_topmost_layer():
+    # layer 20 (higher number = printed later = physically on top) has
+    # nothing above it, so its whole outline must survive untouched.
+    s = _fresh_session()
+    s.rect(5, 0, 0, 600, 600)
+    s.rect(20, 400, 400, 1000, 1000)
+    written = s.mask_op_top_view(63, layers=[5, 20])
+    assert "TOP" in written and written["TOP"] > 0
+    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    assert paths and all(isinstance(p, Path) for p in paths)
+    from hlayout.core.maskops import shape_to_shapely
+    from shapely.ops import unary_union
+    drawn = unary_union([shape_to_shapely(p).buffer(0) for p in paths])
+    # layer 20's own full perimeter (as a thin buffered line) must be
+    # entirely covered by what got drawn -- none of it was removed.
+    top_outline = shapely.geometry.box(400, 400, 1000, 1000).boundary.buffer(1)
+    assert top_outline.difference(drawn.buffer(5)).area < top_outline.area * 0.05
+
+
+def test_top_view_removes_the_occluded_part_of_a_lower_layers_outline():
+    # The part of layer 5's (bottom) outline that falls inside layer 20's
+    # (top) filled footprint must be genuinely absent from the result --
+    # not just present-but-hidden the way a plain union would leave it.
+    s = _fresh_session()
+    s.rect(5, 0, 0, 600, 600)
+    s.rect(20, 400, 400, 1000, 1000)
+    s.mask_op_top_view(63, layers=[5, 20])
+    from hlayout.core.maskops import shape_to_shapely
+    from shapely.ops import unary_union
+    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    drawn = unary_union([shape_to_shapely(p).buffer(0) for p in paths])
+    # A point on layer 5's own boundary that lies STRICTLY inside layer
+    # 20's filled area (e.g. (500, 600), the middle of the occluded top
+    # edge) must not be part of the drawn result.
+    hidden_point = shapely.geometry.Point(500, 600)
+    assert not drawn.buffer(1).contains(hidden_point)
+    # ...but a point on layer 5's boundary OUTSIDE layer 20's footprint
+    # (e.g. (0, 300), the middle of the untouched left edge) must be.
+    visible_point = shapely.geometry.Point(0, 300)
+    assert drawn.buffer(5).contains(visible_point)
+
+
+def test_top_view_defaults_to_every_layer_with_a_fired_film_thickness():
+    from hlayout.io.techfile import save_layer_thickness
+    s = _fresh_session()
+    s.rect(5, 0, 0, 100, 100)
+    s.rect(6, 200, 200, 300, 300)  # not given a thickness -- excluded by default
+    save_layer_thickness(s.library, {"5": 12.0})
+    written = s.mask_op_top_view(63)
+    assert written == {"TOP": 1}  # just layer 5's own single closed-ring outline
+    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    xs = [p[0] for path in paths for p in path.points]
+    ys = [p[1] for path in paths for p in path.points]
+    assert max(xs) <= 100 and max(ys) <= 100  # layer 6's box never appears
+
+
+def test_top_view_raises_without_any_layers_to_composite():
+    s = _fresh_session()
+    with pytest.raises(LayoutError, match="no layers to composite"):
+        s.mask_op_top_view(63, layers=[])
+
+
+def test_top_view_writes_paths_not_polygons():
+    s = _fresh_session()
+    s.rect(5, 0, 0, 100, 100)
+    s.mask_op_top_view(63, layers=[5])
+    result = [sh for sh in s.cell.shapes if sh.layer == 63]
+    assert result and all(isinstance(sh, Path) for sh in result)
+
+
+def test_top_view_line_width_sets_the_drawn_path_width():
+    s = _fresh_session()
+    s.rect(5, 0, 0, 100, 100)
+    s.mask_op_top_view(63, layers=[5], line_width=250)
+    result = [sh for sh in s.cell.shapes if sh.layer == 63]
+    assert all(sh.width == 250 for sh in result)
+
+
+def test_top_view_command_bar():
+    from hlayout.gui.commands import CommandInterpreter
+    from hlayout.scripting import ScriptConsole
+    s = _fresh_session()
+    s.rect(5, 0, 0, 600, 600)
+    s.rect(20, 400, 400, 1000, 1000)
+    interp = CommandInterpreter(s, ScriptConsole(s))
+    out = interp.run("TOPVIEW result=63 layers=5,20")
+    assert "wrote" in out and "path(s) to layer 63" in out
+    assert any(sh.layer == 63 for sh in s.cell.shapes)
+
+
+def test_top_view_command_bar_reports_no_output():
+    from hlayout.gui.commands import CommandInterpreter
+    from hlayout.scripting import ScriptConsole
+    s = _fresh_session()
+    interp = CommandInterpreter(s, ScriptConsole(s))
+    out = interp.run("TOPVIEW result=63 layers=5")
+    assert "no output" in out
+
+
+def test_top_view_command_bar_requires_result():
+    from hlayout.gui.commands import CommandInterpreter
+    from hlayout.scripting import ScriptConsole
+    s = _fresh_session()
+    interp = CommandInterpreter(s, ScriptConsole(s))
+    out = interp.run("TOPVIEW layers=5")
+    assert "error" in out.lower()
+
+
 # --- low-level hlayout.core.maskops unit tests ------------------------------
 
 def test_shape_to_shapely_converts_rectangle_and_polygon():

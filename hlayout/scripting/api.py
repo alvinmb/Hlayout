@@ -33,9 +33,11 @@ from ..core.maskops import (
     MASK_OPS,
     boolean_op,
     fracture_polygons,
+    hidden_line_top_view,
     layer_geoms_flattened,
     layer_to_shapely,
     layer_to_shapely_flattened,
+    shapely_lines_to_paths,
     shapely_to_polygons,
     size_geometry,
 )
@@ -1660,6 +1662,89 @@ class Session:
             if new_polys:
                 cell.shapes.extend(new_polys)
                 written[cell.name] = len(new_polys)
+        self._notify()
+        return written
+
+    def mask_op_top_view(self, result_layer, layers: Optional[List] = None,
+                          line_width: float = 100.0,
+                          cell_names: Optional[List[str]] = None,
+                          datatype: int = 0, flatten: bool = True,
+                          simplify: Optional[float] = None) -> dict:
+        """Draw a top-down, hidden-line-removal pictorial view of the
+        hybrid circuit onto a single output layer -- the classic CAD/
+        drafting sense of the term (as in AutoCAD's HIDE): the visible
+        OUTLINE edges of the design as seen from directly above, with
+        the part of a lower layer's edge that's buried under a higher
+        layer's filled footprint actually removed rather than drawn
+        underneath it.
+
+        This draws outlines, not filled silhouettes -- compositing
+        FILLED regions and merging what's visible onto one
+        undifferentiated output layer is a no-op (their union is always
+        exactly the union of the original layers regardless of
+        stacking order; occlusion only changes which layer contributed
+        a given point, information a single output layer throws away
+        immediately). Working with each layer's boundary line instead
+        preserves the one thing that matters: an edge fully enclosed by
+        something printed above it is genuinely absent from the
+        result, giving a true hidden-line drawing rather than a plain
+        multi-layer union of shapes.
+
+        Layers are processed from the TOP down: the same "layer number
+        order is print/fire order" convention Session.export_freecad()
+        uses, so the HIGHEST layer number is printed/fired last and
+        sits physically on top.
+
+        `layers` (default: every layer with a fired-film thickness --
+        the design's saved layer_thickness tech-param, falling back to
+        hlayout.io.techfile.default_layer_thickness()'s role heuristic,
+        exactly like Session.export_freecad()) is the set of input
+        layers, by number or name -- pass your own list to restrict the
+        view to a subset, or include a normally non-physical layer
+        (e.g. a documentation outline) by naming it explicitly.
+
+        `line_width` (DBU, default 100 = 0.1mm, matching this tool's
+        own body-outline-path convention) is the drawn width of every
+        outline segment.
+
+        Writes the result as new Path shapes on `result_layer`.
+        `cell_names`, `datatype`, and `flatten` match mask_op() exactly
+        (see that method for what each means); `simplify` applies
+        Douglas-Peucker vertex reduction to the line geometry at that
+        DBU tolerance before it's drawn, same idea as mask_op()'s own
+        `simplify` but operating on lines instead of polygon area.
+
+        Returns {cell_name: paths_written} for cells that actually
+        produced output (empty results are omitted). Requires shapely."""
+        from ..io.techfile import default_layer_thickness, load_layer_thickness
+
+        resolve = self.library.layers.resolve
+        r_layer = resolve(result_layer)
+        width_dbu = int(round(line_width))
+
+        if layers is None:
+            thick = load_layer_thickness(self.library) or default_layer_thickness(self.library)
+            layer_set = sorted(int(k) for k in thick)
+        else:
+            layer_set = sorted({resolve(n) for n in layers})
+        if not layer_set:
+            raise LayoutError(
+                "no layers to composite -- pass layers=, or set fired-film "
+                "thicknesses in Setup so the heuristic can seed them"
+            )
+
+        self._checkpoint()
+        cells = ([self.library.get_cell(n) for n in cell_names] if cell_names
+                 else [self.cell])
+        written = {}
+        for cell in cells:
+            result = hidden_line_top_view(self.library, cell, layer_set, flatten=flatten)
+            if simplify:
+                result = result.simplify(simplify, preserve_topology=True)
+            new_paths = shapely_lines_to_paths(result, r_layer, width_dbu, datatype=datatype)
+            if new_paths:
+                cell.shapes.extend(new_paths)
+                written[cell.name] = len(new_paths)
         self._notify()
         return written
 

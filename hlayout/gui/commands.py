@@ -255,6 +255,25 @@ to its stroked-outline polygon first; requires the shapely package):
                                        the 200-point-per-polygon limit on a heavily
                                        sized/booleaned result; also available as
                                        Session.mask_op()
+    TOPVIEW result=<layer> [layers=<n,n,...>] [width=<dbu>] [cell=<name>]
+            [flatten=0|1] [simplify=<dbu>]
+                                       draw a top-down, hidden-line-removal
+                                       pictorial view of the hybrid circuit onto
+                                       result_layer -- the visible OUTLINE edges
+                                       of the design as seen from directly above
+                                       (as in AutoCAD's HIDE), with the part of a
+                                       lower layer's edge buried under a higher
+                                       layer's filled footprint actually removed;
+                                       layers default to every layer with a fired-
+                                       film thickness (Setup, same set
+                                       export_freecad() uses), highest layer
+                                       number = printed last = physically on top;
+                                       pass layers= to restrict to a subset or add
+                                       a normally non-physical layer; width=<dbu>
+                                       sets the drawn outline width (default 100 =
+                                       0.1mm); writes Path shapes, not filled
+                                       polygons -- also available as
+                                       Session.mask_op_top_view()
 
 Design Rule Check (DRC -- single-layer and between-layer geometric checks;
 requires the shapely package; also available as Tools > DRC...):
@@ -1111,6 +1130,45 @@ class CommandInterpreter:
             made_visible = True
         suffix = " (layer visibility turned on)" if made_visible else ""
         return f"{op} wrote {total} polygon(s) to layer {result_layer}{suffix}"
+
+    def _cmd_topview(self, args):
+        usage = ("usage: TOPVIEW result=<layer> [layers=<n,n,...>] [width=<dbu>] "
+                 "[cell=<name>] [flatten=0|1] [simplify=<dbu>]")
+        kwargs = {}
+        for a in args:
+            if "=" not in a:
+                raise CommandError(usage)
+            k, v = a.split("=", 1)
+            k = k.lower()
+            if k == "result":
+                kwargs["result_layer"] = v
+            elif k == "layers":
+                kwargs["layers"] = [tok.strip() for tok in v.split(",") if tok.strip()]
+            elif k == "width":
+                kwargs["line_width"] = float(v)
+            elif k == "cell":
+                kwargs["cell_names"] = [v]
+            elif k == "flatten":
+                kwargs["flatten"] = v not in ("0", "false", "no")
+            elif k == "simplify":
+                kwargs["simplify"] = float(v)
+            else:
+                raise CommandError(f"unknown TOPVIEW option {k!r}")
+        if "result_layer" not in kwargs:
+            raise CommandError(f"{usage}\n(result=<layer> is required)")
+        result_layer = kwargs.pop("result_layer")
+        written = self.session.mask_op_top_view(result_layer, **kwargs)
+        total = sum(written.values())
+        if total == 0:
+            return f"TOPVIEW produced no output on layer {result_layer}"
+        resolved_layer = self.session.library.layers.resolve(result_layer)
+        layer_obj = self.session.library.layers[resolved_layer]
+        made_visible = False
+        if not layer_obj.visible:
+            layer_obj.visible = True
+            made_visible = True
+        suffix = " (layer visibility turned on)" if made_visible else ""
+        return f"TOPVIEW wrote {total} path(s) to layer {result_layer}{suffix}"
 
     # --- DRC (Design Rule Check) -------------------------------------------
     def _cmd_drcrule(self, args):

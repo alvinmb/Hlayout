@@ -43,7 +43,15 @@ from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
 
 from .errors import GeometryError
-from .shapes import MAX_POLY_POINTS, Path, PathCap, Polygon, Rectangle, expand_arefs_to_srefs
+from .shapes import (
+    MAX_PATH_POINTS,
+    MAX_POLY_POINTS,
+    Path,
+    PathCap,
+    Polygon,
+    Rectangle,
+    expand_arefs_to_srefs,
+)
 
 MASK_OPS = ("OVERSIZE", "UNDERSIZE", "AND", "OR", "NOT", "XOR")
 
@@ -240,6 +248,61 @@ def boolean_op(geom_a, geom_b, op: str):
     raise GeometryError(f"unknown boolean mask op {op!r}; expected one of {', '.join(MASK_OPS[2:])}")
 
 
+def hidden_line_top_view(library, cell, layer_numbers, flatten: bool = True):
+    """A top-down, hidden-line-removal pictorial view of the stack --
+    the classic CAD/drafting sense of the term (as in AutoCAD's HIDE):
+    the visible OUTLINE edges of the design as seen from directly
+    above, with the portion of a lower layer's edge that's buried under
+    a higher layer's filled footprint actually removed, not just drawn
+    underneath it.
+
+    This is deliberately edge-based rather than solid-fill-based:
+    compositing FILLED regions front-to-back and merging the visible
+    remainders onto one output layer is a no-op -- their union is
+    always exactly the union of the original layers' own footprints,
+    regardless of stacking order (occlusion only changes which
+    individual piece contributed a given point, information a single
+    undifferentiated output layer throws away immediately). Working
+    with each layer's boundary LINES instead preserves the one thing
+    solid compositing loses: a lower layer's edge that would be
+    invisible in a real top-down view (fully enclosed by something
+    above it) is genuinely absent from the result, giving a true
+    hidden-line drawing rather than a plain multi-layer union.
+
+    ``layer_numbers`` are plain layer numbers, in the same "layer
+    number order is print/fire order" convention
+    hlayout.io.freecadio's 3D export uses -- the HIGHEST number is
+    printed/fired LAST and so sits physically on TOP. Layers are
+    processed from the top down: each layer's own boundary is clipped
+    to the part not already covered by a higher layer's filled area
+    before being added to the result.
+
+    Returns a single shapely (Multi)LineString (empty if nothing is on
+    any of the given layers), ready for shapely_lines_to_paths()."""
+    _require_shapely()
+
+    def gather(layer):
+        if flatten:
+            return layer_to_shapely_flattened(library, cell, layer)
+        return layer_to_shapely(cell.shapes_on_layer(layer))
+
+    covered = _ShapelyPolygon()  # nothing covered yet, working top-down
+    visible_edges = []
+    for n in sorted(set(layer_numbers), reverse=True):  # highest (top) first
+        geom = gather(n)
+        if geom.is_empty:
+            continue
+        boundary = geom.boundary
+        visible_here = boundary.difference(covered) if not covered.is_empty else boundary
+        if not visible_here.is_empty:
+            visible_edges.append(visible_here)
+        covered = geom if covered.is_empty else covered.union(geom)
+
+    if not visible_edges:
+        return LineString()
+    return unary_union(visible_edges)
+
+
 def _signed_area(ring) -> float:
     """Shoelace signed area -- positive for one winding direction,
     negative for the other. Used only to compare windings, not for its
@@ -368,6 +431,57 @@ def shapely_to_polygons(geom, layer: int, datatype: int = 0) -> List[Polygon]:
             )
         polygons.append(Polygon(layer=layer, points=points, datatype=datatype))
     return polygons
+
+
+def shapely_lines_to_paths(geom, layer: int, width: int, datatype: int = 0) -> List[Path]:
+    """Flatten a (possibly multi-, possibly empty) shapely line
+    geometry -- e.g. hidden_line_top_view()'s result -- into a list of
+    this tool's own Path shapes on `layer`, each `width` DBU wide with
+    a round cap. A line with more than the 200-point Path limit is
+    split into consecutive pieces (sharing an endpoint, so they still
+    read as one continuous line) rather than raising, since a hidden-
+    line silhouette's outline length isn't under the caller's control
+    the way a hand-drawn path's is."""
+    _require_shapely()
+    if geom is None or geom.is_empty:
+        return []
+    if geom.geom_type == "LineString":
+        candidates = [geom]
+    elif geom.geom_type == "MultiLineString":
+        candidates = list(geom.geoms)
+    elif geom.geom_type == "GeometryCollection":
+        candidates = []
+        for g in geom.geoms:
+            if g.geom_type == "LineString":
+                candidates.append(g)
+            elif g.geom_type == "MultiLineString":
+                candidates.extend(g.geoms)
+            # Points in the collection (degenerate touches) carry no
+            # length -- skip them.
+    else:
+        candidates = []
+
+    paths = []
+    for line in candidates:
+        if line.is_empty or line.length == 0:
+            continue
+        coords = [(round(x), round(y)) for x, y in line.coords]
+        # dedupe consecutive duplicate points (can happen after a
+        # boolean op) -- a Path needs at least 2 distinct points.
+        pts = [coords[0]]
+        for p in coords[1:]:
+            if p != pts[-1]:
+                pts.append(p)
+        if len(pts) < 2:
+            continue
+        for i in range(0, len(pts) - 1, MAX_PATH_POINTS - 1):
+            chunk = pts[i:i + MAX_PATH_POINTS]
+            if len(chunk) < 2:
+                continue
+            paths.append(Path(layer=layer, points=chunk, width=width,
+                               cap=PathCap.ROUND, datatype=datatype))
+    return paths
+
 
 @dataclass
 class MaskOpStep:
