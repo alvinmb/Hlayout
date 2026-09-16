@@ -171,6 +171,14 @@ def _matched_component_footprint(library, cell_name, component_models):
         stats = footprint_pin_stats(c) if c is not None else None
         if stats is not None and match_gullwing_by_footprint(stats, table) is not None:
             return True
+        # A cell named like the substrate is the BASE of the stack, not
+        # a topmost occluding component -- is_component_cell()'s own
+        # film/non-film test has no idea about stacking role, so left
+        # unchecked it would (and, confirmed live, did) treat a giant
+        # board-sized substrate shape as "a component" sitting on top
+        # of everything, occluding the entire design underneath it.
+        if any(w in cn.lower() for w in ("substrate", "alumina", "ceramic")):
+            return False
         # Bare part fallback: neither a size code nor a catalogued pin
         # pattern identifies it, but it's still listed as a component
         # by Session.match_freecad_components()/the Component Library

@@ -861,6 +861,36 @@ def test_top_view_bare_ic_with_no_name_or_footprint_match_falls_back_to_is_compo
     assert _min_dist_to_paths((400, 400), paths) > 10   # conductor cut under LM741
 
 
+def test_top_view_substrate_cell_is_not_a_component_even_with_the_fallback_active():
+    # Regression: a cell named like the design's own substrate (e.g.
+    # "ALUMINA_SUBSTRATE") is the BASE of the stack, not a topmost
+    # occluding component. It commonly draws on a layer with no saved
+    # layer_thickness at all (an outline/marking layer), which is
+    # exactly what trips is_component_cell()'s fallback film/non-film
+    # test. Confirmed live: left unchecked, that fallback treated the
+    # giant board-sized substrate shape as "a component" sitting on top
+    # of everything, occluding the entire TOPVIEW render underneath it.
+    from hlayout.io.techfile import save_layer_thickness, save_resistor_geometry_rules
+    s = _fresh_session()
+    s.new_cell("ALUMINA_SUBSTRATE")
+    s.rect(61, 0, 0, 2000, 2000)  # outline layer, no thickness saved for it
+    s.use_cell("TOP")
+    save_resistor_geometry_rules(s.library, {
+        "overlap_a": 200, "pad_b": 500, "space_c": 200, "glaze_oversize": 50,
+        "keepout_oversize": 0, "resistor_layer": -1, "conductor_layer": 3,
+        "glaze_layer": -1, "doc_layer": -1, "keepout_layer": -1, "ink_layers": {},
+    })
+    save_layer_thickness(s.library, {"3": 12.0})  # 61 deliberately absent
+    s.rect(3, 500, 500, 900, 900)  # conductor that must remain visible
+    s.sref("ALUMINA_SUBSTRATE", (0, 0))
+    written = s.mask_op_top_view(63)
+    assert written
+    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    # the substrate is walked into like any other non-component cell,
+    # so the conductor beneath it still shows up in the result.
+    assert _min_dist_to_paths((700, 900), paths) < 1
+
+
 def test_top_view_resistor_device_cell_still_not_a_component_with_the_fallback_active():
     # The is_component_cell() fallback must not resurrect the earlier
     # regression: a resistor device cell whose every layer is covered by
