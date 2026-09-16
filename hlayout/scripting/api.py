@@ -1808,25 +1808,30 @@ class Session:
 
     def convert_rects_to_outline(self, layer, width: float,
                                   cell_names: Optional[List[str]] = None) -> dict:
-        """Replace every Rectangle on `layer`, in the named cells' own
-        shapes (never descending into placed sub-cells -- this converts
-        exactly the rectangle actually drawn there, in place), with an
-        equivalent closed-ring Path tracing the same 4 corners, `width`
-        DBU wide -- e.g. so a substrate or package body is a stroked
-        OUTLINE instead of a filled, closed rectangle (a solid fill is
-        often the wrong thing for a silkscreen/reference marking, or
-        for a downstream tool that treats "closed filled shape" and
-        "open stroked outline" differently).
+        """Replace every Rectangle or Polygon on `layer`, in the named
+        cells' own shapes (never descending into placed sub-cells --
+        this converts exactly the shape actually drawn there, in
+        place), with an equivalent closed-ring Path tracing the same
+        corners, `width` DBU wide -- e.g. so a substrate or package
+        body is a stroked OUTLINE instead of a filled, closed shape (a
+        solid fill is often the wrong thing for a silkscreen/reference
+        marking, or for a downstream tool that treats "closed filled
+        shape" and "open stroked outline" differently). A Rectangle
+        always has 4 corners; a Polygon can have up to 200 -- either
+        way, the SAME corner points become the outline path's own
+        points, just closed into a ring and given a stroke width
+        instead of a fill.
 
         Runs on the current cell by default; pass `cell_names` to
         target other/additional specific cells directly (e.g. a
         substrate or package cell's own name, not whatever cell places
         it via Sref -- there's nothing to flatten here, since the
-        rectangle being replaced has to actually live in the cell being
+        shape being replaced has to actually live in the cell being
         operated on).
 
-        Returns {cell_name: rectangles_converted} for cells that had at
-        least one rectangle on `layer` (empty results are omitted)."""
+        Returns {cell_name: shapes_converted} for cells that had at
+        least one matching Rectangle/Polygon on `layer` (empty results
+        are omitted)."""
         r_layer = self.library.layers.resolve(layer)
         w = int(round(width))
         if w <= 0:
@@ -1836,15 +1841,15 @@ class Session:
                  else [self.cell])
         written = {}
         for cell in cells:
-            rects = [sh for sh in cell.shapes
-                     if isinstance(sh, Rectangle) and sh.layer == r_layer]
-            for rect in rects:
-                pts = [tuple(p) for p in rect.points]
+            closed = [sh for sh in cell.shapes
+                      if isinstance(sh, (Rectangle, Polygon)) and sh.layer == r_layer]
+            for shape in closed:
+                pts = [tuple(p) for p in shape.points]
                 pts.append(pts[0])  # close the ring
-                cell.remove(rect)
-                cell.add_path(r_layer, pts, w, cap="flush", datatype=rect.datatype)
-            if rects:
-                written[cell.name] = len(rects)
+                cell.remove(shape)
+                cell.add_path(r_layer, pts, w, cap="flush", datatype=shape.datatype)
+            if closed:
+                written[cell.name] = len(closed)
         self._notify()
         return written
 

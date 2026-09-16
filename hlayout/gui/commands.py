@@ -256,15 +256,15 @@ to its stroked-outline polygon first; requires the shapely package):
                                        sized/booleaned result; also available as
                                        Session.mask_op()
     OUTLINE <layer> width=<dbu> [cell=<name>]
-                                       replace every Rectangle on layer (the named
-                                       cell's OWN shapes only -- never descending
-                                       into placed sub-cells) with an equivalent
-                                       closed-ring Path tracing the same 4 corners,
-                                       width DBU wide -- e.g. so a substrate or
-                                       package body is a stroked outline instead of
-                                       a filled, closed rectangle; cell defaults to
-                                       the current cell; also available as
-                                       Session.convert_rects_to_outline()
+                                       replace every Rectangle or Polygon on layer
+                                       (the named cell's OWN shapes only -- never
+                                       descending into placed sub-cells) with an
+                                       equivalent closed-ring Path tracing the same
+                                       corners, width DBU wide -- e.g. so a
+                                       substrate or package body is a stroked
+                                       outline instead of a filled, closed shape;
+                                       cell defaults to the current cell; also
+                                       available as Session.convert_rects_to_outline()
     TOPVIEW result=<layer> [layers=<n,n,...>] [exclude=<n,n,...>] [hatch=<dbu>]
             [width=<dbu>] [cell=<name>] [flatten=0|1] [simplify=<dbu>]
                                        draw a top-down, hidden-line-removal
@@ -1122,8 +1122,8 @@ class CommandInterpreter:
         written = self.session.convert_rects_to_outline(layer, **kwargs)
         total = sum(written.values())
         if total == 0:
-            return f"OUTLINE converted no rectangles on layer {layer}"
-        return f"OUTLINE converted {total} rectangle(s) to outline paths on layer {layer}"
+            return f"OUTLINE converted no rectangles/polygons on layer {layer}"
+        return f"OUTLINE converted {total} shape(s) to outline paths on layer {layer}"
 
     def _cmd_maskop(self, args):
         usage = ("usage: MASKOP OVERSIZE|UNDERSIZE <layer_a> result=<layer> amount=<dbu> "

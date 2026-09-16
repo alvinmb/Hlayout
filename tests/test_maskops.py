@@ -358,6 +358,24 @@ def test_convert_rects_to_outline_replaces_a_rectangle_with_a_closed_path():
     assert result.points == [(0, 0), (5000, 0), (5000, 5000), (0, 5000), (0, 0)]
 
 
+def test_convert_rects_to_outline_also_converts_polygons():
+    # A substrate/package body is often a Polygon, not a Rectangle
+    # (e.g. after a rotation or a hand-edited outline) -- confirmed
+    # live, a real substrate shape turned out to be a Polygon, which
+    # an earlier Rectangle-only version of this silently skipped
+    # entirely (reporting "no rectangles" despite real closed geometry
+    # sitting right there on the named layer).
+    s = _fresh_session()
+    s.polygon(0, [(0, 0), (5000, 0), (6000, 3000), (5000, 5000), (0, 5000)])
+    written = s.convert_rects_to_outline(0, 100)
+    assert written == {"TOP": 1}
+    result = s.cell.shapes[0]
+    assert isinstance(result, Path)
+    assert result.points == [
+        (0, 0), (5000, 0), (6000, 3000), (5000, 5000), (0, 5000), (0, 0),
+    ]
+
+
 def test_convert_rects_to_outline_only_converts_the_named_layer():
     s = _fresh_session()
     s.rect(0, 0, 0, 100, 100)
@@ -422,7 +440,7 @@ def test_outline_command_bar():
     s.rect(0, 0, 0, 5000, 5000)
     interp = CommandInterpreter(s, ScriptConsole(s))
     out = interp.run("OUTLINE 0 width=100")
-    assert "converted 1 rectangle" in out
+    assert "converted 1 shape" in out
     assert isinstance(s.cell.shapes[0], Path)
 
 
@@ -432,7 +450,7 @@ def test_outline_command_bar_reports_no_conversions():
     s = _fresh_session()
     interp = CommandInterpreter(s, ScriptConsole(s))
     out = interp.run("OUTLINE 0 width=100")
-    assert "converted no rectangles" in out
+    assert "converted no rectangles/polygons" in out
 
 
 def test_outline_command_bar_requires_width():
