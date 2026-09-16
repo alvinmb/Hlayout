@@ -828,152 +828,73 @@ def test_top_view_component_recognition_needs_no_layer_thickness_at_all():
     assert _min_dist_to_paths((300, 600), paths) > 10  # conductor cut under the cap
 
 
-def test_top_view_bare_ic_with_no_name_or_footprint_match_is_walked_into_not_occluding():
-    # A "bare" IC like an 8-pin op-amp has no EIA size code and no
-    # catalogued gull-wing pin-count table entry (that table only covers
-    # 3/14/16/18/20-pin packages), so name/footprint matching alone can
-    # never recognize it. Component recognition here is by name or
-    # footprint ONLY -- deliberately with no reference to layer
-    # thickness at all (a top-down view is about stacking ORDER, not
-    # film thickness) -- so an unrecognized bare part is walked into
-    # like any other non-component cell, contributing its own layers to
-    # the ordinary tiers instead of becoming a topmost occluding
-    # footprint with no way to identify its actual outline.
+def test_top_view_bare_die_recognized_by_outline_not_role_layers():
+    # Per user direction: a bare semiconductor die (built the same way
+    # Tools > Chip Wizard.../Session.create_chip_cell() does -- a body-
+    # outline path plus an epoxy die-attach pad, neither one a resistor/
+    # conductor/glaze film) is a real physical part regardless of its
+    # actual size (could be 0.2 x 0.2mm, could be 1.8 x 1.8mm) -- so
+    # there's no size catalogue to match against. It's recognized here
+    # simply because ALL of its own shapes sit on layers the design
+    # doesn't use for any resistor/conductor/glaze/route/bond/dielectric
+    # role -- exactly what a bare outline/epoxy pad is.
     from hlayout.io.techfile import save_resistor_geometry_rules
     s = _fresh_session()
-    s.new_cell("LM741")
-    s.rect(20, 0, 0, 800, 800)   # a pad footprint, no pin= tags at all
+    s.new_cell("ML1")
+    s.path(60, [(0, 0), (400, 0), (400, 400), (0, 400), (0, 0)], 20, cap="flush")  # outline
+    s.rect(61, 100, 100, 300, 300)  # epoxy die-attach pad
     s.use_cell("TOP")
     save_resistor_geometry_rules(s.library, {
         "overlap_a": 200, "pad_b": 500, "space_c": 200, "glaze_oversize": 50,
         "keepout_oversize": 0, "resistor_layer": -1, "conductor_layer": 3,
         "glaze_layer": -1, "doc_layer": -1, "keepout_layer": -1, "ink_layers": {},
     })
-    s.rect(3, 0, 0, 2000, 2000)  # conductor under the whole chip
-    s.sref("LM741", (0, 0))
+    s.rect(3, 0, 0, 5000, 5000)  # conductor under the whole die
+    s.sref("ML1", (0, 0))
     written = s.mask_op_top_view(63)
     assert written
     paths = [sh for sh in s.cell.shapes if sh.layer == 63]
-    # LM741 isn't recognized as an occluding component, so its own
-    # (0,0)-(800,800) footprint never cuts a notch into the conductor --
-    # a point squarely on where that notch's edge would have been (the
-    # footprint's own right edge, deep inside the conductor's interior)
-    # has no path anywhere near it.
-    assert _min_dist_to_paths((800, 400), paths) > 10
-    assert _min_dist_to_paths((2000, 2000), paths) < 1  # conductor's own corner present
+    # the die's own outline notches a real hole into the conductor --
+    # its own right edge (the stroked path's outer edge, half the 20-wide
+    # stroke beyond the 400 nominal) is present, and conductor strictly
+    # inside its footprint is genuinely gone.
+    assert _min_dist_to_paths((410, 200), paths) < 1
+    assert _min_dist_to_paths((200, 200), paths) > 10
+    assert _min_dist_to_paths((5000, 5000), paths) < 1  # conductor's own corner present
 
 
-def test_top_view_bare_ic_sized_like_a_catalogued_package_is_recognized_by_physical_size():
-    # Per user direction: a bare IC like an 8-pin op-amp has no EIA size
-    # code and no catalogued PIN-COUNT table entry, but it still has a
-    # real physical footprint -- and a real top-down pictorial view
-    # identifies a part by the size of the body actually sitting on the
-    # board, same as looking at the real board would. A cell with no
-    # pin= tags at all (so the pin-count/span check has nothing to go
-    # on) but an overall (length, width) matching a catalogued package
-    # body -- here, SOT_14's 8.65 x 3.90 mm -- is recognized as a
-    # component by that physical size alone, purely geometric, with no
-    # reference to layer thickness.
-    from hlayout.core.units import DBU_MM
+def test_top_view_device_cell_mixing_role_and_non_role_layers_is_not_swallowed():
+    # Regression: the earlier keep-out-layer bug (a resistor device cell
+    # wrongly became "a component" because it ALSO happened to draw on
+    # a non-role keep-out layer) must not resurface here in a new form.
+    # A cell that draws BOTH role-layer content (its own conductor pad)
+    # AND a non-role shape (an incidental keep-out margin) is walked
+    # into, not recognized -- requiring ALL of a cell's own shapes to be
+    # non-role (not just ANY) is what tells a real bare part (outline +
+    # epoxy pad, nothing else) apart from an ordinary device cell that
+    # merely has some non-role decoration alongside its real role-layer
+    # content.
     from hlayout.io.techfile import save_resistor_geometry_rules
     s = _fresh_session()
-    s.new_cell("LM741")
-    length_dbu = round(8.65 / DBU_MM)
-    width_dbu = round(3.90 / DBU_MM)
-    s.rect(20, 0, 0, length_dbu, width_dbu)  # body footprint, no pin= tags
+    s.new_cell("R1")
+    s.rect(3, 0, 0, 100, 100)        # conductor pad -- role-layer content
+    s.rect(7, -300, -300, 400, 400)  # an incidental, non-role keep-out margin
     s.use_cell("TOP")
     save_resistor_geometry_rules(s.library, {
         "overlap_a": 200, "pad_b": 500, "space_c": 200, "glaze_oversize": 50,
-        "keepout_oversize": 0, "resistor_layer": -1, "conductor_layer": 3,
-        "glaze_layer": -1, "doc_layer": -1, "keepout_layer": -1, "ink_layers": {},
+        "keepout_oversize": 200, "resistor_layer": -1, "conductor_layer": 3,
+        "glaze_layer": -1, "doc_layer": -1, "keepout_layer": 7, "ink_layers": {},
     })
-    s.rect(3, 0, 0, length_dbu + 5000, width_dbu + 5000)  # conductor under the whole chip
-    s.sref("LM741", (0, 0))
+    # a trace well outside R1's own body, but squarely inside its
+    # oversized (would-be) keep-out rectangle.
+    s.rect(3, 260, 260, 290, 290)
+    s.sref("R1", (0, 0))
     written = s.mask_op_top_view(63)
     assert written
     paths = [sh for sh in s.cell.shapes if sh.layer == 63]
-    # LM741 IS recognized as an occluding component now -- its own edge
-    # cuts a real notch into the conductor beneath it.
-    assert _min_dist_to_paths((length_dbu, width_dbu // 2), paths) < 1
-
-
-def test_top_view_bbox_matched_bare_ic_occludes_its_full_footprint_not_just_own_shapes():
-    # Regression: LM741's OWN direct shapes are often just a sparse
-    # body-outline marker -- the REAL lead/pad geometry lives in nested
-    # SRef instances (a round lead built from a shared via-cell
-    # template, per footprint_pin_stats()'s own docstring), which is
-    # exactly why the physical-size match measures library.cell_bbox()
-    # (recursive) rather than the cell's own shapes alone. Confirmed
-    # live: using the cell's own (sparse) target.shapes as the
-    # OCCLUDING footprint once it's bbox-recognized left the real,
-    # full-size footprint failing to punch a hole in the conductor
-    # beneath it -- only the tiny marker rectangle actually occluded
-    # anything. The occluding footprint for a bbox match must be a
-    # solid rectangle spanning that same recursive bbox instead.
-    from hlayout.core.units import DBU_MM
-    from hlayout.io.techfile import save_resistor_geometry_rules
-    s = _fresh_session()
-    s.new_cell("chip_pin")
-    s.rect(58, -1, -1, 1, 1)  # a near-zero-extent lead of its own
-    s.new_cell("LM741")
-    s.rect(61, 0, 0, 100, 100)  # sparse body-outline marker, NOT the real body
-    length_dbu = round(8.65 / DBU_MM)
-    width_dbu = round(3.90 / DBU_MM)
-    for i in range(8):
-        x = round(i * length_dbu / 7)  # 8 leads spanning the FULL length
-        s.sref("chip_pin", (x, 0), pin=str(i + 1))
-    s.sref("chip_pin", (0, width_dbu), pin="9")  # sets the full width too
-    s.use_cell("TOP")
-    save_resistor_geometry_rules(s.library, {
-        "overlap_a": 200, "pad_b": 500, "space_c": 200, "glaze_oversize": 50,
-        "keepout_oversize": 0, "resistor_layer": -1, "conductor_layer": 3,
-        "glaze_layer": -1, "doc_layer": -1, "keepout_layer": -1, "ink_layers": {},
-    })
-    s.rect(3, 0, 0, length_dbu + 5000, width_dbu + 5000)  # conductor under the whole chip
-    s.sref("LM741", (0, 0))
-    written = s.mask_op_top_view(63)
-    assert written
-    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
-    # LM741's REAL right edge (its full recursive bbox, far outside its
-    # own sparse 100x100 marker rectangle) must cut a genuine notch into
-    # the conductor beneath it -- that notch boundary passes exactly
-    # through this point if (and only if) the full footprint occluded,
-    # not just the tiny marker.
-    assert _min_dist_to_paths((length_dbu, width_dbu // 2), paths) <= 1
-    # conductor's own outer edge, well outside LM741's footprint, is
-    # untouched.
-    assert _min_dist_to_paths((length_dbu + 5000, width_dbu + 5000), paths) < 1
-
-
-def test_top_view_bare_ic_with_real_pins_but_uncatalogued_pin_count_is_recognized_by_size():
-    # LM741-style, but WITH real pin= tags this time (8 of them) -- so
-    # footprint_pin_stats() returns real stats and the pin-count/span
-    # check actually runs -- it just can't match, since 8 pins isn't a
-    # count the gull-wing table covers at all (only 3/14/16/18/20-pin
-    # packages). The physical-size fallback must still catch this: it's
-    # not gated on "no pins at all", only on "nothing else matched".
-    from hlayout.core.units import DBU_MM
-    from hlayout.io.techfile import save_resistor_geometry_rules
-    s = _fresh_session()
-    s.new_cell("LM741")
-    length_dbu = round(8.65 / DBU_MM)
-    width_dbu = round(3.90 / DBU_MM)
-    s.rect(20, 0, 0, length_dbu, width_dbu)  # body outline
-    for i in range(8):
-        x = round(i * length_dbu / 8)
-        s.rect(58, x, -50, x + 40, 0, pin=str(i + 1))  # 8 real pin-tagged pads
-    s.use_cell("TOP")
-    save_resistor_geometry_rules(s.library, {
-        "overlap_a": 200, "pad_b": 500, "space_c": 200, "glaze_oversize": 50,
-        "keepout_oversize": 0, "resistor_layer": -1, "conductor_layer": 3,
-        "glaze_layer": -1, "doc_layer": -1, "keepout_layer": -1, "ink_layers": {},
-    })
-    s.rect(3, 0, 0, length_dbu + 5000, width_dbu + 5000)
-    s.sref("LM741", (0, 0))
-    written = s.mask_op_top_view(63)
-    assert written
-    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
-    assert _min_dist_to_paths((length_dbu, width_dbu // 2), paths) < 1
+    # the nearby trace is untouched -- R1 was walked into, not treated
+    # as an occluding component with an oversized keep-out footprint.
+    assert _min_dist_to_paths((275, 260), paths) < 1
 
 
 def test_top_view_component_footprint_hole_from_a_stroked_outline_path_is_filled():

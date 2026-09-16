@@ -90,25 +90,40 @@ def _segments_cross(p1, p2, p3, p4) -> bool:
         and d1 != 0 and d2 != 0 and d3 != 0 and d4 != 0
 
 
-def _matched_component_footprint(library, cell_name, component_models):
+def _matched_component_footprint(library, cell_name, component_models, role_layers=frozenset()):
     """The union, in world DBU coordinates, of every placed instance's
     OWN shapes (every layer -- pads included, not just an outline)
     whose cell is a recognized real component: an explicit
     component_models entry (manual or already auto-matched), a name
     carrying a known EIA size code (component_match.match_passive_by_name()),
     a footprint matching a known gull-wing package's pin pattern
-    (component_match.match_gullwing_by_footprint()), or -- when neither
-    of those identifies it, whether because it has no pin= tags at all
-    or because it does but its pin count simply isn't in the table
-    (which only covers 3/14/16/18/20-pin packages, e.g. an 8-pin
-    op-amp) -- its own overall PHYSICAL size (length x width, hierarchy
-    included) matching a catalogued package body
-    (component_match.match_gullwing_by_bbox()). Deliberately NAME/
-    FOOTPRINT/PHYSICAL-SIZE ONLY, with no reference to layer thickness
-    at all -- a top-down pictorial view is about stacking ORDER, not
-    fired-film thickness, and a cell that isn't in component_models and
-    matches none of the above is walked into instead, the same as any
-    other non-component cell.
+    (component_match.match_gullwing_by_footprint()), or -- for a "bare"
+    part identified by neither, e.g. a wire-bonded die built with
+    Session.create_chip_cell() (Tools > Chip Wizard...) -- a cell whose
+    own shapes are ALL on a layer that isn't one of the design's own
+    configured resistor/conductor/glaze/route/bond/dielectric layers
+    (``role_layers``, from Setup). A component's real body/package
+    graphics (an outline path, an epoxy die-attach pad) are drawn this
+    way precisely because they AREN'T a resistor ink, conductor, or
+    glaze film -- and a part's actual physical size is irrelevant here
+    (a transistor or bare die can be a fraction of a millimetre), so
+    there's no size catalogue to match against at all.
+
+    This is what tells a bare die apart from an ordinary DEVICE cell
+    (e.g. a resistor built by generate_resistor()): a resistor draws
+    its OWN role-layer content (ink, conductor pads, glaze) as its
+    primary geometry, with a keep-out margin merely incidental to it --
+    ``any`` non-role shape present would wrongly catch that margin
+    (confirmed live: it did, repeatedly, for every different non-role
+    layer a resistor happens to draw on). Requiring ALL of a cell's own
+    shapes to be non-role, with at least one shape present, only
+    matches a cell with NO role-layer content of its own at all.
+
+    Deliberately NAME/FOOTPRINT/NON-ROLE-GRAPHICS ONLY, with no
+    reference to layer thickness at all -- a top-down pictorial view is
+    about stacking ORDER, not fired-film thickness, and a cell that
+    isn't in component_models and matches none of the above is walked
+    into instead, the same as any other non-component cell.
 
     A component's own body-outline shape is often a thin PATH (a
     stroked ring around the body, not a filled area -- see
@@ -134,16 +149,14 @@ def _matched_component_footprint(library, cell_name, component_models):
         shape_to_shapely,
     )
     from ..core.shapes import expand_arefs_to_srefs
-    from ..core.units import DBU_MM
     from ..io.component_match import (
         eia_size_tokens,
         footprint_pin_stats,
         gullwing_package_table,
-        match_gullwing_by_bbox,
         match_gullwing_by_footprint,
         match_passive_by_name,
     )
-    from shapely.geometry import MultiPolygon, Polygon, box
+    from shapely.geometry import MultiPolygon, Polygon
     from shapely.ops import unary_union
 
     def _fill_holes(geom):
@@ -162,52 +175,21 @@ def _matched_component_footprint(library, cell_name, component_models):
     base_models = dict(component_models) if component_models else {}
 
     def is_recognized(cn):
-        """(True, via_bbox) if ``cn`` is a recognized component, else
-        (False, False). ``via_bbox`` tells the caller which OCCLUDING
-        geometry to use: name/footprint matches use the cell's own
-        drawn shapes (as before), but a physical-size match needs its
-        own recursive bbox instead -- see walk() below for why.
-
-        Deliberately NAME/FOOTPRINT/PHYSICAL-SIZE ONLY -- a top-down
-        pictorial view is about stacking ORDER, never fired-film
-        thickness (see this function's own docstring). An earlier
-        fallback reused is_component_cell()'s film/non-film thickness
-        test for "bare" parts with no name/footprint match, but
-        thickness is too leaky a proxy for "is this a component": it
-        wrongly swallowed the design's own substrate cell, then every
-        resistor device cell (via its own keep-out layer, conventionally
-        drawn unfilled), then any resistor whose specific ink sublayer
-        simply had no thickness saved -- three separate ways real
-        design geometry got merged into one giant occluding
-        "components" blob. A cell that isn't in component_models and
-        matches none of the above is walked into instead, contributing
-        its own layers to the ordinary tiers."""
+        """True if ``cn`` is a recognized component -- see this
+        function's own docstring for the four ways. A cell that isn't
+        in component_models and matches none of them is walked into
+        instead, contributing its own layers to the ordinary tiers."""
         if cn in base_models:
-            return True, False
+            return True
         if match_passive_by_name(cn, tokens) is not None:
-            return True, False
+            return True
         c = library.cells.get(cn)
         stats = footprint_pin_stats(c) if c is not None else None
         if stats is not None and match_gullwing_by_footprint(stats, table) is not None:
-            return True, False
-        if c is not None:
-            # Neither name nor pin-count/span identified it -- either it
-            # has no pin= tags at all (footprint_pin_stats() had nothing
-            # to go on), or it does (e.g. LM741, an 8-pin op-amp) but its
-            # pin count simply isn't in the table (which only covers
-            # 3/14/16/18/20-pin packages). Last resort either way: match
-            # by its own overall PHYSICAL footprint size (length x
-            # width, hierarchy included) against a catalogued package
-            # body -- still purely geometric, still nothing to do with
-            # layer thickness.
-            bbox = library.cell_bbox(cn)
-            if bbox is not None:
-                x0, y0, x1, y1 = bbox
-                length_mm = (x1 - x0) * DBU_MM
-                width_mm = (y1 - y0) * DBU_MM
-                if match_gullwing_by_bbox(length_mm, width_mm, table) is not None:
-                    return True, True
-        return False, False
+            return True
+        if c is not None and c.shapes and all(sh.layer not in role_layers for sh in c.shapes):
+            return True
+        return False
 
     geoms = []
 
@@ -217,25 +199,7 @@ def _matched_component_footprint(library, cell_name, component_models):
         cell = library.cells[name]
         for ref in list(cell.srefs) + expand_arefs_to_srefs(cell.arefs):
             child_transform = _compose_transforms(transform, _sref_point_transform(ref))
-            recognized, via_bbox = is_recognized(ref.cell_name)
-            if recognized and via_bbox:
-                # A physical-size match (e.g. LM741) is measured from
-                # its FULL recursive bbox (leads/pads live in nested
-                # SRefs, not the cell's own shapes -- see
-                # footprint_pin_stats()'s own docstring on why a round
-                # lead is often "a round via-cell template instance"
-                # rather than a shape drawn directly in the part).
-                # Occluding with just target.shapes here would use only
-                # the cell's own body-outline marker (if any) -- too
-                # small/sparse to actually cut the real, full-size
-                # footprint's hole out of whatever's underneath, so the
-                # occluding footprint is the solid rectangle spanning
-                # that same recursive bbox instead.
-                bbox = library.cell_bbox(ref.cell_name)
-                if bbox is not None:
-                    x0, y0, x1, y1 = bbox
-                    geoms.append(_transform_geom(box(x0, y0, x1, y1), child_transform))
-            elif recognized:
+            if is_recognized(ref.cell_name):
                 target = library.cells.get(ref.cell_name)
                 if target is not None:
                     for shape in target.shapes:
@@ -2026,7 +1990,8 @@ class Session:
 
             if role_based:
                 comp_geom = _matched_component_footprint(
-                    self.library, cell.name, load_component_models(self.library))
+                    self.library, cell.name, load_component_models(self.library),
+                    resistor_layers | conductor_layers | glaze_layers)
                 layer_geoms = [(comp_geom, True)]
                 for n in sorted(resistor_layers, reverse=True):
                     layer_geoms.append((gather(n), True))
