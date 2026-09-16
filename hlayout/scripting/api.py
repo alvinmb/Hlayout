@@ -99,9 +99,12 @@ def _matched_component_footprint(library, cell_name, component_models, role_laye
     a footprint matching a known gull-wing package's pin pattern
     (component_match.match_gullwing_by_footprint()), or -- for a "bare"
     part identified by neither, e.g. a wire-bonded die built with
-    Session.create_chip_cell() (Tools > Chip Wizard...) -- a cell whose
-    own shapes are ALL on a layer that isn't one of the design's own
-    configured resistor/conductor/glaze/route/bond/dielectric layers
+    Session.create_chip_cell() (Tools > Chip Wizard...) -- a cell that
+    (a) has at least one child SRef/ARef of its own (a real chip/die
+    cell always gets its pins placed AFTERWARDS as separate instances,
+    per create_chip_cell()'s own convention) AND (b) whose own shapes
+    are ALL on a layer that isn't one of the design's own configured
+    resistor/conductor/glaze/route/bond/dielectric layers
     (``role_layers``, from Setup). A component's real body/package
     graphics (an outline path, an epoxy die-attach pad) are drawn this
     way precisely because they AREN'T a resistor ink, conductor, or
@@ -109,15 +112,17 @@ def _matched_component_footprint(library, cell_name, component_models, role_laye
     (a transistor or bare die can be a fraction of a millimetre), so
     there's no size catalogue to match against at all.
 
-    This is what tells a bare die apart from an ordinary DEVICE cell
-    (e.g. a resistor built by generate_resistor()): a resistor draws
-    its OWN role-layer content (ink, conductor pads, glaze) as its
-    primary geometry, with a keep-out margin merely incidental to it --
-    ``any`` non-role shape present would wrongly catch that margin
-    (confirmed live: it did, repeatedly, for every different non-role
-    layer a resistor happens to draw on). Requiring ALL of a cell's own
-    shapes to be non-role, with at least one shape present, only
-    matches a cell with NO role-layer content of its own at all.
+    Both conditions are load-bearing, each guarding against a
+    confirmed-live false positive: requiring ALL of a cell's own shapes
+    to be non-role (not just ANY) is what tells a bare die apart from
+    an ordinary DEVICE cell (e.g. a resistor built by
+    generate_resistor(), whose own role-layer content -- ink, conductor
+    pads, glaze -- is its primary geometry, with a keep-out margin
+    merely incidental to it -- ``any`` non-role shape present wrongly
+    caught that margin instead). Requiring at least one child instance
+    is what tells a real chip/die apart from the design's own substrate
+    cell -- structurally just as "all non-role" as a die's own outline,
+    but with no children at all.
 
     Deliberately NAME/FOOTPRINT/NON-ROLE-GRAPHICS ONLY, with no
     reference to layer thickness at all -- a top-down pictorial view is
@@ -187,7 +192,20 @@ def _matched_component_footprint(library, cell_name, component_models, role_laye
         stats = footprint_pin_stats(c) if c is not None else None
         if stats is not None and match_gullwing_by_footprint(stats, table) is not None:
             return True
-        if c is not None and c.shapes and all(sh.layer not in role_layers for sh in c.shapes):
+        if (c is not None and c.shapes and (c.srefs or c.arefs)
+                and all(sh.layer not in role_layers for sh in c.shapes)):
+            # Regression: the design's own substrate cell (a single
+            # shape on its own outline/marking layer, no children at
+            # all) is STRUCTURALLY identical to a die's outline from an
+            # "all shapes non-role" test alone -- confirmed live, that
+            # test alone wrongly re-caught it, resurrecting the exact
+            # substrate-occludes-everything bug this whole recognition
+            # scheme exists to avoid. A real chip/die cell always has
+            # its pins placed AFTERWARDS as separate SRef instances
+            # (create_chip_cell()'s own convention -- "die pins added
+            # afterwards as instances of the chosen cell"); the
+            # substrate never has any children at all. Requiring at
+            # least one is what tells them apart.
             return True
         return False
 

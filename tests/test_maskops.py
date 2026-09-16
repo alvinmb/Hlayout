@@ -837,12 +837,19 @@ def test_top_view_bare_die_recognized_by_outline_not_role_layers():
     # there's no size catalogue to match against. It's recognized here
     # simply because ALL of its own shapes sit on layers the design
     # doesn't use for any resistor/conductor/glaze/route/bond/dielectric
-    # role -- exactly what a bare outline/epoxy pad is.
+    # role -- exactly what a bare outline/epoxy pad is. A real chip/die
+    # cell also always has its pins placed afterwards as separate SRef
+    # instances (create_chip_cell()'s own convention), which is what
+    # tells it apart from the design's own childless substrate cell
+    # (see test_top_view_substrate_cell_with_no_children_is_not_a_component).
     from hlayout.io.techfile import save_resistor_geometry_rules
     s = _fresh_session()
+    s.new_cell("chip_pin")
+    s.rect(58, -20, -20, 20, 20)
     s.new_cell("ML1")
     s.path(60, [(0, 0), (400, 0), (400, 400), (0, 400), (0, 0)], 20, cap="flush")  # outline
     s.rect(61, 100, 100, 300, 300)  # epoxy die-attach pad
+    s.sref("chip_pin", (200, 400), pin="1")  # a die pin, placed separately
     s.use_cell("TOP")
     save_resistor_geometry_rules(s.library, {
         "overlap_a": 200, "pad_b": 500, "space_c": 200, "glaze_oversize": 50,
@@ -861,6 +868,39 @@ def test_top_view_bare_die_recognized_by_outline_not_role_layers():
     assert _min_dist_to_paths((410, 200), paths) < 1
     assert _min_dist_to_paths((200, 200), paths) > 10
     assert _min_dist_to_paths((5000, 5000), paths) < 1  # conductor's own corner present
+
+
+def test_top_view_substrate_cell_with_no_children_is_not_a_component():
+    # Regression: the design's own substrate cell -- a single shape on
+    # its own outline/marking layer, same as a die's outline, but with
+    # NO children of its own -- is structurally indistinguishable from
+    # a bare die by "all shapes non-role" alone. Confirmed live: left
+    # unguarded, that test alone wrongly re-caught the substrate,
+    # resurrecting the exact substrate-occludes-everything regression
+    # this whole recognition scheme exists to avoid (in a NEW form, via
+    # the non-role-layer path this time rather than layer thickness).
+    # Requiring at least one child SRef/ARef -- a real chip/die cell
+    # always gets its pins placed afterwards as separate instances,
+    # per create_chip_cell()'s own convention -- is what tells them
+    # apart: the substrate never has any children at all.
+    from hlayout.io.techfile import save_resistor_geometry_rules
+    s = _fresh_session()
+    s.new_cell("Substrate")
+    s.rect(61, 0, 0, 5000, 5000)  # board-sized shape, on a non-role layer, no children
+    s.use_cell("TOP")
+    save_resistor_geometry_rules(s.library, {
+        "overlap_a": 200, "pad_b": 500, "space_c": 200, "glaze_oversize": 50,
+        "keepout_oversize": 0, "resistor_layer": -1, "conductor_layer": 3,
+        "glaze_layer": -1, "doc_layer": -1, "keepout_layer": -1, "ink_layers": {},
+    })
+    s.rect(3, 500, 500, 900, 900)  # conductor that must remain visible
+    s.sref("Substrate", (0, 0))
+    written = s.mask_op_top_view(63)
+    assert written
+    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    # the substrate is walked into like any other non-component cell,
+    # so the conductor beneath it still shows up in the result.
+    assert _min_dist_to_paths((700, 900), paths) < 1
 
 
 def test_top_view_device_cell_mixing_role_and_non_role_layers_is_not_swallowed():
