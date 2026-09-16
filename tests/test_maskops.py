@@ -900,6 +900,37 @@ def test_top_view_bare_ic_sized_like_a_catalogued_package_is_recognized_by_physi
     assert _min_dist_to_paths((length_dbu + 5000, width_dbu + 5000), paths) < 1
 
 
+def test_top_view_bare_ic_with_real_pins_but_uncatalogued_pin_count_is_recognized_by_size():
+    # LM741-style, but WITH real pin= tags this time (8 of them) -- so
+    # footprint_pin_stats() returns real stats and the pin-count/span
+    # check actually runs -- it just can't match, since 8 pins isn't a
+    # count the gull-wing table covers at all (only 3/14/16/18/20-pin
+    # packages). The physical-size fallback must still catch this: it's
+    # not gated on "no pins at all", only on "nothing else matched".
+    from hlayout.core.units import DBU_MM
+    from hlayout.io.techfile import save_resistor_geometry_rules
+    s = _fresh_session()
+    s.new_cell("LM741")
+    length_dbu = round(8.65 / DBU_MM)
+    width_dbu = round(3.90 / DBU_MM)
+    s.rect(20, 0, 0, length_dbu, width_dbu)  # body outline
+    for i in range(8):
+        x = round(i * length_dbu / 8)
+        s.rect(58, x, -50, x + 40, 0, pin=str(i + 1))  # 8 real pin-tagged pads
+    s.use_cell("TOP")
+    save_resistor_geometry_rules(s.library, {
+        "overlap_a": 200, "pad_b": 500, "space_c": 200, "glaze_oversize": 50,
+        "keepout_oversize": 0, "resistor_layer": -1, "conductor_layer": 3,
+        "glaze_layer": -1, "doc_layer": -1, "keepout_layer": -1, "ink_layers": {},
+    })
+    s.rect(3, 0, 0, length_dbu + 5000, width_dbu + 5000)
+    s.sref("LM741", (0, 0))
+    written = s.mask_op_top_view(63)
+    assert written
+    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    assert _min_dist_to_paths((length_dbu, width_dbu // 2), paths) < 1
+
+
 def test_top_view_component_footprint_hole_from_a_stroked_outline_path_is_filled():
     # Regression: a component's body outline is often a thin PATH (a
     # stroked ring, not a filled area -- see

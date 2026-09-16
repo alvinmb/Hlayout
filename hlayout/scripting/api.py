@@ -97,11 +97,12 @@ def _matched_component_footprint(library, cell_name, component_models):
     component_models entry (manual or already auto-matched), a name
     carrying a known EIA size code (component_match.match_passive_by_name()),
     a footprint matching a known gull-wing package's pin pattern
-    (component_match.match_gullwing_by_footprint()), or -- for a truly
-    "bare" part with no pin= tags at all, so the pin-pattern check has
-    nothing to go on (e.g. an op-amp IC placed with no pin footprint
-    metadata) -- its own overall PHYSICAL size (length x width,
-    hierarchy included) matching a catalogued package body
+    (component_match.match_gullwing_by_footprint()), or -- when neither
+    of those identifies it, whether because it has no pin= tags at all
+    or because it does but its pin count simply isn't in the table
+    (which only covers 3/14/16/18/20-pin packages, e.g. an 8-pin
+    op-amp) -- its own overall PHYSICAL size (length x width, hierarchy
+    included) matching a catalogued package body
     (component_match.match_gullwing_by_bbox()). Deliberately NAME/
     FOOTPRINT/PHYSICAL-SIZE ONLY, with no reference to layer thickness
     at all -- a top-down pictorial view is about stacking ORDER, not
@@ -183,15 +184,16 @@ def _matched_component_footprint(library, cell_name, component_models):
         stats = footprint_pin_stats(c) if c is not None else None
         if stats is not None and match_gullwing_by_footprint(stats, table) is not None:
             return True
-        if c is not None and stats is None:
-            # A truly "bare" part -- no pin= tags anywhere, so
-            # footprint_pin_stats() has nothing to go on and the pin-
-            # count/span check above can never run at all (e.g. an
-            # op-amp IC placed without any pin footprint metadata).
-            # Last resort: match by its own overall PHYSICAL footprint
-            # size (length x width, hierarchy included) against a
-            # catalogued package body -- still purely geometric, still
-            # nothing to do with layer thickness.
+        if c is not None:
+            # Neither name nor pin-count/span identified it -- either it
+            # has no pin= tags at all (footprint_pin_stats() had nothing
+            # to go on), or it does (e.g. LM741, an 8-pin op-amp) but its
+            # pin count simply isn't in the table (which only covers
+            # 3/14/16/18/20-pin packages). Last resort either way: match
+            # by its own overall PHYSICAL footprint size (length x
+            # width, hierarchy included) against a catalogued package
+            # body -- still purely geometric, still nothing to do with
+            # layer thickness.
             bbox = library.cell_bbox(cn)
             if bbox is not None:
                 x0, y0, x1, y1 = bbox
