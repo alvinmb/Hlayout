@@ -255,6 +255,16 @@ to its stroked-outline polygon first; requires the shapely package):
                                        the 200-point-per-polygon limit on a heavily
                                        sized/booleaned result; also available as
                                        Session.mask_op()
+    OUTLINE <layer> width=<dbu> [cell=<name>]
+                                       replace every Rectangle on layer (the named
+                                       cell's OWN shapes only -- never descending
+                                       into placed sub-cells) with an equivalent
+                                       closed-ring Path tracing the same 4 corners,
+                                       width DBU wide -- e.g. so a substrate or
+                                       package body is a stroked outline instead of
+                                       a filled, closed rectangle; cell defaults to
+                                       the current cell; also available as
+                                       Session.convert_rects_to_outline()
     TOPVIEW result=<layer> [layers=<n,n,...>] [exclude=<n,n,...>] [hatch=<dbu>]
             [width=<dbu>] [cell=<name>] [flatten=0|1] [simplify=<dbu>]
                                        draw a top-down, hidden-line-removal
@@ -1090,6 +1100,31 @@ class CommandInterpreter:
                 f"(W={body_width}, L={body_length})")
 
     # --- mask ops ---------------------------------------------------------
+    def _cmd_outline(self, args):
+        usage = "usage: OUTLINE <layer> width=<dbu> [cell=<name>]"
+        if not args:
+            raise CommandError(usage)
+        layer = args[0]
+        kwargs = {}
+        for a in args[1:]:
+            if "=" not in a:
+                raise CommandError(usage)
+            k, v = a.split("=", 1)
+            k = k.lower()
+            if k == "width":
+                kwargs["width"] = float(v)
+            elif k == "cell":
+                kwargs["cell_names"] = [v]
+            else:
+                raise CommandError(f"unknown OUTLINE option {k!r}")
+        if "width" not in kwargs:
+            raise CommandError(f"{usage}\n(width=<dbu> is required)")
+        written = self.session.convert_rects_to_outline(layer, **kwargs)
+        total = sum(written.values())
+        if total == 0:
+            return f"OUTLINE converted no rectangles on layer {layer}"
+        return f"OUTLINE converted {total} rectangle(s) to outline paths on layer {layer}"
+
     def _cmd_maskop(self, args):
         usage = ("usage: MASKOP OVERSIZE|UNDERSIZE <layer_a> result=<layer> amount=<dbu> "
                  "[cell=<name>] [flatten=0|1] [simplify=<dbu>]\n"

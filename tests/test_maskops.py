@@ -341,6 +341,109 @@ def test_mask_op_is_a_single_undo_step():
     assert len(s.cell.shapes) == before
 
 
+# --- Session.convert_rects_to_outline() / OUTLINE ---------------------------
+
+def test_convert_rects_to_outline_replaces_a_rectangle_with_a_closed_path():
+    s = _fresh_session()
+    s.rect(0, 0, 0, 5000, 5000)
+    written = s.convert_rects_to_outline(0, 100)
+    assert written == {"TOP": 1}
+    shapes = s.cell.shapes
+    assert len(shapes) == 1
+    result = shapes[0]
+    assert isinstance(result, Path)
+    assert result.layer == 0
+    assert result.width == 100
+    # closed ring: same 4 corners, first point repeated at the end.
+    assert result.points == [(0, 0), (5000, 0), (5000, 5000), (0, 5000), (0, 0)]
+
+
+def test_convert_rects_to_outline_only_converts_the_named_layer():
+    s = _fresh_session()
+    s.rect(0, 0, 0, 100, 100)
+    s.rect(1, 0, 0, 100, 100)
+    written = s.convert_rects_to_outline(0, 50)
+    assert written == {"TOP": 1}
+    assert any(isinstance(sh, Rectangle) and sh.layer == 1 for sh in s.cell.shapes)
+    assert not any(isinstance(sh, Rectangle) and sh.layer == 0 for sh in s.cell.shapes)
+
+
+def test_convert_rects_to_outline_converts_every_matching_rectangle():
+    s = _fresh_session()
+    s.rect(0, 0, 0, 100, 100)
+    s.rect(0, 500, 500, 600, 600)
+    written = s.convert_rects_to_outline(0, 50)
+    assert written == {"TOP": 2}
+    assert all(isinstance(sh, Path) for sh in s.cell.shapes)
+
+
+def test_convert_rects_to_outline_leaves_other_shape_types_untouched():
+    s = _fresh_session()
+    s.rect(0, 0, 0, 100, 100)
+    s.path(0, [(200, 200), (300, 200)], width=20, cap="round")
+    written = s.convert_rects_to_outline(0, 50)
+    assert written == {"TOP": 1}
+    assert sum(1 for sh in s.cell.shapes if isinstance(sh, Path)) == 2
+
+
+def test_convert_rects_to_outline_targets_a_named_cell_directly_no_flatten():
+    # No flatten option -- this always operates on the named cell's own
+    # shapes only, since the rectangle being replaced has to actually
+    # live in the cell being operated on (e.g. a substrate or package
+    # cell's own name, not whatever cell places it via Sref).
+    s = _fresh_session()
+    s.new_cell("Substrate")
+    s.rect(61, 0, 0, 5000, 5000)
+    s.use_cell("TOP")
+    s.sref("Substrate", (0, 0))
+    written = s.convert_rects_to_outline(61, 100, cell_names=["Substrate"])
+    assert written == {"Substrate": 1}
+    assert isinstance(s.library.cells["Substrate"].shapes[0], Path)
+    assert not any(isinstance(sh, Rectangle) for sh in s.cell.shapes)  # TOP untouched
+
+
+def test_convert_rects_to_outline_zero_rectangles_returns_empty():
+    s = _fresh_session()
+    s.rect(1, 0, 0, 100, 100)  # a different layer
+    assert s.convert_rects_to_outline(0, 50) == {}
+
+
+def test_convert_rects_to_outline_rejects_non_positive_width():
+    s = _fresh_session()
+    s.rect(0, 0, 0, 100, 100)
+    with pytest.raises(LayoutError):
+        s.convert_rects_to_outline(0, 0)
+
+
+def test_outline_command_bar():
+    from hlayout.gui.commands import CommandInterpreter
+    from hlayout.scripting import ScriptConsole
+    s = _fresh_session()
+    s.rect(0, 0, 0, 5000, 5000)
+    interp = CommandInterpreter(s, ScriptConsole(s))
+    out = interp.run("OUTLINE 0 width=100")
+    assert "converted 1 rectangle" in out
+    assert isinstance(s.cell.shapes[0], Path)
+
+
+def test_outline_command_bar_reports_no_conversions():
+    from hlayout.gui.commands import CommandInterpreter
+    from hlayout.scripting import ScriptConsole
+    s = _fresh_session()
+    interp = CommandInterpreter(s, ScriptConsole(s))
+    out = interp.run("OUTLINE 0 width=100")
+    assert "converted no rectangles" in out
+
+
+def test_outline_command_bar_requires_width():
+    from hlayout.gui.commands import CommandInterpreter
+    from hlayout.scripting import ScriptConsole
+    s = _fresh_session()
+    interp = CommandInterpreter(s, ScriptConsole(s))
+    out = interp.run("OUTLINE 0")
+    assert "error" in out.lower()
+
+
 # --- MASKOP command-bar tests -----------------------------------------------
 
 def test_maskop_command_oversize():
