@@ -828,136 +828,76 @@ def test_top_view_component_recognition_needs_no_layer_thickness_at_all():
     assert _min_dist_to_paths((300, 600), paths) > 10  # conductor cut under the cap
 
 
-def test_top_view_bare_ic_with_no_name_or_footprint_match_falls_back_to_is_component_cell():
-    # Regression: a "bare" IC like an 8-pin op-amp has no EIA size code
-    # and no catalogued gull-wing pin-count table entry (that table only
-    # covers 3/14/16/18/20-pin packages), so name/footprint matching
-    # alone can never recognize it -- exactly the gap that made it show
-    # up correctly in the Component Library Manager (is_component_cell(),
-    # via the design's own explicitly saved layer_thickness) but not in
-    # TOPVIEW. Falling back to that same test when name/footprint
-    # matching fails closes the gap: a cell already listed as a
-    # component in the Component Library Manager is treated as one here
-    # too, even with no matched or manually-assigned 3D model.
-    from hlayout.io.techfile import save_layer_thickness, save_resistor_geometry_rules
+def test_top_view_bare_ic_with_no_name_or_footprint_match_is_walked_into_not_occluding():
+    # A "bare" IC like an 8-pin op-amp has no EIA size code and no
+    # catalogued gull-wing pin-count table entry (that table only covers
+    # 3/14/16/18/20-pin packages), so name/footprint matching alone can
+    # never recognize it. Component recognition here is by name or
+    # footprint ONLY -- deliberately with no reference to layer
+    # thickness at all (a top-down view is about stacking ORDER, not
+    # film thickness) -- so an unrecognized bare part is walked into
+    # like any other non-component cell, contributing its own layers to
+    # the ordinary tiers instead of becoming a topmost occluding
+    # footprint with no way to identify its actual outline.
+    from hlayout.io.techfile import save_resistor_geometry_rules
     s = _fresh_session()
     s.new_cell("LM741")
     s.rect(20, 0, 0, 800, 800)   # a pad footprint, no pin= tags at all
-    s.rect(58, 0, 0, 800, 800)   # some other layer the design gives a
-                                  # thickness to (e.g. lid/case marking)
     s.use_cell("TOP")
     save_resistor_geometry_rules(s.library, {
         "overlap_a": 200, "pad_b": 500, "space_c": 200, "glaze_oversize": 50,
         "keepout_oversize": 0, "resistor_layer": -1, "conductor_layer": 3,
         "glaze_layer": -1, "doc_layer": -1, "keepout_layer": -1, "ink_layers": {},
     })
-    save_layer_thickness(s.library, {"3": 12.0, "58": 5.0})  # 20 deliberately absent
     s.rect(3, 0, 0, 2000, 2000)  # conductor under the whole chip
     s.sref("LM741", (0, 0))
     written = s.mask_op_top_view(63)
     assert written
     paths = [sh for sh in s.cell.shapes if sh.layer == 63]
-    assert _min_dist_to_paths((0, 0), paths) < 1        # LM741's own outline present
-    assert _min_dist_to_paths((400, 400), paths) > 10   # conductor cut under LM741
+    # LM741 isn't recognized as an occluding component, so its own
+    # (0,0)-(800,800) footprint never cuts a notch into the conductor --
+    # a point squarely on where that notch's edge would have been (the
+    # footprint's own right edge, deep inside the conductor's interior)
+    # has no path anywhere near it.
+    assert _min_dist_to_paths((800, 400), paths) > 10
+    assert _min_dist_to_paths((2000, 2000), paths) < 1  # conductor's own corner present
 
 
-def test_top_view_substrate_cell_is_not_a_component_even_with_the_fallback_active():
-    # Regression: a cell named like the design's own substrate (e.g.
-    # "ALUMINA_SUBSTRATE") is the BASE of the stack, not a topmost
-    # occluding component. It commonly draws on a layer with no saved
-    # layer_thickness at all (an outline/marking layer), which is
-    # exactly what trips is_component_cell()'s fallback film/non-film
-    # test. Confirmed live: left unchecked, that fallback treated the
-    # giant board-sized substrate shape as "a component" sitting on top
-    # of everything, occluding the entire TOPVIEW render underneath it.
-    from hlayout.io.techfile import save_layer_thickness, save_resistor_geometry_rules
+def test_top_view_bare_ic_sized_like_a_catalogued_package_is_recognized_by_physical_size():
+    # Per user direction: a bare IC like an 8-pin op-amp has no EIA size
+    # code and no catalogued PIN-COUNT table entry, but it still has a
+    # real physical footprint -- and a real top-down pictorial view
+    # identifies a part by the size of the body actually sitting on the
+    # board, same as looking at the real board would. A cell with no
+    # pin= tags at all (so the pin-count/span check has nothing to go
+    # on) but an overall (length, width) matching a catalogued package
+    # body -- here, SOT_14's 8.65 x 3.90 mm -- is recognized as a
+    # component by that physical size alone, purely geometric, with no
+    # reference to layer thickness.
+    from hlayout.core.units import DBU_MM
+    from hlayout.io.techfile import save_resistor_geometry_rules
     s = _fresh_session()
-    s.new_cell("ALUMINA_SUBSTRATE")
-    s.rect(61, 0, 0, 2000, 2000)  # outline layer, no thickness saved for it
+    s.new_cell("LM741")
+    length_dbu = round(8.65 / DBU_MM)
+    width_dbu = round(3.90 / DBU_MM)
+    s.rect(20, 0, 0, length_dbu, width_dbu)  # body footprint, no pin= tags
     s.use_cell("TOP")
     save_resistor_geometry_rules(s.library, {
         "overlap_a": 200, "pad_b": 500, "space_c": 200, "glaze_oversize": 50,
         "keepout_oversize": 0, "resistor_layer": -1, "conductor_layer": 3,
         "glaze_layer": -1, "doc_layer": -1, "keepout_layer": -1, "ink_layers": {},
     })
-    save_layer_thickness(s.library, {"3": 12.0})  # 61 deliberately absent
-    s.rect(3, 500, 500, 900, 900)  # conductor that must remain visible
-    s.sref("ALUMINA_SUBSTRATE", (0, 0))
+    s.rect(3, 0, 0, length_dbu + 5000, width_dbu + 5000)  # conductor under the whole chip
+    s.sref("LM741", (0, 0))
     written = s.mask_op_top_view(63)
     assert written
     paths = [sh for sh in s.cell.shapes if sh.layer == 63]
-    # the substrate is walked into like any other non-component cell,
-    # so the conductor beneath it still shows up in the result.
-    assert _min_dist_to_paths((700, 900), paths) < 1
-
-
-def test_top_view_resistor_keepout_layer_does_not_make_it_a_component():
-    # Regression: generate_resistor() draws every resistor's own
-    # dielectric keep-out rectangle (resistor_geometry_rules'
-    # keepout_layer, oversized by keepout_oversize on all sides)
-    # directly inside its own device cell. When that layer is drawn
-    # UNFILLED -- the common convention for a non-physical clearance
-    # boundary, not a real film -- default_layer_thickness()'s generic
-    # catch-all skips it (it only picks up FILLED, visible geometry),
-    # and it isn't one of the named role layers either. Left unhandled,
-    # is_component_cell()'s film/non-film fallback test then sees an
-    # "unknown" layer on every resistor device cell and wrongly
-    # classifies EVERY resistor as its own topmost occluding component
-    # -- so its oversized keep-out margin (not just its own body) cuts
-    # into whatever conductor happens to run nearby, underneath that
-    # margin but well outside the resistor's actual footprint.
-    from hlayout.io.techfile import save_layer_thickness, save_resistor_geometry_rules
-    s = _fresh_session()
-    s.new_cell("R1")
-    s.rect(30, 0, 0, 100, 100)          # resistor ink
-    s.rect(19, -20, -20, 120, 120)      # glaze
-    s.rect(3, -150, 0, 0, 100)          # conductor pad 1
-    s.rect(3, 100, 0, 250, 100)         # conductor pad 2
-    s.rect(7, -300, -300, 400, 400)     # oversized dielectric keep-out margin
-    s.use_cell("TOP")
-    s.library.layers[7].fill = False    # keep-out drawn unfilled, as is conventional
-    save_resistor_geometry_rules(s.library, {
-        "overlap_a": 150, "pad_b": 150, "space_c": 100, "glaze_oversize": 20,
-        "keepout_oversize": 200, "resistor_layer": 30, "conductor_layer": 3,
-        "glaze_layer": 19, "doc_layer": 62, "keepout_layer": 7,
-        "ink_layers": {"300000": 17},
-    })
-    save_layer_thickness(s.library, {"3": 12.0, "19": 20.0, "30": 15.0})  # 7 deliberately absent
-    # a trace that runs well outside R1's own body/pads/glaze, but
-    # squarely inside its oversized keep-out rectangle.
-    s.rect(3, 260, 260, 290, 290)
-    s.sref("R1", (0, 0))
-    written = s.mask_op_top_view(63)
-    assert written
-    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
-    # the nearby trace is untouched -- R1's keep-out margin isn't an
-    # occluding component footprint.
-    assert _min_dist_to_paths((275, 260), paths) < 1
-
-
-def test_top_view_resistor_device_cell_still_not_a_component_with_the_fallback_active():
-    # The is_component_cell() fallback must not resurrect the earlier
-    # regression: a resistor device cell whose every layer is covered by
-    # the design's own explicitly saved layer_thickness is still not a
-    # component, even though the fallback test runs for it too.
-    from hlayout.io.techfile import save_layer_thickness, save_resistor_geometry_rules
-    s = _fresh_session()
-    s.new_cell("R1_DEVICE")
-    s.rect(3, 0, 0, 100, 100)
-    s.rect(4, 150, 0, 250, 20)
-    s.rect(19, 0, 0, 100, 100)
-    s.use_cell("TOP")
-    save_resistor_geometry_rules(s.library, {
-        "overlap_a": 200, "pad_b": 500, "space_c": 200, "glaze_oversize": 50,
-        "keepout_oversize": 0, "resistor_layer": 30, "conductor_layer": 3,
-        "glaze_layer": 19, "doc_layer": -1, "keepout_layer": -1, "ink_layers": {},
-    })
-    save_layer_thickness(s.library, {"3": 12.0, "4": 10.0, "19": 20.0})
-    s.rect(3, 500, 500, 900, 900)
-    s.sref("R1_DEVICE", (0, 0))
-    s.mask_op_top_view(63)
-    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
-    assert _min_dist_to_paths((200, 20), paths) < 1
+    # LM741 IS recognized as an occluding component now -- its own edge
+    # cuts a real notch into the conductor beneath it.
+    assert _min_dist_to_paths((length_dbu, width_dbu // 2), paths) < 1
+    # conductor's own outer edge, well outside LM741's footprint, is
+    # untouched.
+    assert _min_dist_to_paths((length_dbu + 5000, width_dbu + 5000), paths) < 1
 
 
 def test_top_view_component_footprint_hole_from_a_stroked_outline_path_is_filled():

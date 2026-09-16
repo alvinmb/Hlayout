@@ -21,6 +21,7 @@ from hlayout.io.component_match import (
     find_step_file,
     footprint_pin_stats,
     gullwing_package_table,
+    match_gullwing_by_bbox,
     match_gullwing_by_footprint,
     match_passive_by_name,
 )
@@ -70,7 +71,10 @@ def test_match_passive_by_name_rejects_an_ambiguous_name():
 
 def test_gullwing_package_table_derives_sot23():
     table = gullwing_package_table()
-    assert table["SOT_23"] == {"pin_count": 3, "x_span_mm": pytest.approx(0.95)}
+    assert table["SOT_23"] == {
+        "pin_count": 3, "x_span_mm": pytest.approx(0.95),
+        "length_mm": 2.9, "width_mm": 1.3,
+    }
 
 
 def test_gullwing_package_table_derives_pkg20_from_soic_leads():
@@ -94,7 +98,10 @@ def test_gullwing_package_table_respects_overrides():
     custom_sot = {"MY_SOT": dict(L=1, W=1, H=1, lead_t=0.1, lead_out=0.1, lead_foot=0.1,
                                   leads_neg_y=[(-1.0, 0.4)], leads_pos_y=[(1.0, 0.4)])}
     table = gullwing_package_table(sot_packages=custom_sot)
-    assert table["MY_SOT"] == {"pin_count": 2, "x_span_mm": pytest.approx(2.0)}
+    assert table["MY_SOT"] == {
+        "pin_count": 2, "x_span_mm": pytest.approx(2.0),
+        "length_mm": 1, "width_mm": 1,
+    }
     assert "SOT_23" not in table
 
 
@@ -228,6 +235,48 @@ def test_match_gullwing_by_footprint_ambiguous_returns_none():
     }
     assert match_gullwing_by_footprint({"pin_count": 4, "x_span_mm": 1.0, "y_span_mm": 1.0},
                                         table) is None
+
+
+# --- match_gullwing_by_bbox ---------------------------------------------------
+# The last-resort match for a truly bare part with no pin= tags at all
+# (so footprint_pin_stats() has nothing to go on) -- by its own overall
+# physical (length, width) alone, e.g. an op-amp IC with no EIA size
+# code and no catalogued pin-pattern table entry (see
+# hlayout.scripting.api._matched_component_footprint()'s own use of
+# this, gated on stats is None).
+
+def test_match_gullwing_by_bbox_exact():
+    table = gullwing_package_table()
+    assert match_gullwing_by_bbox(8.65, 3.90, table) == "SOT_14"
+
+
+def test_match_gullwing_by_bbox_within_tolerance():
+    table = gullwing_package_table()
+    assert match_gullwing_by_bbox(8.9, 3.7, table) == "SOT_14"
+
+
+def test_match_gullwing_by_bbox_wrong_orientation_still_matches():
+    # length/width swapped (a footprint rotated 90 degrees) still hits
+    # the same package -- orientation-independent, same convention
+    # match_gullwing_by_footprint() uses for its own span check.
+    table = gullwing_package_table()
+    assert match_gullwing_by_bbox(3.90, 8.65, table) == "SOT_14"
+
+
+def test_match_gullwing_by_bbox_too_far_off():
+    table = gullwing_package_table()
+    assert match_gullwing_by_bbox(20.0, 20.0, table) is None
+
+
+def test_match_gullwing_by_bbox_ambiguous_between_close_family_members_returns_none():
+    # SOT_14/16/18 share the same 3.9mm width and sit close enough in
+    # length (8.65/9.90/11.16mm) that a loose tolerance would overlap
+    # them all -- BBOX_SIZE_TOLERANCE is deliberately tight enough that
+    # a candidate squarely between two of them stays ambiguous rather
+    # than guessing.
+    table = gullwing_package_table()
+    midpoint = (8.65 + 9.90) / 2.0
+    assert match_gullwing_by_bbox(midpoint, 3.90, table) is None
 
 
 # --- _gullwing_rotation_correction -------------------------------------------

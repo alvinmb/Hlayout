@@ -97,17 +97,17 @@ def _matched_component_footprint(library, cell_name, component_models):
     component_models entry (manual or already auto-matched), a name
     carrying a known EIA size code (component_match.match_passive_by_name()),
     a footprint matching a known gull-wing package's pin pattern
-    (component_match.match_gullwing_by_footprint()), or -- for a "bare"
-    part that name/footprint matching can't identify at all (an IC with
-    no size code and no catalogued pin-pattern table entry, e.g. an
-    8-pin op-amp) -- the exact same film/non-film layer test
-    hlayout.io.freecadio.is_component_cell() already uses, which is
-    what Session.match_freecad_components()/the Component Library
-    Manager already lists it under. Reusing that (rather than
-    rebuilding a separate, parallel "is this a component" answer) means
-    a cell you can already see listed as a component in the Component
-    Library Manager is treated as one here too, even before it has (or
-    ever gets) a matched or manually-assigned 3D model.
+    (component_match.match_gullwing_by_footprint()), or -- for a truly
+    "bare" part with no pin= tags at all, so the pin-pattern check has
+    nothing to go on (e.g. an op-amp IC placed with no pin footprint
+    metadata) -- its own overall PHYSICAL size (length x width,
+    hierarchy included) matching a catalogued package body
+    (component_match.match_gullwing_by_bbox()). Deliberately NAME/
+    FOOTPRINT/PHYSICAL-SIZE ONLY, with no reference to layer thickness
+    at all -- a top-down pictorial view is about stacking ORDER, not
+    fired-film thickness, and a cell that isn't in component_models and
+    matches none of the above is walked into instead, the same as any
+    other non-component cell.
 
     A component's own body-outline shape is often a thin PATH (a
     stroked ring around the body, not a filled area -- see
@@ -133,19 +133,14 @@ def _matched_component_footprint(library, cell_name, component_models):
         shape_to_shapely,
     )
     from ..core.shapes import expand_arefs_to_srefs
+    from ..core.units import DBU_MM
     from ..io.component_match import (
         eia_size_tokens,
         footprint_pin_stats,
         gullwing_package_table,
+        match_gullwing_by_bbox,
         match_gullwing_by_footprint,
         match_passive_by_name,
-    )
-    from ..io.freecadio import is_component_cell
-    from ..io.techfile import (
-        default_layer_thickness,
-        load_dielectric_rules,
-        load_layer_thickness,
-        load_resistor_geometry_rules,
     )
     from shapely.geometry import MultiPolygon, Polygon
     from shapely.ops import unary_union
@@ -164,35 +159,22 @@ def _matched_component_footprint(library, cell_name, component_models):
     tokens = eia_size_tokens()
     table = gullwing_package_table()
     base_models = dict(component_models) if component_models else {}
-    thick = load_layer_thickness(library) or default_layer_thickness(library)
-    fallback_film_layers = {int(k) for k in thick}
-    # keepout_layer/doc_layer (drawn directly inside EVERY resistor's own
-    # device cell by generate_resistor(), oversized by keepout_oversize)
-    # and the dielectric's own keepout_layers are non-physical marker
-    # geometry -- never a real film -- but default_layer_thickness() has
-    # no entry for them unless they happen to also carry filled+visible
-    # drawn geometry elsewhere. Left unhandled, a keepout drawn UNFILLED
-    # (the common convention for a clearance outline) falls outside
-    # is_component_cell()'s film/non-film test, wrongly turning every
-    # resistor device cell into "a component" -- merging its oversized,
-    # commonly touching keepout margin into the same topmost occluding
-    # blob as the design's real placed components.
-    try:
-        rg = load_resistor_geometry_rules(library)
-        for n in (rg.get("keepout_layer"), rg.get("doc_layer")):
-            if isinstance(n, int) and n >= 0:
-                fallback_film_layers.add(n)
-    except Exception:
-        pass
-    try:
-        dr = load_dielectric_rules(library)
-        for n in dr.get("keepout_layers") or []:
-            if isinstance(n, int) and n >= 0:
-                fallback_film_layers.add(n)
-    except Exception:
-        pass
 
     def is_recognized(cn):
+        # Deliberately NAME/FOOTPRINT ONLY -- a top-down pictorial view
+        # is about stacking ORDER, never fired-film thickness (see this
+        # function's own docstring). An earlier fallback reused
+        # is_component_cell()'s film/non-film thickness test for "bare"
+        # parts with no name/footprint match, but thickness is too
+        # leaky a proxy for "is this a component": it wrongly swallowed
+        # the design's own substrate cell, then every resistor device
+        # cell (via its own keep-out layer, conventionally drawn
+        # unfilled), then any resistor whose specific ink sublayer
+        # simply had no thickness saved -- three separate ways real
+        # design geometry got merged into one giant occluding
+        # "components" blob. A cell that isn't in component_models and
+        # doesn't match a name or footprint is walked into instead,
+        # contributing its own layers to the ordinary tiers.
         if cn in base_models:
             return True
         if match_passive_by_name(cn, tokens) is not None:
@@ -201,19 +183,23 @@ def _matched_component_footprint(library, cell_name, component_models):
         stats = footprint_pin_stats(c) if c is not None else None
         if stats is not None and match_gullwing_by_footprint(stats, table) is not None:
             return True
-        # A cell named like the substrate is the BASE of the stack, not
-        # a topmost occluding component -- is_component_cell()'s own
-        # film/non-film test has no idea about stacking role, so left
-        # unchecked it would (and, confirmed live, did) treat a giant
-        # board-sized substrate shape as "a component" sitting on top
-        # of everything, occluding the entire design underneath it.
-        if any(w in cn.lower() for w in ("substrate", "alumina", "ceramic")):
-            return False
-        # Bare part fallback: neither a size code nor a catalogued pin
-        # pattern identifies it, but it's still listed as a component
-        # by Session.match_freecad_components()/the Component Library
-        # Manager -- treat it the same way here.
-        return is_component_cell(library, cn, fallback_film_layers, base_models)
+        if c is not None and stats is None:
+            # A truly "bare" part -- no pin= tags anywhere, so
+            # footprint_pin_stats() has nothing to go on and the pin-
+            # count/span check above can never run at all (e.g. an
+            # op-amp IC placed without any pin footprint metadata).
+            # Last resort: match by its own overall PHYSICAL footprint
+            # size (length x width, hierarchy included) against a
+            # catalogued package body -- still purely geometric, still
+            # nothing to do with layer thickness.
+            bbox = library.cell_bbox(cn)
+            if bbox is not None:
+                x0, y0, x1, y1 = bbox
+                length_mm = (x1 - x0) * DBU_MM
+                width_mm = (y1 - y0) * DBU_MM
+                if match_gullwing_by_bbox(length_mm, width_mm, table) is not None:
+                    return True
+        return False
 
     geoms = []
 

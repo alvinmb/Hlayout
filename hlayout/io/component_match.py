@@ -74,6 +74,16 @@ from .techfile import default_layer_thickness, load_layer_thickness
 #: pad size/shape isn't modeled here at all, only pin count + spacing.
 X_SPAN_TOLERANCE = 0.30
 
+#: How far a candidate's own overall (length, width) may miss a
+#: package's body size and still count as a match_gullwing_by_bbox()
+#: match. Much tighter than X_SPAN_TOLERANCE: with no pin count to
+#: filter on first, physical size is the ONLY signal, and the SOT-14/
+#: 16/18 family's body lengths (8.65/9.90/11.16 mm) sit only ~12-15%
+#: apart from each other -- X_SPAN_TOLERANCE's 30% window overlaps all
+#: three at once (ambiguous, so nothing matches at all); this stays
+#: comfortably under that gap.
+BBOX_SIZE_TOLERANCE = 0.10
+
 
 @dataclass
 class Match:
@@ -224,6 +234,8 @@ def gullwing_package_table(sot_packages=None, pkg20=None) -> Dict[str, dict]:
         table[name] = {
             "pin_count": len(entry.get("leads_neg_y", ())) + len(entry.get("leads_pos_y", ())),
             "x_span_mm": max(xs) - min(xs),
+            "length_mm": entry["L"],
+            "width_mm": entry["W"],
         }
 
     leads = _soic_leads(pkg["leads_per_side"], pkg["pitch_mm"])
@@ -231,6 +243,8 @@ def gullwing_package_table(sot_packages=None, pkg20=None) -> Dict[str, dict]:
     table["PKG20"] = {
         "pin_count": pkg["leads_per_side"] * 2,
         "x_span_mm": max(xs) - min(xs),
+        "length_mm": pkg["length_mm"],
+        "width_mm": pkg["width_mm"],
     }
     return table
 
@@ -306,6 +320,39 @@ def match_gullwing_by_footprint(stats: dict, table: Optional[dict] = None,
         lo, hi = expected * (1 - tolerance), expected * (1 + tolerance)
         if lo <= x_span <= hi or lo <= y_span <= hi:
             found.add(name)
+    return next(iter(found)) if len(found) == 1 else None
+
+
+def match_gullwing_by_bbox(length_mm: float, width_mm: float, table: Optional[dict] = None,
+                            tolerance: float = BBOX_SIZE_TOLERANCE) -> Optional[str]:
+    """Package name whose own body (length_mm, width_mm) is a close
+    match for a candidate's OVERALL physical footprint bounding box --
+    the last resort for a truly "bare" part with no pin= tags at all
+    (so footprint_pin_stats() has nothing to go on and
+    match_gullwing_by_footprint() can never run), e.g. an op-amp IC
+    with no EIA size code and no catalogued pin-count table entry.
+    Recognizing it by its physical L x W alone -- not by pin count, not
+    by fired-film thickness -- still matches how a real top-down
+    pictorial view identifies a part: by the size of the body actually
+    sitting on the board.
+
+    Checked BOTH ways round (candidate's length against the package's
+    length OR its width, and vice versa) so footprint orientation
+    doesn't matter, the same convention match_gullwing_by_footprint()
+    uses for its own span check. None if zero or more than one package
+    matches (ambiguous -> left unmatched)."""
+    table = gullwing_package_table() if table is None else table
+    found = set()
+    for name, spec in table.items():
+        pkg_l, pkg_w = spec.get("length_mm"), spec.get("width_mm")
+        if not pkg_l or not pkg_w:
+            continue
+        for l_ref, w_ref in ((pkg_l, pkg_w), (pkg_w, pkg_l)):
+            lo_l, hi_l = l_ref * (1 - tolerance), l_ref * (1 + tolerance)
+            lo_w, hi_w = w_ref * (1 - tolerance), w_ref * (1 + tolerance)
+            if lo_l <= length_mm <= hi_l and lo_w <= width_mm <= hi_w:
+                found.add(name)
+                break
     return next(iter(found)) if len(found) == 1 else None
 
 
