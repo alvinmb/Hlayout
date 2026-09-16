@@ -53,9 +53,11 @@ import os
 import tempfile
 from typing import Dict, List, Optional, Tuple
 
-from ..core.library import Library
+from ..core.errors import CellError
+from ..core.library import Library, _transform_bbox
 from ..core.shapes import Path, Polygon, Rectangle, Text, expand_arefs_to_srefs
 from ..core.units import DBU_MM
+from .techfile import load_refdes_annotation_layer
 
 _MAX_DEPTH = 64
 
@@ -108,10 +110,26 @@ def _flatten_for_print(library: Library, cell_name: str):
     visibility -- callers filter to visible layers themselves (see
     render_cell_svg()) so hidden_layers_with_data() can also see what
     a hidden layer would have drawn, to explain a shape's absence from
-    print rather than just silently reproducing it."""
+    print rather than just silently reproducing it.
+
+    A placed instance's SRef.label (the draggable ref-des annotation
+    every placed part gets -- see Session.sref()'s own docstring) is
+    NOT itself real geometry, so it's invisible to this walk's own
+    ``cell.shapes`` loop above -- exactly the gap that made a printed
+    page come out with no ref-des text at all even though the canvas
+    clearly shows one floating over every part. Mirroring
+    hlayout.io.dxfio._flatten_texts_and_refdes()'s own convention: a
+    label already baked as a real Text shape inside the placed cell
+    (``sh.text == ref.label``) is left alone (the ordinary shapes loop
+    above already picks it up); otherwise a Text entry is synthesized
+    here at the child's own bbox centre plus its label_offset, on
+    load_refdes_annotation_layer()'s layer -- so PRINT and DXF export
+    agree on where a ref-des ends up without either one baking
+    anything into the design itself."""
     polys: Dict[int, List[List[Tuple[float, float]]]] = {}
     paths: Dict[int, List[Tuple[List[Tuple[float, float]], float]]] = {}
     texts: Dict[int, List[Tuple[Tuple[float, float], str]]] = {}
+    refdes_layer = load_refdes_annotation_layer(library)
 
     def walk(name, transform, scale, depth):
         if depth > _MAX_DEPTH or name not in library.cells:
@@ -143,6 +161,33 @@ def _flatten_for_print(library: Library, cell_name: str):
                 rx = x * cos_t - y * sin_t
                 ry = x * sin_t + y * cos_t
                 return parent((rx + ox, ry + oy))
+
+            if ref.label and refdes_layer is not None and refdes_layer >= 0:
+                child = library.cells.get(ref.cell_name)
+                baked = None
+                if child is not None:
+                    for sh in child.shapes:
+                        if isinstance(sh, Text) and sh.text == ref.label:
+                            baked = sh
+                            break
+                if baked is None:
+                    try:
+                        box = library.cell_bbox(ref.cell_name)
+                    except CellError:
+                        box = None
+                    if box is not None:
+                        x1, y1, x2, y2 = _transform_bbox(box, ref)
+                        cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+                    else:
+                        cx, cy = ref.origin
+                    lox, loy = ref.label_offset
+                    # (cx+lox, cy+loy) is in `cell`'s own local space --
+                    # the same space shape.origin is in for cell.shapes
+                    # above -- so it goes through the accumulated
+                    # ancestor `transform`, not `child_transform`.
+                    texts.setdefault(refdes_layer, []).append(
+                        (transform((cx + lox, cy + loy)), ref.label)
+                    )
 
             walk(ref.cell_name, child_transform, scale * mag, depth + 1)
 

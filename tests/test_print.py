@@ -49,6 +49,75 @@ def test_render_cell_svg_excludes_hidden_layers_from_the_bbox_too():
     assert f'width="{1000 * DBU_MM:.3f}mm"' in svg   # just the visible 1x1mm square
 
 
+# --- Reference designators (SRef.label) --------------------------------
+# A placed instance's ref-des label is a draggable canvas annotation,
+# not real geometry (see SRef's own docstring) -- so it's invisible to
+# a plain shapes walk. render_cell_svg() must synthesize it the same
+# way DXF export already does (hlayout.io.dxfio), or a printed page
+# comes out with no ref-des text at all despite the canvas showing one
+# over every part.
+
+def _design_with_labeled_part():
+    s = Session.new("PRINTTEST")
+    s.new_cell("TOP")
+    s.new_cell("CAP_0805")
+    s.rect(20, 0, 0, 500, 300)
+    s.use_cell("TOP")
+    from hlayout.io.techfile import save_refdes_annotation_layer
+    save_refdes_annotation_layer(s.library, 62)
+    s.sref("CAP_0805", (1000, 1000), label="C1")
+    return s
+
+
+def test_print_renders_an_unbaked_ref_des_label():
+    s = _design_with_labeled_part()
+    svg, layer_order, _scale = render_cell_svg(s.library, "TOP", scale=1.0)
+    assert 62 in layer_order
+    assert ">C1<" in svg
+
+
+def test_print_ref_des_label_positioned_at_instance_bbox_centre_plus_offset():
+    s = _design_with_labeled_part()
+    from hlayout.io.printio import _flatten_for_print
+    _polys, _paths, texts = _flatten_for_print(s.library, "TOP")
+    # CAP_0805's own (0,0)-(500,300) bbox, placed at (1000,1000) ->
+    # centre at (1250, 1150), no label_offset given.
+    assert texts[62] == [((1250.0, 1150.0), "C1")]
+
+
+def test_print_skips_an_already_baked_ref_des_label():
+    # A cell whose own Text shape already spells out the SAME string as
+    # the instance's label must not get a SECOND, synthesized copy --
+    # the real Text shape is already picked up by the ordinary shapes
+    # walk.
+    s = Session.new("PRINTTEST")
+    s.new_cell("TOP")
+    s.new_cell("CAP_0805")
+    s.rect(20, 0, 0, 500, 300)
+    s.text(62, (250, 350), "C1")
+    s.use_cell("TOP")
+    from hlayout.io.techfile import save_refdes_annotation_layer
+    save_refdes_annotation_layer(s.library, 62)
+    s.sref("CAP_0805", (1000, 1000), label="C1")
+
+    from hlayout.io.printio import _flatten_for_print
+    _polys, _paths, texts = _flatten_for_print(s.library, "TOP")
+    assert len(texts[62]) == 1  # the baked one only, not a duplicate
+
+
+def test_print_ignores_ref_des_label_when_no_annotation_layer_configured():
+    s = Session.new("PRINTTEST")
+    s.new_cell("TOP")
+    s.new_cell("CAP_0805")
+    s.rect(20, 0, 0, 500, 300)
+    s.use_cell("TOP")
+    s.sref("CAP_0805", (1000, 1000), label="C1")  # refdes_annotation_layer left unset (-1)
+
+    from hlayout.io.printio import _flatten_for_print
+    _polys, _paths, texts = _flatten_for_print(s.library, "TOP")
+    assert not any("C1" in t for entries in texts.values() for _pos, t in entries)
+
+
 # --- hidden_layers_with_data() -- explains a shape's absence from print --
 
 def test_hidden_layers_with_data_reports_a_hidden_layer_with_geometry():
