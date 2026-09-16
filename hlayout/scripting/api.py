@@ -90,7 +90,8 @@ def _segments_cross(p1, p2, p3, p4) -> bool:
         and d1 != 0 and d2 != 0 and d3 != 0 and d4 != 0
 
 
-def _matched_component_footprint(library, cell_name, component_models, role_layers=frozenset()):
+def _matched_component_footprint(library, cell_name, component_models, role_layers=frozenset(),
+                                  excluded_layers=frozenset()):
     """The union, in world DBU coordinates, of every placed instance's
     OWN shapes (every layer -- pads included, not just an outline)
     whose cell is a recognized real component: an explicit
@@ -123,6 +124,20 @@ def _matched_component_footprint(library, cell_name, component_models, role_laye
     is what tells a real chip/die apart from the design's own substrate
     cell -- structurally just as "all non-role" as a die's own outline,
     but with no children at all.
+
+    Neither condition, though, can tell a small bare die apart from a
+    sealed hybrid PACKAGE's own outer case/lid (e.g. a 20-pin flatpack
+    built the same way -- outline + an ARef of external header pins) --
+    both are, structurally, "graphics-only with children". Confirmed
+    live: a real package case's own outline can legitimately span the
+    ENTIRE board (it physically does sit above everything inside it),
+    so recognizing it the same way as a small die is technically
+    correct but useless for an inside/assembly view that wants to see
+    THROUGH the case at the real circuit. ``excluded_layers`` (from
+    mask_op_top_view()'s own ``exclude_layers=``) is the caller's way
+    out: a graphics-only candidate whose own shapes are ALL on an
+    excluded layer is walked into instead of recognized, the same
+    escape hatch exclude_layers already gives every other tier.
 
     Deliberately NAME/FOOTPRINT/NON-ROLE-GRAPHICS ONLY, with no
     reference to layer thickness at all -- a top-down pictorial view is
@@ -193,7 +208,8 @@ def _matched_component_footprint(library, cell_name, component_models, role_laye
         if stats is not None and match_gullwing_by_footprint(stats, table) is not None:
             return True
         if (c is not None and c.shapes and (c.srefs or c.arefs)
-                and all(sh.layer not in role_layers for sh in c.shapes)):
+                and all(sh.layer not in role_layers for sh in c.shapes)
+                and not all(sh.layer in excluded_layers for sh in c.shapes)):
             # Regression: the design's own substrate cell (a single
             # shape on its own outline/marking layer, no children at
             # all) is STRUCTURALLY identical to a die's outline from an
@@ -206,6 +222,14 @@ def _matched_component_footprint(library, cell_name, component_models, role_laye
             # afterwards as instances of the chosen cell"); the
             # substrate never has any children at all. Requiring at
             # least one is what tells them apart.
+            #
+            # That still can't tell a small die apart from a sealed
+            # package's own outer case/lid (confirmed live: a 20-pin
+            # flatpack's outline legitimately spans the ENTIRE board,
+            # swallowing every real component and all conductor/
+            # resistor content inside it) -- excluded_layers is the
+            # caller's explicit way out, the same escape hatch every
+            # other tier already gets from exclude_layers=.
             return True
         return False
 
@@ -1912,7 +1936,15 @@ class Session:
         the role-based default without having to rebuild the whole
         layer set by hand -- e.g. a documentation or debug layer that
         happens to have real geometry and would otherwise show up in
-        the "other" tier. Ignored when `layers` is given explicitly
+        the "other" tier. It also reaches into component recognition
+        itself: a "bare" part recognized only by its own non-role
+        graphics (see _matched_component_footprint()) is walked into
+        instead of treated as an occluding component when ALL of its
+        own shapes sit on an excluded layer -- the escape hatch for a
+        sealed package's own outer case/lid, whose outline can
+        legitimately span the entire board and would otherwise occlude
+        every real component and all conductor/resistor content inside
+        it (confirmed live). Ignored when `layers` is given explicitly
         (there, just leave the layer out of the list instead).
 
         `hatch_conductor_pitch` (DBU, default None = no hatching), if
@@ -2025,8 +2057,8 @@ class Session:
             }
             other_layers = generic_layers - role_layers - substrate_layers
 
-            if exclude_layers:
-                excluded = {resolve(n) for n in exclude_layers}
+            excluded = {resolve(n) for n in exclude_layers} if exclude_layers else set()
+            if excluded:
                 resistor_layers -= excluded
                 conductor_layers -= excluded
                 glaze_layers -= excluded
@@ -2056,7 +2088,7 @@ class Session:
             if role_based:
                 comp_geom = _matched_component_footprint(
                     self.library, cell.name, load_component_models(self.library),
-                    resistor_layers | conductor_layers | glaze_layers)
+                    resistor_layers | conductor_layers | glaze_layers, excluded)
                 layer_geoms = [(comp_geom, True)]
                 for n in sorted(resistor_layers, reverse=True):
                     layer_geoms.append((gather(n), True))

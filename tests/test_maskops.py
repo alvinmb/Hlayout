@@ -1058,6 +1058,48 @@ def test_top_view_device_cell_mixing_role_and_non_role_layers_is_not_swallowed()
     assert _min_dist_to_paths((275, 260), paths) < 1
 
 
+def test_top_view_exclude_layers_stops_a_sealed_package_case_from_occluding_everything():
+    # Confirmed live: a sealed hybrid package's own outer case/lid (a
+    # 20-pin flatpack, outline + an ARef of external header pins) is
+    # recognized the same way a small bare die is -- graphics-only with
+    # children -- but its outline can legitimately span the ENTIRE
+    # board (it physically does sit above everything inside it), so it
+    # swallowed every real component and all conductor content inside
+    # it. Real repro: exclude_layers=[<the case's own outline layer>]
+    # is the way out -- a graphics-only candidate whose own shapes are
+    # ALL on an excluded layer is walked into instead of recognized,
+    # the same escape hatch exclude_layers already gives every other
+    # tier.
+    from hlayout.io.techfile import save_resistor_geometry_rules
+    s = _fresh_session()
+    s.new_cell("header_pin")
+    s.rect(58, -20, -20, 20, 20)
+    s.new_cell("PKG_20")
+    s.rect(61, -3400, -3400, 26000, 24600)  # the case's own huge outline
+    for i in range(4):  # a few header pins, enough to give it children
+        s.sref("header_pin", (i * 2000, 0), pin=str(i + 1))
+    s.use_cell("TOP")
+    save_resistor_geometry_rules(s.library, {
+        "overlap_a": 200, "pad_b": 500, "space_c": 200, "glaze_oversize": 50,
+        "keepout_oversize": 0, "resistor_layer": -1, "conductor_layer": 3,
+        "glaze_layer": -1, "doc_layer": -1, "keepout_layer": -1, "ink_layers": {},
+    })
+    s.rect(3, 5000, 5000, 15000, 15000)  # conductor, well inside the case's footprint
+    s.sref("PKG_20", (0, 0))
+
+    # bare: the case swallows the conductor entirely.
+    written = s.mask_op_top_view(63)
+    assert written
+    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    assert _min_dist_to_paths((10000, 15000), paths) > 10
+
+    # exclude=61 (the case's own outline layer): the conductor is back.
+    written2 = s.mask_op_top_view(62, exclude_layers=[61])
+    assert written2
+    paths2 = [sh for sh in s.cell.shapes if sh.layer == 62]
+    assert _min_dist_to_paths((10000, 15000), paths2) < 1
+
+
 def test_top_view_component_footprint_hole_from_a_stroked_outline_path_is_filled():
     # Regression: a component's body outline is often a thin PATH (a
     # stroked ring, not a filled area -- see
