@@ -891,6 +891,50 @@ def test_top_view_substrate_cell_is_not_a_component_even_with_the_fallback_activ
     assert _min_dist_to_paths((700, 900), paths) < 1
 
 
+def test_top_view_resistor_keepout_layer_does_not_make_it_a_component():
+    # Regression: generate_resistor() draws every resistor's own
+    # dielectric keep-out rectangle (resistor_geometry_rules'
+    # keepout_layer, oversized by keepout_oversize on all sides)
+    # directly inside its own device cell. When that layer is drawn
+    # UNFILLED -- the common convention for a non-physical clearance
+    # boundary, not a real film -- default_layer_thickness()'s generic
+    # catch-all skips it (it only picks up FILLED, visible geometry),
+    # and it isn't one of the named role layers either. Left unhandled,
+    # is_component_cell()'s film/non-film fallback test then sees an
+    # "unknown" layer on every resistor device cell and wrongly
+    # classifies EVERY resistor as its own topmost occluding component
+    # -- so its oversized keep-out margin (not just its own body) cuts
+    # into whatever conductor happens to run nearby, underneath that
+    # margin but well outside the resistor's actual footprint.
+    from hlayout.io.techfile import save_layer_thickness, save_resistor_geometry_rules
+    s = _fresh_session()
+    s.new_cell("R1")
+    s.rect(30, 0, 0, 100, 100)          # resistor ink
+    s.rect(19, -20, -20, 120, 120)      # glaze
+    s.rect(3, -150, 0, 0, 100)          # conductor pad 1
+    s.rect(3, 100, 0, 250, 100)         # conductor pad 2
+    s.rect(7, -300, -300, 400, 400)     # oversized dielectric keep-out margin
+    s.use_cell("TOP")
+    s.library.layers[7].fill = False    # keep-out drawn unfilled, as is conventional
+    save_resistor_geometry_rules(s.library, {
+        "overlap_a": 150, "pad_b": 150, "space_c": 100, "glaze_oversize": 20,
+        "keepout_oversize": 200, "resistor_layer": 30, "conductor_layer": 3,
+        "glaze_layer": 19, "doc_layer": 62, "keepout_layer": 7,
+        "ink_layers": {"300000": 17},
+    })
+    save_layer_thickness(s.library, {"3": 12.0, "19": 20.0, "30": 15.0})  # 7 deliberately absent
+    # a trace that runs well outside R1's own body/pads/glaze, but
+    # squarely inside its oversized keep-out rectangle.
+    s.rect(3, 260, 260, 290, 290)
+    s.sref("R1", (0, 0))
+    written = s.mask_op_top_view(63)
+    assert written
+    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    # the nearby trace is untouched -- R1's keep-out margin isn't an
+    # occluding component footprint.
+    assert _min_dist_to_paths((275, 260), paths) < 1
+
+
 def test_top_view_resistor_device_cell_still_not_a_component_with_the_fallback_active():
     # The is_component_cell() fallback must not resurrect the earlier
     # regression: a resistor device cell whose every layer is covered by

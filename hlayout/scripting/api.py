@@ -141,7 +141,12 @@ def _matched_component_footprint(library, cell_name, component_models):
         match_passive_by_name,
     )
     from ..io.freecadio import is_component_cell
-    from ..io.techfile import default_layer_thickness, load_layer_thickness
+    from ..io.techfile import (
+        default_layer_thickness,
+        load_dielectric_rules,
+        load_layer_thickness,
+        load_resistor_geometry_rules,
+    )
     from shapely.geometry import MultiPolygon, Polygon
     from shapely.ops import unary_union
 
@@ -161,6 +166,31 @@ def _matched_component_footprint(library, cell_name, component_models):
     base_models = dict(component_models) if component_models else {}
     thick = load_layer_thickness(library) or default_layer_thickness(library)
     fallback_film_layers = {int(k) for k in thick}
+    # keepout_layer/doc_layer (drawn directly inside EVERY resistor's own
+    # device cell by generate_resistor(), oversized by keepout_oversize)
+    # and the dielectric's own keepout_layers are non-physical marker
+    # geometry -- never a real film -- but default_layer_thickness() has
+    # no entry for them unless they happen to also carry filled+visible
+    # drawn geometry elsewhere. Left unhandled, a keepout drawn UNFILLED
+    # (the common convention for a clearance outline) falls outside
+    # is_component_cell()'s film/non-film test, wrongly turning every
+    # resistor device cell into "a component" -- merging its oversized,
+    # commonly touching keepout margin into the same topmost occluding
+    # blob as the design's real placed components.
+    try:
+        rg = load_resistor_geometry_rules(library)
+        for n in (rg.get("keepout_layer"), rg.get("doc_layer")):
+            if isinstance(n, int) and n >= 0:
+                fallback_film_layers.add(n)
+    except Exception:
+        pass
+    try:
+        dr = load_dielectric_rules(library)
+        for n in dr.get("keepout_layers") or []:
+            if isinstance(n, int) and n >= 0:
+                fallback_film_layers.add(n)
+    except Exception:
+        pass
 
     def is_recognized(cn):
         if cn in base_models:
