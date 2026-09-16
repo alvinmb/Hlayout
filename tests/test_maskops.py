@@ -895,6 +895,51 @@ def test_top_view_bare_ic_sized_like_a_catalogued_package_is_recognized_by_physi
     # LM741 IS recognized as an occluding component now -- its own edge
     # cuts a real notch into the conductor beneath it.
     assert _min_dist_to_paths((length_dbu, width_dbu // 2), paths) < 1
+
+
+def test_top_view_bbox_matched_bare_ic_occludes_its_full_footprint_not_just_own_shapes():
+    # Regression: LM741's OWN direct shapes are often just a sparse
+    # body-outline marker -- the REAL lead/pad geometry lives in nested
+    # SRef instances (a round lead built from a shared via-cell
+    # template, per footprint_pin_stats()'s own docstring), which is
+    # exactly why the physical-size match measures library.cell_bbox()
+    # (recursive) rather than the cell's own shapes alone. Confirmed
+    # live: using the cell's own (sparse) target.shapes as the
+    # OCCLUDING footprint once it's bbox-recognized left the real,
+    # full-size footprint failing to punch a hole in the conductor
+    # beneath it -- only the tiny marker rectangle actually occluded
+    # anything. The occluding footprint for a bbox match must be a
+    # solid rectangle spanning that same recursive bbox instead.
+    from hlayout.core.units import DBU_MM
+    from hlayout.io.techfile import save_resistor_geometry_rules
+    s = _fresh_session()
+    s.new_cell("chip_pin")
+    s.rect(58, -1, -1, 1, 1)  # a near-zero-extent lead of its own
+    s.new_cell("LM741")
+    s.rect(61, 0, 0, 100, 100)  # sparse body-outline marker, NOT the real body
+    length_dbu = round(8.65 / DBU_MM)
+    width_dbu = round(3.90 / DBU_MM)
+    for i in range(8):
+        x = round(i * length_dbu / 7)  # 8 leads spanning the FULL length
+        s.sref("chip_pin", (x, 0), pin=str(i + 1))
+    s.sref("chip_pin", (0, width_dbu), pin="9")  # sets the full width too
+    s.use_cell("TOP")
+    save_resistor_geometry_rules(s.library, {
+        "overlap_a": 200, "pad_b": 500, "space_c": 200, "glaze_oversize": 50,
+        "keepout_oversize": 0, "resistor_layer": -1, "conductor_layer": 3,
+        "glaze_layer": -1, "doc_layer": -1, "keepout_layer": -1, "ink_layers": {},
+    })
+    s.rect(3, 0, 0, length_dbu + 5000, width_dbu + 5000)  # conductor under the whole chip
+    s.sref("LM741", (0, 0))
+    written = s.mask_op_top_view(63)
+    assert written
+    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    # LM741's REAL right edge (its full recursive bbox, far outside its
+    # own sparse 100x100 marker rectangle) must cut a genuine notch into
+    # the conductor beneath it -- that notch boundary passes exactly
+    # through this point if (and only if) the full footprint occluded,
+    # not just the tiny marker.
+    assert _min_dist_to_paths((length_dbu, width_dbu // 2), paths) <= 1
     # conductor's own outer edge, well outside LM741's footprint, is
     # untouched.
     assert _min_dist_to_paths((length_dbu + 5000, width_dbu + 5000), paths) < 1
