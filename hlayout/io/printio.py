@@ -45,6 +45,14 @@ Fidelity gaps (disclosed, not silently approximated):
     physical HAIRLINE_MM on the page, not the design's actual DBU
     coordinates. Do not read a printed outline's thickness as a
     dimension.
+  * A layer coloured white or near-white (routinely true for a layer
+    meant to stand out on this tool's own dark canvas, e.g.
+    CHIP_OUTLINE_COLOR) prints in BLACK instead (see
+    _print_safe_color()/PRINT_SAFE_LUMINANCE_CUTOFF) -- on paper, white
+    ink on a white page is genuinely invisible, not merely faint,
+    which otherwise silently dropped that layer's entire drawn content
+    (and its own legend swatch) with no visible sign anything was
+    missing. Do not read a printed layer's colour as its on-screen one.
 """
 
 import html
@@ -86,6 +94,33 @@ HAIRLINE_MM = 0.15
 
 def _hairline_dbu(scale_used: float) -> float:
     return HAIRLINE_MM / (DBU_MM * scale_used)
+
+
+#: Perceived-luminance (0-255, ITU-R BT.601) cutoff above which a layer's
+#: own colour is swapped for black on the printed page -- catches pure
+#: white and near-white (e.g. this tool's own CHIP_OUTLINE_COLOR="#ffffff",
+#: chosen for contrast against the app's dark canvas) without touching a
+#: merely light-but-visible colour like pale yellow.
+PRINT_SAFE_LUMINANCE_CUTOFF = 250.0
+
+
+def _print_safe_color(hex_color: str) -> str:
+    """``hex_color`` (e.g. "#ffffff"), or black if it's too light to
+    show up against PRINT's white page background. A layer coloured
+    for maximum contrast on this tool's own dark canvas is routinely
+    white or near-white -- on paper, white ink on a white page is
+    genuinely invisible, not merely faint, which silently dropped a
+    layer's entire drawn content from both the SVG and its own legend
+    swatch with no indication anything was wrong."""
+    h = (hex_color or "").lstrip("#")
+    if len(h) != 6:
+        return hex_color or "#000000"
+    try:
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    except ValueError:
+        return hex_color
+    luminance = 0.299 * r + 0.587 * g + 0.114 * b
+    return "#000000" if luminance > PRINT_SAFE_LUMINANCE_CUTOFF else hex_color
 
 
 def _auto_scale(width_mm: float, height_mm: float) -> float:
@@ -269,7 +304,7 @@ def render_cell_svg(library: Library, cell_name: str, margin_dbu: float = 2000.0
     ]
     for n in layer_order:
         layer = library.layers[n]
-        color = layer.color or "#000000"
+        color = _print_safe_color(layer.color)
         parts.append(f'<g id="layer-{n}">')
         for pts in polys.get(n, []):
             pts_attr = " ".join(f"{sx(x):.2f},{sy(y):.2f}" for x, y in pts)
@@ -323,9 +358,10 @@ def write_print_html(library: Library, cell_name: str, out_path: str = None,
     legend_rows = []
     for n in layer_order:
         layer = library.layers[n]
+        swatch_color = _print_safe_color(layer.color)
         legend_rows.append(
             f'<span style="display:inline-flex;align-items:center;margin-right:16px;">'
-            f'<span style="width:12px;height:12px;background:{layer.color};'
+            f'<span style="width:12px;height:12px;background:{swatch_color};'
             f'border:1px solid #333;display:inline-block;margin-right:4px;"></span>'
             f'{html.escape(f"{n}: {layer.name}")}</span>'
         )

@@ -10,6 +10,7 @@ from hlayout.core.library import Library
 from hlayout.io.printio import (
     PRINT_TARGET_MM,
     _auto_scale,
+    _print_safe_color,
     hidden_layers_with_data,
     render_cell_svg,
     send_to_system_printer,
@@ -24,6 +25,59 @@ def _design():
     top.add_rectangle(0, 0, 0, 1000, 1000)
     top.add_path(1, [(0, 0), (2000, 0)], width=100, cap="round")
     return s
+
+
+# --- _print_safe_color() -- a layer coloured for the dark canvas must ------
+# still be visible on PRINT's white page (confirmed live: a layer coloured
+# pure white, e.g. Session.CHIP_OUTLINE_COLOR, silently dropped its entire
+# drawn content -- white ink on a white page -- with no visible sign
+# anything was missing).
+
+def test_print_safe_color_swaps_pure_white_for_black():
+    assert _print_safe_color("#ffffff") == "#000000"
+
+
+def test_print_safe_color_swaps_near_white_for_black():
+    assert _print_safe_color("#fefefe") == "#000000"
+
+
+def test_print_safe_color_leaves_a_real_color_untouched():
+    assert _print_safe_color("#e6194b") == "#e6194b"
+
+
+def test_print_safe_color_leaves_a_light_but_visible_color_untouched():
+    # Pale yellow reads as a light yellow tint against white paper --
+    # low contrast, but genuinely visible, unlike true white -- so it's
+    # deliberately NOT swapped just for being light.
+    assert _print_safe_color("#ffff00") == "#ffff00"
+
+
+def test_print_safe_color_leaves_black_unchanged():
+    assert _print_safe_color("#000000") == "#000000"
+
+
+def test_print_safe_color_handles_missing_color():
+    assert _print_safe_color("") == "#000000"
+    assert _print_safe_color(None) == "#000000"
+
+
+def test_render_cell_svg_draws_a_white_layer_in_black_instead():
+    s = _design()
+    s.library.layers.set_style(0, color="#ffffff")
+    svg, _layer_order, _scale = render_cell_svg(s.library, "TOP", scale=1.0)
+    assert 'stroke="#000000"' in svg
+    assert 'stroke="#ffffff"' not in svg
+    assert 'fill="#ffffff"' not in svg
+
+
+def test_write_print_html_legend_swatch_is_also_print_safe():
+    s = _design()
+    s.library.layers.set_style(0, color="#ffffff")
+    path = write_print_html(s.library, "TOP")
+    html = open(path, encoding="utf-8").read()
+    os.remove(path)
+    assert "background:#000000;" in html
+    assert "background:#ffffff;" not in html
 
 
 # --- render_cell_svg() ------------------------------------------------
