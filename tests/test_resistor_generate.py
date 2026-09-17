@@ -532,7 +532,9 @@ def test_generate_resistor_table_title_row_defaults_on_and_spans_full_width():
                                       row_height=row_height)
     cell = s.library.cells[name]
     texts = _table_cells(cell)
-    assert texts[(100.0, row_height)] == "RESISTOR TABLE"
+    # centred by default: total_width=8700, "RESISTOR TABLE" (14 chars)
+    # estimated at text_height*0.6 per char = 1260 -> x = (8700-1260)/2.
+    assert texts[(3720.0, row_height)] == "RESISTOR TABLE"
 
     lines = [sh for sh in cell.shapes if isinstance(sh, Path)]
     horiz = [ln for ln in lines if ln.points[0][1] == ln.points[1][1]]
@@ -551,6 +553,20 @@ def test_generate_resistor_table_title_row_defaults_on_and_spans_full_width():
     title_top = default_text_height * 1.2 + row_height
     assert all(max(ln.points[0][1], ln.points[1][1]) == title_top for ln in outer)
     assert all(max(ln.points[0][1], ln.points[1][1]) < title_top for ln in inner)
+
+
+def test_generate_resistor_table_title_inset_overrides_centering():
+    # Per user direction the title is centred by default; title_inset
+    # is the explicit opt-out for a plain left-aligned inset instead.
+    from hlayout.io.techfile import save_resistor_list
+    s = _fresh_session()
+    save_resistor_list(s.library, [
+        {"ref_des": "R1", "value": 100.0, "tolerance": "5%", "power_mw": 100.0,
+         "body_width": 1000.0, "selected_ink": 100.0},
+    ])
+    name = s.generate_resistor_table("RESTABLE_TEST", 62, title_inset=250.0)
+    texts = _table_cells(s.library.cells[name])
+    assert texts[(250.0, 250.0)] == "RESISTOR TABLE"
 
 
 def test_generate_resistor_table_title_can_be_omitted():

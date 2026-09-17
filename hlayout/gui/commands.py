@@ -244,8 +244,9 @@ a resistor; this draws it):
                                        has spaces, or pass title="" to omit it) adds one
                                        more row above the column headers, spanning the
                                        full table width as a single merged cell (no
-                                       column dividers through it) -- titleinset sets
-                                       its own left-edge text inset. Generic and
+                                       column dividers through it), horizontally centred
+                                       by default -- pass titleinset=<dbu> to left-align
+                                       it at that inset instead. Generic and
                                        re-runnable -- overwrite defaults to 1, so
                                        running it again after adding/editing resistors
                                        just rebuilds the cell fresh; place it (SREF)

@@ -1455,7 +1455,8 @@ class Session:
                                  text_height: float = 150.0, line_layer=None,
                                  line_width: float = 20.0,
                                  title: Optional[str] = "RESISTOR TABLE",
-                                 title_inset: float = 100.0, overwrite: bool = True) -> str:
+                                 title_inset: Optional[float] = None,
+                                 overwrite: bool = True) -> str:
         """Build a resistor BOM table -- REF DES / VALUE (OHMS) / TOL% /
         AIM VALUE / INK (OHMS/SQ) -- as a grid of Text shapes plus ruled
         row/column border lines, all in its own cell, generated fresh
@@ -1490,8 +1491,14 @@ class Session:
         `title` (default "RESISTOR TABLE"; pass None or "" to omit it)
         adds one more row ABOVE the column headers -- a single cell
         spanning the table's full width (no internal column dividers
-        through it, unlike every row below), with its own text inset
-        `title_inset` DBU from the left edge.
+        through it, unlike every row below), horizontally CENTRED in
+        that width by default (estimating its rendered width the same
+        way hlayout.core.shapes.Text.bbox() does: height * 0.6 per
+        character -- there's no real font-metrics table to measure
+        against, but this is the same estimate already used elsewhere
+        for a Text shape's own bbox, so it's at least self-consistent).
+        Pass `title_inset` (DBU) to left-align it at that inset from
+        the left edge instead of centring it.
 
         Raises LayoutError if there are no saved resistor rows to
         tabulate at all (Setup/the Resistor Designer hasn't saved a
@@ -1583,7 +1590,13 @@ class Session:
 
             if title:
                 title_top = header_top + row_height
-                cell.add_text(r_layer, (ox + title_inset, oy + row_height), title, height=h)
+                if title_inset is None:
+                    total_width = col_bounds[-1] - col_bounds[0]
+                    est_title_width = text_height * 0.6 * len(title)
+                    title_x = ox + max(0.0, (total_width - est_title_width) / 2.0)
+                else:
+                    title_x = ox + title_inset
+                cell.add_text(r_layer, (title_x, oy + row_height), title, height=h)
                 horiz_lines = [title_top] + row_tops
                 top = title_top
             else:
