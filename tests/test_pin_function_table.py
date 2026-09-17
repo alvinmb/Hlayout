@@ -86,9 +86,9 @@ def test_pin_function_table_custom_pins_per_group():
     name = s.generate_pin_function_table("PINTABLE", 62, 20, pins_per_group=5)
     rows = _pin_rows(s.library.cells[name])
     assert sorted(rows) == list(range(1, 21))
-    # 4 groups of 5 -> 4 "PIN NUM" headers, 4 "PIN FUNCTION" headers.
+    # 4 groups of 5 -> 4 "PIN #" headers, 4 "PIN FUNCTION" headers.
     texts = _all_texts(s.library.cells[name])
-    assert texts.count("PIN NUM") == 4
+    assert texts.count("PIN #") == 4
     assert texts.count("PIN FUNCTION") == 4
 
 
@@ -147,10 +147,27 @@ def test_pin_function_table_custom_title_text():
     assert "20-PIN HYBRID PACKAGE" in _all_texts(s.library.cells[name])
 
 
+def test_pin_function_table_groups_sit_edge_to_edge_by_default():
+    # Per user direction: no gap between sections by default -- group
+    # 1's own left border coincides exactly with group 0's own right
+    # border (not offset by any gap), and group 1's own right border
+    # sits at exactly 2x a single group's width.
+    s = _fresh_session()
+    col_widths = (800.0, 2000.0)
+    name = s.generate_pin_function_table("PINTABLE", 62, 20, col_widths=col_widths)
+    cell = s.library.cells[name]
+    lines = [sh for sh in cell.shapes if isinstance(sh, Path)]
+    vert = [ln for ln in lines if ln.points[0][0] == ln.points[1][0]]
+    x_positions = sorted({ln.points[0][0] for ln in vert})
+    group_width = sum(col_widths)
+    assert group_width in x_positions          # group 0's right == group 1's left
+    assert 2 * group_width in x_positions      # group 1's own right edge
+
+
 def test_pin_function_table_groups_are_separate_bordered_boxes_with_a_gap():
     # Each group is its OWN mini-table (outer box + one internal
-    # divider between PIN NUM/PIN FUNCTION) with empty space to the
-    # next group's own box -- not one continuous grid across groups.
+    # divider between PIN #/PIN FUNCTION) with empty space to the
+    # next group's own box, when group_gap is explicitly given.
     s = _fresh_session()
     col_widths = (800.0, 2000.0)
     group_gap = 300.0
@@ -214,7 +231,7 @@ def test_pintable_command_bar_pergroup_option():
     interp = CommandInterpreter(s, ScriptConsole(s))
     interp.run("PINTABLE PINTABLE_TEST 62 20 pergroup=5")
     texts = _all_texts(s.library.cells["PINTABLE_TEST"])
-    assert texts.count("PIN NUM") == 4
+    assert texts.count("PIN #") == 4
 
 
 def test_pintable_command_bar_requires_pin_count():

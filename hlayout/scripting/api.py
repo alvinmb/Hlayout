@@ -1628,13 +1628,13 @@ class Session:
                                      pins_per_group: int = 10,
                                      functions: Optional[dict] = None,
                                      origin=(0, 0), row_height: float = 250.0,
-                                     col_widths=(800.0, 2000.0), group_gap: float = 300.0,
+                                     col_widths=(800.0, 2000.0), group_gap: float = 0.0,
                                      text_height: float = 150.0, line_layer=None,
                                      line_width: float = 20.0,
                                      title: Optional[str] = "PIN FUNCTION TABLE",
                                      title_inset: Optional[float] = None,
                                      overwrite: bool = True) -> str:
-        """Build a pinout reference table -- one PIN NUM / PIN FUNCTION
+        """Build a pinout reference table -- one PIN # / PIN FUNCTION
         column-pair per group of `pins_per_group` pins (default 10),
         with groups placed side by side left to right -- as a grid of
         Text shapes plus ruled row/column border lines, in its own
@@ -1651,11 +1651,14 @@ class Session:
         centred within its own column, the same convention
         generate_resistor_table() uses.
 
-        `col_widths` (DBU, one per column: pin num, pin function) is
-        shared by every group; `group_gap` (DBU) is the empty space
-        between one group's own bordered box and the next -- each
-        group is its own separate mini-table, not one continuous grid
-        across all of them. `title` (default "PIN FUNCTION TABLE";
+        `col_widths` (DBU, one per column: pin #, pin function) is
+        shared by every group; `group_gap` (DBU, default 0 -- groups
+        sit edge to edge with no space between them) is the empty
+        space between one group's own bordered box and the next, if
+        any -- each group is still its own separate mini-table (with
+        its own outer border, drawn independently of its neighbours),
+        it just isn't visually separated from them at the default 0.
+        `title` (default "PIN FUNCTION TABLE";
         None/"" to omit) spans the FULL width of every group plus the
         gaps between them, centred by default (pass `title_inset` to
         left-align it instead) -- see generate_resistor_table()'s own
@@ -1680,7 +1683,7 @@ class Session:
                 f"pin_count ({pin_count}) must be a positive whole multiple of "
                 f"pins_per_group ({pins_per_group})"
             )
-        HEADINGS = ("PIN NUM", "PIN FUNCTION")
+        HEADINGS = ("PIN #", "PIN FUNCTION")
         if len(col_widths) != len(HEADINGS):
             raise LayoutError(f"col_widths must have {len(HEADINGS)} entries")
         if cell_name in self.library.cells:

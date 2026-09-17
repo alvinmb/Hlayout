@@ -258,7 +258,7 @@ a resistor; this draws it):
              [rowheight=<dbu>] [textheight=<dbu>] [linelayer=<n|name>]
              [linewidth=<dbu>] [groupgap=<dbu>] [title=<text>] [titleinset=<dbu>]
              [overwrite=0|1]
-                                       build a pinout reference table -- one PIN NUM /
+                                       build a pinout reference table -- one PIN # /
                                        PIN FUNCTION column-pair per group of pergroup
                                        pins (default 10), groups placed side by side
                                        left to right (e.g. 20 pins -> 2 groups, 50 pins
@@ -269,10 +269,10 @@ a resistor; this draws it):
                                        mapping exposed here; pass one directly in a
                                        script if you want pins pre-filled). Every cell's
                                        text is centred within its own column, same as
-                                       RESTABLE; groupgap is the empty space between one
-                                       group's own bordered box and the next -- each
-                                       group is its own separate mini-table, not one
-                                       continuous grid across all of them. title
+                                       RESTABLE; groupgap (default 0 -- groups sit edge
+                                       to edge) is the empty space between one group's
+                                       own bordered box and the next, if any -- each
+                                       group is still its own separate mini-table. title
                                        (default "PIN FUNCTION TABLE") spans the full
                                        width of every group plus the gaps between them,
                                        centred by default -- same title/titleinset/
