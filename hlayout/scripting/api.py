@@ -1536,9 +1536,20 @@ class Session:
         for w in col_widths[:-1]:
             col_x.append(col_x[-1] + w)
         h = int(round(text_height))
-        # A little headroom above each row's text baseline so the grid
-        # line above a row doesn't run through the text itself.
-        top_pad = row_height * 0.3
+        # Headroom above each row's text baseline so the grid line
+        # above a row clears the text instead of running through it --
+        # Text's own origin is its BOTTOM-left corner (see
+        # hlayout.core.shapes.Text.bbox()), so the glyphs extend UPWARD
+        # from the row's nominal y by text_height; the line above must
+        # clear that, not just leave a fraction of row_height that can
+        # be smaller than the text itself (confirmed live: it was,
+        # and the grid line cut right through the text).
+        top_pad = text_height * 1.2
+        if top_pad >= row_height:
+            raise LayoutError(
+                f"row_height ({row_height:g}) must be bigger than "
+                f"text_height*1.2 ({top_pad:g}) to leave room for the grid lines"
+            )
 
         with self._batch():
             cell = self.library.new_cell(cell_name)

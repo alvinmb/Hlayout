@@ -379,6 +379,48 @@ def _table_cells(cell):
     return {sh.origin: sh.text for sh in cell.shapes if isinstance(sh, Text)}
 
 
+def test_generate_resistor_table_text_does_not_cross_the_grid_line_above_it():
+    # Confirmed live: Text's own origin is its BOTTOM-left corner (see
+    # hlayout.core.shapes.Text.bbox()), so a row's text glyphs extend
+    # UPWARD from the row's nominal y by text_height. The row's own top
+    # grid line must clear that -- it was instead placed using a
+    # fraction of row_height with no relation to text_height at all,
+    # so the default text_height (150) comfortably exceeded that
+    # padding (row_height*0.3 = 75), and the grid line above every row
+    # ran right through the text.
+    from hlayout.io.techfile import save_resistor_list
+    s = _fresh_session()
+    save_resistor_list(s.library, [
+        {"ref_des": "R1", "value": 100.0, "tolerance": "5%", "power_mw": 100.0,
+         "body_width": 1000.0, "selected_ink": 100.0},
+    ])
+    row_height, text_height = 250.0, 150.0
+    name = s.generate_resistor_table("RESTABLE_TEST", 62, row_height=row_height,
+                                      text_height=text_height, title=None)
+    cell = s.library.cells[name]
+    # the header row's own text origin is at y=0 (oy); its glyphs reach
+    # up to y=text_height. The grid line directly above the header row
+    # must sit AT OR ABOVE that, never below it.
+    lines = [sh for sh in cell.shapes if isinstance(sh, Path)]
+    header_top_line_y = max(ln.points[0][1] for ln in lines
+                             if ln.points[0][1] == ln.points[1][1])
+    assert header_top_line_y >= text_height
+
+
+def test_generate_resistor_table_rejects_a_row_height_too_small_for_the_text():
+    from hlayout.io.techfile import save_resistor_list
+    s = _fresh_session()
+    save_resistor_list(s.library, [
+        {"ref_des": "R1", "value": 100.0, "tolerance": "5%", "power_mw": 100.0,
+         "body_width": 1000.0, "selected_ink": 100.0},
+    ])
+    try:
+        s.generate_resistor_table("RESTABLE_TEST", 62, row_height=100.0, text_height=150.0)
+        assert False, "expected LayoutError"
+    except LayoutError as e:
+        assert "row_height" in str(e)
+
+
 def test_generate_resistor_table_aim_value_matches_the_designers_own_formula():
     # aim value = value x (aim_pct% + tolerance%) -- see
     # hlayout.gui.resistor_designer.Resistor.aim_value()'s own docstring
@@ -505,7 +547,8 @@ def test_generate_resistor_table_title_row_defaults_on_and_spans_full_width():
     total_width = sum(col_widths)
     outer = [ln for ln in vert if ln.points[0][0] in (0.0, total_width)]
     inner = [ln for ln in vert if ln.points[0][0] not in (0.0, total_width)]
-    title_top = row_height * 0.3 + row_height
+    default_text_height = 150.0  # generate_resistor_table()'s own default
+    title_top = default_text_height * 1.2 + row_height
     assert all(max(ln.points[0][1], ln.points[1][1]) == title_top for ln in outer)
     assert all(max(ln.points[0][1], ln.points[1][1]) < title_top for ln in inner)
 
