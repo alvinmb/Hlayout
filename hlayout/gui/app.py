@@ -468,6 +468,7 @@ class App(tk.Tk):
         toolsm.add_command(label="Chip Wizard...", command=self.show_chip_wizard)
         toolsm.add_command(label="Mask Operations...", command=self.show_mask_op_dialog)
         toolsm.add_command(label="Mask Operation Batch...", command=lambda: open_maskop_batch_window(self))
+        toolsm.add_command(label="Top View...", command=self.show_topview_dialog)
         toolsm.add_command(label="DRC...", command=lambda: open_drc_window(self))
         toolsm.add_command(label="Extract Netlist...", command=self.show_extract_netlist_dialog)
         toolsm.add_command(label="Generate Dielectric Fill...", command=self.show_dielectric_dialog)
@@ -3185,6 +3186,200 @@ class App(tk.Tk):
                 )
             else:
                 msg = f"{op}: wrote {total} polygon(s) to layer {result_layer}"
+                if made_visible:
+                    msg += " (layer visibility turned on)"
+                self.status.set(msg)
+            win.destroy()
+
+        btn_row = ttk.Frame(win)
+        btn_row.pack(pady=(6, 12))
+        ttk.Button(btn_row, text="Apply", command=apply_and_close).pack(side="left", padx=6)
+        ttk.Button(btn_row, text="Cancel", command=win.destroy).pack(side="left", padx=6)
+
+        win.bind("<Escape>", lambda e: win.destroy())
+
+    def show_topview_dialog(self):
+        """Tools > Top View...: build a top-down, hidden-line-removal
+        pictorial view of the hybrid circuit (as in AutoCAD's HIDE) onto
+        a result layer -- the classic CAD/drafting sense of the term,
+        with a lower entry's outline genuinely notched wherever a
+        higher one covers it, not just drawn underneath it. With no
+        explicit layers, stacking follows the real fab process order by
+        ROLE regardless of layer numbers -- components (by name/
+        footprint/non-role graphics, never fired-film thickness) sit
+        topmost, then resistor ink, then conductor, then any other
+        layer with real geometry, then substrate; glaze and wire bonds
+        are both non-occluding overlays, always drawn in full. Backed
+        by Session.mask_op_top_view(); same operation as the TOPVIEW
+        command-bar command. Requires the shapely package."""
+        win = tk.Toplevel(self)
+        win.title("Top View")
+        win.transient(self)
+        win.grab_set()
+        win.resizable(False, False)
+
+        ttk.Label(
+            win,
+            text="Draw a top-down, hidden-line-removal pictorial view of the "
+                 "design onto a result layer -- components/dies occlude "
+                 "conductor/resistor beneath them, then substrate; glaze and "
+                 "wire bonds are always shown in full. Leave Explicit layers "
+                 "blank for the role-based default (recommended).",
+            wraplength=440, justify="left",
+        ).pack(anchor="w", padx=12, pady=(12, 6))
+
+        def layer_choices():
+            return [f"{n} ({self.session.library.layers[n].name})"
+                    for n in range(len(self.session.library.layers))]
+
+        form = ttk.Frame(win)
+        form.pack(padx=12, fill="x")
+
+        ttk.Label(form, text="Result layer:").grid(row=0, column=0, sticky="e", padx=4, pady=4)
+        result_var = tk.StringVar(value="")
+        result_combo = ttk.Combobox(form, textvariable=result_var, width=22, state="readonly",
+                                     values=layer_choices())
+        result_combo.grid(row=0, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="Explicit layers (advanced):").grid(
+            row=1, column=0, sticky="e", padx=4, pady=4)
+        layers_var = tk.StringVar(value="")
+        ttk.Entry(form, textvariable=layers_var, width=24).grid(
+            row=1, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="Exclude layers:").grid(row=2, column=0, sticky="e", padx=4, pady=4)
+        exclude_var = tk.StringVar(value="")
+        ttk.Entry(form, textvariable=exclude_var, width=24).grid(
+            row=2, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="Hatch conductor (mm, 0=off):").grid(
+            row=3, column=0, sticky="e", padx=4, pady=4)
+        hatch_var = tk.DoubleVar(value=0.0)
+        hatch_spin = ttk.Spinbox(form, from_=0.0, to=1e6, increment=0.001,
+                                  textvariable=hatch_var, width=14)
+        hatch_spin.grid(row=3, column=1, sticky="w", padx=4, pady=4)
+
+        angles_label = ttk.Label(form, text="Hatch angles (deg):")
+        angles_label.grid(row=4, column=0, sticky="e", padx=4, pady=4)
+        angles_var = tk.StringVar(value="45,-45")
+        angles_entry = ttk.Entry(form, textvariable=angles_var, width=24)
+        angles_entry.grid(row=4, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="Line width (mm):").grid(row=5, column=0, sticky="e", padx=4, pady=4)
+        width_var = tk.DoubleVar(value=dbu_to_mm(100))
+        ttk.Spinbox(form, from_=0.001, to=1e6, increment=0.001, textvariable=width_var, width=14).grid(
+            row=5, column=1, sticky="w", padx=4, pady=4)
+
+        ttk.Label(form, text="Apply to:").grid(row=6, column=0, sticky="e", padx=4, pady=4)
+        scope_var = tk.StringVar(value="Current cell")
+        cell_names = list(self.session.library.cells.keys())
+        scope_combo = ttk.Combobox(form, textvariable=scope_var, state="readonly", width=22,
+                                    values=["Current cell"] + cell_names)
+        scope_combo.grid(row=6, column=1, sticky="w", padx=4, pady=4)
+
+        flatten_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            form, text="Include placed cells (Sref) when gathering input geometry",
+            variable=flatten_var,
+        ).grid(row=7, column=0, columnspan=2, sticky="w", padx=4, pady=(0, 4))
+
+        ttk.Label(form, text="Simplify (mm, 0=off):").grid(
+            row=8, column=0, sticky="e", padx=4, pady=4)
+        simplify_var = tk.DoubleVar(value=0.0)
+        ttk.Spinbox(form, from_=0.0, to=1e6, increment=0.001, textvariable=simplify_var, width=14).grid(
+            row=8, column=1, sticky="w", padx=4, pady=4)
+
+        def sync_fields(*_args):
+            # The Spinbox's own text can be transiently empty/invalid
+            # while the user is editing it (e.g. selecting all and
+            # deleting before typing a new value) -- DoubleVar.get()
+            # raises TclError in that instant rather than returning 0,
+            # and this fires on every keystroke via the trace below.
+            try:
+                has_hatch = hatch_var.get() > 0
+            except tk.TclError:
+                has_hatch = False
+            angles_entry.configure(state="normal" if has_hatch else "disabled")
+
+        hatch_spin.configure(command=sync_fields)
+        hatch_var.trace_add("write", sync_fields)
+        sync_fields()
+
+        error_var = tk.StringVar(value="")
+        ttk.Label(win, textvariable=error_var, foreground="red", wraplength=440,
+                  justify="left").pack(anchor="w", padx=12)
+
+        def layer_num(text):
+            return int(text.split(" ", 1)[0]) if text.strip() else None
+
+        def split_layers(text):
+            return [tok.strip() for tok in text.split(",") if tok.strip()] or None
+
+        def apply_and_close():
+            result_layer = layer_num(result_var.get())
+            if result_layer is None:
+                error_var.set("Pick a Result layer.")
+                return
+            kwargs = {"flatten": flatten_var.get()}
+            explicit_layers = split_layers(layers_var.get())
+            if explicit_layers is not None:
+                kwargs["layers"] = explicit_layers
+            exclude_layers = split_layers(exclude_var.get())
+            if exclude_layers is not None:
+                kwargs["exclude_layers"] = exclude_layers
+            try:
+                hatch_mm = hatch_var.get()
+            except tk.TclError:
+                hatch_mm = 0.0
+            if hatch_mm > 0:
+                kwargs["hatch_conductor_pitch"] = mm_to_dbu(hatch_mm)
+                try:
+                    angles = tuple(float(tok.strip()) for tok in angles_var.get().split(",")
+                                   if tok.strip())
+                except ValueError:
+                    error_var.set("Hatch angles must be comma-separated numbers.")
+                    return
+                if angles:
+                    kwargs["hatch_conductor_angles"] = angles
+            try:
+                width_mm = width_var.get()
+            except tk.TclError:
+                error_var.set("Line width must be a number.")
+                return
+            if width_mm <= 0:
+                error_var.set("Line width must be greater than zero.")
+                return
+            kwargs["line_width"] = mm_to_dbu(width_mm)
+            scope = scope_var.get()
+            if scope != "Current cell":
+                kwargs["cell_names"] = [scope]
+            try:
+                simplify = mm_to_dbu(simplify_var.get())
+            except tk.TclError:
+                simplify = 0
+            if simplify > 0:
+                kwargs["simplify"] = simplify
+            try:
+                written = self.session.mask_op_top_view(result_layer, **kwargs)
+            except LayoutError as e:
+                error_var.set(str(e))
+                return
+            total = sum(written.values())
+            made_visible = False
+            if total > 0:
+                # Written straight to a layer whose visibility happens to
+                # be off is otherwise indistinguishable from writing
+                # nothing at all -- turn it on rather than leaving a real
+                # result silently hidden.
+                result_layer_obj = self.session.library.layers[result_layer]
+                if not result_layer_obj.visible:
+                    result_layer_obj.visible = True
+                    made_visible = True
+            self.refresh_all()
+            if total == 0:
+                self.status.set(f"TOPVIEW: no output on layer {result_layer}")
+            else:
+                msg = f"TOPVIEW: wrote {total} path(s) to layer {result_layer}"
                 if made_visible:
                     msg += " (layer visibility turned on)"
                 self.status.set(msg)

@@ -1031,6 +1031,105 @@ def test_mask_op_dialog_boolean_op_turns_on_a_hidden_result_layer():
         app.destroy()
 
 
+def test_topview_dialog_writes_a_hidden_line_result():
+    app = _make_app()
+    try:
+        top = app.session.library.cells["TOP"]
+        top.add_rectangle(0, 0, 0, 1000, 1000)
+
+        app.show_topview_dialog()
+        win = _find_toplevels(app)[0]
+
+        combos = _collect_widgets(win, ttk.Combobox)
+        # Order on the grid: Result layer, Apply-to scope.
+        result_combo, scope_combo = combos
+        result_combo.set("1 (L1)")
+
+        # ttk.Spinbox/Combobox are themselves ttk.Entry subclasses, so
+        # filter to plain Entry widgets only.
+        entries = [w for w in _collect_widgets(win, ttk.Entry) if type(w) is ttk.Entry]
+        # Order on the grid: Explicit layers, Exclude layers, Hatch angles.
+        layers_entry, _exclude_entry, _angles_entry = entries
+        layers_entry.insert(0, "0")  # bypass role-based default, use layer 0 explicitly
+
+        apply_btn = next(b for b in _collect_widgets(win, ttk.Button)
+                          if b.cget("text") == "Apply")
+        apply_btn.invoke()
+
+        assert any(sh.layer == 1 for sh in top.shapes)
+        assert "wrote" in app.status.get()
+    finally:
+        app.destroy()
+
+
+def test_topview_dialog_hatch_angles_field_disabled_without_a_hatch_pitch():
+    app = _make_app()
+    try:
+        app.show_topview_dialog()
+        win = _find_toplevels(app)[0]
+        entries = [w for w in _collect_widgets(win, ttk.Entry) if type(w) is ttk.Entry]
+        _layers_entry, _exclude_entry, angles_entry = entries
+        assert str(angles_entry.cget("state")) == "disabled"
+
+        spins = _collect_widgets(win, ttk.Spinbox)
+        # Order on the grid: Hatch conductor, Line width, Simplify.
+        hatch_spin, _width_spin, _simplify_spin = spins
+        hatch_spin.delete(0, "end")
+        hatch_spin.insert(0, "0.1")
+        hatch_spin.event_generate("<KeyRelease>")
+        app.update()
+        assert str(angles_entry.cget("state")) == "normal"
+    finally:
+        app.destroy()
+
+
+def test_topview_dialog_clearing_the_hatch_field_does_not_crash():
+    # Confirmed live: clearing the Hatch conductor spinbox to type a new
+    # value (a normal editing gesture) left it transiently empty, and
+    # sync_fields()'s own hatch_var.get() -- fired via the DoubleVar's
+    # own write trace -- raised _tkinter.TclError: "expected
+    # floating-point number but got \"\"" instead of just treating an
+    # unparseable/empty value the same as "no hatch". Set the
+    # underlying Tcl variable directly (the exact mechanism a real
+    # keystroke drives) rather than the widget's own .delete(), which
+    # doesn't reliably round-trip back through the trace in a test.
+    app = _make_app()
+    try:
+        app.show_topview_dialog()
+        win = _find_toplevels(app)[0]
+        spins = _collect_widgets(win, ttk.Spinbox)
+        hatch_spin, _width_spin, _simplify_spin = spins
+        var_name = hatch_spin.cget("textvariable")
+
+        # An uncaught exception in a Tk variable trace goes through
+        # App._report_callback_exception, which shows a blocking modal
+        # error dialog -- exactly what the user's own screenshot
+        # showed. Capture it directly instead, so a real bug here
+        # fails the test rather than hanging it waiting for a dialog
+        # nothing will ever dismiss.
+        captured = []
+        app.report_callback_exception = lambda exc, val, tb: captured.append(val)
+        app.tk.globalsetvar(var_name, "")
+        assert not captured, f"sync_fields raised: {captured}"
+    finally:
+        app.destroy()
+
+
+def test_topview_dialog_requires_a_result_layer():
+    app = _make_app()
+    try:
+        app.show_topview_dialog()
+        win = _find_toplevels(app)[0]
+        apply_btn = next(b for b in _collect_widgets(win, ttk.Button)
+                          if b.cget("text") == "Apply")
+        apply_btn.invoke()
+        # validation blocked Apply -- the dialog is still open, not
+        # destroyed the way a successful Apply would leave it.
+        assert win.winfo_exists()
+    finally:
+        app.destroy()
+
+
 def test_setup_menu_has_technology_file_items():
     app = _make_app()
     try:
