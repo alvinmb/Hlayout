@@ -515,7 +515,7 @@ class Session:
                                               pkg20=pkg20, sot_packages=sot_packages)
 
     def print_cell(self, cell_name: Optional[str] = None, out_path: Optional[str] = None,
-                    scale: Optional[float] = None) -> str:
+                    scale: Optional[float] = None, pin_label_layers=None) -> str:
         """Render the design (default: the current cell) as a
         printable HTML page -- a color-swatch legend plus an SVG
         drawing of its visible, flattened geometry -- and write it to
@@ -530,13 +530,26 @@ class Session:
         that size (using a clean factor -- 2x, 5x, 10x, ...) instead of
         printing "at 100%" as a barely-visible speck, which is exactly
         what a true-size hybrid part a few mm across would otherwise
-        do. Pass 1.0 to force true size regardless. See
-        hlayout.io.printio for exactly what does/doesn't render."""
+        do. Pass 1.0 to force true size regardless.
+
+        ``pin_label_layers`` (layer numbers or names) draws a numbered
+        label at every pin on those layers -- e.g. a bare die's own pad
+        layer, so an assembly operator can see which numbered pad to
+        land a wire bond on. Deliberately opt-in and scoped by layer,
+        not automatic: an ordinary passive/resistor's own 2-terminal
+        pins are ALSO pin-tagged, and labelling those too would be
+        unwanted clutter on every part -- see
+        hlayout.io.printio._flatten_for_print()'s own docstring.
+
+        See hlayout.io.printio for exactly what does/doesn't render."""
         from ..io.printio import write_print_html
         name = cell_name or self.current_cell_name
         if name is None:
             raise LibraryError("no current cell to print")
-        return write_print_html(self.library, name, out_path, scale=scale)
+        resolved_pin_layers = ([self.library.layers.resolve(n) for n in pin_label_layers]
+                                if pin_label_layers else None)
+        return write_print_html(self.library, name, out_path, scale=scale,
+                                 pin_label_layers=resolved_pin_layers)
 
     def run_dxf_export_batch(self, jobs=None, cell_name: Optional[str] = None):
         """Run a saved series of DXF export jobs -- e.g. one job per

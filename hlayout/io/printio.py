@@ -134,7 +134,7 @@ def _auto_scale(width_mm: float, height_mm: float) -> float:
     return _NICE_SCALES[-1]
 
 
-def _flatten_for_print(library: Library, cell_name: str):
+def _flatten_for_print(library: Library, cell_name: str, pin_label_layers=None):
     """Walk the Sref/Aref hierarchy starting at ``cell_name``, applying
     each instance's transform, and bucket the resulting *world-space*
     geometry by layer number. Returns (polys, paths, texts):
@@ -160,11 +160,26 @@ def _flatten_for_print(library: Library, cell_name: str):
     here at the child's own bbox centre plus its label_offset, on
     load_refdes_annotation_layer()'s layer -- so PRINT and DXF export
     agree on where a ref-des ends up without either one baking
-    anything into the design itself."""
+    anything into the design itself.
+
+    ``pin_label_layers`` (optional, e.g. a bare die's own pad layer) is
+    a wire-bonding aid: a numbered pin (Rectangle/Polygon.pin, or an
+    SRef.pin -- a round lead built from a shared via-cell template, see
+    hlayout.core.shapes.SRef.pin's own docstring) whose OWN layer (the
+    shape's own, or the target cell's, for an SRef) is in this set gets
+    its pin number drawn as a Text label at its own position, on that
+    same layer. Deliberately opt-in and scoped by LAYER, not drawn for
+    every numbered pin everywhere -- an ordinary passive/resistor's own
+    2-terminal pins are ALSO pin-tagged (their "1"/"2" identify which
+    end is which), and labelling those too would be unwanted clutter on
+    every single part; a bare die's own pad layer is normally distinct
+    from a passive's terminal layer, so naming just that layer reaches
+    exactly the pins that matter for locating a bond."""
     polys: Dict[int, List[List[Tuple[float, float]]]] = {}
     paths: Dict[int, List[Tuple[List[Tuple[float, float]], float]]] = {}
     texts: Dict[int, List[Tuple[Tuple[float, float], str]]] = {}
     refdes_layer = load_refdes_annotation_layer(library)
+    pin_layers = {int(n) for n in pin_label_layers} if pin_label_layers else set()
 
     def walk(name, transform, scale, depth):
         if depth > _MAX_DEPTH or name not in library.cells:
@@ -173,6 +188,12 @@ def _flatten_for_print(library: Library, cell_name: str):
         for shape in cell.shapes:
             if isinstance(shape, (Rectangle, Polygon)):
                 polys.setdefault(shape.layer, []).append([transform(p) for p in shape.points])
+                pin = getattr(shape, "pin", "")
+                if pin and shape.layer in pin_layers:
+                    x0, y0, x1, y1 = shape.bbox()
+                    texts.setdefault(shape.layer, []).append(
+                        (transform(((x0 + x1) / 2.0, (y0 + y1) / 2.0)), pin)
+                    )
             elif isinstance(shape, Path):
                 paths.setdefault(shape.layer, []).append(
                     ([transform(p) for p in shape.points], shape.width * scale))
@@ -224,6 +245,20 @@ def _flatten_for_print(library: Library, cell_name: str):
                         (transform((cx + lox, cy + loy)), ref.label)
                     )
 
+            ref_pin = getattr(ref, "pin", "")
+            if ref_pin and pin_layers:
+                child = library.cells.get(ref.cell_name)
+                if child is not None:
+                    pin_layer = next((sh.layer for sh in child.shapes
+                                       if sh.layer in pin_layers), None)
+                    if pin_layer is not None:
+                        # ref.origin is in `cell`'s own local space, same
+                        # as ref.label's -- the accumulated ancestor
+                        # `transform`, not `child_transform`.
+                        texts.setdefault(pin_layer, []).append(
+                            (transform(ref.origin), ref_pin)
+                        )
+
             walk(ref.cell_name, child_transform, scale * mag, depth + 1)
 
     walk(cell_name, lambda p: (float(p[0]), float(p[1])), 1.0, 0)
@@ -231,19 +266,22 @@ def _flatten_for_print(library: Library, cell_name: str):
 
 
 def render_cell_svg(library: Library, cell_name: str, margin_dbu: float = 2000.0,
-                     scale: Optional[float] = None) -> Tuple[str, List[int], float]:
+                     scale: Optional[float] = None, pin_label_layers=None) -> Tuple[str, List[int], float]:
     """Build an SVG document (as a string) of ``cell_name``'s visible,
     flattened geometry. ``scale`` sets the printed size relative to
     true physical size (2.0 = twice actual size on paper); left as
     None, it's chosen automatically (see the module docstring) --
     1.0 unless the design is smaller than PRINT_TARGET_MM, in which
     case it's scaled up to about that size using the nearest clean
-    factor. Returns (svg_markup, layer_numbers_drawn, scale_used) --
-    the layer list is used by write_print_html() to build a legend of
-    only the layers that actually appear, in the order first
-    encountered; the scale is shown on the printed page so it's never
-    ambiguous what's been done to the drawing's size."""
-    polys, paths, texts = _flatten_for_print(library, cell_name)
+    factor. ``pin_label_layers`` draws a numbered-pin label at every
+    pin on those layers -- see _flatten_for_print()'s own docstring for
+    why this is opt-in and layer-scoped rather than automatic. Returns
+    (svg_markup, layer_numbers_drawn, scale_used) -- the layer list is
+    used by write_print_html() to build a legend of only the layers
+    that actually appear, in the order first encountered; the scale is
+    shown on the printed page so it's never ambiguous what's been done
+    to the drawing's size."""
+    polys, paths, texts = _flatten_for_print(library, cell_name, pin_label_layers)
 
     # "Print what's on screen": _flatten_for_print() collects every
     # layer's geometry regardless of visibility, but only a VISIBLE
@@ -340,7 +378,7 @@ def hidden_layers_with_data(library: Library, cell_name: str) -> List[int]:
 
 
 def write_print_html(library: Library, cell_name: str, out_path: str = None,
-                      scale: Optional[float] = None) -> str:
+                      scale: Optional[float] = None, pin_label_layers=None) -> str:
     """Render ``cell_name`` (see render_cell_svg()) into a standalone,
     printable HTML page -- a title, a scale note, a small color-swatch
     legend of the layers actually drawn, and the SVG itself -- and
@@ -348,11 +386,14 @@ def write_print_html(library: Library, cell_name: str, out_path: str = None,
     ``scale`` is passed straight through to render_cell_svg() -- left
     as None, small designs are auto-scaled up so "print at 100%"
     produces something bigger than a speck; see that function and the
-    module docstring. Returns the path written. Opening the result in
-    a browser and printing it (Ctrl+P, or handed to the OS's own print
-    flow -- see App.print_current_view()) is the actual "print" step;
-    this function only produces the page."""
-    svg, layer_order, scale_used = render_cell_svg(library, cell_name, scale=scale)
+    module docstring. ``pin_label_layers`` is also passed straight
+    through -- see _flatten_for_print()'s own docstring. Returns the
+    path written. Opening the result in a browser and printing it
+    (Ctrl+P, or handed to the OS's own print flow -- see
+    App.print_current_view()) is the actual "print" step; this
+    function only produces the page."""
+    svg, layer_order, scale_used = render_cell_svg(
+        library, cell_name, scale=scale, pin_label_layers=pin_label_layers)
     hidden = hidden_layers_with_data(library, cell_name)
 
     legend_rows = []

@@ -172,6 +172,71 @@ def test_print_ignores_ref_des_label_when_no_annotation_layer_configured():
     assert not any("C1" in t for entries in texts.values() for _pos, t in entries)
 
 
+# --- pin_label_layers -- wire-bonding aid for a bare die's own pins ------
+# Deliberately opt-in and scoped by LAYER: an ordinary passive/resistor's
+# own 2-terminal pins are ALSO pin-tagged ("1"/"2"), so labelling every
+# numbered pin everywhere would clutter every single part -- only a
+# layer the caller actually names gets pin numbers drawn.
+
+def _design_with_bare_die():
+    s = Session.new("PRINTTEST")
+    s.new_cell("TOP")
+    s.new_cell("chip_pin")
+    s.rect(58, -20, -20, 20, 20)
+    s.new_cell("LM741")
+    s.rect(61, -450, -450, 450, 450)  # body outline, not pin-tagged
+    s.use_cell("TOP")
+    s.sref("LM741", (0, 0))
+    return s
+
+
+def test_print_labels_an_sref_pin_on_the_named_layer():
+    s = _design_with_bare_die()
+    s.use_cell("LM741")
+    s.sref("chip_pin", (400, 0), pin="3")
+    from hlayout.io.printio import _flatten_for_print
+    _polys, _paths, texts = _flatten_for_print(s.library, "TOP", pin_label_layers=[58])
+    assert texts[58] == [((400.0, 0.0), "3")]
+
+
+def test_print_labels_an_inline_pin_tagged_shape_on_the_named_layer():
+    s = Session.new("PRINTTEST")
+    s.new_cell("TOP")
+    s.new_cell("LM741")
+    s.rect(58, -20, -20, 20, 20, pin="7")  # inline pin-tagged pad
+    s.use_cell("TOP")
+    s.sref("LM741", (1000, 2000))
+    from hlayout.io.printio import _flatten_for_print
+    _polys, _paths, texts = _flatten_for_print(s.library, "TOP", pin_label_layers=[58])
+    assert texts[58] == [((1000.0, 2000.0), "7")]
+
+
+def test_print_ignores_pins_on_an_unnamed_layer():
+    s = _design_with_bare_die()
+    s.use_cell("LM741")
+    s.sref("chip_pin", (400, 0), pin="3")
+    from hlayout.io.printio import _flatten_for_print
+    _polys, _paths, texts = _flatten_for_print(s.library, "TOP", pin_label_layers=None)
+    assert 58 not in texts
+
+
+def test_print_does_not_label_an_ordinary_resistors_2_terminal_pins():
+    # Confirmed live: a real design's resistors and caps ALSO carry
+    # pin="1"/"2" on their own terminal pads -- pin_label_layers must
+    # stay strictly layer-scoped or every ordinary part gets cluttered
+    # with pin numbers too.
+    s = Session.new("PRINTTEST")
+    s.new_cell("TOP")
+    s.new_cell("R1")
+    s.rect(3, 0, 0, 100, 100, pin="1")
+    s.rect(3, 200, 0, 300, 100, pin="2")
+    s.use_cell("TOP")
+    s.sref("R1", (0, 0))
+    from hlayout.io.printio import _flatten_for_print
+    _polys, _paths, texts = _flatten_for_print(s.library, "TOP", pin_label_layers=[58])
+    assert 3 not in texts
+
+
 # --- hidden_layers_with_data() -- explains a shape's absence from print --
 
 def test_hidden_layers_with_data_reports_a_hidden_layer_with_geometry():

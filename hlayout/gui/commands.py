@@ -131,7 +131,7 @@ Files:
                                        wire bonds as raised loops, components as
                                        fixed-height bodies or substituted models);
                                        run it inside FreeCAD. Needs shapely
-    PRINT [cell=<name>] [out=<path.html>] [scale=<n>]
+    PRINT [cell=<name>] [out=<path.html>] [scale=<n>] [pinlayers=<n,n,...>]
                                        render the design (default: the current cell)
                                        as a printable HTML page -- a legend plus an
                                        SVG drawing of its visible geometry -- and hand
@@ -140,7 +140,13 @@ Files:
                                        defaults to auto (a design under ~150mm across
                                        is scaled up to about that size instead of
                                        printing as a speck at "100%"); pass 1 to force
-                                       true physical size. Same as File > Print...
+                                       true physical size. pinlayers= draws a numbered
+                                       label at every pin on those layers -- e.g. a bare
+                                       die's own pad layer, for wire-bonding reference --
+                                       deliberately opt-in and layer-scoped, since an
+                                       ordinary part's own 2-terminal pins are ALSO
+                                       pin-tagged and would otherwise clutter every part.
+                                       Same as File > Print...
     MERGE <lib1.gds> <lib2.gds> <lib3.gds> [library_name]
                                        combine every cell from lib1 and lib2 into a
                                        new file lib3 -- a plain file-to-file operation,
@@ -905,10 +911,12 @@ class CommandInterpreter:
         return f"FreeCAD 3D macro written to {written}"
 
     def _cmd_print(self, args):
-        usage = "usage: PRINT [cell=<name>] [out=<path.html>] [scale=<n>]"
+        usage = ("usage: PRINT [cell=<name>] [out=<path.html>] [scale=<n>] "
+                  "[pinlayers=<n,n,...>]")
         cell_name = None
         out = None
         scale = None
+        pin_layers = None
         for a in args:
             if a.lower().startswith("cell="):
                 cell_name = a.split("=", 1)[1]
@@ -921,10 +929,13 @@ class CommandInterpreter:
                     raise CommandError("scale must be a number")
                 if scale <= 0:
                     raise CommandError("scale must be positive")
+            elif a.lower().startswith("pinlayers="):
+                pin_layers = [tok.strip() for tok in a.split("=", 1)[1].split(",") if tok.strip()]
             else:
                 raise CommandError(usage)
         try:
-            path = self.session.print_cell(cell_name=cell_name, out_path=out, scale=scale)
+            path = self.session.print_cell(cell_name=cell_name, out_path=out, scale=scale,
+                                            pin_label_layers=pin_layers)
         except LayoutError as e:
             raise CommandError(str(e))
         from ..io.printio import hidden_layers_with_data, send_to_system_printer
