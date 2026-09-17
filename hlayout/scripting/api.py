@@ -1452,18 +1452,20 @@ class Session:
     def generate_resistor_table(self, cell_name: str, layer, *, origin=(0, 0),
                                  row_height: float = 250.0,
                                  col_widths=(1200.0, 2500.0, 1000.0, 2000.0, 2000.0),
-                                 text_height: float = 150.0, overwrite: bool = True) -> str:
+                                 text_height: float = 150.0, line_layer=None,
+                                 line_width: float = 20.0, overwrite: bool = True) -> str:
         """Build a resistor BOM table -- REF DES / VALUE (OHMS) / TOL% /
-        AIM VALUE / INK (OHMS/SQ) -- as a grid of Text shapes in its own
-        cell, generated fresh from the saved Thick-Film Resistor
-        Designer rows (hlayout.io.techfile.load_resistor_list(), the
-        same data the Designer's own table shows). Generic and re-run-
-        able: this ALWAYS rebuilds the cell from whatever the resistor
-        list currently holds (``overwrite`` defaults to True, unlike
-        every other ``cell already exists`` guard in this module) --
-        call it again after adding/editing resistors to refresh the
-        table, then Session.sref() the cell wherever it's needed (e.g.
-        alongside the assembly drawing, for PRINT).
+        AIM VALUE / INK (OHMS/SQ) -- as a grid of Text shapes plus ruled
+        row/column border lines, all in its own cell, generated fresh
+        from the saved Thick-Film Resistor Designer rows
+        (hlayout.io.techfile.load_resistor_list(), the same data the
+        Designer's own table shows). Generic and re-runnable: this
+        ALWAYS rebuilds the cell from whatever the resistor list
+        currently holds (``overwrite`` defaults to True, unlike every
+        other ``cell already exists`` guard in this module) -- call it
+        again after adding/editing resistors to refresh the table, then
+        Session.sref() the cell wherever it's needed (e.g. alongside
+        the assembly drawing, for PRINT).
 
         "Aim value" uses the SAME formula the Resistor Designer itself
         uses (value x (aim_pct% + tolerance%) -- see
@@ -1475,7 +1477,13 @@ class Session:
         `col_widths` (DBU, one per column: ref des, value, tolerance,
         aim value, ink) and `row_height`/`text_height` (DBU) control
         the table's layout; the defaults are sized for text_height's
-        own default.
+        own default. The ruled grid -- one horizontal line above every
+        row (including the header) plus one below the last row, and one
+        vertical line at every column boundary (including both outer
+        edges) -- is drawn on `line_layer` (defaults to the same layer
+        as the text) at `line_width` DBU, giving every cell (header and
+        data) its own bordered box the way a real printed table reads,
+        not just floating text in a grid pattern.
 
         Raises LayoutError if there are no saved resistor rows to
         tabulate at all (Setup/the Resistor Designer hasn't saved a
@@ -1505,6 +1513,8 @@ class Session:
             self.library.delete_cell(cell_name)
 
         r_layer = self.library.layers.resolve(layer)
+        grid_layer = self.library.layers.resolve(line_layer) if line_layer is not None else r_layer
+        grid_width = int(round(line_width))
         aim_pct = load_resistor_design_rules(self.library)["aim_pct"]
 
         def tol_fraction(tol_str):
@@ -1518,6 +1528,9 @@ class Session:
         for w in col_widths[:-1]:
             col_x.append(col_x[-1] + w)
         h = int(round(text_height))
+        # A little headroom above each row's text baseline so the grid
+        # line above a row doesn't run through the text itself.
+        top_pad = row_height * 0.3
 
         with self._batch():
             cell = self.library.new_cell(cell_name)
@@ -1542,6 +1555,16 @@ class Session:
                     f"{aim:,.0f}",
                     f"{ink:,.0f}" if ink is not None else "—",
                 ))
+
+            n_data_rows = len(rows)
+            row_tops = [oy + top_pad - i * row_height for i in range(n_data_rows + 2)]
+            col_bounds = col_x + [col_x[-1] + col_widths[-1]]
+            left, right = col_bounds[0], col_bounds[-1]
+            top, bottom = row_tops[0], row_tops[-1]
+            for y in row_tops:
+                cell.add_path(grid_layer, [(left, y), (right, y)], grid_width, cap="flush")
+            for x in col_bounds:
+                cell.add_path(grid_layer, [(x, top), (x, bottom)], grid_width, cap="flush")
         return cell_name
 
     def clear_undo_history(self) -> None:

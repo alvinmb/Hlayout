@@ -226,21 +226,25 @@ a resistor; this draws it):
                                        and D (glaze oversize, on all 4 sides) mean.
                                        dlayer= is still accepted but ignored.
     RESTABLE <cell_name> <layer> [origin=<x,y>] [rowheight=<dbu>] [textheight=<dbu>]
-             [overwrite=0|1]
+             [linelayer=<n|name>] [linewidth=<dbu>] [overwrite=0|1]
                                        build a resistor BOM table -- REF DES / VALUE
                                        (OHMS) / TOL% / AIM VALUE / INK (OHMS/SQ) -- as
-                                       a grid of Text shapes in its own cell, generated
+                                       a grid of Text shapes, PLUS ruled row/column
+                                       border lines so every cell reads as a real
+                                       bordered box, all in its own cell, generated
                                        fresh from the saved Thick-Film Resistor
                                        Designer rows (the same data its own table
                                        shows); "aim value" uses that Designer's own
                                        formula (value x (aim_pct% + tolerance%)) so it
                                        always matches whatever it used to pick each
-                                       ink. Generic and re-runnable -- overwrite
-                                       defaults to 1, so running it again after adding/
-                                       editing resistors just rebuilds the cell fresh;
-                                       place it (SREF) wherever needed, e.g. alongside
-                                       the assembly drawing for PRINT. Also available
-                                       as Session.generate_resistor_table()
+                                       ink. linelayer defaults to the same layer as the
+                                       text; linewidth defaults to a thin 20 DBU rule.
+                                       Generic and re-runnable -- overwrite defaults to
+                                       1, so running it again after adding/editing
+                                       resistors just rebuilds the cell fresh; place it
+                                       (SREF) wherever needed, e.g. alongside the
+                                       assembly drawing for PRINT. Also available as
+                                       Session.generate_resistor_table()
 
 Layer-based mask operations (resize/boolean, like a GDSII CAM system's
 Size/AND/OR deck operators -- any Path on an input layer is converted
@@ -1143,7 +1147,8 @@ class CommandInterpreter:
 
     def _cmd_restable(self, args):
         usage = ("usage: RESTABLE <cell_name> <layer> [origin=<x,y>] "
-                 "[rowheight=<dbu>] [textheight=<dbu>] [overwrite=0|1]")
+                 "[rowheight=<dbu>] [textheight=<dbu>] [linelayer=<n|name>] "
+                 "[linewidth=<dbu>] [overwrite=0|1]")
         if len(args) < 2:
             raise CommandError(usage)
         cell_name, layer = args[0], args[1]
@@ -1159,6 +1164,10 @@ class CommandInterpreter:
                 kwargs["row_height"] = float(v)
             elif k == "textheight":
                 kwargs["text_height"] = float(v)
+            elif k == "linelayer":
+                kwargs["line_layer"] = self.session.library.layers.resolve(v)
+            elif k == "linewidth":
+                kwargs["line_width"] = float(v)
             elif k == "overwrite":
                 kwargs["overwrite"] = v not in ("0", "false", "no")
             else:

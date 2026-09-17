@@ -4,7 +4,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from hlayout.core.errors import LayoutError
-from hlayout.core.shapes import Rectangle, Text
+from hlayout.core.shapes import Path, Rectangle, Text
 from hlayout.io.techfile import (
     load_resistor_geometry_rules,
     resistor_ink_layer,
@@ -436,6 +436,52 @@ def test_generate_resistor_table_requires_a_cell_name():
         assert False, "expected LayoutError"
     except LayoutError:
         pass
+
+
+def test_generate_resistor_table_draws_a_ruled_grid():
+    # Per user direction: a real bordered table, not just floating text
+    # in a grid pattern -- one horizontal line above every row
+    # (including the header) plus one below the last row, and one
+    # vertical line at every column boundary (including both outer
+    # edges).
+    from hlayout.io.techfile import save_resistor_list
+    s = _fresh_session()
+    save_resistor_list(s.library, [
+        {"ref_des": "R1", "value": 680000.0, "tolerance": "5%", "power_mw": 125.0,
+         "body_width": 2000.0, "selected_ink": 300000.0},
+        {"ref_des": "R2", "value": 1000.0, "tolerance": "1%", "power_mw": 125.0,
+         "body_width": 2000.0, "selected_ink": 1000.0},
+    ])
+    col_widths = (1200.0, 2500.0, 1000.0, 2000.0, 2000.0)
+    name = s.generate_resistor_table("RESTABLE_TEST", 62, col_widths=col_widths)
+    cell = s.library.cells[name]
+    lines = [sh for sh in cell.shapes if isinstance(sh, Path)]
+    # 2 data rows + header + 1 = 4 horizontal lines; 5 columns + 1 = 6
+    # vertical lines.
+    horiz = [ln for ln in lines if ln.points[0][1] == ln.points[1][1]]
+    vert = [ln for ln in lines if ln.points[0][0] == ln.points[1][0]]
+    assert len(horiz) == 4
+    assert len(vert) == 6
+    # the grid spans the full table width (sum of col_widths) and every
+    # column boundary is represented.
+    total_width = sum(col_widths)
+    x_positions = sorted({ln.points[0][0] for ln in vert})
+    assert x_positions[0] == 0
+    assert x_positions[-1] == total_width
+    assert len(x_positions) == 6
+
+
+def test_generate_resistor_table_grid_uses_a_separate_line_layer():
+    from hlayout.io.techfile import save_resistor_list
+    s = _fresh_session()
+    save_resistor_list(s.library, [
+        {"ref_des": "R1", "value": 100.0, "tolerance": "5%", "power_mw": 100.0,
+         "body_width": 1000.0, "selected_ink": 100.0},
+    ])
+    name = s.generate_resistor_table("RESTABLE_TEST", 62, line_layer=10)
+    cell = s.library.cells[name]
+    assert all(sh.layer == 62 for sh in cell.shapes if isinstance(sh, Text))
+    assert all(sh.layer == 10 for sh in cell.shapes if isinstance(sh, Path))
 
 
 def test_generate_resistor_table_overwrite_defaults_true_and_rebuilds():
