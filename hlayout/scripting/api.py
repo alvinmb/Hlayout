@@ -1624,6 +1624,143 @@ class Session:
                 cell.add_path(grid_layer, [(x, header_top), (x, bottom)], grid_width, cap="flush")
         return cell_name
 
+    def generate_pin_function_table(self, cell_name: str, layer, pin_count: int, *,
+                                     pins_per_group: int = 10,
+                                     functions: Optional[dict] = None,
+                                     origin=(0, 0), row_height: float = 250.0,
+                                     col_widths=(800.0, 2000.0), group_gap: float = 300.0,
+                                     text_height: float = 150.0, line_layer=None,
+                                     line_width: float = 20.0,
+                                     title: Optional[str] = "PIN FUNCTION TABLE",
+                                     title_inset: Optional[float] = None,
+                                     overwrite: bool = True) -> str:
+        """Build a pinout reference table -- one PIN NUM / PIN FUNCTION
+        column-pair per group of `pins_per_group` pins (default 10),
+        with groups placed side by side left to right -- as a grid of
+        Text shapes plus ruled row/column border lines, in its own
+        cell. `pin_count` must be a whole multiple of `pins_per_group`
+        (e.g. 20/30/40/50 pins at the default 10 per group -> 2/3/4/5
+        groups); pin numbers run 1..pin_count, group 1 covering
+        1..pins_per_group, group 2 covering the next pins_per_group,
+        and so on.
+
+        `functions` (optional) is a {pin_number: "function name"} dict
+        -- a pin not present (or `functions` left as None, the
+        default) gets a BLANK function cell, a plain fill-in-by-hand
+        template. Every cell's text (headers and data alike) is
+        centred within its own column, the same convention
+        generate_resistor_table() uses.
+
+        `col_widths` (DBU, one per column: pin num, pin function) is
+        shared by every group; `group_gap` (DBU) is the empty space
+        between one group's own bordered box and the next -- each
+        group is its own separate mini-table, not one continuous grid
+        across all of them. `title` (default "PIN FUNCTION TABLE";
+        None/"" to omit) spans the FULL width of every group plus the
+        gaps between them, centred by default (pass `title_inset` to
+        left-align it instead) -- see generate_resistor_table()'s own
+        docstring for the same title/grid/centring conventions, shared
+        here.
+
+        Generic and re-runnable, same as generate_resistor_table():
+        `overwrite` defaults to True, so calling this again (e.g. with
+        an updated `functions` mapping) just rebuilds the cell fresh.
+        Then Session.sref() the cell wherever it's needed, e.g.
+        alongside the assembly drawing, for PRINT.
+
+        Raises LayoutError if `pin_count` isn't a positive multiple of
+        `pins_per_group`, or if `cell_name` exists and isn't a table
+        this method itself can safely rebuild (pass overwrite=False to
+        refuse touching an existing cell instead)."""
+        cell_name = (cell_name or "").strip()
+        if not cell_name:
+            raise LayoutError("a cell name is required")
+        if pin_count <= 0 or pins_per_group <= 0 or pin_count % pins_per_group != 0:
+            raise LayoutError(
+                f"pin_count ({pin_count}) must be a positive whole multiple of "
+                f"pins_per_group ({pins_per_group})"
+            )
+        HEADINGS = ("PIN NUM", "PIN FUNCTION")
+        if len(col_widths) != len(HEADINGS):
+            raise LayoutError(f"col_widths must have {len(HEADINGS)} entries")
+        if cell_name in self.library.cells:
+            if not overwrite:
+                raise LayoutError(
+                    f"{cell_name!r} already exists in this design; pass "
+                    "overwrite=True to replace it"
+                )
+            self.library.delete_cell(cell_name)
+
+        r_layer = self.library.layers.resolve(layer)
+        grid_layer = self.library.layers.resolve(line_layer) if line_layer is not None else r_layer
+        grid_width = int(round(line_width))
+        functions = functions or {}
+        h = int(round(text_height))
+        top_pad = text_height * 1.2
+        if top_pad >= row_height:
+            raise LayoutError(
+                f"row_height ({row_height:g}) must be bigger than "
+                f"text_height*1.2 ({top_pad:g}) to leave room for the grid lines"
+            )
+
+        n_groups = pin_count // pins_per_group
+        group_width = sum(col_widths)
+        ox, oy = origin
+
+        with self._batch():
+            cell = self.library.new_cell(cell_name)
+            self.current_cell_name = cell_name
+
+            def put_row(group_x, y, cells_text):
+                x = group_x
+                for w, text in zip(col_widths, cells_text):
+                    if text:
+                        est_width = text_height * 0.6 * len(text)
+                        tx = x + max(0.0, (w - est_width) / 2.0)
+                        cell.add_text(r_layer, (tx, y), text, height=h)
+                    x += w
+
+            row_tops = [oy + top_pad - i * row_height for i in range(pins_per_group + 2)]
+            header_top, bottom = row_tops[0], row_tops[-1]
+
+            for g in range(n_groups):
+                group_x = ox + g * (group_width + group_gap)
+                put_row(group_x, oy, HEADINGS)
+                for i in range(pins_per_group):
+                    pin_num = g * pins_per_group + i + 1
+                    y = oy - (i + 1) * row_height
+                    put_row(group_x, y, (str(pin_num), functions.get(pin_num, "")))
+
+                group_left, group_right = group_x, group_x + group_width
+                for yy in row_tops:
+                    cell.add_path(grid_layer, [(group_left, yy), (group_right, yy)],
+                                  grid_width, cap="flush")
+                cell.add_path(grid_layer, [(group_left, header_top), (group_left, bottom)],
+                              grid_width, cap="flush")
+                cell.add_path(grid_layer, [(group_right, header_top), (group_right, bottom)],
+                              grid_width, cap="flush")
+                mid_x = group_x + col_widths[0]
+                cell.add_path(grid_layer, [(mid_x, header_top), (mid_x, bottom)],
+                              grid_width, cap="flush")
+
+            if title:
+                total_width = n_groups * group_width + (n_groups - 1) * group_gap
+                title_top = header_top + row_height
+                if title_inset is None:
+                    est_title_width = text_height * 0.6 * len(title)
+                    title_x = ox + max(0.0, (total_width - est_title_width) / 2.0)
+                else:
+                    title_x = ox + title_inset
+                cell.add_text(r_layer, (title_x, oy + row_height), title, height=h)
+                left, right = ox, ox + total_width
+                cell.add_path(grid_layer, [(left, title_top), (right, title_top)],
+                              grid_width, cap="flush")
+                cell.add_path(grid_layer, [(left, title_top), (left, header_top)],
+                              grid_width, cap="flush")
+                cell.add_path(grid_layer, [(right, title_top), (right, header_top)],
+                              grid_width, cap="flush")
+        return cell_name
+
     def clear_undo_history(self) -> None:
         """Called when self.library is replaced wholesale (New, Open
         GDS) rather than edited -- there's nothing meaningful to undo

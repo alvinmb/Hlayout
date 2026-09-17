@@ -254,6 +254,30 @@ a resistor; this draws it):
                                        wherever needed, e.g. alongside the
                                        assembly drawing for PRINT. Also available as
                                        Session.generate_resistor_table()
+    PINTABLE <cell_name> <layer> <pin_count> [pergroup=<n>] [origin=<x,y>]
+             [rowheight=<dbu>] [textheight=<dbu>] [linelayer=<n|name>]
+             [linewidth=<dbu>] [groupgap=<dbu>] [title=<text>] [titleinset=<dbu>]
+             [overwrite=0|1]
+                                       build a pinout reference table -- one PIN NUM /
+                                       PIN FUNCTION column-pair per group of pergroup
+                                       pins (default 10), groups placed side by side
+                                       left to right (e.g. 20 pins -> 2 groups, 50 pins
+                                       -> 5 groups); pin_count must be a whole multiple
+                                       of pergroup. FUNCTION starts blank on every pin --
+                                       fill it in by hand afterward (there's no
+                                       Session.generate_pin_function_table() functions=
+                                       mapping exposed here; pass one directly in a
+                                       script if you want pins pre-filled). Every cell's
+                                       text is centred within its own column, same as
+                                       RESTABLE; groupgap is the empty space between one
+                                       group's own bordered box and the next -- each
+                                       group is its own separate mini-table, not one
+                                       continuous grid across all of them. title
+                                       (default "PIN FUNCTION TABLE") spans the full
+                                       width of every group plus the gaps between them,
+                                       centred by default -- same title/titleinset/
+                                       overwrite conventions as RESTABLE. Also available
+                                       as Session.generate_pin_function_table()
 
 Layer-based mask operations (resize/boolean, like a GDSII CAM system's
 Size/AND/OR deck operators -- any Path on an input layer is converted
@@ -1191,6 +1215,53 @@ class CommandInterpreter:
         except LayoutError as e:
             raise CommandError(str(e))
         return f"generated resistor table cell {name!r}"
+
+    def _cmd_pintable(self, args):
+        usage = ("usage: PINTABLE <cell_name> <layer> <pin_count> "
+                 "[pergroup=<n>] [origin=<x,y>] [rowheight=<dbu>] [textheight=<dbu>] "
+                 "[linelayer=<n|name>] [linewidth=<dbu>] [groupgap=<dbu>] "
+                 "[title=<text>] [titleinset=<dbu>] [overwrite=0|1]  "
+                 "(quote title=\"...\" if it has spaces)")
+        if len(args) < 3:
+            raise CommandError(usage)
+        cell_name, layer = args[0], args[1]
+        try:
+            pin_count = int(args[2])
+        except ValueError:
+            raise CommandError(f"{usage}\n(pin_count must be a whole number)")
+        kwargs = {}
+        for a in args[3:]:
+            if "=" not in a:
+                raise CommandError(usage)
+            k, v = a.split("=", 1)
+            k = k.lower()
+            if k == "pergroup":
+                kwargs["pins_per_group"] = int(v)
+            elif k == "origin":
+                kwargs["origin"] = _parse_point(v)
+            elif k == "rowheight":
+                kwargs["row_height"] = float(v)
+            elif k == "textheight":
+                kwargs["text_height"] = float(v)
+            elif k == "linelayer":
+                kwargs["line_layer"] = self.session.library.layers.resolve(v)
+            elif k == "linewidth":
+                kwargs["line_width"] = float(v)
+            elif k == "groupgap":
+                kwargs["group_gap"] = float(v)
+            elif k == "title":
+                kwargs["title"] = v
+            elif k == "titleinset":
+                kwargs["title_inset"] = float(v)
+            elif k == "overwrite":
+                kwargs["overwrite"] = v not in ("0", "false", "no")
+            else:
+                raise CommandError(f"unknown PINTABLE option {k!r}")
+        try:
+            name = self.session.generate_pin_function_table(cell_name, layer, pin_count, **kwargs)
+        except LayoutError as e:
+            raise CommandError(str(e))
+        return f"generated pin function table cell {name!r}"
 
     # --- mask ops ---------------------------------------------------------
     def _cmd_clear(self, args):
