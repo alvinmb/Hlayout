@@ -230,9 +230,10 @@ a resistor; this draws it):
              [overwrite=0|1]
                                        build a resistor BOM table -- REF DES / VALUE
                                        (OHMS) / TOL% / AIM VALUE / INK (OHMS/SQ) -- as
-                                       a grid of Text shapes, PLUS ruled row/column
-                                       border lines so every cell reads as a real
-                                       bordered box, all in its own cell, generated
+                                       a grid of Text shapes (every cell centred within
+                                       its own column), PLUS ruled row/column border
+                                       lines so every cell reads as a real bordered box,
+                                       all in its own cell, generated
                                        fresh from the saved Thick-Film Resistor
                                        Designer rows (the same data its own table
                                        shows); "aim value" uses that Designer's own

@@ -1480,13 +1480,16 @@ class Session:
         `col_widths` (DBU, one per column: ref des, value, tolerance,
         aim value, ink) and `row_height`/`text_height` (DBU) control
         the table's layout; the defaults are sized for text_height's
-        own default. The ruled grid -- one horizontal line above every
-        row (including the header) plus one below the last row, and one
-        vertical line at every column boundary (including both outer
-        edges) -- is drawn on `line_layer` (defaults to the same layer
-        as the text) at `line_width` DBU, giving every cell (header and
-        data) its own bordered box the way a real printed table reads,
-        not just floating text in a grid pattern.
+        own default. Every cell's text (header row and data rows alike)
+        is horizontally CENTRED within its own column, using the same
+        character-width estimate as the title (below). The ruled grid
+        -- one horizontal line above every row (including the header)
+        plus one below the last row, and one vertical line at every
+        column boundary (including both outer edges) -- is drawn on
+        `line_layer` (defaults to the same layer as the text) at
+        `line_width` DBU, giving every cell (header and data) its own
+        bordered box the way a real printed table reads, not just
+        floating text in a grid pattern.
 
         `title` (default "RESISTOR TABLE"; pass None or "" to omit it)
         adds one more row ABOVE the column headers -- a single cell
@@ -1563,9 +1566,16 @@ class Session:
             self.current_cell_name = cell_name
 
             def put_row(y, cells_text):
-                for x, text in zip(col_x, cells_text):
+                for x, w, text in zip(col_x, col_widths, cells_text):
                     if text:
-                        cell.add_text(r_layer, (x, y), text, height=h)
+                        # Centred within its own column, same character-
+                        # width estimate as the title -- height * 0.6 per
+                        # character (hlayout.core.shapes.Text.bbox()'s own
+                        # convention, self-consistent even without a real
+                        # font-metrics table to measure against).
+                        est_width = text_height * 0.6 * len(text)
+                        tx = x + max(0.0, (w - est_width) / 2.0)
+                        cell.add_text(r_layer, (tx, y), text, height=h)
 
             put_row(oy, HEADINGS)
             for i, row in enumerate(rows, start=1):

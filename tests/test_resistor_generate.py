@@ -375,8 +375,21 @@ def test_generate_resistor_creates_a_uniquely_named_cell_per_call():
 
 def _table_cells(cell):
     """{(x, y): text} for every Text shape in `cell` -- easy lookup by
-    grid position regardless of shape order."""
+    exact position regardless of shape order. See _table_row() below
+    for a lookup by (row y, column INDEX) instead, which is robust to
+    exactly how text is positioned within its own column (left-
+    aligned, centred, ...)."""
     return {sh.origin: sh.text for sh in cell.shapes if isinstance(sh, Text)}
+
+
+def _table_row(cell, y):
+    """[text, ...] left-to-right for every Text shape at row `y` in
+    `cell` -- index by COLUMN POSITION (0=first column) rather than by
+    exact x, since that shifts depending on how text is aligned within
+    its own column."""
+    row = [sh for sh in cell.shapes if isinstance(sh, Text) and sh.origin[1] == y]
+    row.sort(key=lambda sh: sh.origin[0])
+    return [sh.text for sh in row]
 
 
 def test_generate_resistor_table_text_does_not_cross_the_grid_line_above_it():
@@ -436,13 +449,9 @@ def test_generate_resistor_table_aim_value_matches_the_designers_own_formula():
          "body_width": 2000.0, "selected_ink": 300000.0},
     ])
     name = s.generate_resistor_table("RESTABLE_TEST", 62)
-    cells = _table_cells(s.library.cells[name])
-    assert cells[(0, 0)] == "REF DES"
-    assert cells[(0, -250)] == "R1"
-    assert cells[(1200, -250)] == "680,000"
-    assert cells[(3700, -250)] == "5%"
-    assert cells[(4700, -250)] == "544,000"  # 680000 * (0.75 + 0.05)
-    assert cells[(6700, -250)] == "300,000"
+    cell = s.library.cells[name]
+    assert _table_row(cell, 0) == ["REF DES", "VALUE (OHMS)", "TOL%", "AIM VALUE", "INK (OHMS/SQ)"]
+    assert _table_row(cell, -250) == ["R1", "680,000", "5%", "544,000", "300,000"]
 
 
 def test_generate_resistor_table_handles_a_row_with_no_selected_ink():
@@ -453,8 +462,8 @@ def test_generate_resistor_table_handles_a_row_with_no_selected_ink():
          "body_width": 1000.0, "selected_ink": None},
     ])
     name = s.generate_resistor_table("RESTABLE_TEST", 62)
-    cells = _table_cells(s.library.cells[name])
-    assert cells[(6700, -250)] == "—"
+    cell = s.library.cells[name]
+    assert _table_row(cell, -250)[-1] == "—"
 
 
 def test_generate_resistor_table_raises_without_a_saved_resistor_list():
@@ -624,9 +633,9 @@ def test_generate_resistor_table_overwrite_defaults_true_and_rebuilds():
          "body_width": 1000.0, "selected_ink": 200.0},
     ])
     s.generate_resistor_table("RESTABLE_TEST", 62)  # no overwrite= passed
-    cells = _table_cells(s.library.cells[name])
-    assert cells[(0, -250)] == "R2"
-    assert (0, -500) not in cells  # only one data row now, not stale + new
+    cell = s.library.cells[name]
+    assert _table_row(cell, -250)[0] == "R2"
+    assert _table_row(cell, -500) == []  # only one data row now, not stale + new
 
 
 def test_generate_resistor_table_overwrite_false_refuses_an_existing_cell():
