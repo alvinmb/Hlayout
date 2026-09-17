@@ -453,7 +453,9 @@ def test_generate_resistor_table_draws_a_ruled_grid():
          "body_width": 2000.0, "selected_ink": 1000.0},
     ])
     col_widths = (1200.0, 2500.0, 1000.0, 2000.0, 2000.0)
-    name = s.generate_resistor_table("RESTABLE_TEST", 62, col_widths=col_widths)
+    # title=None isolates the base grid from the (separately tested)
+    # title row.
+    name = s.generate_resistor_table("RESTABLE_TEST", 62, col_widths=col_widths, title=None)
     cell = s.library.cells[name]
     lines = [sh for sh in cell.shapes if isinstance(sh, Path)]
     # 2 data rows + header + 1 = 4 horizontal lines; 5 columns + 1 = 6
@@ -469,6 +471,68 @@ def test_generate_resistor_table_draws_a_ruled_grid():
     assert x_positions[0] == 0
     assert x_positions[-1] == total_width
     assert len(x_positions) == 6
+
+
+def test_generate_resistor_table_title_row_defaults_on_and_spans_full_width():
+    # Per user direction: a header/title row above the column headers,
+    # e.g. "RESISTOR TABLE" -- on by default, spanning the table's full
+    # width as ONE merged cell (no column dividers running through it,
+    # unlike every row below it).
+    from hlayout.io.techfile import save_resistor_list
+    s = _fresh_session()
+    save_resistor_list(s.library, [
+        {"ref_des": "R1", "value": 100.0, "tolerance": "5%", "power_mw": 100.0,
+         "body_width": 1000.0, "selected_ink": 100.0},
+    ])
+    col_widths = (1200.0, 2500.0, 1000.0, 2000.0, 2000.0)
+    row_height = 250.0
+    name = s.generate_resistor_table("RESTABLE_TEST", 62, col_widths=col_widths,
+                                      row_height=row_height)
+    cell = s.library.cells[name]
+    texts = _table_cells(cell)
+    assert texts[(100.0, row_height)] == "RESISTOR TABLE"
+
+    lines = [sh for sh in cell.shapes if isinstance(sh, Path)]
+    horiz = [ln for ln in lines if ln.points[0][1] == ln.points[1][1]]
+    vert = [ln for ln in lines if ln.points[0][0] == ln.points[1][0]]
+    # 1 data row + header + title + 1 = 4 horizontal lines (one extra
+    # vs. no title); still only 6 verticals -- the title doesn't add
+    # column dividers of its own.
+    assert len(horiz) == 4
+    assert len(vert) == 6
+    # the two OUTER verticals reach all the way up through the title
+    # row; no inner vertical does.
+    total_width = sum(col_widths)
+    outer = [ln for ln in vert if ln.points[0][0] in (0.0, total_width)]
+    inner = [ln for ln in vert if ln.points[0][0] not in (0.0, total_width)]
+    title_top = row_height * 0.3 + row_height
+    assert all(max(ln.points[0][1], ln.points[1][1]) == title_top for ln in outer)
+    assert all(max(ln.points[0][1], ln.points[1][1]) < title_top for ln in inner)
+
+
+def test_generate_resistor_table_title_can_be_omitted():
+    from hlayout.io.techfile import save_resistor_list
+    s = _fresh_session()
+    save_resistor_list(s.library, [
+        {"ref_des": "R1", "value": 100.0, "tolerance": "5%", "power_mw": 100.0,
+         "body_width": 1000.0, "selected_ink": 100.0},
+    ])
+    name = s.generate_resistor_table("RESTABLE_TEST", 62, title=None)
+    texts = list(_table_cells(s.library.cells[name]).values())
+    assert "RESISTOR TABLE" not in texts
+
+
+def test_generate_resistor_table_custom_title_text():
+    from hlayout.io.techfile import save_resistor_list
+    s = _fresh_session()
+    save_resistor_list(s.library, [
+        {"ref_des": "R1", "value": 100.0, "tolerance": "5%", "power_mw": 100.0,
+         "body_width": 1000.0, "selected_ink": 100.0},
+    ])
+    name = s.generate_resistor_table("RESTABLE_TEST", 62, title="ASSEMBLY 1 RESISTORS")
+    texts = list(_table_cells(s.library.cells[name]).values())
+    assert "ASSEMBLY 1 RESISTORS" in texts
+    assert "RESISTOR TABLE" not in texts
 
 
 def test_generate_resistor_table_grid_uses_a_separate_line_layer():

@@ -1453,7 +1453,9 @@ class Session:
                                  row_height: float = 250.0,
                                  col_widths=(1200.0, 2500.0, 1000.0, 2000.0, 2000.0),
                                  text_height: float = 150.0, line_layer=None,
-                                 line_width: float = 20.0, overwrite: bool = True) -> str:
+                                 line_width: float = 20.0,
+                                 title: Optional[str] = "RESISTOR TABLE",
+                                 title_inset: float = 100.0, overwrite: bool = True) -> str:
         """Build a resistor BOM table -- REF DES / VALUE (OHMS) / TOL% /
         AIM VALUE / INK (OHMS/SQ) -- as a grid of Text shapes plus ruled
         row/column border lines, all in its own cell, generated fresh
@@ -1484,6 +1486,12 @@ class Session:
         as the text) at `line_width` DBU, giving every cell (header and
         data) its own bordered box the way a real printed table reads,
         not just floating text in a grid pattern.
+
+        `title` (default "RESISTOR TABLE"; pass None or "" to omit it)
+        adds one more row ABOVE the column headers -- a single cell
+        spanning the table's full width (no internal column dividers
+        through it, unlike every row below), with its own text inset
+        `title_inset` DBU from the left edge.
 
         Raises LayoutError if there are no saved resistor rows to
         tabulate at all (Setup/the Resistor Designer hasn't saved a
@@ -1560,11 +1568,26 @@ class Session:
             row_tops = [oy + top_pad - i * row_height for i in range(n_data_rows + 2)]
             col_bounds = col_x + [col_x[-1] + col_widths[-1]]
             left, right = col_bounds[0], col_bounds[-1]
-            top, bottom = row_tops[0], row_tops[-1]
-            for y in row_tops:
+            header_top, bottom = row_tops[0], row_tops[-1]
+
+            if title:
+                title_top = header_top + row_height
+                cell.add_text(r_layer, (ox + title_inset, oy + row_height), title, height=h)
+                horiz_lines = [title_top] + row_tops
+                top = title_top
+            else:
+                horiz_lines = row_tops
+                top = header_top
+
+            for y in horiz_lines:
                 cell.add_path(grid_layer, [(left, y), (right, y)], grid_width, cap="flush")
-            for x in col_bounds:
-                cell.add_path(grid_layer, [(x, top), (x, bottom)], grid_width, cap="flush")
+            # outer edges span the FULL height (through the title row,
+            # if any); inner column dividers stop at the header -- the
+            # title is one merged cell, not split by column.
+            cell.add_path(grid_layer, [(left, top), (left, bottom)], grid_width, cap="flush")
+            cell.add_path(grid_layer, [(right, top), (right, bottom)], grid_width, cap="flush")
+            for x in col_bounds[1:-1]:
+                cell.add_path(grid_layer, [(x, header_top), (x, bottom)], grid_width, cap="flush")
         return cell_name
 
     def clear_undo_history(self) -> None:

@@ -226,7 +226,8 @@ a resistor; this draws it):
                                        and D (glaze oversize, on all 4 sides) mean.
                                        dlayer= is still accepted but ignored.
     RESTABLE <cell_name> <layer> [origin=<x,y>] [rowheight=<dbu>] [textheight=<dbu>]
-             [linelayer=<n|name>] [linewidth=<dbu>] [overwrite=0|1]
+             [linelayer=<n|name>] [linewidth=<dbu>] [title=<text>] [titleinset=<dbu>]
+             [overwrite=0|1]
                                        build a resistor BOM table -- REF DES / VALUE
                                        (OHMS) / TOL% / AIM VALUE / INK (OHMS/SQ) -- as
                                        a grid of Text shapes, PLUS ruled row/column
@@ -239,10 +240,16 @@ a resistor; this draws it):
                                        always matches whatever it used to pick each
                                        ink. linelayer defaults to the same layer as the
                                        text; linewidth defaults to a thin 20 DBU rule.
-                                       Generic and re-runnable -- overwrite defaults to
-                                       1, so running it again after adding/editing
-                                       resistors just rebuilds the cell fresh; place it
-                                       (SREF) wherever needed, e.g. alongside the
+                                       title (default "RESISTOR TABLE"; quote it if it
+                                       has spaces, or pass title="" to omit it) adds one
+                                       more row above the column headers, spanning the
+                                       full table width as a single merged cell (no
+                                       column dividers through it) -- titleinset sets
+                                       its own left-edge text inset. Generic and
+                                       re-runnable -- overwrite defaults to 1, so
+                                       running it again after adding/editing resistors
+                                       just rebuilds the cell fresh; place it (SREF)
+                                       wherever needed, e.g. alongside the
                                        assembly drawing for PRINT. Also available as
                                        Session.generate_resistor_table()
 
@@ -1148,7 +1155,8 @@ class CommandInterpreter:
     def _cmd_restable(self, args):
         usage = ("usage: RESTABLE <cell_name> <layer> [origin=<x,y>] "
                  "[rowheight=<dbu>] [textheight=<dbu>] [linelayer=<n|name>] "
-                 "[linewidth=<dbu>] [overwrite=0|1]")
+                 "[linewidth=<dbu>] [title=<text>] [titleinset=<dbu>] "
+                 "[overwrite=0|1]  (quote title=\"...\" if it has spaces)")
         if len(args) < 2:
             raise CommandError(usage)
         cell_name, layer = args[0], args[1]
@@ -1168,6 +1176,10 @@ class CommandInterpreter:
                 kwargs["line_layer"] = self.session.library.layers.resolve(v)
             elif k == "linewidth":
                 kwargs["line_width"] = float(v)
+            elif k == "title":
+                kwargs["title"] = v
+            elif k == "titleinset":
+                kwargs["title_inset"] = float(v)
             elif k == "overwrite":
                 kwargs["overwrite"] = v not in ("0", "false", "no")
             else:
