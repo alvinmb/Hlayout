@@ -225,6 +225,22 @@ a resistor; this draws it):
                                        A (overlap), B (pad length), C (side space),
                                        and D (glaze oversize, on all 4 sides) mean.
                                        dlayer= is still accepted but ignored.
+    RESTABLE <cell_name> <layer> [origin=<x,y>] [rowheight=<dbu>] [textheight=<dbu>]
+             [overwrite=0|1]
+                                       build a resistor BOM table -- REF DES / VALUE
+                                       (OHMS) / TOL% / AIM VALUE / INK (OHMS/SQ) -- as
+                                       a grid of Text shapes in its own cell, generated
+                                       fresh from the saved Thick-Film Resistor
+                                       Designer rows (the same data its own table
+                                       shows); "aim value" uses that Designer's own
+                                       formula (value x (aim_pct% + tolerance%)) so it
+                                       always matches whatever it used to pick each
+                                       ink. Generic and re-runnable -- overwrite
+                                       defaults to 1, so running it again after adding/
+                                       editing resistors just rebuilds the cell fresh;
+                                       place it (SREF) wherever needed, e.g. alongside
+                                       the assembly drawing for PRINT. Also available
+                                       as Session.generate_resistor_table()
 
 Layer-based mask operations (resize/boolean, like a GDSII CAM system's
 Size/AND/OR deck operators -- any Path on an input layer is converted
@@ -1124,6 +1140,34 @@ class CommandInterpreter:
             origin[0], origin[1], body_width, body_length, rotation=rotation, **kwargs)
         return (f"generated resistor cell {device_name!r}, placed at {origin} "
                 f"(W={body_width}, L={body_length})")
+
+    def _cmd_restable(self, args):
+        usage = ("usage: RESTABLE <cell_name> <layer> [origin=<x,y>] "
+                 "[rowheight=<dbu>] [textheight=<dbu>] [overwrite=0|1]")
+        if len(args) < 2:
+            raise CommandError(usage)
+        cell_name, layer = args[0], args[1]
+        kwargs = {}
+        for a in args[2:]:
+            if "=" not in a:
+                raise CommandError(usage)
+            k, v = a.split("=", 1)
+            k = k.lower()
+            if k == "origin":
+                kwargs["origin"] = _parse_point(v)
+            elif k == "rowheight":
+                kwargs["row_height"] = float(v)
+            elif k == "textheight":
+                kwargs["text_height"] = float(v)
+            elif k == "overwrite":
+                kwargs["overwrite"] = v not in ("0", "false", "no")
+            else:
+                raise CommandError(f"unknown RESTABLE option {k!r}")
+        try:
+            name = self.session.generate_resistor_table(cell_name, layer, **kwargs)
+        except LayoutError as e:
+            raise CommandError(str(e))
+        return f"generated resistor table cell {name!r}"
 
     # --- mask ops ---------------------------------------------------------
     def _cmd_clear(self, args):

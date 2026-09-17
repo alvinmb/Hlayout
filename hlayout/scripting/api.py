@@ -1449,6 +1449,101 @@ class Session:
             self.sref(device_name, (x, y), rotation=rotation, label=str(ref_des) if ref_des else "")
         return device_name
 
+    def generate_resistor_table(self, cell_name: str, layer, *, origin=(0, 0),
+                                 row_height: float = 250.0,
+                                 col_widths=(1200.0, 2500.0, 1000.0, 2000.0, 2000.0),
+                                 text_height: float = 150.0, overwrite: bool = True) -> str:
+        """Build a resistor BOM table -- REF DES / VALUE (OHMS) / TOL% /
+        AIM VALUE / INK (OHMS/SQ) -- as a grid of Text shapes in its own
+        cell, generated fresh from the saved Thick-Film Resistor
+        Designer rows (hlayout.io.techfile.load_resistor_list(), the
+        same data the Designer's own table shows). Generic and re-run-
+        able: this ALWAYS rebuilds the cell from whatever the resistor
+        list currently holds (``overwrite`` defaults to True, unlike
+        every other ``cell already exists`` guard in this module) --
+        call it again after adding/editing resistors to refresh the
+        table, then Session.sref() the cell wherever it's needed (e.g.
+        alongside the assembly drawing, for PRINT).
+
+        "Aim value" uses the SAME formula the Resistor Designer itself
+        uses (value x (aim_pct% + tolerance%) -- see
+        hlayout.gui.resistor_designer.Resistor.aim_value()), reading
+        aim_pct from hlayout.io.techfile.load_resistor_design_rules()
+        so the printed table always matches whatever the Designer
+        actually used to pick each ink.
+
+        `col_widths` (DBU, one per column: ref des, value, tolerance,
+        aim value, ink) and `row_height`/`text_height` (DBU) control
+        the table's layout; the defaults are sized for text_height's
+        own default.
+
+        Raises LayoutError if there are no saved resistor rows to
+        tabulate at all (Setup/the Resistor Designer hasn't saved a
+        resistor_list yet), or if `cell_name` exists and isn't a table
+        this method itself can safely rebuild (pass overwrite=False to
+        refuse touching an existing cell instead)."""
+        from ..io.techfile import load_resistor_design_rules, load_resistor_list
+
+        cell_name = (cell_name or "").strip()
+        if not cell_name:
+            raise LayoutError("a cell name is required")
+        rows = load_resistor_list(self.library)
+        if not rows:
+            raise LayoutError(
+                "no resistor rows saved -- generate resistors with the "
+                "Thick-Film Resistor Designer first"
+            )
+        HEADINGS = ("REF DES", "VALUE (OHMS)", "TOL%", "AIM VALUE", "INK (OHMS/SQ)")
+        if len(col_widths) != len(HEADINGS):
+            raise LayoutError(f"col_widths must have {len(HEADINGS)} entries")
+        if cell_name in self.library.cells:
+            if not overwrite:
+                raise LayoutError(
+                    f"{cell_name!r} already exists in this design; pass "
+                    "overwrite=True to replace it"
+                )
+            self.library.delete_cell(cell_name)
+
+        r_layer = self.library.layers.resolve(layer)
+        aim_pct = load_resistor_design_rules(self.library)["aim_pct"]
+
+        def tol_fraction(tol_str):
+            try:
+                return float(str(tol_str).strip().rstrip("%")) / 100.0
+            except ValueError:
+                return 0.0
+
+        ox, oy = origin
+        col_x = [ox]
+        for w in col_widths[:-1]:
+            col_x.append(col_x[-1] + w)
+        h = int(round(text_height))
+
+        with self._batch():
+            cell = self.library.new_cell(cell_name)
+            self.current_cell_name = cell_name
+
+            def put_row(y, cells_text):
+                for x, text in zip(col_x, cells_text):
+                    if text:
+                        cell.add_text(r_layer, (x, y), text, height=h)
+
+            put_row(oy, HEADINGS)
+            for i, row in enumerate(rows, start=1):
+                y = oy - i * row_height
+                value = row["value"]
+                tol = row["tolerance"]
+                aim = value * (aim_pct / 100.0 + tol_fraction(tol))
+                ink = row.get("selected_ink")
+                put_row(y, (
+                    row["ref_des"],
+                    f"{value:,.0f}",
+                    tol,
+                    f"{aim:,.0f}",
+                    f"{ink:,.0f}" if ink is not None else "—",
+                ))
+        return cell_name
+
     def clear_undo_history(self) -> None:
         """Called when self.library is replaced wholesale (New, Open
         GDS) rather than edited -- there's nothing meaningful to undo

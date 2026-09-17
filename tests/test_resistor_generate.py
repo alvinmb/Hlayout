@@ -3,6 +3,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from hlayout.core.errors import LayoutError
 from hlayout.core.shapes import Rectangle, Text
 from hlayout.io.techfile import (
     load_resistor_geometry_rules,
@@ -363,3 +364,136 @@ def test_generate_resistor_creates_a_uniquely_named_cell_per_call():
     # Two independent device cells were created in the library.
     assert name1 in s.library.cells
     assert name2 in s.library.cells
+
+
+# --- Session.generate_resistor_table() / RESTABLE ---------------------------
+# A resistor BOM table (REF DES / VALUE (OHMS) / TOL% / AIM VALUE /
+# INK (OHMS/SQ)) built from the saved Thick-Film Resistor Designer rows,
+# per user direction: generic and re-runnable, always rebuilding fresh
+# from whatever the resistor list currently holds, so it can be placed
+# alongside the assembly drawing for PRINT.
+
+def _table_cells(cell):
+    """{(x, y): text} for every Text shape in `cell` -- easy lookup by
+    grid position regardless of shape order."""
+    return {sh.origin: sh.text for sh in cell.shapes if isinstance(sh, Text)}
+
+
+def test_generate_resistor_table_aim_value_matches_the_designers_own_formula():
+    # aim value = value x (aim_pct% + tolerance%) -- see
+    # hlayout.gui.resistor_designer.Resistor.aim_value()'s own docstring
+    # for the exact same formula; this must never drift from it.
+    from hlayout.io.techfile import save_resistor_design_rules, save_resistor_list
+    s = _fresh_session()
+    save_resistor_design_rules(s.library, {
+        "aim_pct": 75.0, "ar_min": 0.25, "ar_max": 4.0,
+        "available_inks": [10, 30, 100], "select_mode": "aspect",
+    })
+    save_resistor_list(s.library, [
+        {"ref_des": "R1", "value": 680000.0, "tolerance": "5%", "power_mw": 125.0,
+         "body_width": 2000.0, "selected_ink": 300000.0},
+    ])
+    name = s.generate_resistor_table("RESTABLE_TEST", 62)
+    cells = _table_cells(s.library.cells[name])
+    assert cells[(0, 0)] == "REF DES"
+    assert cells[(0, -250)] == "R1"
+    assert cells[(1200, -250)] == "680,000"
+    assert cells[(3700, -250)] == "5%"
+    assert cells[(4700, -250)] == "544,000"  # 680000 * (0.75 + 0.05)
+    assert cells[(6700, -250)] == "300,000"
+
+
+def test_generate_resistor_table_handles_a_row_with_no_selected_ink():
+    from hlayout.io.techfile import save_resistor_list
+    s = _fresh_session()
+    save_resistor_list(s.library, [
+        {"ref_des": "R1", "value": 100.0, "tolerance": "5%", "power_mw": 100.0,
+         "body_width": 1000.0, "selected_ink": None},
+    ])
+    name = s.generate_resistor_table("RESTABLE_TEST", 62)
+    cells = _table_cells(s.library.cells[name])
+    assert cells[(6700, -250)] == "—"
+
+
+def test_generate_resistor_table_raises_without_a_saved_resistor_list():
+    s = _fresh_session()
+    try:
+        s.generate_resistor_table("RESTABLE_TEST", 62)
+        assert False, "expected LayoutError"
+    except LayoutError as e:
+        assert "resistor" in str(e).lower()
+
+
+def test_generate_resistor_table_requires_a_cell_name():
+    from hlayout.io.techfile import save_resistor_list
+    s = _fresh_session()
+    save_resistor_list(s.library, [
+        {"ref_des": "R1", "value": 100.0, "tolerance": "5%", "power_mw": 100.0,
+         "body_width": 1000.0, "selected_ink": 100.0},
+    ])
+    try:
+        s.generate_resistor_table("", 62)
+        assert False, "expected LayoutError"
+    except LayoutError:
+        pass
+
+
+def test_generate_resistor_table_overwrite_defaults_true_and_rebuilds():
+    # Generic and re-runnable, per user direction -- unlike every other
+    # "cell already exists" guard in this module, overwrite defaults to
+    # True here: running RESTABLE again after editing the resistor list
+    # should just refresh the table, not require an explicit flag.
+    from hlayout.io.techfile import save_resistor_list
+    s = _fresh_session()
+    save_resistor_list(s.library, [
+        {"ref_des": "R1", "value": 100.0, "tolerance": "5%", "power_mw": 100.0,
+         "body_width": 1000.0, "selected_ink": 100.0},
+    ])
+    name = s.generate_resistor_table("RESTABLE_TEST", 62)
+    save_resistor_list(s.library, [
+        {"ref_des": "R2", "value": 200.0, "tolerance": "1%", "power_mw": 100.0,
+         "body_width": 1000.0, "selected_ink": 200.0},
+    ])
+    s.generate_resistor_table("RESTABLE_TEST", 62)  # no overwrite= passed
+    cells = _table_cells(s.library.cells[name])
+    assert cells[(0, -250)] == "R2"
+    assert (0, -500) not in cells  # only one data row now, not stale + new
+
+
+def test_generate_resistor_table_overwrite_false_refuses_an_existing_cell():
+    from hlayout.io.techfile import save_resistor_list
+    s = _fresh_session()
+    save_resistor_list(s.library, [
+        {"ref_des": "R1", "value": 100.0, "tolerance": "5%", "power_mw": 100.0,
+         "body_width": 1000.0, "selected_ink": 100.0},
+    ])
+    s.generate_resistor_table("RESTABLE_TEST", 62)
+    try:
+        s.generate_resistor_table("RESTABLE_TEST", 62, overwrite=False)
+        assert False, "expected LayoutError"
+    except LayoutError as e:
+        assert "already exists" in str(e)
+
+
+def test_restable_command_bar():
+    from hlayout.gui.commands import CommandInterpreter
+    from hlayout.scripting import ScriptConsole
+    from hlayout.io.techfile import save_resistor_list
+    s = _fresh_session()
+    save_resistor_list(s.library, [
+        {"ref_des": "R1", "value": 100.0, "tolerance": "5%", "power_mw": 100.0,
+         "body_width": 1000.0, "selected_ink": 100.0},
+    ])
+    interp = CommandInterpreter(s, ScriptConsole(s))
+    out = interp.run("RESTABLE RESTABLE_TEST 62")
+    assert "generated resistor table" in out
+    assert "RESTABLE_TEST" in s.library.cells
+
+
+def test_restable_command_bar_requires_layer():
+    from hlayout.gui.commands import CommandInterpreter
+    from hlayout.scripting import ScriptConsole
+    s = _fresh_session()
+    interp = CommandInterpreter(s, ScriptConsole(s))
+    out = interp.run("RESTABLE RESTABLE_TEST")
+    assert "error" in out.lower()
