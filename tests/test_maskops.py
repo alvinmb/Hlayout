@@ -341,6 +341,90 @@ def test_mask_op_is_a_single_undo_step():
     assert len(s.cell.shapes) == before
 
 
+# --- Session.clear_layer() / CLEAR -------------------------------------------
+
+def test_clear_layer_deletes_every_shape_on_that_layer():
+    s = _fresh_session()
+    s.rect(63, 0, 0, 100, 100)
+    s.rect(63, 200, 200, 300, 300)
+    s.rect(0, 0, 0, 50, 50)
+    written = s.clear_layer(63)
+    assert written == {"TOP": 2}
+    assert [sh.layer for sh in s.cell.shapes] == [0]
+
+
+def test_clear_layer_on_an_already_clean_layer_returns_empty():
+    s = _fresh_session()
+    s.rect(0, 0, 0, 50, 50)
+    assert s.clear_layer(63) == {}
+
+
+def test_clear_layer_mixed_shape_types():
+    s = _fresh_session()
+    s.rect(63, 0, 0, 100, 100)
+    s.path(63, [(0, 0), (100, 0)], width=20, cap="round")
+    s.polygon(63, [(0, 0), (10, 0), (5, 10)])
+    written = s.clear_layer(63)
+    assert written == {"TOP": 3}
+    assert s.cell.shapes == []
+
+
+def test_clear_layer_targets_a_named_cell_directly_no_flatten():
+    # No flatten option -- this always operates on the named cell's own
+    # shapes only, matching mask_op_top_view()'s own scope (the layer
+    # being cleared has to actually live in the cell being operated on).
+    s = _fresh_session()
+    s.new_cell("Other")
+    s.rect(63, 0, 0, 100, 100)
+    s.use_cell("TOP")
+    s.rect(63, 0, 0, 50, 50)
+    written = s.clear_layer(63, cell_names=["Other"])
+    assert written == {"Other": 1}
+    assert any(sh.layer == 63 for sh in s.cell.shapes)  # TOP untouched
+    assert s.library.cells["Other"].shapes == []
+
+
+def test_clear_layer_is_undoable():
+    s = _fresh_session()
+    s.rect(63, 0, 0, 100, 100)
+    s.clear_undo_history()
+    before = len(s.cell.shapes)
+    s.clear_layer(63)
+    assert len(s.cell.shapes) == before - 1
+    assert s.undo() is True
+    assert len(s.cell.shapes) == before
+
+
+def test_clear_command_bar():
+    from hlayout.gui.commands import CommandInterpreter
+    from hlayout.scripting import ScriptConsole
+    s = _fresh_session()
+    s.rect(63, 0, 0, 100, 100)
+    s.rect(63, 200, 200, 300, 300)
+    interp = CommandInterpreter(s, ScriptConsole(s))
+    out = interp.run("CLEAR 63")
+    assert "deleted 2 shape" in out
+    assert s.cell.shapes == []
+
+
+def test_clear_command_bar_reports_nothing_to_delete():
+    from hlayout.gui.commands import CommandInterpreter
+    from hlayout.scripting import ScriptConsole
+    s = _fresh_session()
+    interp = CommandInterpreter(s, ScriptConsole(s))
+    out = interp.run("CLEAR 63")
+    assert "nothing on layer 63" in out
+
+
+def test_clear_command_bar_requires_a_layer():
+    from hlayout.gui.commands import CommandInterpreter
+    from hlayout.scripting import ScriptConsole
+    s = _fresh_session()
+    interp = CommandInterpreter(s, ScriptConsole(s))
+    out = interp.run("CLEAR")
+    assert "error" in out.lower()
+
+
 # --- Session.convert_rects_to_outline() / OUTLINE ---------------------------
 
 def test_convert_rects_to_outline_replaces_a_rectangle_with_a_closed_path():

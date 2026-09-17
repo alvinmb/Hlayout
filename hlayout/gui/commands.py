@@ -229,6 +229,18 @@ a resistor; this draws it):
 Layer-based mask operations (resize/boolean, like a GDSII CAM system's
 Size/AND/OR deck operators -- any Path on an input layer is converted
 to its stroked-outline polygon first; requires the shapely package):
+    CLEAR <layer> [cell=<name>]
+                                       delete every shape on layer from the
+                                       named cell's OWN shapes (never
+                                       descending into placed sub-cells);
+                                       cell defaults to the current cell.
+                                       Handy for a scratch/result layer --
+                                       TOPVIEW always APPENDS rather than
+                                       replacing, so repeated runs while
+                                       iterating accumulate leftover paths;
+                                       clear the layer first for a clean
+                                       rerun. Also available as
+                                       Session.clear_layer()
     MASKOP OVERSIZE <layer_a> result=<layer> amount=<dbu> [cell=<name>] [flatten=0|1]
                                        [simplify=<dbu>]
                                        grow everything on layer_a by amount DBU,
@@ -1114,6 +1126,27 @@ class CommandInterpreter:
                 f"(W={body_width}, L={body_length})")
 
     # --- mask ops ---------------------------------------------------------
+    def _cmd_clear(self, args):
+        usage = "usage: CLEAR <layer> [cell=<name>]"
+        if not args:
+            raise CommandError(usage)
+        layer = args[0]
+        kwargs = {}
+        for a in args[1:]:
+            if "=" not in a:
+                raise CommandError(usage)
+            k, v = a.split("=", 1)
+            k = k.lower()
+            if k == "cell":
+                kwargs["cell_names"] = [v]
+            else:
+                raise CommandError(f"unknown CLEAR option {k!r}")
+        written = self.session.clear_layer(layer, **kwargs)
+        total = sum(written.values())
+        if total == 0:
+            return f"CLEAR: nothing on layer {layer} to delete"
+        return f"CLEAR: deleted {total} shape(s) from layer {layer}"
+
     def _cmd_outline(self, args):
         usage = "usage: OUTLINE <layer> width=<dbu> [cell=<name>]"
         if not args:

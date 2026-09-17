@@ -1890,6 +1890,36 @@ class Session:
         self._notify()
         return written
 
+    def clear_layer(self, layer, cell_names: Optional[List[str]] = None) -> dict:
+        """Delete every shape on `layer` from the named cells' own
+        shapes (never descending into placed sub-cells -- this deletes
+        exactly what's drawn directly in the cell being operated on,
+        the same scope mask_op_top_view()/convert_rects_to_outline()
+        use). The obvious use is cleaning up a scratch/result layer --
+        e.g. mask_op_top_view() always APPENDS new paths to its result
+        layer rather than replacing what's there, so repeated runs
+        while iterating on a design accumulate leftover paths from
+        every earlier attempt; clear the layer first for a clean rerun.
+
+        Runs on the current cell by default; pass `cell_names` to
+        target other/additional specific cells directly.
+
+        Returns {cell_name: shapes_deleted} for cells that had at least
+        one shape on `layer` (empty results are omitted)."""
+        r_layer = self.library.layers.resolve(layer)
+        self._checkpoint()
+        cells = ([self.library.get_cell(n) for n in cell_names] if cell_names
+                 else [self.cell])
+        written = {}
+        for cell in cells:
+            doomed = [sh for sh in cell.shapes if sh.layer == r_layer]
+            for shape in doomed:
+                cell.remove(shape)
+            if doomed:
+                written[cell.name] = len(doomed)
+        self._notify()
+        return written
+
     def mask_op_top_view(self, result_layer, layers: Optional[List] = None,
                           exclude_layers: Optional[List] = None,
                           hatch_conductor_pitch: Optional[float] = None,
