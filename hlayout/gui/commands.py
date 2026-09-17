@@ -281,13 +281,16 @@ to its stroked-outline polygon first; requires the shapely package):
                                        FOOTPRINT (a known pin pattern), not by
                                        which layer it draws on, and sits topmost;
                                        then resistor ink, then conductor (incl.
-                                       Route/Wire Bond layers), then any other
-                                       layer with real geometry, then substrate;
+                                       Route layers), then any other layer with
+                                       real geometry, then substrate;
                                        an unclassified "other" layer can never
                                        occlude conductor/resistor/a component just
-                                       for having a higher number; glaze is a
-                                       non-occluding outline overlay, always fully
-                                       shown; no fired-film thickness is needed
+                                       for having a higher number; glaze AND the
+                                       Wire Bond layer are both non-occluding
+                                       outline overlays, always fully shown (a
+                                       bond wire terminates ON a pad, it doesn't
+                                       run underneath one); no fired-film
+                                       thickness is needed
                                        anywhere in any of this; exclude=<n,n,...>
                                        drops specific layers out of the role-based
                                        default (ignored once layers= is given

@@ -925,6 +925,42 @@ def test_top_view_role_order_components_and_epoxy_occlude_conductor():
     assert _min_dist_to_paths((0, 300), paths) < 1
 
 
+def test_top_view_wire_bond_is_not_clipped_by_the_component_it_bonds_to():
+    # A wire bond terminates ON a component's own pad, at the surface --
+    # it doesn't run buried underneath the component the way a real
+    # conductor trace does. Confirmed live: lumping the Wire Bond layer
+    # into the occluding conductor tier left a bond wire visibly
+    # stopping short of the pad it actually reaches, clipped by the very
+    # component it's bonded to. It must be non-occluding, same as glaze.
+    from hlayout.io.techfile import save_bond_rules, save_layer_thickness, \
+        save_resistor_geometry_rules
+    s = _fresh_session()
+    s.new_cell("CAP_1210")
+    s.rect(61, 0, 0, 400, 550)  # component footprint (non-film outline)
+    s.use_cell("TOP")
+    save_resistor_geometry_rules(s.library, {
+        "overlap_a": 200, "pad_b": 500, "space_c": 200, "glaze_oversize": 50,
+        "keepout_oversize": 0, "resistor_layer": -1, "conductor_layer": 50,
+        "glaze_layer": -1, "doc_layer": -1, "keepout_layer": -1, "ink_layers": {},
+    })
+    save_layer_thickness(s.library, {"50": 12.0})
+    save_bond_rules(s.library, {"layer": 59, "width": 30, "pad": 100,
+                                 "min_length": 300, "max_length": 5000})
+    s.sref("CAP_1210", (100, 100))  # component footprint now (100,100)-(500,650)
+    # a bond wire running from outside the component to well INSIDE its
+    # footprint -- as if landing on the die's own pad. Horizontal with a
+    # flush cap, so its own stroke edge is a plain straight line at
+    # y=315 (centreline y=300, +half the 30-wide stroke).
+    s.path(59, [(0, 300), (300, 300)], width=30, cap="flush")
+    written = s.mask_op_top_view(63)
+    assert written
+    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    # the wire's own top edge, at x=250 -- deep inside the component's
+    # footprint (which starts at x=100) -- is still fully present, not
+    # clipped at the component's edge.
+    assert _min_dist_to_paths((250, 315), paths) < 1
+
+
 def test_top_view_component_recognition_needs_no_layer_thickness_at_all():
     # Component recognition (by EIA-size name here) works with NOTHING
     # saved in layer_thickness anywhere in the design -- it has no

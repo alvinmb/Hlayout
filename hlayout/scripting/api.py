@@ -1915,22 +1915,25 @@ class Session:
         _matched_component_footprint()) -- then the resistor ink
         layer(s), then
         every conductor layer (Setup's own conductor_layer plus the
-        Route Layers and Wire Bond layers), then any OTHER visible,
-        filled layer not otherwise classified, then the substrate. An
-        unclassified "other" layer is its own tier, strictly below
-        conductor -- it never occludes conductor (or resistor, or a
-        component) just because it happens to have a higher layer
-        number, the exact number-ordering problem this role-based
-        stacking exists to avoid in the first place; two layers within
-        the SAME tier (e.g. two unclassified "other" layers) still
-        settle ties between themselves by plain layer number, since
-        nothing further distinguishes them. The glaze layer is drawn
-        as a non-occluding outline overlay -- always shown in full,
-        never hidden by or hiding anything else, since glaze is a
-        thin, largely transparent overprint rather than an opaque film
-        in this pictorial convention. Layer roles come from the same
-        Setup accessors export_freecad()'s heuristic uses
-        (hlayout.io.techfile's resistor/route/bond/dielectric rules).
+        Route Layers), then any OTHER visible, filled layer not
+        otherwise classified, then the substrate. An unclassified
+        "other" layer is its own tier, strictly below conductor -- it
+        never occludes conductor (or resistor, or a component) just
+        because it happens to have a higher layer number, the exact
+        number-ordering problem this role-based stacking exists to
+        avoid in the first place; two layers within the SAME tier (e.g.
+        two unclassified "other" layers) still settle ties between
+        themselves by plain layer number, since nothing further
+        distinguishes them. The glaze layer AND the Wire Bond layer are
+        both drawn as non-occluding overlays -- always shown in full,
+        never hidden by or hiding anything else: glaze is a thin,
+        largely transparent overprint rather than an opaque film in
+        this pictorial convention, and a wire bond terminates ON a
+        component's own pad at the surface rather than running buried
+        underneath it, so it must never be clipped short by the very
+        component it's bonded to. Layer roles come from the same Setup
+        accessors export_freecad()'s heuristic uses (hlayout.io.techfile's
+        resistor/route/bond/dielectric rules).
 
         `exclude_layers` (numbers or names) drops specific layers out of
         the role-based default without having to rebuild the whole
@@ -1958,7 +1961,7 @@ class Session:
         pair (e.g. (60, -60)) or a single angle for one-directional
         hatching instead of a cross. Both are ignored when `layers` is
         given explicitly, and have no effect on any other tier
-        (resistor, substrate, components, glaze).
+        (resistor, substrate, components, glaze, wire bonds).
 
         Pass an explicit `layers` list (numbers or names) to bypass all
         of that and get the older, simpler behaviour instead: every
@@ -2000,7 +2003,7 @@ class Session:
             if not layer_set:
                 raise LayoutError("no layers to composite -- pass a non-empty layers=")
         else:
-            resistor_layers, conductor_layers, glaze_layers = set(), set(), set()
+            resistor_layers, conductor_layers, glaze_layers, bond_layers = set(), set(), set(), set()
             try:
                 rg = load_resistor_geometry_rules(self.library)
                 if isinstance(rg.get("resistor_layer"), int) and rg["resistor_layer"] >= 0:
@@ -2024,7 +2027,7 @@ class Session:
             try:
                 b = int(load_bond_rules(self.library)["layer"])
                 if b >= 0:
-                    conductor_layers.add(b)
+                    bond_layers.add(b)
             except Exception:
                 pass
             try:
@@ -2044,7 +2047,7 @@ class Session:
             for c in self.library.cells.values():
                 for sh in c.shapes:
                     drawn.add(sh.layer)
-            role_layers = resistor_layers | conductor_layers | glaze_layers
+            role_layers = resistor_layers | conductor_layers | glaze_layers | bond_layers
             generic_layers = {
                 n for n in drawn
                 if 0 <= n < len(self.library.layers)
@@ -2062,11 +2065,12 @@ class Session:
                 resistor_layers -= excluded
                 conductor_layers -= excluded
                 glaze_layers -= excluded
+                bond_layers -= excluded
                 substrate_layers -= excluded
                 other_layers -= excluded
 
             all_considered_layers = resistor_layers | conductor_layers | glaze_layers \
-                | substrate_layers | other_layers
+                | bond_layers | substrate_layers | other_layers
 
             if not all_considered_layers:
                 raise LayoutError(
@@ -2088,7 +2092,7 @@ class Session:
             if role_based:
                 comp_geom = _matched_component_footprint(
                     self.library, cell.name, load_component_models(self.library),
-                    resistor_layers | conductor_layers | glaze_layers, excluded)
+                    resistor_layers | conductor_layers | glaze_layers | bond_layers, excluded)
                 layer_geoms = [(comp_geom, True)]
                 for n in sorted(resistor_layers, reverse=True):
                     layer_geoms.append((gather(n), True))
@@ -2102,6 +2106,16 @@ class Session:
                 for n in sorted(substrate_layers, reverse=True):
                     layer_geoms.append((gather(n), True))
                 for n in sorted(glaze_layers):
+                    layer_geoms.append((gather(n), False))
+                for n in sorted(bond_layers):
+                    # A wire bond terminates ON a component's own pad,
+                    # at the surface -- it doesn't run buried underneath
+                    # one the way a real conductor trace does, so it
+                    # must never be clipped short by the very component
+                    # it's bonded to (confirmed live: occluding a bond
+                    # wire the same as conductor left it visibly
+                    # stopping short of the pad it actually reaches).
+                    # Non-occluding, same as glaze.
                     layer_geoms.append((gather(n), False))
             else:
                 layer_geoms = [(gather(n), True) for n in sorted(layer_set, reverse=True)]
