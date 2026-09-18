@@ -542,6 +542,8 @@ def _tokenize(line: str):
 
 
 class CommandInterpreter:
+    MAX_HISTORY = 10  # Up/Down in the command bar recalls at most this many
+
     def __init__(self, session, console, on_change: Optional[Callable[[], None]] = None, view=None):
         self.session = session
         self.console = console
@@ -555,6 +557,7 @@ class CommandInterpreter:
         if not line:
             return ""
         self.history.append(line)
+        del self.history[:-self.MAX_HISTORY]
         self._hist_index = len(self.history)
         try:
             tokens = _tokenize(line)
