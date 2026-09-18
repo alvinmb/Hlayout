@@ -379,10 +379,17 @@ to its stroked-outline polygon first; requires the shapely package):
                                        with no layers=, stacking follows the real
                                        fab process order by ROLE regardless of
                                        layer numbers -- a cell counts as a
-                                       component by NAME (an EIA size code) or
-                                       FOOTPRINT (a known pin pattern), not by
-                                       which layer it draws on, and sits topmost;
-                                       then resistor ink, then conductor (incl.
+                                       component by NAME (an EIA size code),
+                                       FOOTPRINT (a known pin pattern), an
+                                       explicit component_models/Component
+                                       Library entry, OR STRUCTURALLY as a bare
+                                       part -- a placed cell whose own shapes sit
+                                       entirely on non-role layers and that has
+                                       at least one child instance (e.g. a naked
+                                       die with no size code and no catalogued
+                                       pin-count table entry) -- not by which
+                                       layer it draws on, and sits topmost; then
+                                       resistor ink, then conductor (incl.
                                        Route layers), then any other layer with
                                        real geometry, then substrate;
                                        an unclassified "other" layer can never
@@ -396,7 +403,16 @@ to its stroked-outline polygon first; requires the shapely package):
                                        anywhere in any of this; exclude=<n,n,...>
                                        drops specific layers out of the role-based
                                        default (ignored once layers= is given
-                                       explicitly); hatch=<dbu> fills every
+                                       explicitly) -- it ALSO gates the
+                                       structural bare-part test above: a bare
+                                       part is walked into instead of treated as
+                                       an occluding component when ALL of its own
+                                       shapes sit on an excluded layer -- the
+                                       escape hatch for a sealed package's own
+                                       case/lid, whose outline can legitimately
+                                       span the whole board and would otherwise
+                                       occlude every real component inside it;
+                                       hatch=<dbu> fills every
                                        conductor-tier layer's own visible region
                                        with a 45/-45 degree cross-hatch at that
                                        pitch, the standard technical-drawing
@@ -408,7 +424,7 @@ to its stroked-outline polygon first; requires the shapely package):
                                        behaviour instead; width=<dbu> sets the
                                        drawn outline width (default 100 =
                                        0.1mm); writes Path shapes, not filled
-                                       polygons -- also available as
+                                       polygons -- also Tools > Top View... and
                                        Session.mask_op_top_view()
 
 Design Rule Check (DRC -- single-layer and between-layer geometric checks;
