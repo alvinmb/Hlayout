@@ -29,6 +29,7 @@ from ..core.cell import Cell
 from ..core.errors import LayoutError, LibraryError
 from ..core.library import Library, merge_libraries
 from ..core.shapes import Polygon, Rectangle
+from ..core.units import mm_to_dbu
 from ..core.maskops import (
     MASK_OPS,
     boolean_op,
@@ -253,6 +254,16 @@ def _matched_component_footprint(library, cell_name, component_models, role_laye
 
     walk(cell_name, None)
     return _fill_holes(unary_union(geoms)) if geoms else unary_union([])
+
+
+# ISO 216 sheet sizes in mm, stored as (short_edge, long_edge) --
+# portrait uses (short, long) as (width, height), landscape swaps them.
+# Limited to A4/A3: hlayout.core.units.MAX_SIZE_MM caps the database at
+# 500 x 500 mm, and A2 (594 mm) and larger don't fit inside that.
+SHEET_SIZES_MM = {
+    "A4": (210.0, 297.0),
+    "A3": (297.0, 420.0),
+}
 
 
 class Session:
@@ -1762,6 +1773,158 @@ class Session:
                               grid_width, cap="flush")
                 cell.add_path(grid_layer, [(right, title_top), (right, header_top)],
                               grid_width, cap="flush")
+        return cell_name
+
+    def generate_drawing_sheet(self, cell_name: str, layer, *, size: str = "A3",
+                                orientation: str = "portrait",
+                                origin=(0, 0), margin_mm: float = 10.0,
+                                title_block_height_mm: float = 45.0,
+                                text_height_mm: float = 3.0,
+                                line_width_mm: float = 0.35, line_layer=None,
+                                title: str = "", dwg_no: str = "", issue: str = "",
+                                drawn_by: str = "", drawn_date: str = "",
+                                checked_by: str = "", checked_date: str = "",
+                                approved_by: str = "", approved_date: str = "",
+                                overwrite: bool = True) -> str:
+        """Build a standard drawing sheet -- a ruled border frame sized
+        to a real ISO paper size (`size`: "A4" or "A3", default "A3" --
+        larger ISO sizes don't fit inside hlayout's 500 x 500 mm
+        database cap, hlayout.core.units.MAX_SIZE_MM), `orientation`
+        "portrait" (default) or "landscape", with a
+        standard title block ruled across the FULL width of the
+        bottom of that frame -- as a grid of Text shapes plus border/
+        grid Path lines, in its own cell, the same generic
+        grid-drawing convention generate_resistor_table() and
+        generate_pin_function_table() use. Unlike those, every
+        distance here is in real millimetres (`margin_mm`,
+        `title_block_height_mm`, `text_height_mm`, `line_width_mm`),
+        matching how a physical drawing sheet is actually specified,
+        and is converted to DBU internally
+        (hlayout.core.units.mm_to_dbu()).
+
+        The title block has 5 rows, top to bottom:
+          1. TITLE (full width)
+          2. DWG NO | ISSUE
+          3. DRAWN BY | DATE
+          4. CHECKED BY | DATE
+          5. APPROVED BY | DATE
+        Every field is blank by default -- a plain fill-in-by-hand
+        template, the same convention generate_pin_function_table()'s
+        FUNCTION column uses -- pass any of `title`/`dwg_no`/`issue`/
+        `drawn_by`/`drawn_date`/`checked_by`/`checked_date`/
+        `approved_by`/`approved_date` to pre-fill it. Each cell reads
+        "LABEL:" when blank or "LABEL: value" when filled, left-
+        aligned (unlike RESTABLE/PINTABLE's centred cells -- a title
+        block conventionally reads label-first, left to right).
+
+        The rest of the sheet (above the title block, inside the
+        margin) is left empty -- this cell is just the border and
+        title block; place the actual design content, and/or
+        Session.sref() this cell in, wherever it's needed for PRINT.
+
+        Generic and re-runnable, same as generate_resistor_table():
+        `overwrite` defaults to True, so calling this again (e.g.
+        with updated title-block fields) just rebuilds the cell
+        fresh.
+
+        Raises LayoutError if `size`/`orientation` aren't recognised,
+        if `margin_mm`/`title_block_height_mm` don't leave room for an
+        actual drawing area and title-block text, or if `cell_name`
+        exists and isn't a sheet this method itself can safely rebuild
+        (pass overwrite=False to refuse touching an existing cell
+        instead)."""
+        cell_name = (cell_name or "").strip()
+        if not cell_name:
+            raise LayoutError("a cell name is required")
+        size = (size or "").upper()
+        if size not in SHEET_SIZES_MM:
+            raise LayoutError(
+                f"unknown size {size!r}; must be one of {sorted(SHEET_SIZES_MM)}"
+            )
+        orientation = (orientation or "").lower()
+        if orientation not in ("portrait", "landscape"):
+            raise LayoutError('orientation must be "portrait" or "landscape"')
+        short_mm, long_mm = SHEET_SIZES_MM[size]
+        width_mm, height_mm = (short_mm, long_mm) if orientation == "portrait" else (long_mm, short_mm)
+        if cell_name in self.library.cells:
+            if not overwrite:
+                raise LayoutError(
+                    f"{cell_name!r} already exists in this design; pass "
+                    "overwrite=True to replace it"
+                )
+            self.library.delete_cell(cell_name)
+
+        sheet_w, sheet_h = mm_to_dbu(width_mm), mm_to_dbu(height_mm)
+        margin = mm_to_dbu(margin_mm)
+        if 2 * margin >= min(sheet_w, sheet_h):
+            raise LayoutError(
+                f"margin_mm ({margin_mm:g}) is too large for a {size} "
+                f"{orientation} sheet ({width_mm:g} x {height_mm:g} mm)"
+            )
+        title_block_h = mm_to_dbu(title_block_height_mm)
+        text_h = mm_to_dbu(text_height_mm)
+        row_h = title_block_h / 5.0
+        if text_h * 1.2 >= row_h:
+            raise LayoutError(
+                f"title_block_height_mm ({title_block_height_mm:g}) must be "
+                f"bigger than text_height_mm*1.2*5 ({text_height_mm * 1.2 * 5:g}) "
+                "to leave room for 5 rows of text"
+            )
+
+        r_layer = self.library.layers.resolve(layer)
+        grid_layer = self.library.layers.resolve(line_layer) if line_layer is not None else r_layer
+        grid_width = mm_to_dbu(line_width_mm)
+        pad_x = text_h * 0.5
+
+        ox, oy = origin
+        left, right = ox + margin, ox + sheet_w - margin
+        frame_top, frame_bottom = oy + sheet_h - margin, oy + margin
+        frame_width = right - left
+        if title_block_h >= frame_top - frame_bottom:
+            raise LayoutError(
+                f"title_block_height_mm ({title_block_height_mm:g}) leaves no "
+                f"room for a drawing area above it on a {size} {orientation} sheet"
+            )
+        title_block_top = frame_bottom + title_block_h
+        row_tops = [title_block_top - i * row_h for i in range(6)]
+
+        name_w = frame_width * 0.7
+        date_w = frame_width - name_w
+        divider_x = left + name_w
+
+        ROWS = (
+            (("TITLE", title),),
+            (("DWG NO", dwg_no), ("ISSUE", issue)),
+            (("DRAWN BY", drawn_by), ("DATE", drawn_date)),
+            (("CHECKED BY", checked_by), ("DATE", checked_date)),
+            (("APPROVED BY", approved_by), ("DATE", approved_date)),
+        )
+
+        with self._batch():
+            cell = self.library.new_cell(cell_name)
+            self.current_cell_name = cell_name
+
+            for i, fields in enumerate(ROWS):
+                row_top, row_bottom = row_tops[i], row_tops[i + 1]
+                ty = row_bottom + (row_h - text_h) / 2.0
+                cols = [(left, frame_width)] if len(fields) == 1 else [(left, name_w), (divider_x, date_w)]
+                for (x, w), (label, value) in zip(cols, fields):
+                    text = f"{label}:" + (f" {value}" if value else "")
+                    cell.add_text(r_layer, (x + pad_x, ty), text, height=text_h)
+
+            # outer border: the full frame, inset by margin from the sheet edge
+            cell.add_path(grid_layer, [(left, frame_top), (left, frame_bottom)],
+                          grid_width, cap="flush")
+            cell.add_path(grid_layer, [(right, frame_top), (right, frame_bottom)],
+                          grid_width, cap="flush")
+            cell.add_path(grid_layer, [(left, frame_top), (right, frame_top)],
+                          grid_width, cap="flush")
+            for y in row_tops:
+                cell.add_path(grid_layer, [(left, y), (right, y)], grid_width, cap="flush")
+            # DWG NO/ISSUE and the three signature rows below it all share
+            # the same name/date column divider, drawn as one continuous line.
+            cell.add_path(grid_layer, [(divider_x, row_tops[1]), (divider_x, row_tops[5])],
+                          grid_width, cap="flush")
         return cell_name
 
     def clear_undo_history(self) -> None:

@@ -278,6 +278,37 @@ a resistor; this draws it):
                                        centred by default -- same title/titleinset/
                                        overwrite conventions as RESTABLE. Also available
                                        as Session.generate_pin_function_table()
+    SHEET <cell_name> <layer> [size=A4|A3] [orientation=portrait|landscape]
+          [origin=<x,y>] [margin=<mm>] [titleheight=<mm>] [textheight=<mm>]
+          [linewidth=<mm>] [linelayer=<n|name>] [title=<text>] [dwgno=<text>]
+          [issue=<text>] [drawnby=<text>] [drawndate=<text>] [checkedby=<text>]
+          [checkeddate=<text>] [approvedby=<text>] [approveddate=<text>]
+          [overwrite=0|1]
+                                       build a standard drawing sheet -- a ruled
+                                       border frame sized to a real ISO paper size
+                                       (size defaults to A3; A4 also fits, A2 and up
+                                       don't -- hlayout's database is capped at
+                                       500x500mm), orientation defaults to portrait,
+                                       with a standard title block ruled across the
+                                       full width of the bottom of the frame: TITLE
+                                       (full width), then DWG NO | ISSUE, then
+                                       DRAWN BY | DATE, CHECKED BY | DATE, and
+                                       APPROVED BY | DATE. margin/titleheight/
+                                       textheight/linewidth are real millimetres
+                                       (unlike RESTABLE/PINTABLE's DBU), converted
+                                       internally to match hlayout's own DBU grid.
+                                       Every title-block field is blank by default
+                                       (reads "LABEL:") -- pass any of the text
+                                       options above to pre-fill it (quote a value
+                                       with spaces). The area above the title block,
+                                       inside the margin, is left empty for the
+                                       actual drawing content. Generic and
+                                       re-runnable -- overwrite defaults to 1, so
+                                       re-running it (e.g. with updated title-block
+                                       text) just rebuilds the cell fresh; place it
+                                       (SREF) wherever needed, e.g. behind the
+                                       assembly drawing, for PRINT. Also available as
+                                       Session.generate_drawing_sheet()
 
 Layer-based mask operations (resize/boolean, like a GDSII CAM system's
 Size/AND/OR deck operators -- any Path on an input layer is converted
@@ -1262,6 +1293,67 @@ class CommandInterpreter:
         except LayoutError as e:
             raise CommandError(str(e))
         return f"generated pin function table cell {name!r}"
+
+    def _cmd_sheet(self, args):
+        usage = ("usage: SHEET <cell_name> <layer> [size=A4|A3] "
+                 "[orientation=portrait|landscape] [origin=<x,y>] [margin=<mm>] "
+                 "[titleheight=<mm>] [textheight=<mm>] [linewidth=<mm>] "
+                 "[linelayer=<n|name>] [title=<text>] [dwgno=<text>] [issue=<text>] "
+                 "[drawnby=<text>] [drawndate=<text>] [checkedby=<text>] "
+                 "[checkeddate=<text>] [approvedby=<text>] [approveddate=<text>] "
+                 "[overwrite=0|1]  (quote a value with spaces, e.g. title=\"...\")")
+        if len(args) < 2:
+            raise CommandError(usage)
+        cell_name, layer = args[0], args[1]
+        kwargs = {}
+        for a in args[2:]:
+            if "=" not in a:
+                raise CommandError(usage)
+            k, v = a.split("=", 1)
+            k = k.lower()
+            if k == "size":
+                kwargs["size"] = v
+            elif k == "orientation":
+                kwargs["orientation"] = v
+            elif k == "origin":
+                kwargs["origin"] = _parse_point(v)
+            elif k == "margin":
+                kwargs["margin_mm"] = float(v)
+            elif k == "titleheight":
+                kwargs["title_block_height_mm"] = float(v)
+            elif k == "textheight":
+                kwargs["text_height_mm"] = float(v)
+            elif k == "linewidth":
+                kwargs["line_width_mm"] = float(v)
+            elif k == "linelayer":
+                kwargs["line_layer"] = self.session.library.layers.resolve(v)
+            elif k == "title":
+                kwargs["title"] = v
+            elif k == "dwgno":
+                kwargs["dwg_no"] = v
+            elif k == "issue":
+                kwargs["issue"] = v
+            elif k == "drawnby":
+                kwargs["drawn_by"] = v
+            elif k == "drawndate":
+                kwargs["drawn_date"] = v
+            elif k == "checkedby":
+                kwargs["checked_by"] = v
+            elif k == "checkeddate":
+                kwargs["checked_date"] = v
+            elif k == "approvedby":
+                kwargs["approved_by"] = v
+            elif k == "approveddate":
+                kwargs["approved_date"] = v
+            elif k == "overwrite":
+                kwargs["overwrite"] = v not in ("0", "false", "no")
+            else:
+                raise CommandError(f"unknown SHEET option {k!r}")
+        try:
+            name = self.session.generate_drawing_sheet(cell_name, layer, **kwargs)
+        except LayoutError as e:
+            raise CommandError(str(e))
+        return f"generated drawing sheet cell {name!r}"
 
     # --- mask ops ---------------------------------------------------------
     def _cmd_clear(self, args):
