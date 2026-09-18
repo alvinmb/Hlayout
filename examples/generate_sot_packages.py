@@ -75,13 +75,17 @@ PACKAGES = {
                      tab_pin=4, tab=(3.8, 2.0)),
     "SOT-363":  dict(pins=6, body=(2.0, 1.25), pitch=0.65, row_gap=2.0, pad=(0.7, 0.4)),
     # Gull-wing multi-lead ICs at the standard 1.27 mm (0.05") SOIC pitch --
-    # see the "NOTE ON NAMING" in the module docstring.
-    "SOT-8":    dict(pins=8,  body=(4.9, 3.9),  pitch=1.27, row_gap=6.0, pad=(1.5, 0.6)),
-    "SOT-16":   dict(pins=16, body=(9.9, 3.9),  pitch=1.27, row_gap=6.0, pad=(1.5, 0.6)),
-    "SOT-18":   dict(pins=18, body=(11.5, 7.5), pitch=1.27, row_gap=9.8, pad=(1.5, 0.6)),
-    "SOT-20":   dict(pins=20, body=(12.8, 7.5), pitch=1.27, row_gap=9.8, pad=(1.5, 0.6)),
-    "SOT-24":   dict(pins=24, body=(15.4, 7.5), pitch=1.27, row_gap=9.8, pad=(1.5, 0.6)),
-    "SOT-28":   dict(pins=28, body=(17.9, 7.5), pitch=1.27, row_gap=9.8, pad=(1.5, 0.6)),
+    # see the "NOTE ON NAMING" in the module docstring. body is (across
+    # the two rows, along a row) here -- the SECOND number is the one
+    # that has to grow with pin count, since that's the axis pitch runs
+    # along; getting these backwards is exactly the bug fixed 2026-09 --
+    # the outline drew rotated 90 degrees for every one of these.
+    "SOT-8":    dict(pins=8,  body=(3.9, 4.9),  pitch=1.27, row_gap=6.0, pad=(1.5, 0.6)),
+    "SOT-16":   dict(pins=16, body=(3.9, 9.9),  pitch=1.27, row_gap=6.0, pad=(1.5, 0.6)),
+    "SOT-18":   dict(pins=18, body=(7.5, 11.5), pitch=1.27, row_gap=9.8, pad=(1.5, 0.6)),
+    "SOT-20":   dict(pins=20, body=(7.5, 12.8), pitch=1.27, row_gap=9.8, pad=(1.5, 0.6)),
+    "SOT-24":   dict(pins=24, body=(7.5, 15.4), pitch=1.27, row_gap=9.8, pad=(1.5, 0.6)),
+    "SOT-28":   dict(pins=28, body=(7.5, 17.9), pitch=1.27, row_gap=9.8, pad=(1.5, 0.6)),
 }
 
 INDEX_PITCH_MM = 12.0

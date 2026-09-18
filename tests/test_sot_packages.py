@@ -73,3 +73,26 @@ def test_gullwing_ic_packages_use_the_standard_1_27mm_soic_pitch():
         )
         deltas = [b - a for a, b in zip(left, left[1:])]
         assert all(abs(d - pitch_dbu) < 10 for d in deltas), name
+
+
+def test_gullwing_ic_body_outline_is_not_rotated_90_degrees_from_the_pins():
+    # Regression test: the body's own PACKAGES dict entry once had (across-rows,
+    # along-row) backwards for every package here, drawing an outline rotated
+    # 90 degrees from the actual pin span -- narrower than the pins along the
+    # row, and needlessly long across the rows. Confirmed live 2026-09.
+    from hlayout.core.shapes import Path
+    lib = load_gds(OUT_GDS)
+    for name in GULLWING_IC_PACKAGES:
+        cell = lib.cells[name]
+        outline = next(sh for sh in cell.shapes if isinstance(sh, Path) and sh.layer == 61)
+        ox0 = min(p[0] for p in outline.points)
+        ox1 = max(p[0] for p in outline.points)
+        oy0 = min(p[1] for p in outline.points)
+        oy1 = max(p[1] for p in outline.points)
+        pads = [sh for sh in cell.shapes if isinstance(sh, Rectangle) and sh.layer == 20]
+        pin_ys = [sum(p[1] for p in sh.points) / len(sh.points) for sh in pads]
+        pin_span_y = max(pin_ys) - min(pin_ys)
+        # the body must be at least as long, along the row (Y), as the pins
+        # actually spread, and narrower across the two rows (X) than along Y.
+        assert (oy1 - oy0) >= pin_span_y, name
+        assert (ox1 - ox0) < (oy1 - oy0), name
