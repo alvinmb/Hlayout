@@ -2,7 +2,16 @@
 package footprints, one Cell per package, plus an "INDEX" cell that
 places every package in a labelled row for browsing.
 
-Packages: SOT-23, SOT-23-5, SOT-23-6, SOT-89, SOT-143, SOT-223, SOT-363.
+Packages: SOT-23, SOT-23-5, SOT-23-6, SOT-89, SOT-143, SOT-223, SOT-363,
+SOT-8, SOT-16, SOT-18, SOT-20, SOT-24, SOT-28.
+
+NOTE ON NAMING: SOT-8/16/18/20/24/28 are gull-wing multi-lead IC
+packages, not transistor outlines -- JEDEC properly calls this shape
+"SOIC"/"SO" (e.g. real-world SOIC-8, SOIC-20W), not "SOT", which is
+otherwise reserved for 3-6 lead parts. They're named SOT-<n> here to
+match how they were asked for and to sit alongside the rest of this
+file's SOT family; rename the cells if your library wants the
+JEDEC-correct SOIC-<n> naming instead.
 
 Each package cell has:
 
@@ -65,6 +74,14 @@ PACKAGES = {
     "SOT-223":  dict(pins=4, body=(6.5, 3.5), pitch=2.3, row_gap=6.3, pad=(1.6, 0.9),
                      tab_pin=4, tab=(3.8, 2.0)),
     "SOT-363":  dict(pins=6, body=(2.0, 1.25), pitch=0.65, row_gap=2.0, pad=(0.7, 0.4)),
+    # Gull-wing multi-lead ICs at the standard 1.27 mm (0.05") SOIC pitch --
+    # see the "NOTE ON NAMING" in the module docstring.
+    "SOT-8":    dict(pins=8,  body=(4.9, 3.9),  pitch=1.27, row_gap=6.0, pad=(1.5, 0.6)),
+    "SOT-16":   dict(pins=16, body=(9.9, 3.9),  pitch=1.27, row_gap=6.0, pad=(1.5, 0.6)),
+    "SOT-18":   dict(pins=18, body=(11.5, 7.5), pitch=1.27, row_gap=9.8, pad=(1.5, 0.6)),
+    "SOT-20":   dict(pins=20, body=(12.8, 7.5), pitch=1.27, row_gap=9.8, pad=(1.5, 0.6)),
+    "SOT-24":   dict(pins=24, body=(15.4, 7.5), pitch=1.27, row_gap=9.8, pad=(1.5, 0.6)),
+    "SOT-28":   dict(pins=28, body=(17.9, 7.5), pitch=1.27, row_gap=9.8, pad=(1.5, 0.6)),
 }
 
 INDEX_PITCH_MM = 12.0
