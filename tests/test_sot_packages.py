@@ -4,6 +4,7 @@ import sys
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "examples"))
 
 from hlayout.core.shapes import Rectangle
 from hlayout.io.gdsio import load_gds
@@ -96,3 +97,24 @@ def test_gullwing_ic_body_outline_is_not_rotated_90_degrees_from_the_pins():
         # actually spread, and narrower across the two rows (X) than along Y.
         assert (oy1 - oy0) >= pin_span_y, name
         assert (ox1 - ox0) < (oy1 - oy0), name
+
+
+def test_step_parts_covers_every_package_and_writes_a_valid_macro(tmp_path):
+    import generate_sot_packages as gen
+    from hlayout.io.example_step3d import write_step_macro
+
+    parts = gen.step_parts()
+    assert {p[0] for p in parts} == set(EXPECTED_PACKAGES)
+    assert all(func == "make_dip_x" for _name, func, _kwargs in parts)
+    # a tab_pin package's tab lead width made it into the 3D lead list too
+    for name, spec in gen.PACKAGES.items():
+        if spec.get("tab_pin"):
+            kwargs = next(k for n, _f, k in parts if n == name)
+            all_leads = kwargs["leads_neg_x"] + kwargs["leads_pos_x"]
+            widths = sorted({w for _pos, w in all_leads})
+            assert spec["tab"][1] in widths, name
+
+    path = write_step_macro(parts, str(tmp_path / "step_out"))
+    text = open(path).read()
+    for name in EXPECTED_PACKAGES:
+        assert repr(name) in text

@@ -4,6 +4,7 @@ import sys
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "examples"))
 
 from hlayout.core.shapes import Path, Rectangle
 from hlayout.io.gdsio import load_gds
@@ -118,3 +119,21 @@ def test_rejects_a_lid_inset_too_large_for_the_body():
         cwd=ROOT, capture_output=True, text=True, timeout=30,
     )
     assert result.returncode != 0
+
+
+def test_step_parts_covers_every_pin_count_and_writes_a_valid_macro(tmp_path):
+    import generate_kyocera_cfp_packages as gen
+    from hlayout.io.example_step3d import write_step_macro
+
+    lib, sizes = gen.build(PIN_COUNTS, gen.ROW_PITCH_MM, gen.PIN_PITCH_MM,
+                           gen.PAD_LENGTH_MM, gen.PAD_WIDTH_MM, gen.MARGIN_MM, gen.LID_INSET_MM)
+    parts = gen.step_parts(PIN_COUNTS, sizes, gen.PIN_PITCH_MM, gen.PAD_LENGTH_MM,
+                           gen.PAD_WIDTH_MM, gen.LID_INSET_MM)
+    assert {p[0] for p in parts} == set(EXPECTED_CELLS)
+    assert all(func == "make_dip" for _name, func, _kwargs in parts)
+    assert all(kwargs["lid"] is not None for _name, _func, kwargs in parts)  # every CFP has a lid
+
+    path = write_step_macro(parts, str(tmp_path / "step_out"))
+    text = open(path).read()
+    for name in EXPECTED_CELLS:
+        assert repr(name) in text

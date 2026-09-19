@@ -4,6 +4,7 @@ import sys
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "examples"))
 
 from hlayout.core.shapes import Path, Polygon
 from hlayout.io.gdsio import load_gds
@@ -115,3 +116,23 @@ def test_rejects_a_pad_diameter_not_larger_than_the_hole_diameter():
     )
     assert result.returncode != 0
     assert "annular ring" in result.stderr
+
+
+def test_step_parts_covers_every_cell_and_writes_a_valid_macro(tmp_path):
+    import generate_ceramic_substrates as gen
+    from hlayout.io.example_step3d import write_step_macro
+
+    lib, sizes, names = gen.build(PIN_COUNTS, gen.PITCH_MM, gen.PAD_DIAMETER_MM,
+                                  gen.HOLE_DIAMETER_MM, gen.DEPTH_MM, gen.MARGIN_MM)
+    parts = gen.step_parts(PIN_COUNTS, sizes, gen.PITCH_MM, gen.PAD_DIAMETER_MM, gen.HOLE_DIAMETER_MM)
+    assert {p[0] for p in parts} == set(EXPECTED_CELLS)
+    assert all(func == "make_substrate_pins" for _name, func, _kwargs in parts)
+    # only the -HOLE variant gets a nonzero pin_length (the braze feedthrough)
+    for name, _func, kwargs in parts:
+        expected = gen.PIN_LENGTH_MM if name.endswith("-HOLE") else 0.0
+        assert kwargs["pin_length"] == expected, name
+
+    path = write_step_macro(parts, str(tmp_path / "step_out"))
+    text = open(path).read()
+    for name in EXPECTED_CELLS:
+        assert repr(name) in text

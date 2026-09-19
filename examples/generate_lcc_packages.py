@@ -19,7 +19,9 @@ runs counterclockwise (viewed from above, +x right/+y up) along the
 bottom edge left-to-right, up the right edge, along the top edge
 right-to-left, then down the left edge back to pin 1. Renumber with
 PIN SET / Session.set_pin() if your fab uses the opposite hand.
-Component origin is the centre of the body.
+Component origin is the BOTTOM-LEFT corner of the body (matching
+hlayout.core.smdlib's / hlayout.io.component_library's convention),
+not its centre -- the body spans (0, 0) to (side, side).
 
 IMPORTANT: PITCH_MM/PAD_WIDTH_MM/PAD_DEPTH_MM/CORNER_MARGIN_MM below
 are round-number parametric estimates for layout practice, NOT pulled
@@ -31,6 +33,7 @@ Usage:
     python examples/generate_lcc_packages.py
     python examples/generate_lcc_packages.py --start 8 --stop 44 --step 4
     python examples/generate_lcc_packages.py --pitch 1.0 --out my_lcc.gds
+    python examples/generate_lcc_packages.py --step-dir step_out --run-freecad
 """
 import argparse
 import os
@@ -47,6 +50,7 @@ sys.path.insert(0, _root)
 from hlayout.core.library import Library
 from hlayout.io.gdsio import save_gds
 from hlayout.core.units import mm_to_dbu
+from hlayout.io.example_step3d import run_step_macro, write_step_macro
 
 PAD_LAYER = 20
 OUTLINE_LAYER = 61
@@ -62,6 +66,10 @@ CORNER_MARGIN_MM = 1.5
 PIN1_DOT_MM = 0.3
 
 INDEX_PITCH_MM = 16.0
+
+#: body height, mm -- 3D export only, no use in the 2D footprint.
+#: Round number for a real ceramic LCC package, not size-dependent.
+HEIGHT_MM = 2.3
 
 
 def _pad_along_edge(cell, cx_mm, cy_mm, along_mm, depth_mm, horizontal, pin):
@@ -85,41 +93,44 @@ def build_package(cell, pins, pitch, pad_width, pad_depth, corner_margin):
     half = side / 2.0
 
     def _positions():
+        # relative-to-centre spacing, then shifted into bottom-left-
+        # origin space (0..side) by adding half -- see the module
+        # docstring on why the cell's own origin is bottom-left.
         span = (per_side - 1) * pitch
         start = -span / 2.0
-        return [start + k * pitch for k in range(per_side)]
+        return [start + k * pitch + half for k in range(per_side)]
 
     pos = _positions()
     n = 1
     # Bottom edge, left -> right.
     for x in pos:
-        _pad_along_edge(cell, x, -half, pad_width, pad_depth, horizontal=True, pin=n)
+        _pad_along_edge(cell, x, 0.0, pad_width, pad_depth, horizontal=True, pin=n)
         n += 1
     # Right edge, bottom -> top.
     for y in pos:
-        _pad_along_edge(cell, half, y, pad_width, pad_depth, horizontal=False, pin=n)
+        _pad_along_edge(cell, side, y, pad_width, pad_depth, horizontal=False, pin=n)
         n += 1
     # Top edge, right -> left.
     for x in reversed(pos):
-        _pad_along_edge(cell, x, half, pad_width, pad_depth, horizontal=True, pin=n)
+        _pad_along_edge(cell, x, side, pad_width, pad_depth, horizontal=True, pin=n)
         n += 1
     # Left edge, top -> bottom.
     for y in reversed(pos):
-        _pad_along_edge(cell, -half, y, pad_width, pad_depth, horizontal=False, pin=n)
+        _pad_along_edge(cell, 0.0, y, pad_width, pad_depth, horizontal=False, pin=n)
         n += 1
 
-    h = mm_to_dbu(half)
+    s = mm_to_dbu(side)
     cell.add_path(OUTLINE_LAYER,
-                  [(-h, -h), (h, -h), (h, h), (-h, h), (-h, -h)],
+                  [(0, 0), (s, 0), (s, s), (0, s), (0, 0)],
                   width=mm_to_dbu(OUTLINE_WIDTH_MM), cap="flush")
 
     # Pin-1 orientation dot, just inside the body near the first pad.
     dot_x = mm_to_dbu(pos[0])
-    dot_y = mm_to_dbu(-half + corner_margin * 0.5)
+    dot_y = mm_to_dbu(corner_margin * 0.5)
     hd = mm_to_dbu(PIN1_DOT_MM) // 2
     cell.add_rectangle(LABEL_LAYER, dot_x - hd, dot_y - hd, dot_x + hd, dot_y + hd)
 
-    cell.add_text(LABEL_LAYER, (0, 0), "U", height=mm_to_dbu(LABEL_HEIGHT_MM))
+    cell.add_text(LABEL_LAYER, (mm_to_dbu(half), mm_to_dbu(half)), "U", height=mm_to_dbu(LABEL_HEIGHT_MM))
     return side
 
 
@@ -135,11 +146,24 @@ def build(pin_counts, pitch, pad_width, pad_depth, corner_margin) -> Library:
         name = f"LCC-{pins}"
         index.add_sref(name, (i * mm_to_dbu(INDEX_PITCH_MM), 0))
         index.add_text(LABEL_LAYER,
-                       (i * mm_to_dbu(INDEX_PITCH_MM), mm_to_dbu(-sides[pins] / 2.0 - 2.0)),
+                       (i * mm_to_dbu(INDEX_PITCH_MM), mm_to_dbu(-2.0)),
                        name, height=mm_to_dbu(LABEL_HEIGHT_MM))
 
     lib.check_bounds()
     return lib, sides
+
+
+def step_parts(pin_counts, sides, pitch, pad_width, pad_depth):
+    """(name, "make_lcc", kwargs) for every pin count -- see
+    hlayout.io.example_step3d. Centred on the origin, matching build()'s
+    own cells, so a STEP file here lines up with its GDS cell."""
+    return [
+        (f"LCC-{pins}", "make_lcc", dict(
+            side=sides[pins], pitch=pitch, per_side=pins // 4,
+            pad_w=pad_width, pad_depth=pad_depth, H=HEIGHT_MM,
+        ))
+        for pins in pin_counts
+    ]
 
 
 def main(argv=None):
@@ -157,6 +181,12 @@ def main(argv=None):
                     help=f"corner to nearest pad centre, mm (default: {CORNER_MARGIN_MM})")
     ap.add_argument("-o", "--out", default=os.path.join(_here, "lcc_packages.gds"),
                     help="output .gds path (default: examples/lcc_packages.gds)")
+    ap.add_argument("--step-dir", default=None,
+                    help="also write a FreeCAD macro building a matching 3D STEP model "
+                         "for every pin count into this folder")
+    ap.add_argument("--run-freecad", action="store_true",
+                    help="with --step-dir, also run the macro with freecadcmd to produce "
+                         "the .step files now (requires FreeCAD installed)")
     args = ap.parse_args(argv)
 
     if args.step <= 0 or args.start <= 0 or args.stop < args.start:
@@ -172,6 +202,13 @@ def main(argv=None):
     print(f"{len(pin_counts)} LCC package cells + INDEX -> {args.out}")
     for pins in pin_counts:
         print(f"  LCC-{pins:<3d} {pins} pins ({pins // 4}/side)  body {sides[pins]:.2f} x {sides[pins]:.2f} mm")
+
+    if args.step_dir:
+        parts = step_parts(pin_counts, sides, args.pitch, args.pad_width, args.pad_depth)
+        macro_path = write_step_macro(parts, args.step_dir)
+        print(f"wrote 3D STEP macro -> {macro_path}")
+        if args.run_freecad:
+            print(run_step_macro(macro_path))
 
 
 if __name__ == "__main__":

@@ -22,7 +22,9 @@ Pin 1 is the bottom-left pad; numbering runs left-to-right along the
 bottom edge (pins 1..N/2), then right-to-left along the top edge
 (N/2+1..N) -- the usual DIP counterclockwise-from-below convention.
 Renumber with PIN SET / Session.set_pin() if your fab uses the
-opposite hand. Component origin is the centre of the body.
+opposite hand. Component origin is the BOTTOM-LEFT corner of the body
+(matching hlayout.core.smdlib's / hlayout.io.component_library's
+convention), not its centre -- the body spans (0, 0) to (length, depth).
 
 IMPORTANT: PAD_DIAMETER_MM/DEPTH_MM/MARGIN_MM below are round-number
 parametric estimates for layout practice, NOT pulled from a specific
@@ -33,6 +35,7 @@ Usage:
     python examples/generate_ceramic_substrates.py
     python examples/generate_ceramic_substrates.py --start 20 --stop 50 --step 10
     python examples/generate_ceramic_substrates.py --hole-diameter 1.0 --out my_subs.gds
+    python examples/generate_ceramic_substrates.py --step-dir step_out --run-freecad
 """
 import argparse
 import os
@@ -50,6 +53,7 @@ from hlayout.core.library import Library
 from hlayout.core.shapes import circle_points
 from hlayout.io.gdsio import save_gds
 from hlayout.core.units import mm_to_dbu
+from hlayout.io.example_step3d import run_step_macro, write_step_macro
 
 PAD_LAYER = 20
 HOLE_LAYER = 21
@@ -68,6 +72,13 @@ MARGIN_MM = 2.0     # body edge to the nearest pad's centre, along the row
 
 INDEX_PITCH_MM = 20.0
 
+#: 3D export only, no use in the 2D footprint. HEIGHT_MM is the ceramic
+#: body thickness; PIN_LENGTH_MM is how far the _HOLE variant's braze
+#: pin protrudes below the substrate (a real feedthrough lead) -- round
+#: numbers, not a specific manufacturer's drawing.
+HEIGHT_MM = 1.5
+PIN_LENGTH_MM = 2.0
+
 
 def _pad(cell, cx_mm, cy_mm, pad_dia, hole_dia, pin):
     center = (mm_to_dbu(cx_mm), mm_to_dbu(cy_mm))
@@ -83,24 +94,28 @@ def build_package(cell, pins, pitch, pad_dia, hole_dia, depth, margin):
         raise ValueError(f"pins ({pins}) must be a positive even number for a dual-row substrate")
     per_side = pins // 2
     span = (per_side - 1) * pitch
-    xs = [(-span / 2.0) + k * pitch for k in range(per_side)]
     half_depth = depth / 2.0
     half_length = span / 2.0 + margin
+    # Everything below is computed relative-to-centre, then shifted by
+    # (ox, oy) into bottom-left-origin space -- see the module
+    # docstring on why the cell's own origin is bottom-left.
+    ox, oy = half_length, half_depth
+    xs = [(-span / 2.0) + k * pitch + ox for k in range(per_side)]
 
     n = 1
     for x in xs:                       # bottom row, left -> right
-        _pad(cell, x, -half_depth, pad_dia, hole_dia, n)
+        _pad(cell, x, 0.0, pad_dia, hole_dia, n)
         n += 1
     for x in reversed(xs):             # top row, right -> left
-        _pad(cell, x, half_depth, pad_dia, hole_dia, n)
+        _pad(cell, x, depth, pad_dia, hole_dia, n)
         n += 1
 
-    hl, hw = mm_to_dbu(half_length), mm_to_dbu(half_depth)
+    length_dbu, depth_dbu = mm_to_dbu(half_length * 2), mm_to_dbu(depth)
     cell.add_path(OUTLINE_LAYER,
-                  [(-hl, -hw), (hl, -hw), (hl, hw), (-hl, hw), (-hl, -hw)],
+                  [(0, 0), (length_dbu, 0), (length_dbu, depth_dbu), (0, depth_dbu), (0, 0)],
                   width=mm_to_dbu(OUTLINE_WIDTH_MM), cap="flush")
 
-    cell.add_text(LABEL_LAYER, (0, 0), "PKG", height=mm_to_dbu(LABEL_HEIGHT_MM))
+    cell.add_text(LABEL_LAYER, (mm_to_dbu(ox), mm_to_dbu(oy)), "PKG", height=mm_to_dbu(LABEL_HEIGHT_MM))
     return half_length * 2, depth
 
 
@@ -119,11 +134,28 @@ def build(pin_counts, pitch, pad_dia, hole_dia, depth, margin) -> Library:
     for i, name in enumerate(names):
         index.add_sref(name, (i * mm_to_dbu(INDEX_PITCH_MM), 0))
         index.add_text(LABEL_LAYER,
-                       (i * mm_to_dbu(INDEX_PITCH_MM), mm_to_dbu(-sizes[name][1] / 2.0 - 2.0)),
+                       (i * mm_to_dbu(INDEX_PITCH_MM), mm_to_dbu(-2.0)),
                        name, height=mm_to_dbu(LABEL_HEIGHT_MM))
 
     lib.check_bounds()
     return lib, sizes, names
+
+
+def step_parts(pin_counts, sizes, pitch, pad_dia, hole_dia):
+    """(name, "make_substrate_pins", kwargs) for every cell build()
+    made -- see hlayout.io.example_step3d. Centred on the origin,
+    matching build()'s own cells, so a STEP file here lines up with
+    its GDS cell."""
+    parts = []
+    for pins in pin_counts:
+        for suffix, pin_length in (("", 0.0), ("-HOLE", PIN_LENGTH_MM)):
+            name = f"SUBSTRATE-{pins}{suffix}"
+            length, depth = sizes[name]
+            parts.append((name, "make_substrate_pins", dict(
+                L=length, W=depth, H=HEIGHT_MM, per_side=pins // 2, pitch=pitch,
+                pad_dia=pad_dia, pin_length=pin_length,
+            )))
+    return parts
 
 
 def main(argv=None):
@@ -143,6 +175,12 @@ def main(argv=None):
                     help=f"body edge to nearest pad centre, mm (default: {MARGIN_MM})")
     ap.add_argument("-o", "--out", default=os.path.join(_here, "ceramic_substrates.gds"),
                     help="output .gds path (default: examples/ceramic_substrates.gds)")
+    ap.add_argument("--step-dir", default=None,
+                    help="also write a FreeCAD macro building a matching 3D STEP model "
+                         "for every cell into this folder")
+    ap.add_argument("--run-freecad", action="store_true",
+                    help="with --step-dir, also run the macro with freecadcmd to produce "
+                         "the .step files now (requires FreeCAD installed)")
     args = ap.parse_args(argv)
 
     if args.step <= 0 or args.start <= 0 or args.stop < args.start:
@@ -162,6 +200,13 @@ def main(argv=None):
     for name in names:
         length, depth = sizes[name]
         print(f"  {name:22s} body {length:.2f} x {depth:.2f} mm")
+
+    if args.step_dir:
+        parts = step_parts(pin_counts, sizes, args.pitch, args.pad_diameter, args.hole_diameter)
+        macro_path = write_step_macro(parts, args.step_dir)
+        print(f"wrote 3D STEP macro -> {macro_path}")
+        if args.run_freecad:
+            print(run_step_macro(macro_path))
 
 
 if __name__ == "__main__":

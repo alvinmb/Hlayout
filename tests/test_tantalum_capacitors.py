@@ -4,6 +4,7 @@ import sys
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "examples"))
 
 from hlayout.core.shapes import Path, Rectangle
 from hlayout.io.gdsio import load_gds
@@ -57,24 +58,31 @@ def test_each_case_has_exactly_two_pins_numbered_1_and_2():
         assert sorted(p.pin for p in pads) == ["1", "2"], name
 
 
-def test_pin_1_is_the_anode_on_the_negative_x_end_pin_2_the_cathode_on_positive_x():
+def test_pin_1_is_the_anode_on_the_left_end_pin_2_the_cathode_on_the_right():
+    # Component origin is the body's own BOTTOM-LEFT corner (see the
+    # module docstring), so "left end" means nearer x=0 than the far
+    # (length) edge, not literally negative.
     lib = load_gds(OUT_GDS)
     for name in EXPECTED_CASES:
-        pads = {sh.pin: sh for sh in lib.cells[name].shapes
-                if isinstance(sh, Rectangle) and sh.layer == 20}
+        cell = lib.cells[name]
+        x0, _y0, x1, _y1 = cell.bbox()
+        mid_x = (x0 + x1) / 2.0
+        pads = {sh.pin: sh for sh in cell.shapes if isinstance(sh, Rectangle) and sh.layer == 20}
         cx1 = sum(p[0] for p in pads["1"].points) / len(pads["1"].points)
         cx2 = sum(p[0] for p in pads["2"].points) / len(pads["2"].points)
-        assert cx1 < 0 < cx2, name
+        assert cx1 < mid_x < cx2, name
 
 
 def test_each_case_has_a_polarity_band_near_the_anode_end():
     lib = load_gds(OUT_GDS)
     for name in EXPECTED_CASES:
         cell = lib.cells[name]
+        x0, _y0, x1, _y1 = cell.bbox()
+        mid_x = (x0 + x1) / 2.0
         bands = [sh for sh in cell.shapes if isinstance(sh, Rectangle) and sh.layer == 62]
         assert len(bands) == 1, name
         band_cx = sum(p[0] for p in bands[0].points) / len(bands[0].points)
-        assert band_cx < 0, f"{name}: polarity band should sit on the anode (-X) end"
+        assert band_cx < mid_x, f"{name}: polarity band should sit on the anode (left) end"
 
 
 def test_each_case_has_a_body_outline_and_the_pads_overlap_it():
@@ -94,3 +102,18 @@ def test_each_case_has_a_body_outline_and_the_pads_overlap_it():
             overlaps_body = px0 < ox1 and px1 > ox0
             extends_past_end = px0 < ox0 or px1 > ox1
             assert overlaps_body and extends_past_end, f"{name} pin {pad.pin}"
+
+
+def test_step_parts_covers_every_case_and_writes_a_valid_macro(tmp_path):
+    import generate_tantalum_capacitors as gen
+    from hlayout.io.example_step3d import write_step_macro
+
+    parts = gen.step_parts()
+    assert {p[0] for p in parts} == set(EXPECTED_CASES)
+    assert all(func == "make_end_cap" for _name, func, _kwargs in parts)
+    assert all(kwargs["overhang"] == gen.CASES[name]["overhang"] for name, _func, kwargs in parts)
+
+    path = write_step_macro(parts, str(tmp_path / "step_out"))
+    text = open(path).read()
+    for name in EXPECTED_CASES:
+        assert repr(name) in text

@@ -23,7 +23,9 @@ Pin 1 is the bottom-left pad; numbering runs left-to-right along the
 bottom edge (pins 1..N/2), then right-to-left along the top edge
 (N/2+1..N) -- the usual DIP counterclockwise-from-below convention.
 Renumber with PIN SET / Session.set_pin() if your fab uses the
-opposite hand. Component origin is the centre of the body.
+opposite hand. Component origin is the BOTTOM-LEFT corner of the body
+(matching hlayout.core.smdlib's / hlayout.io.component_library's
+convention), not its centre -- the body spans (0, 0) to (length, depth).
 
 IMPORTANT: PAD_LENGTH_MM/PAD_WIDTH_MM/MARGIN_MM below are round-number
 parametric estimates for layout practice, NOT pulled from a specific
@@ -35,6 +37,7 @@ Usage:
     python examples/generate_kyocera_cfp_packages.py
     python examples/generate_kyocera_cfp_packages.py --start 20 --stop 64 --step 10
     python examples/generate_kyocera_cfp_packages.py --row-pitch 22.86 --lid-inset 2.0
+    python examples/generate_kyocera_cfp_packages.py --step-dir step_out --run-freecad
 """
 import argparse
 import os
@@ -51,6 +54,7 @@ sys.path.insert(0, _root)
 from hlayout.core.library import Library
 from hlayout.io.gdsio import save_gds
 from hlayout.core.units import mm_to_dbu
+from hlayout.io.example_step3d import run_step_macro, soic_leads, write_step_macro
 
 INCH_MM = 25.4
 
@@ -71,6 +75,12 @@ LID_INSET_MM = 1.5                  # body outline to lid edge, every side
 
 INDEX_PITCH_MM = 30.0
 
+#: 3D export only, no use in the 2D footprint -- round numbers for a
+#: real sealed metal/ceramic hybrid package, not a specific drawing.
+HEIGHT_MM = 2.5
+LID_HEIGHT_MM = 0.4
+LEAD_THICKNESS_MM = 0.15
+
 
 def _pad(cell, cx_mm, cy_mm, l_mm, w_mm, pin):
     hx, hy = mm_to_dbu(l_mm) // 2, mm_to_dbu(w_mm) // 2
@@ -83,31 +93,37 @@ def build_package(cell, pins, row_pitch, pin_pitch, pad_l, pad_w, margin, lid_in
         raise ValueError(f"pins ({pins}) must be a positive even number for a dual-row package")
     per_side = pins // 2
     span = (per_side - 1) * pin_pitch
-    xs = [(-span / 2.0) + k * pin_pitch for k in range(per_side)]
     half_row = row_pitch / 2.0
     half_length = span / 2.0 + margin
     half_depth = half_row + pad_w / 2.0
+    # Everything below is computed relative-to-centre, then shifted by
+    # (ox, oy) into bottom-left-origin space -- see the module
+    # docstring on why the cell's own origin is bottom-left.
+    ox, oy = half_length, half_depth
+    xs = [(-span / 2.0) + k * pin_pitch + ox for k in range(per_side)]
+    length, depth = half_length * 2, half_depth * 2
 
     n = 1
     for x in xs:                       # bottom row, left -> right
-        _pad(cell, x, -half_row, pad_l, pad_w, n)
+        _pad(cell, x, oy - half_row, pad_l, pad_w, n)
         n += 1
     for x in reversed(xs):             # top row, right -> left
-        _pad(cell, x, half_row, pad_l, pad_w, n)
+        _pad(cell, x, oy + half_row, pad_l, pad_w, n)
         n += 1
 
-    hl, hw = mm_to_dbu(half_length), mm_to_dbu(half_depth)
+    l_dbu, d_dbu = mm_to_dbu(length), mm_to_dbu(depth)
     cell.add_path(OUTLINE_LAYER,
-                  [(-hl, -hw), (hl, -hw), (hl, hw), (-hl, hw), (-hl, -hw)],
+                  [(0, 0), (l_dbu, 0), (l_dbu, d_dbu), (0, d_dbu), (0, 0)],
                   width=mm_to_dbu(OUTLINE_WIDTH_MM), cap="flush")
 
-    lid_hl, lid_hw = mm_to_dbu(half_length - lid_inset), mm_to_dbu(half_depth - lid_inset)
-    if lid_hl <= 0 or lid_hw <= 0:
+    lid_l, lid_d = length - 2 * lid_inset, depth - 2 * lid_inset
+    if lid_l <= 0 or lid_d <= 0:
         raise ValueError(f"lid_inset ({lid_inset}) is too large for a {pins}-pin package body")
-    cell.add_rectangle(LID_LAYER, -lid_hl, -lid_hw, lid_hl, lid_hw)
+    lid_x0, lid_y0 = mm_to_dbu(lid_inset), mm_to_dbu(lid_inset)
+    cell.add_rectangle(LID_LAYER, lid_x0, lid_y0, lid_x0 + mm_to_dbu(lid_l), lid_y0 + mm_to_dbu(lid_d))
 
-    cell.add_text(LABEL_LAYER, (0, 0), "PKG", height=mm_to_dbu(LABEL_HEIGHT_MM))
-    return half_length * 2, half_depth * 2
+    cell.add_text(LABEL_LAYER, (mm_to_dbu(ox), mm_to_dbu(oy)), "PKG", height=mm_to_dbu(LABEL_HEIGHT_MM))
+    return length, depth
 
 
 def build(pin_counts, row_pitch, pin_pitch, pad_l, pad_w, margin, lid_inset) -> Library:
@@ -122,11 +138,39 @@ def build(pin_counts, row_pitch, pin_pitch, pad_l, pad_w, margin, lid_inset) -> 
     for i, name in enumerate(sizes):
         index.add_sref(name, (i * mm_to_dbu(INDEX_PITCH_MM), 0))
         index.add_text(LABEL_LAYER,
-                       (i * mm_to_dbu(INDEX_PITCH_MM), mm_to_dbu(-sizes[name][1] / 2.0 - 2.0)),
+                       (i * mm_to_dbu(INDEX_PITCH_MM), mm_to_dbu(-2.0)),
                        name, height=mm_to_dbu(LABEL_HEIGHT_MM))
 
     lib.check_bounds()
     return lib, sizes
+
+
+def step_parts(pin_counts, sizes, pin_pitch, pad_l, pad_w, lid_inset):
+    """(name, "make_dip", kwargs) for every pin count -- see
+    hlayout.io.example_step3d. Bottom-left origin, matching build()'s
+    own cells, so a STEP file here lines up with its GDS cell.
+
+    build_package()'s own 2D outline is already drawn at the full
+    pad-tip extent (row_pitch + pad_w), not a smaller true ceramic
+    wall -- there's no separate "body" boundary in the 2D footprint
+    for leads to stick out past. So here L/W is that SAME outline
+    size, and lead_out/lead_foot are kept tiny (just enough for a
+    visible gull-wing profile) instead of the full pad_w/2 reach a
+    lead sticking out from a smaller body would need -- that keeps the
+    3D bounding box matching the 2D outline instead of overshooting it."""
+    lead_out = 0.05
+    lead_foot = 0.02
+    parts = []
+    for pins in pin_counts:
+        name = f"KYOCERA-CFP-{pins}"
+        length, depth = sizes[name]
+        leads = soic_leads(pins // 2, pin_pitch, pad_l)
+        parts.append((name, "make_dip", dict(
+            L=length, W=depth, H=HEIGHT_MM, leads_neg_y=leads, leads_pos_y=leads,
+            lead_t=LEAD_THICKNESS_MM, lead_out=lead_out, lead_foot=lead_foot,
+            lid=(lid_inset, LID_HEIGHT_MM),
+        )))
+    return parts
 
 
 def main(argv=None):
@@ -149,6 +193,12 @@ def main(argv=None):
                     help=f"body outline to lid edge, mm (default: {LID_INSET_MM})")
     ap.add_argument("-o", "--out", default=os.path.join(_here, "kyocera_cfp_packages.gds"),
                     help="output .gds path (default: examples/kyocera_cfp_packages.gds)")
+    ap.add_argument("--step-dir", default=None,
+                    help="also write a FreeCAD macro building a matching 3D STEP model "
+                         "for every pin count into this folder")
+    ap.add_argument("--run-freecad", action="store_true",
+                    help="with --step-dir, also run the macro with freecadcmd to produce "
+                         "the .step files now (requires FreeCAD installed)")
     args = ap.parse_args(argv)
 
     if args.step <= 0 or args.start <= 0 or args.stop < args.start:
@@ -165,6 +215,14 @@ def main(argv=None):
     print(f"{len(pin_counts)} Kyocera-style CFP package cells + INDEX -> {args.out}")
     for name, (length, depth) in sizes.items():
         print(f"  {name:18s} body {length:.2f} x {depth:.2f} mm")
+
+    if args.step_dir:
+        parts = step_parts(pin_counts, sizes, args.pin_pitch, args.pad_length,
+                           args.pad_width, args.lid_inset)
+        macro_path = write_step_macro(parts, args.step_dir)
+        print(f"wrote 3D STEP macro -> {macro_path}")
+        if args.run_freecad:
+            print(run_step_macro(macro_path))
 
 
 if __name__ == "__main__":

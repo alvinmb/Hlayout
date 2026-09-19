@@ -4,6 +4,7 @@ import sys
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "examples"))
 
 from hlayout.core.shapes import Path, Rectangle
 from hlayout.io.gdsio import load_gds
@@ -57,17 +58,21 @@ def test_each_lcc_package_has_exactly_its_pin_count_of_pads_numbered_1_to_n():
         assert sorted(int(p.pin) for p in pads) == list(range(1, pins + 1)), name
 
 
-def test_each_lcc_package_has_a_square_body_outline():
+def test_each_lcc_package_has_a_square_body_outline_at_the_bottom_left_origin():
     lib = load_gds(OUT_GDS)
     for name in EXPECTED_PACKAGES:
         cell = lib.cells[name]
         outlines = [sh for sh in cell.shapes if isinstance(sh, Path) and sh.layer == 61]
         assert len(outlines) == 1, name
-        x0, y0, x1, y1 = cell.bbox()
-        # square, and centred on the origin (component origin is the body centre)
-        assert abs((x1 - x0) - (y1 - y0)) < 5
-        assert abs((x0 + x1) / 2) < 5
-        assert abs((y0 + y1) / 2) < 5
+        ox0 = min(p[0] for p in outlines[0].points)
+        oy0 = min(p[1] for p in outlines[0].points)
+        ox1 = max(p[0] for p in outlines[0].points)
+        oy1 = max(p[1] for p in outlines[0].points)
+        # square, and its own bottom-left corner at the component origin
+        # (matching hlayout.core.smdlib's / component_library's convention)
+        assert abs((ox1 - ox0) - (oy1 - oy0)) < 5, name
+        assert abs(ox0) < 5, name
+        assert abs(oy0) < 5, name
 
 
 def test_pads_are_evenly_split_across_the_four_edges():
@@ -108,3 +113,20 @@ def test_custom_start_stop_step_changes_the_generated_series():
     finally:
         if os.path.exists(out_path):
             os.remove(out_path)
+
+
+def test_step_parts_covers_every_pin_count_and_writes_a_valid_macro(tmp_path):
+    import generate_lcc_packages as gen
+    from hlayout.io.example_step3d import write_step_macro
+
+    pin_counts = [8, 12, 16, 20, 24, 28, 32]
+    lib, sides = gen.build(pin_counts, gen.PITCH_MM, gen.PAD_WIDTH_MM,
+                            gen.PAD_DEPTH_MM, gen.CORNER_MARGIN_MM)
+    parts = gen.step_parts(pin_counts, sides, gen.PITCH_MM, gen.PAD_WIDTH_MM, gen.PAD_DEPTH_MM)
+    assert {p[0] for p in parts} == set(EXPECTED_PACKAGES)
+    assert all(func == "make_lcc" for _name, func, _kwargs in parts)
+
+    path = write_step_macro(parts, str(tmp_path / "step_out"))
+    text = open(path).read()
+    for name in EXPECTED_PACKAGES:
+        assert repr(name) in text

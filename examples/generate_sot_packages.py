@@ -22,8 +22,10 @@ Each package cell has:
 
 Pads sit in two rows (left/right of the body) on a regular pitch, the
 generic gull-wing arrangement. SOT-89 and SOT-223 carry an oversized
-tab pad in place of one ordinary pad. Component origin is the centre
-of the body.
+tab pad in place of one ordinary pad. Component origin is the
+BOTTOM-LEFT corner of the body (matching hlayout.core.smdlib's /
+hlayout.io.component_library's convention), not its centre -- the
+body spans (0, 0) to (body[0], body[1]).
 
 IMPORTANT: these are round-number nominal dimensions for layout
 practice, NOT per-manufacturer datasheet land patterns. Check a real
@@ -32,6 +34,7 @@ datasheet / IPC-7351 land pattern before committing a board.
 Usage:
     python examples/generate_sot_packages.py
     python examples/generate_sot_packages.py --out my_sot.gds
+    python examples/generate_sot_packages.py --step-dir step_out --run-freecad
 """
 import argparse
 import os
@@ -48,6 +51,7 @@ sys.path.insert(0, _root)
 from hlayout.core.library import Library
 from hlayout.io.gdsio import save_gds
 from hlayout.core.units import mm_to_dbu
+from hlayout.io.example_step3d import run_step_macro, write_step_macro
 
 PAD_LAYER = 20
 OUTLINE_LAYER = 61
@@ -88,6 +92,17 @@ PACKAGES = {
     "SOT-28":   dict(pins=28, body=(7.5, 17.9), pitch=1.27, row_gap=9.8, pad=(1.5, 0.6)),
 }
 
+#: body height, mm -- 3D export only, no use in the 2D footprint.
+#: Matches hlayout.io.component_library.DEFAULT_SOT_PACKAGES's own
+#: values where a name overlaps (SOT_23/323/89/223 there), so the two
+#: independent 3D conventions at least agree on this one number.
+HEIGHT_MM = {
+    "SOT-23": 1.1, "SOT-23-5": 1.1, "SOT-23-6": 1.1,
+    "SOT-89": 1.5, "SOT-143": 1.1, "SOT-223": 1.6, "SOT-363": 0.95,
+    "SOT-8": 1.75, "SOT-16": 1.75, "SOT-18": 1.75,
+    "SOT-20": 1.75, "SOT-24": 1.75, "SOT-28": 1.75,
+}
+
 INDEX_PITCH_MM = 12.0
 
 
@@ -106,14 +121,19 @@ def build_package(cell, spec):
     tab_pin = spec.get("tab_pin")
     tab = spec.get("tab")
 
+    # Everything below is computed relative-to-centre, then shifted by
+    # (ox, oy) into bottom-left-origin space -- see the module
+    # docstring on why the cell's own origin is bottom-left.
+    ox, oy = body_l / 2.0, body_w / 2.0
+
     per_row = (pins + 1) // 2          # row 1 (pins 1..per_row) is the left/lower row
     # Pads run along the y axis; the two rows are offset in x by row_gap.
     def _row_positions(count):
         span = (count - 1) * pitch
-        return [(-span / 2.0) + k * pitch for k in range(count)]
+        return [(-span / 2.0) + k * pitch + oy for k in range(count)]
 
-    left_x = -row_gap / 2.0
-    right_x = row_gap / 2.0
+    left_x = -row_gap / 2.0 + ox
+    right_x = row_gap / 2.0 + ox
 
     left_ys = _row_positions(per_row)
     right_ys = list(reversed(_row_positions(pins - per_row)))
@@ -132,12 +152,12 @@ def build_package(cell, spec):
             _pad(cell, right_x, y, pad_l, pad_w, n)
         n += 1
 
-    hl, hw = mm_to_dbu(body_l) // 2, mm_to_dbu(body_w) // 2
+    bl, bw = mm_to_dbu(body_l), mm_to_dbu(body_w)
     cell.add_path(OUTLINE_LAYER,
-                  [(-hl, -hw), (hl, -hw), (hl, hw), (-hl, hw), (-hl, -hw)],
+                  [(0, 0), (bl, 0), (bl, bw), (0, bw), (0, 0)],
                   width=mm_to_dbu(OUTLINE_WIDTH_MM), cap="flush")
 
-    cell.add_text(LABEL_LAYER, (0, 0), "U", height=mm_to_dbu(LABEL_HEIGHT_MM))
+    cell.add_text(LABEL_LAYER, (mm_to_dbu(ox), mm_to_dbu(oy)), "U", height=mm_to_dbu(LABEL_HEIGHT_MM))
 
 
 def build() -> Library:
@@ -156,11 +176,83 @@ def build() -> Library:
     return lib
 
 
+def _spec_step_leads(spec):
+    """leads_neg_x/leads_pos_x for make_dip_x() from a PACKAGES entry
+    -- same (relative-to-centre) positions/widths build_package()
+    itself computes for the left/right rows, just returned as plain
+    data instead of drawn, so the 2D cell and the 3D model can never
+    drift apart."""
+    pins = spec["pins"]
+    pitch = spec["pitch"]
+    pad_w = spec["pad"][1]
+    tab_pin = spec.get("tab_pin")
+    tab = spec.get("tab")
+    per_row = (pins + 1) // 2
+
+    def _positions(count):
+        span = (count - 1) * pitch
+        return [(-span / 2.0) + k * pitch for k in range(count)]
+
+    def _leads(ys, first_pin):
+        out = []
+        for i, y in enumerate(ys):
+            n = first_pin + i
+            w = tab[1] if tab_pin == n and tab else pad_w
+            out.append((round(y, 4), w))
+        return out
+
+    neg = _leads(_positions(per_row), 1)
+    pos = list(reversed(_leads(_positions(pins - per_row), per_row + 1)))
+    return neg, pos
+
+
+def step_parts():
+    """(name, "make_dip_x", kwargs) for every PACKAGES entry -- see
+    hlayout.io.example_step3d.make_dip_x() (the rows-along-X twin of
+    make_dip(), matching this script's own axis convention directly,
+    no swapping needed). Bottom-left origin, matching build()'s own
+    cells, so a STEP file here lines up with its GDS cell.
+
+    KNOWN GAP: reach (below) is computed from the spec's ordinary pad
+    size only -- a tab_pin's own bigger tab size isn't factored in, so
+    SOT-89/143/223's 3D tab lead falls a little short of where the 2D
+    tab pad's own outer edge actually sits (confirmed ~0.3 mm on
+    SOT-89 -- _gullwing_side_x() only takes one lead_out for a whole
+    side, not a per-lead override, so fixing this needs a real API
+    change, not just a number tweak)."""
+    parts = []
+    for name, spec in PACKAGES.items():
+        body_l, body_w = spec["body"]
+        row_gap, pad_l = spec["row_gap"], spec["pad"][0]
+        leads_neg_x, leads_pos_x = _spec_step_leads(spec)
+        # Reach the leads/feet need to cover, from the 3D body's own
+        # wall (X=0/X=body_l) out to roughly where the 2D pad's own
+        # outer edge sits -- see the module docstring's note that a
+        # pad can extend a little past the outline. lead_t itself also
+        # adds to the total reach (the "drop" segment has width
+        # lead_t), so it's subtracted back out.
+        lead_t = 0.15
+        reach = max((row_gap / 2.0 + pad_l / 2.0) - body_l / 2.0, 0.05)
+        lead_out = max(reach - lead_t, 0.02)
+        parts.append((name, "make_dip_x", dict(
+            L=body_l, W=body_w, H=HEIGHT_MM[name],
+            leads_neg_x=leads_neg_x, leads_pos_x=leads_pos_x,
+            lead_t=lead_t, lead_out=lead_out, lead_foot=0.05,
+        )))
+    return parts
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("-o", "--out", default=os.path.join(_here, "sot_packages.gds"),
                     help="output .gds path (default: examples/sot_packages.gds)")
+    ap.add_argument("--step-dir", default=None,
+                    help="also write a FreeCAD macro building a matching 3D STEP model "
+                         "for every package into this folder")
+    ap.add_argument("--run-freecad", action="store_true",
+                    help="with --step-dir, also run the macro with freecadcmd to produce "
+                         "the .step files now (requires FreeCAD installed)")
     args = ap.parse_args(argv)
 
     lib = build()
@@ -169,6 +261,12 @@ def main(argv=None):
     print(f"{len(PACKAGES)} SOT package cells + INDEX -> {args.out}")
     for name, spec in PACKAGES.items():
         print(f"  {name:9s} {spec['pins']} pins  body {spec['body'][0]} x {spec['body'][1]} mm")
+
+    if args.step_dir:
+        macro_path = write_step_macro(step_parts(), args.step_dir)
+        print(f"wrote 3D STEP macro -> {macro_path}")
+        if args.run_freecad:
+            print(run_step_macro(macro_path))
 
 
 if __name__ == "__main__":
