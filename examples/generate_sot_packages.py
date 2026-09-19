@@ -84,8 +84,14 @@ PACKAGES = {
     # that has to grow with pin count, since that's the axis pitch runs
     # along; getting these backwards is exactly the bug fixed 2026-09 --
     # the outline drew rotated 90 degrees for every one of these.
-    "SOT-8":    dict(pins=8,  body=(3.9, 4.9),  pitch=1.27, row_gap=6.0, pad=(1.5, 0.6)),
-    "SOT-16":   dict(pins=16, body=(3.9, 9.9),  pitch=1.27, row_gap=6.0, pad=(1.5, 0.6)),
+    # SOT-8's body/row_gap/pitch match a real 8-pin SOIC datasheet
+    # drawing (body 3.95 x 5.1, row_gap/lead-span 6.0, pitch 1.27, all
+    # confirmed against it directly) -- SOT-16 shares its narrow-body
+    # width (3.95) for the same reason, but keeps its own already-
+    # reasonable along-row length (9.9) since no 16-pin reference was
+    # checked against.
+    "SOT-8":    dict(pins=8,  body=(3.95, 5.1), pitch=1.27, row_gap=6.0, pad=(1.5, 0.6)),
+    "SOT-16":   dict(pins=16, body=(3.95, 9.9), pitch=1.27, row_gap=6.0, pad=(1.5, 0.6)),
     "SOT-18":   dict(pins=18, body=(7.5, 11.5), pitch=1.27, row_gap=9.8, pad=(1.5, 0.6)),
     "SOT-20":   dict(pins=20, body=(7.5, 12.8), pitch=1.27, row_gap=9.8, pad=(1.5, 0.6)),
     "SOT-24":   dict(pins=24, body=(7.5, 15.4), pitch=1.27, row_gap=9.8, pad=(1.5, 0.6)),
@@ -96,12 +102,23 @@ PACKAGES = {
 #: Matches hlayout.io.component_library.DEFAULT_SOT_PACKAGES's own
 #: values where a name overlaps (SOT_23/323/89/223 there), so the two
 #: independent 3D conventions at least agree on this one number.
+#: SOT-8/16/18/20/24/28's own 2.5 mm matches the same 8-pin SOIC
+#: datasheet drawing body=(3.95,5.1) above (overall height "A" = 2.5),
+#: applied to the whole gull-wing sub-family since package height
+#: doesn't vary much with pin count/body width the way length does.
 HEIGHT_MM = {
     "SOT-23": 1.1, "SOT-23-5": 1.1, "SOT-23-6": 1.1,
     "SOT-89": 1.5, "SOT-143": 1.1, "SOT-223": 1.6, "SOT-363": 0.95,
-    "SOT-8": 1.75, "SOT-16": 1.75, "SOT-18": 1.75,
-    "SOT-20": 1.75, "SOT-24": 1.75, "SOT-28": 1.75,
+    "SOT-8": 2.5, "SOT-16": 2.5, "SOT-18": 2.5,
+    "SOT-20": 2.5, "SOT-24": 2.5, "SOT-28": 2.5,
 }
+
+#: real lead width ("b" on a datasheet), mm -- 3D export only for the
+#: gull-wing sub-family. The 2D land pad is deliberately wider (see
+#: PACKAGES's own pad=) for a real solderable copper pad, but the
+#: actual metal lead itself -- what the 3D model should show -- is
+#: this much narrower, matching the same 8-pin SOIC reference drawing.
+LEAD_WIDTH_MM = 0.38
 
 INDEX_PITCH_MM = 12.0
 
@@ -176,15 +193,18 @@ def build() -> Library:
     return lib
 
 
-def _spec_step_leads(spec):
+def _spec_step_leads(spec, lead_w=None):
     """leads_neg_x/leads_pos_x for make_dip_x() from a PACKAGES entry
-    -- same (relative-to-centre) positions/widths build_package()
-    itself computes for the left/right rows, just returned as plain
-    data instead of drawn, so the 2D cell and the 3D model can never
-    drift apart."""
+    -- same (relative-to-centre) positions build_package() itself
+    computes for the left/right rows, just returned as plain data
+    instead of drawn, so the 2D cell and the 3D model can never drift
+    apart. `lead_w` overrides the ordinary (non-tab) lead's width --
+    the 2D land pad is deliberately wider than the real metal lead
+    (see LEAD_WIDTH_MM); defaults to the 2D pad's own width when not
+    given. A tab_pin's own tab width is never overridden."""
     pins = spec["pins"]
     pitch = spec["pitch"]
-    pad_w = spec["pad"][1]
+    pad_w = lead_w if lead_w is not None else spec["pad"][1]
     tab_pin = spec.get("tab_pin")
     tab = spec.get("tab")
     per_row = (pins + 1) // 2
@@ -224,7 +244,11 @@ def step_parts():
     for name, spec in PACKAGES.items():
         body_l, body_w = spec["body"]
         row_gap, pad_l = spec["row_gap"], spec["pad"][0]
-        leads_neg_x, leads_pos_x = _spec_step_leads(spec)
+        # gull-wing ICs (SOT-8 and up) get their real, narrower metal
+        # lead width in 3D; the transistor-family entries keep using
+        # their pad width as before.
+        lead_w = LEAD_WIDTH_MM if spec["pins"] >= 8 else None
+        leads_neg_x, leads_pos_x = _spec_step_leads(spec, lead_w)
         # Reach the leads/feet need to cover, from the 3D body's own
         # wall (X=0/X=body_l) out to roughly where the 2D pad's own
         # outer edge sits -- see the module docstring's note that a
