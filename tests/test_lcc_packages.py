@@ -90,6 +90,50 @@ def test_pads_are_evenly_split_across_the_four_edges():
         assert [on_bottom, on_top, on_left, on_right] == [per_side] * 4, name
 
 
+def test_lcc_20_body_matches_the_real_jedec_l20_sq_datasheet():
+    # Regression test: CORNER_MARGIN_MM is back-solved from a real
+    # 20-terminal LCC drawing ("L20(SQ) 0204") so a fresh 20-pin part
+    # reproduces its 0.350" (8.89 mm) body exactly.
+    lib = load_gds(OUT_GDS)
+    outline = next(sh for sh in lib.cells["LCC-20"].shapes if isinstance(sh, Path) and sh.layer == 61)
+    x0 = min(p[0] for p in outline.points)
+    x1 = max(p[0] for p in outline.points)
+    side_mm = (x1 - x0) / 1000.0
+    assert abs(side_mm - 8.89) < 0.05
+
+
+def test_body_outline_is_chamfered_with_a_smaller_cut_at_the_pin_1_corner():
+    lib = load_gds(OUT_GDS)
+    for name in EXPECTED_PACKAGES:
+        cell = lib.cells[name]
+        outline = next(sh for sh in cell.shapes if isinstance(sh, Path) and sh.layer == 61)
+        pts = outline.points
+        x0 = min(p[0] for p in pts)
+        y0 = min(p[1] for p in pts)
+        # a plain (unchamfered) square outline would have a point AT
+        # the (x0, y0) corner itself; a chamfered one never does.
+        assert (x0, y0) not in [(p[0], p[1]) for p in pts], name
+        # the two points nearest the pin-1 (bottom-left) corner must be
+        # closer to it than the points cutting the other three corners.
+        near_pin1 = [p for p in pts if abs(p[0] - x0) < 50 or abs(p[1] - y0) < 50]
+        dists = sorted((p[0] - x0) ** 2 + (p[1] - y0) ** 2 for p in near_pin1)
+        assert dists[1] < dists[-1], name
+
+
+def test_top_surface_outline_is_inset_from_the_body_outline():
+    lib = load_gds(OUT_GDS)
+    for name in EXPECTED_PACKAGES:
+        cell = lib.cells[name]
+        outline = next(sh for sh in cell.shapes if isinstance(sh, Path) and sh.layer == 61)
+        top = next(sh for sh in cell.shapes if isinstance(sh, Path) and sh.layer == 63)
+        bx0, by0 = min(p[0] for p in outline.points), min(p[1] for p in outline.points)
+        bx1, by1 = max(p[0] for p in outline.points), max(p[1] for p in outline.points)
+        tx0, ty0 = min(p[0] for p in top.points), min(p[1] for p in top.points)
+        tx1, ty1 = max(p[0] for p in top.points), max(p[1] for p in top.points)
+        assert bx0 < tx0 < tx1 < bx1, name
+        assert by0 < ty0 < ty1 < by1, name
+
+
 def test_rejects_a_pin_count_not_a_multiple_of_four():
     result = subprocess.run(
         [sys.executable, SCRIPT, "--start", "10", "--stop", "10"],

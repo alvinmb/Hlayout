@@ -10,8 +10,15 @@ multiple of 4. Each package cell has:
   * copper land pads on LAYER 20, pin-numbered "1"..N for netlist
     extraction, straddling the body edge (half in, half out) the way
     a real castellation wraps the body's fired edge;
-  * a body-outline Path on LAYER 61 (0.1 mm) round the nominal body;
-  * a small pin-1 orientation dot on LAYER 62, next to the first pad;
+  * a chamfered body-outline Path on LAYER 61 (0.1 mm) round the
+    nominal body -- 45 degree corner chamfers, matching a real
+    ceramic LCC's moulded/fired corners;
+  * a smaller top-surface outline Path on LAYER 63, inset from the
+    body outline, showing the stepped-down top face a real LCC's lid
+    sits into;
+  * a small pin-1 orientation dot on LAYER 62, next to the first pad
+    -- pin 1's own body corner also gets a distinctly SMALLER chamfer
+    than the other three corners, a real LCC's own pin-1 indicator;
   * a reference-designator placeholder Text "U" on LAYER 62.
 
 Pin 1 sits at the bottom-left corner of the bottom edge; numbering
@@ -23,11 +30,18 @@ Component origin is the BOTTOM-LEFT corner of the body (matching
 hlayout.core.smdlib's / hlayout.io.component_library's convention),
 not its centre -- the body spans (0, 0) to (side, side).
 
-IMPORTANT: PITCH_MM/PAD_WIDTH_MM/PAD_DEPTH_MM/CORNER_MARGIN_MM below
-are round-number parametric estimates for layout practice, NOT pulled
-from a specific JEDEC MS-* spec sheet -- adjust them (or pass the
-matching --pitch/--pad-width/--pad-depth/--corner-margin flags) to
-match the real package you're targeting.
+PITCH_MM (0.050" BSC), CORNER_MARGIN_MM, TOP_INSET_MM and the two
+CHAMFER_MM constants below are anchored to a real JEDEC 20-terminal
+LCC datasheet drawing ("L20(SQ) 0204"): 0.350" (8.89 mm) overall body
+SQ, 0.300" (7.62 mm) top-surface SQ, 0.050" (1.270 mm) pitch, 0.040"
+(1.016 mm) generic corner chamfers REF, 0.020" (0.508 mm) pin-1
+corner chamfer REF -- CORNER_MARGIN_MM is back-solved from the
+20-pin body/pitch (so a fresh 20-pin part reproduces 8.89 mm exactly)
+and then reused as-is for every other pin count, the same parametric
+"one shape, scaled" approach the rest of this family already uses.
+PAD_WIDTH_MM/PAD_DEPTH_MM remain round-number estimates -- adjust
+them (or pass the matching --pad-width/--pad-depth flags) if your
+fab's own land pattern differs.
 
 Usage:
     python examples/generate_lcc_packages.py
@@ -55,21 +69,32 @@ from hlayout.io.example_step3d import run_step_macro, write_step_macro
 PAD_LAYER = 20
 OUTLINE_LAYER = 61
 LABEL_LAYER = 62
+TOP_LAYER = 63
 OUTLINE_WIDTH_MM = 0.1
 LABEL_HEIGHT_MM = 0.6
 
-#: defaults -- all mm; see the module docstring for what each means.
+#: defaults -- all mm; see the module docstring for what each means
+#: and which JEDEC drawing they were checked against.
 PITCH_MM = 1.27
 PAD_WIDTH_MM = 0.75
 PAD_DEPTH_MM = 1.0
-CORNER_MARGIN_MM = 1.5
+#: (8.89 - (5 - 1) * 1.27) / 2 -- the real 20-pin body/pitch above,
+#: solved for the edge-to-first-pin-centre margin.
+CORNER_MARGIN_MM = 1.905
 PIN1_DOT_MM = 0.3
+#: half the difference between the real 8.89 mm body and 7.62 mm top
+#: face -- how far each edge steps in from the body outline to the
+#: smaller top-surface outline.
+TOP_INSET_MM = 0.635
+CHAMFER_MM = 1.016
+PIN1_CHAMFER_MM = 0.508
 
 INDEX_PITCH_MM = 16.0
 
 #: body height, mm -- 3D export only, no use in the 2D footprint.
-#: Round number for a real ceramic LCC package, not size-dependent.
-HEIGHT_MM = 2.3
+#: Within the real drawing's .064-.090" (1.626-2.286 mm) overall
+#: height range.
+HEIGHT_MM = 2.0
 
 
 def _pad_along_edge(cell, cx_mm, cy_mm, along_mm, depth_mm, horizontal, pin):
@@ -85,12 +110,17 @@ def _pad_along_edge(cell, cx_mm, cy_mm, along_mm, depth_mm, horizontal, pin):
     cell.add_rectangle(PAD_LAYER, cx - hl, cy - hw, cx + hl, cy + hw, pin=str(pin))
 
 
-def build_package(cell, pins, pitch, pad_width, pad_depth, corner_margin):
+def build_package(cell, pins, pitch, pad_width, pad_depth, corner_margin,
+                   chamfer=CHAMFER_MM, pin1_chamfer=PIN1_CHAMFER_MM, top_inset=TOP_INSET_MM):
     if pins <= 0 or pins % 4 != 0:
         raise ValueError(f"pins ({pins}) must be a positive multiple of 4 for a square LCC")
     per_side = pins // 4
     side = 2 * corner_margin + (per_side - 1) * pitch
     half = side / 2.0
+    if max(chamfer, pin1_chamfer) * 2 >= side:
+        raise ValueError(f"chamfer too large for a {pins}-pin body ({side:.2f} mm side)")
+    if top_inset * 2 >= side:
+        raise ValueError(f"top_inset too large for a {pins}-pin body ({side:.2f} mm side)")
 
     def _positions():
         # relative-to-centre spacing, then shifted into bottom-left-
@@ -120,8 +150,21 @@ def build_package(cell, pins, pitch, pad_width, pad_depth, corner_margin):
         n += 1
 
     s = mm_to_dbu(side)
+    c = mm_to_dbu(chamfer)
+    c1 = mm_to_dbu(pin1_chamfer)
+    # Chamfered body outline -- every corner cut at 45 degrees, except
+    # pin 1's own corner (bottom-left, (0,0)) which gets a distinctly
+    # SMALLER cut than the other three, a real LCC's own pin-1 mark.
     cell.add_path(OUTLINE_LAYER,
-                  [(0, 0), (s, 0), (s, s), (0, s), (0, 0)],
+                  [(c1, 0), (s - c, 0), (s, c), (s, s - c), (s - c, s),
+                   (c, s), (0, s - c), (0, c1), (c1, 0)],
+                  width=mm_to_dbu(OUTLINE_WIDTH_MM), cap="flush")
+
+    # Smaller top-surface outline -- the stepped-down face a real
+    # LCC's lid sits into, inset from the body outline on every side.
+    ti = mm_to_dbu(top_inset)
+    cell.add_path(TOP_LAYER,
+                  [(ti, ti), (s - ti, ti), (s - ti, s - ti), (ti, s - ti), (ti, ti)],
                   width=mm_to_dbu(OUTLINE_WIDTH_MM), cap="flush")
 
     # Pin-1 orientation dot, just inside the body near the first pad.
