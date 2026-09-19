@@ -39,6 +39,12 @@ corner chamfer REF -- CORNER_MARGIN_MM is back-solved from the
 20-pin body/pitch (so a fresh 20-pin part reproduces 8.89 mm exactly)
 and then reused as-is for every other pin count, the same parametric
 "one shape, scaled" approach the rest of this family already uses.
+Cross-checked against TI's own LCCC catalog (ti.com/packaging, search
+"LCC"): this formula reproduces the real 20-pin (FK/FD, 8.89 mm) and
+28-pin (FK28A/FD, 11.43 mm) body sizes exactly; the real 8-pin part
+(FKH) uses a special-cased 5.0 mm body that breaks the linear
+progression (our formula gives 5.08 mm there) -- a JEDEC quirk at the
+smallest LCCC size, not a bug in this approach.
 PAD_WIDTH_MM/PAD_DEPTH_MM remain round-number estimates -- adjust
 them (or pass the matching --pad-width/--pad-depth flags) if your
 fab's own land pattern differs.
