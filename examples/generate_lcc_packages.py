@@ -56,6 +56,7 @@ Usage:
     python examples/generate_lcc_packages.py --step-dir step_out --run-freecad
 """
 import argparse
+import math
 import os
 import sys
 
@@ -71,6 +72,7 @@ from hlayout.core.library import Library
 from hlayout.io.gdsio import save_gds
 from hlayout.core.units import mm_to_dbu
 from hlayout.io.example_step3d import run_step_macro, write_step_macro
+from hlayout.core.shapes import MAX_PATH_POINTS
 
 PAD_LAYER = 20
 OUTLINE_LAYER = 61
@@ -94,6 +96,18 @@ PIN1_DOT_MM = 0.3
 TOP_INSET_MM = 0.635
 CHAMFER_MM = 1.016
 PIN1_CHAMFER_MM = 0.508
+#: radius of the castellation scallop cut into the body edge at each
+#: pin -- a real LCCC terminal is a plated half-via straddling the
+#: fired body edge, not just a plain land pad; drawn on PAD_LAYER so
+#: it reads as continuous copper with the land pad. ~0.7-0.8 mm
+#: diameter is typical for a 1.27 mm-pitch LCCC.
+CASTELLATION_RADIUS_MM = 0.4
+#: minimum copper-to-copper clearance to maintain between the two
+#: corner pads that meet at each body corner (2026-09 request) -- if
+#: a given --pitch/--pad-width/--pad-depth/--corner-margin combination
+#: would put them closer than this, build_package() chamfers the
+#: facing corner of each one just enough to restore it.
+CORNER_CLEARANCE_MM = 0.3
 
 INDEX_PITCH_MM = 16.0
 
@@ -103,17 +117,77 @@ INDEX_PITCH_MM = 16.0
 HEIGHT_MM = 2.0
 
 
-def _pad_along_edge(cell, cx_mm, cy_mm, along_mm, depth_mm, horizontal, pin):
+def _chamfered_rect_points(x0, y0, x1, y1, corner, k):
+    """Corner points (DBU) of the box (x0,y0)-(x1,y1) with one corner
+    -- 'tl'/'tr'/'bl'/'br' -- cut by a 45 degree chamfer of leg k
+    (DBU); k<=0 returns the plain rectangle. Used to trim a corner pad
+    just enough to clear the perpendicular-edge pad sharing that body
+    corner -- see build_package()'s own corner-clearance comment."""
+    if k <= 0:
+        return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    if corner == "tl":
+        return [(x0, y0), (x1, y0), (x1, y1), (x0 + k, y1), (x0, y1 - k)]
+    if corner == "tr":
+        return [(x0, y0), (x1 - k, y0), (x1, y0 + k), (x1, y1), (x0, y1)]
+    if corner == "bl":
+        return [(x0, y0 + k), (x0 + k, y0), (x1, y0), (x1, y1), (x0, y1)]
+    if corner == "br":
+        return [(x0, y0), (x1, y0), (x1, y1 - k), (x1 - k, y1), (x0, y1)]
+    raise ValueError(f"bad corner {corner!r}")
+
+
+def _pad_along_edge(cell, cx_mm, cy_mm, along_mm, depth_mm, horizontal, pin,
+                     chamfer_corner=None, chamfer_k_mm=0.0):
     """A pad centred at (cx_mm, cy_mm), `along_mm` long in the
     direction of the edge it sits on and `depth_mm` deep straddling
     the edge -- `horizontal=True` for the top/bottom edges (pad runs
-    in x), `False` for the left/right edges (pad runs in y)."""
+    in x), `False` for the left/right edges (pad runs in y). Draws a
+    plain rectangle unless `chamfer_k_mm` > 0, in which case
+    `chamfer_corner` ('tl'/'tr'/'bl'/'br', in absolute x/y terms, not
+    rotated with `horizontal`) gets a 45 degree cut of that leg length
+    -- see build_package()'s own corner-clearance comment on when/why."""
     if horizontal:
         hl, hw = mm_to_dbu(along_mm) // 2, mm_to_dbu(depth_mm) // 2
     else:
         hl, hw = mm_to_dbu(depth_mm) // 2, mm_to_dbu(along_mm) // 2
     cx, cy = mm_to_dbu(cx_mm), mm_to_dbu(cy_mm)
-    cell.add_rectangle(PAD_LAYER, cx - hl, cy - hw, cx + hl, cy + hw, pin=str(pin))
+    x0, y0, x1, y1 = cx - hl, cy - hw, cx + hl, cy + hw
+    if chamfer_k_mm > 0:
+        k = mm_to_dbu(chamfer_k_mm)
+        cell.add_polygon(PAD_LAYER, _chamfered_rect_points(x0, y0, x1, y1, chamfer_corner, k),
+                          pin=str(pin))
+    else:
+        cell.add_rectangle(PAD_LAYER, x0, y0, x1, y1, pin=str(pin))
+
+
+def _castellation_points(cx_mm, cy_mm, radius_mm, inward_dx, inward_dy, segments=16):
+    """DBU point ring (open, no duplicated closing point) for the
+    plated half-via scallop at one terminal -- a real LCCC castellation
+    -- centred at (cx_mm, cy_mm) ON the body edge, flat diameter along
+    the edge, bulging inward by `radius_mm` in the (inward_dx,
+    inward_dy) unit direction. Shared by the copper land-pad shape
+    (_castellation()) and the body outline's own notch at that same
+    terminal (build_package() -- a real LCCC's castellation is a
+    physical scallop cut into the CERAMIC BODY itself, with the
+    copper simply following that same cut, so the outline needs the
+    identical geometry, not just the pad)."""
+    base = math.atan2(inward_dy, inward_dx)
+    pts = []
+    for i in range(segments + 1):
+        a = base - math.pi / 2.0 + (math.pi * i / segments)
+        pts.append((mm_to_dbu(cx_mm + radius_mm * math.cos(a)),
+                    mm_to_dbu(cy_mm + radius_mm * math.sin(a))))
+    return pts
+
+
+def _castellation(cell, cx_mm, cy_mm, radius_mm, inward_dx, inward_dy, segments=16):
+    """The plated half-via scallop straddling the body edge at one
+    terminal -- a real LCCC castellation, not just a plain land pad
+    (2026-09 request). Drawn on PAD_LAYER (same copper as the land pad
+    it straddles, so it reads as one shape); carries no `pin=` of its
+    own -- the land pad already does. See _castellation_points() for
+    the shared geometry (also used to notch the body outline)."""
+    cell.add_polygon(PAD_LAYER, _castellation_points(cx_mm, cy_mm, radius_mm, inward_dx, inward_dy, segments))
 
 
 def build_package(cell, pins, pitch, pad_width, pad_depth, corner_margin,
@@ -137,22 +211,60 @@ def build_package(cell, pins, pitch, pad_width, pad_depth, corner_margin,
         return [start + k * pitch + half for k in range(per_side)]
 
     pos = _positions()
+
+    # Corner-pad clearance (2026-09 request): the two corner pads that
+    # meet at each body corner are a diagonal gap g = corner_margin -
+    # pad_width/2 - pad_depth/2 apart (both axes equal by the square
+    # body's own symmetry), so their true corner-to-corner distance is
+    # g*sqrt(2). If a custom --pitch/--pad-width/--pad-depth/
+    # --corner-margin combination would put that under
+    # CORNER_CLEARANCE_MM, chamfer BOTH corner pads' facing corner by
+    # leg k so the (now-parallel) cut edges sit exactly
+    # CORNER_CLEARANCE_MM apart -- see the module's dev notes for the
+    # derivation. k=0 (the default parameters) draws plain rectangles,
+    # unchanged from before.
+    g = corner_margin - pad_width / 2.0 - pad_depth / 2.0
+    chamfer_k = max(0.0, CORNER_CLEARANCE_MM / math.sqrt(2.0) - g)
+
     n = 1
-    # Bottom edge, left -> right.
-    for x in pos:
-        _pad_along_edge(cell, x, 0.0, pad_width, pad_depth, horizontal=True, pin=n)
+    last = per_side - 1
+    # (cx_mm, cy_mm, inward_dx, inward_dy) for every pin's castellation
+    # -- collected as pins are placed so the body outline below can cut
+    # the SAME scallops out of itself (2026-09 request: the castellation
+    # is a physical notch in the ceramic body, not just a copper add-on).
+    castellations = []
+    # Bottom edge, left -> right. Corner chamfers face the left/right
+    # edges' own nearest corner pad -- see the derivation above.
+    for i, x in enumerate(pos):
+        corner = "tl" if i == 0 else "tr" if i == last else None
+        _pad_along_edge(cell, x, 0.0, pad_width, pad_depth, horizontal=True, pin=n,
+                         chamfer_corner=corner, chamfer_k_mm=chamfer_k)
+        _castellation(cell, x, 0.0, CASTELLATION_RADIUS_MM, 0.0, 1.0)
+        castellations.append((x, 0.0, 0.0, 1.0))
         n += 1
     # Right edge, bottom -> top.
-    for y in pos:
-        _pad_along_edge(cell, side, y, pad_width, pad_depth, horizontal=False, pin=n)
+    for i, y in enumerate(pos):
+        corner = "bl" if i == 0 else "tl" if i == last else None
+        _pad_along_edge(cell, side, y, pad_width, pad_depth, horizontal=False, pin=n,
+                         chamfer_corner=corner, chamfer_k_mm=chamfer_k)
+        _castellation(cell, side, y, CASTELLATION_RADIUS_MM, -1.0, 0.0)
+        castellations.append((side, y, -1.0, 0.0))
         n += 1
     # Top edge, right -> left.
-    for x in reversed(pos):
-        _pad_along_edge(cell, x, side, pad_width, pad_depth, horizontal=True, pin=n)
+    for i, x in enumerate(reversed(pos)):
+        corner = "br" if i == 0 else "bl" if i == last else None
+        _pad_along_edge(cell, x, side, pad_width, pad_depth, horizontal=True, pin=n,
+                         chamfer_corner=corner, chamfer_k_mm=chamfer_k)
+        _castellation(cell, x, side, CASTELLATION_RADIUS_MM, 0.0, -1.0)
+        castellations.append((x, side, 0.0, -1.0))
         n += 1
     # Left edge, top -> bottom.
-    for y in reversed(pos):
-        _pad_along_edge(cell, 0.0, y, pad_width, pad_depth, horizontal=False, pin=n)
+    for i, y in enumerate(reversed(pos)):
+        corner = "br" if i == 0 else "tr" if i == last else None
+        _pad_along_edge(cell, 0.0, y, pad_width, pad_depth, horizontal=False, pin=n,
+                         chamfer_corner=corner, chamfer_k_mm=chamfer_k)
+        _castellation(cell, 0.0, y, CASTELLATION_RADIUS_MM, 1.0, 0.0)
+        castellations.append((0.0, y, 1.0, 0.0))
         n += 1
 
     s = mm_to_dbu(side)
@@ -160,11 +272,28 @@ def build_package(cell, pins, pitch, pad_width, pad_depth, corner_margin,
     c1 = mm_to_dbu(pin1_chamfer)
     # Chamfered body outline -- every corner cut at 45 degrees, except
     # pin 1's own corner (bottom-left, (0,0)) which gets a distinctly
-    # SMALLER cut than the other three, a real LCC's own pin-1 mark.
-    cell.add_path(OUTLINE_LAYER,
-                  [(c1, 0), (s - c, 0), (s, c), (s, s - c), (s - c, s),
-                   (c, s), (0, s - c), (0, c1), (c1, 0)],
-                  width=mm_to_dbu(OUTLINE_WIDTH_MM), cap="flush")
+    # SMALLER cut than the other three, a real LCC's own pin-1 mark --
+    # with every terminal's castellation cut into it as a physical
+    # scallop notch (2026-09 request), the same way a real LCCC's
+    # ceramic body is actually machined/moulded: the castellation is a
+    # feature of the BODY, and the copper on PAD_LAYER just follows the
+    # same cut, rather than the body staying a plain chamfered
+    # rectangle while only the copper shows the scallop.
+    from shapely.geometry import Polygon as _SPoly
+    from shapely.ops import unary_union as _sunion
+    _body = _SPoly([(c1, 0), (s - c, 0), (s, c), (s, s - c), (s - c, s),
+                     (c, s), (0, s - c), (0, c1)])
+    _scallops = [_SPoly(_castellation_points(cx, cy, CASTELLATION_RADIUS_MM, dx, dy))
+                 for cx, cy, dx, dy in castellations]
+    _notched = _body.difference(_sunion(_scallops)) if _scallops else _body
+    _ring = list(_notched.exterior.coords)
+    if tuple(_ring[0]) != tuple(_ring[-1]):
+        _ring.append(_ring[0])
+    _outline_pts = [(int(round(px)), int(round(py))) for px, py in _ring]
+    for _i in range(0, len(_outline_pts) - 1, MAX_PATH_POINTS - 1):
+        _chunk = _outline_pts[_i:_i + MAX_PATH_POINTS]
+        if len(_chunk) >= 2:
+            cell.add_path(OUTLINE_LAYER, _chunk, width=mm_to_dbu(OUTLINE_WIDTH_MM), cap="flush")
 
     # Smaller top-surface outline -- the stepped-down face a real
     # LCC's lid sits into, inset from the body outline on every side.

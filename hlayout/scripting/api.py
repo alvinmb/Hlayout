@@ -1141,6 +1141,36 @@ class Session:
         finally:
             self._suspend_checkpoint = prev
 
+    def delete_last(self):
+        """Remove the most recently added shape, sref or aref from the
+        current cell -- the DELETE LAST command. One undo step. Returns
+        "shape", "sref" or "aref" for what went, or None if the cell is
+        empty.
+
+        A cell keeps shapes, srefs and arefs in three separate lists, so
+        "most recent" is read off the undo history: the newest snapshot
+        in which one of the three lists was shorter than it is now says
+        which kind grew last. With no history to go on (a freshly opened
+        file) it falls back to shape, then sref, then aref."""
+        cell = self.cell
+        lists = (("shape", cell.shapes), ("sref", cell.srefs), ("aref", cell.arefs))
+        if not any(items for _, items in lists):
+            return None
+        pick = None
+        for snap in reversed(self._undo_stack):
+            old = snap.cells.get(cell.name)
+            was = (len(old.shapes), len(old.srefs), len(old.arefs)) if old else (0, 0, 0)
+            grown = [i for i in range(3) if was[i] < len(lists[i][1])]
+            if grown:
+                pick = grown[-1]
+                break
+        if pick is None:
+            pick = next(i for i in range(3) if lists[i][1])
+        self._checkpoint()
+        lists[pick][1].pop()
+        self._notify()
+        return lists[pick][0]
+
     def checkpoint(self) -> None:
         """Public entry point for external callers -- specifically the
         GUI's own mouse-driven edits (drag-to-move, Edit Selected...,
@@ -2218,7 +2248,8 @@ class Session:
     def mask_op(self, op: str, layer_a, result_layer, layer_b=None,
                 amount: float = 0.0, cell_names: Optional[List[str]] = None,
                 datatype: int = 0, flatten: bool = True,
-                simplify: Optional[float] = None) -> dict:
+                simplify: Optional[float] = None,
+                join_style: str = "mitre") -> dict:
         """Layer-based mask operation -- OVERSIZE, UNDERSIZE, AND, OR,
         NOT, XOR -- similar to the "resize"/boolean layer operators in
         a GDSII CAM system: grows/shrinks a layer, or combines two
@@ -2274,6 +2305,16 @@ class Session:
         result is written flat into the operated-on cell itself, never
         back down into a placed sub-cell.
 
+        `join_style` (default "mitre") is passed straight through to
+        OVERSIZE/UNDERSIZE's underlying buffer -- see
+        hlayout.core.maskops.size_geometry() for why you'd ever want
+        "round" or "bevel" instead: mainly, growing/shrinking geometry
+        that already includes a many-facet curve (e.g. a castellation
+        scallop unioned with a pad), where the default mitre join
+        produces a small spurious spike/notch at the facet-to-straight
+        seam. Ignored for AND/OR/NOT/XOR (those have no offset to
+        join-style).
+
         Returns {cell_name: polygons_written} for cells that actually
         produced output (empty results are omitted).
         """
@@ -2306,9 +2347,9 @@ class Session:
         for cell in cells:
             geom_a = gather(cell, a_layer)
             if op == "OVERSIZE":
-                result = size_geometry(geom_a, amount)
+                result = size_geometry(geom_a, amount, join_style=join_style)
             elif op == "UNDERSIZE":
-                result = size_geometry(geom_a, -amount)
+                result = size_geometry(geom_a, -amount, join_style=join_style)
             else:
                 geom_b = gather(cell, b_layer)
                 result = boolean_op(geom_a, geom_b, op)
@@ -2766,8 +2807,34 @@ class Session:
         if inputs:
             biggest = max(inputs, key=lambda g: g.area)
             rest = [g for g in inputs if g is not biggest]
-            if not rest or biggest.buffer(1.0).contains(unary_union(rest)):
+            if not rest:
                 boundary, holes = biggest, rest
+            else:
+                # Don't require *exact* full containment (a bare 1 DBU
+                # tolerance) -- a hole/keep-out that pokes even slightly
+                # past the intended boundary (a via near the board edge,
+                # a keep-out sized with its own margin, ordinary DBU
+                # rounding) would otherwise silently fail this check
+                # entirely and fall back to a bbox+margin fill that
+                # treats the boundary shape itself as just another hole
+                # -- producing a near-empty/sliver result instead of an
+                # error, which is worse than either succeeding or
+                # failing loudly. Instead: treat `biggest` as the
+                # boundary whenever it accounts for almost all of the
+                # other shapes' combined area (>= 95% overlap) -- clearly
+                # different from an unrelated large shape that doesn't
+                # actually enclose anything (0% overlap, e.g. the
+                # bbox+margin-fallback test's keep-out and via window,
+                # which don't overlap each other at all) -- and CLIP
+                # each hole to the boundary so any part outside it is
+                # simply ignored rather than invalidating detection.
+                rest_union = unary_union(rest)
+                rest_area = rest_union.area
+                overlap_area = biggest.intersection(rest_union).area
+                if rest_area == 0 or overlap_area / rest_area >= 0.95:
+                    boundary = biggest
+                    holes = [g.intersection(biggest) for g in rest]
+                    holes = [g for g in holes if not g.is_empty]
 
         if boundary is not None:
             fill = boundary
@@ -3059,13 +3126,18 @@ class Session:
             return None
 
         ends = [tuple(best.points[0]), tuple(best.points[1])]
+        # Exactly one ball per end: two bonds may share a pad, in which
+        # case two identical discs sit on that end and each bond owns one
+        # -- taking every disc found there would strip the neighbour's.
         balls = []
-        for s in cell.shapes:
-            if not (isinstance(s, Polygon) and s.layer == r_layer):
-                continue
-            x1, y1, x2, y2 = s.bbox()
-            c = ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
-            for e in ends:
+        for e in ends:
+            for s in cell.shapes:
+                if not (isinstance(s, Polygon) and s.layer == r_layer):
+                    continue
+                if any(s is b for b in balls):
+                    continue
+                x1, y1, x2, y2 = s.bbox()
+                c = ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
                 if math.hypot(c[0] - e[0], c[1] - e[1]) <= 2.0:
                     balls.append(s)
                     break
@@ -3226,29 +3298,28 @@ class Session:
             )
 
         from shapely.geometry import Point as _spoint
-        from shapely.geometry import box as _sbox
         from shapely.ops import unary_union
 
         obstacles = layer_to_shapely_flattened(self.library, cell, r_layer)
         inflate = width / 2.0 + clr
-        # Clear a landing zone around each endpoint so the routed
-        # centre-line can actually start/finish there: the pad the trace
-        # lands on is itself copper on this layer (and, for bare-point
-        # endpoints, we've no shape to exclude by identity), so without
-        # this the buffered obstacle set seals the endpoint off.
-        halo = inflate + 2.0 * grid
-        landing = [
-            _sbox(ax - halo, ay - halo, ax + halo, ay + halo),
-            _sbox(bx - halo, by - halo, bx + halo, by + halo),
-        ]
-        # Also drop the two selected pin shapes' own copper entirely.
-        for s in (sa, sb):
-            if s is not None:
-                g = shape_to_shapely(s)
-                if g is not None and not g.is_empty:
-                    landing.append(g)
+        # The copper an endpoint lands on must not seal that endpoint
+        # off: drop the whole connected piece of copper under (or within
+        # half a trace width of) each endpoint -- the pad plus whatever
+        # is already joined to it, i.e. the same net. Everything else
+        # stays an obstacle however close to a pin it sits. (This used
+        # to clear a square halo around each endpoint instead, which let
+        # a trace run straight through unrelated copper next to a pin.)
         if not obstacles.is_empty:
-            obstacles = obstacles.difference(unary_union(landing))
+            reach = max(width / 2.0, 1.0)
+            ends = (_spoint(ax, ay), _spoint(bx, by))
+            pieces = list(getattr(obstacles, "geoms", [obstacles]))
+            obstacles = unary_union([g for g in pieces
+                                     if not any(g.distance(e) <= reach for e in ends)])
+        # Also drop the two selected pin shapes' own copper entirely.
+        own = [shape_to_shapely(s) for s in (sa, sb) if s is not None]
+        own = [g for g in own if g is not None and not g.is_empty]
+        if own and not obstacles.is_empty:
+            obstacles = obstacles.difference(unary_union(own))
         if not obstacles.is_empty and inflate > 0:
             obstacles = obstacles.buffer(inflate, join_style="mitre", mitre_limit=5.0)
 

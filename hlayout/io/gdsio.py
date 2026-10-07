@@ -60,6 +60,28 @@ POLY_PIN_PROPATTR = 123
 # (the ref-designator annotation) -- see SRef.pin's own docstring.
 SREF_PIN_PROPATTR = 121
 
+# A cell's shapes are one ordered list here, but GDSII (via gdstk) hands
+# them back grouped by element type -- boundaries, then paths, then
+# labels. Anything addressed by position (list_pins()/PIN SET indices,
+# DELETE LAST) would shift after a save/open, so a cell whose order is
+# NOT already that grouped order records each shape's index as an
+# element property and load_gds() sorts by it. Cells already in grouped
+# order (the common case: all rectangles, say) are written unchanged.
+SHAPE_ORDER_PROPATTR = 120
+
+
+def _kind_rank(shape) -> int:
+    return 0 if isinstance(shape, (Polygon, Rectangle)) else 1 if isinstance(shape, Path) else 2
+
+
+def _shape_order(element):
+    value = element.get_gds_property(SHAPE_ORDER_PROPATTR)
+    try:
+        return int(str(value).rstrip("\x00"))
+    except (TypeError, ValueError):
+        return None
+
+
 _CAP_TO_GDSTK = {
     PathCap.ROUND: "round",
     PathCap.SQUARE: "extended",
@@ -77,33 +99,37 @@ def save_gds(library: Library, path: str) -> None:
 
     for name, cell in library.cells.items():
         gcell = gcells[name]
-        for shape in cell.shapes:
+        ranks = [_kind_rank(shape) for shape in cell.shapes]
+        keep_order = ranks != sorted(ranks)
+        for index, shape in enumerate(cell.shapes):
             if isinstance(shape, (Polygon, Rectangle)):
-                gpoly = gdstk.Polygon(shape.points, layer=shape.layer, datatype=shape.datatype)
+                gelem = gdstk.Polygon(shape.points, layer=shape.layer, datatype=shape.datatype)
                 if shape.pin:
                     propattr = RECT_PIN_PROPATTR if isinstance(shape, Rectangle) else POLY_PIN_PROPATTR
-                    gpoly.set_gds_property(propattr, shape.pin)
-                gcell.add(gpoly)
+                    gelem.set_gds_property(propattr, shape.pin)
             elif isinstance(shape, Path):
-                gcell.add(gdstk.FlexPath(
+                gelem = gdstk.FlexPath(
                     shape.points,
                     width=shape.width,
                     ends=_CAP_TO_GDSTK[shape.cap],
                     layer=shape.layer,
                     datatype=shape.datatype,
                     simple_path=True,
-                ))
+                )
             elif isinstance(shape, Text):
-                gcell.add(gdstk.Label(
+                gelem = gdstk.Label(
                     shape.text,
                     shape.origin,
                     rotation=math.radians(shape.rotation),
                     magnification=shape.height / TEXT_BASE_HEIGHT,
                     layer=shape.layer,
                     texttype=shape.font,
-                ))
+                )
             else:
                 raise LayoutError(f"unsupported shape type: {type(shape)!r}")
+            if keep_order:
+                gelem.set_gds_property(SHAPE_ORDER_PROPATTR, str(index))
+            gcell.add(gelem)
 
         for ref in cell.srefs:
             if ref.cell_name not in gcells:
@@ -167,8 +193,10 @@ def load_gds(path: str, library_name: Optional[str] = None) -> Library:
     # Pass 2: populate shapes and references.
     for gcell in gdslib.cells:
         cell = library.get_cell(gcell.name)
+        orders = []  # one SHAPE_ORDER_PROPATTR value (or None) per loaded shape
 
         for poly in gcell.polygons:
+            orders.append(_shape_order(poly))
             pts = [(int(round(x)), int(round(y))) for x, y in poly.points]
             if len(pts) == 4:
                 pin = (poly.get_gds_property(RECT_PIN_PROPATTR) or "").rstrip("\x00")
@@ -192,9 +220,11 @@ def load_gds(path: str, library_name: Optional[str] = None) -> Library:
             if len(spine) < 2:
                 _skipped_degenerate_paths.append((gcell.name, layer, tuple(spine)))
                 continue
+            orders.append(_shape_order(fp))
             cell.shapes.append(Path(layer=layer, points=spine, width=width, cap=cap, datatype=datatype))
 
         for label in gcell.labels:
+            orders.append(_shape_order(label))
             font = label.texttype if 0 <= label.texttype < 4 else 0
             height = max(1, int(round(label.magnification * TEXT_BASE_HEIGHT)))
             cell.shapes.append(Text(
@@ -206,6 +236,10 @@ def load_gds(path: str, library_name: Optional[str] = None) -> Library:
                 rotation=math.degrees(label.rotation),
                 datatype=label.texttype,
             ))
+
+        if orders and None not in orders and len(orders) == len(cell.shapes):
+            ranked = sorted(zip(orders, range(len(orders))))
+            cell.shapes[:] = [cell.shapes[i] for _, i in ranked]
 
         for ref in gcell.references:
             rep = ref.repetition

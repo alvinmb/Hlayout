@@ -540,6 +540,36 @@ def _parse_point(tok: str):
     return (float(parts[0]), float(parts[1]))
 
 
+def _is_number(tok: str) -> bool:
+    try:
+        float(tok)
+        return True
+    except ValueError:
+        return False
+
+
+def _join_points(args, start, count=None):
+    """Let a point be typed as two tokens (``0 0``) as well as one
+    (``0,0``): from index ``start``, the next ``count`` points (all the
+    rest if None) are each turned into a single ``x,y`` token, leaving
+    everything else untouched. A token that already has a comma, or
+    isn't a number, is passed through as is."""
+    out = list(args[:start])
+    i, n = start, 0
+    while i < len(args) and (count is None or n < count):
+        a = args[i]
+        if ("," not in a and _is_number(a) and i + 1 < len(args)
+                and "," not in args[i + 1] and _is_number(args[i + 1])):
+            out.append(f"{a},{args[i + 1]}")
+            i += 2
+        else:
+            out.append(a)
+            i += 1
+        n += 1
+    out.extend(args[i:])
+    return out
+
+
 def _tokenize(line: str):
     """Split a command line into tokens: whitespace-separated, quotes
     (single or double) group and are stripped.
@@ -621,6 +651,7 @@ class CommandInterpreter:
         return f"current cell: {name}"
 
     def _cmd_rect(self, args):
+        args = _join_points(args, 1, 2)
         if len(args) != 3:
             raise CommandError("usage: RECT <layer> <x1,y1> <x2,y2>  (layer: number or name)")
         layer = args[0]
@@ -630,6 +661,7 @@ class CommandInterpreter:
         return "rectangle added"
 
     def _cmd_poly(self, args):
+        args = _join_points(args, 1, None)
         if len(args) < 4:
             raise CommandError("usage: POLY <layer> <x1,y1> <x2,y2> <x3,y3> ...  (layer: number or name)")
         layer = args[0]
@@ -638,6 +670,7 @@ class CommandInterpreter:
         return f"polygon added ({len(points)} points)"
 
     def _cmd_path(self, args):
+        args = _join_points(args, 3, None)
         if len(args) < 5:
             raise CommandError("usage: PATH <layer> <width> <cap> <x1,y1> <x2,y2> ...  (layer: number or name)")
         layer = args[0]
@@ -648,6 +681,7 @@ class CommandInterpreter:
         return f"path added ({len(points)} points)"
 
     def _cmd_circle(self, args):
+        args = _join_points(args, 1, 1)
         if len(args) < 3:
             raise CommandError(
                 "usage: CIRCLE <layer> <cx,cy> <radius> [segments]  "
@@ -661,6 +695,7 @@ class CommandInterpreter:
         return f"circle added ({segments} segments)"
 
     def _cmd_text(self, args):
+        args = _join_points(args, 1, 1)
         if len(args) < 3:
             raise CommandError('usage: TEXT <layer> <x,y> "<string>" [height] [font]  (layer: number or name)')
         layer = args[0]
@@ -672,6 +707,7 @@ class CommandInterpreter:
         return "text added"
 
     def _cmd_sref(self, args):
+        args = _join_points(args, 1, 1)
         if len(args) < 2:
             raise CommandError("usage: SREF <cellname> <x,y> [rotation] [mag] [mirror]")
         cell_name = args[0]
@@ -683,6 +719,7 @@ class CommandInterpreter:
         return f"sref to {cell_name} added"
 
     def _cmd_aref(self, args):
+        args = _join_points(args, 1, 1)
         usage = ("usage: AREF <cellname> <x,y> <columns> <rows> <col_spacing> <row_spacing> "
                  "[rotation] [mag] [mirror]")
         if len(args) < 6:
@@ -707,17 +744,8 @@ class CommandInterpreter:
     def _cmd_delete(self, args):
         if not args or args[0].upper() != "LAST":
             raise CommandError("usage: DELETE LAST")
-        cell = self.session.cell
-        if cell.shapes:
-            cell.shapes.pop()
-            return "removed last shape"
-        if cell.srefs:
-            cell.srefs.pop()
-            return "removed last sref"
-        if cell.arefs:
-            cell.arefs.pop()
-            return "removed last aref"
-        return "nothing to delete"
+        kind = self.session.delete_last()
+        return f"removed last {kind}" if kind else "nothing to delete"
 
     # --- layers -----------------------------------------------------------
     def _cmd_layer(self, args):
@@ -777,6 +805,8 @@ class CommandInterpreter:
 
     # --- view ---------------------------------------------------------
     def _cmd_zoom(self, args):
+        if args and args[0].upper() == "WINDOW":
+            args = _join_points(args, 1, 2)
         if self.view is None:
             raise CommandError("ZOOM requires an attached view")
         if not args:
@@ -839,6 +869,7 @@ class CommandInterpreter:
 
     # --- selection edits ------------------------------------------------
     def _cmd_move(self, args):
+        args = _join_points(args, 0, 1)
         if self.view is None:
             raise CommandError("MOVE requires an attached view")
         if len(args) != 1:
@@ -862,6 +893,7 @@ class CommandInterpreter:
         return f"rotated by {angle:g} degrees"
 
     def _cmd_copy(self, args):
+        args = _join_points(args, 0, 1)
         if self.view is None:
             raise CommandError("COPY requires an attached view")
         if len(args) != 1:
@@ -898,6 +930,7 @@ class CommandInterpreter:
         return "merged selected shapes into one polygon"
 
     def _cmd_makecell(self, args):
+        args = _join_points(args, 1, 1)
         if self.view is None:
             raise CommandError("MAKECELL requires an attached view")
         usage = "usage: MAKECELL <new cell name> <origin x,y> [replace=1 | revision=1]"
@@ -1149,6 +1182,7 @@ class CommandInterpreter:
         return "\n".join(f"{m['name']} (source: {m['source']})" for m in matches)
 
     def _cmd_place(self, args):
+        args = _join_points(args, 1, 1)
         if len(args) < 2:
             raise CommandError(
                 "usage: PLACE <cellname> <x,y> [source=current|0|1] [rotation] [mag] [mirror]"
@@ -1176,6 +1210,7 @@ class CommandInterpreter:
         return f"placed {cell_name}"
 
     def _cmd_resgen(self, args):
+        args = _join_points(args, 0, 1)
         usage = ("usage: RESGEN <x,y> <body_width> <body_length> [rotation=<deg>] "
                  "[ink=<rsh>] [ref=<designator>] [a=<dbu>] [b=<dbu>] [c=<dbu>] "
                  "[d=<dbu>] [e=<dbu>] [rlayer=<n|name>] [clayer=<n|name>] "
@@ -1758,6 +1793,11 @@ class CommandInterpreter:
         return f"dielectric fill: {written} polygon(s) written"
 
     def _cmd_bond(self, args):
+        sub = args[0].upper() if args else ""
+        if sub in ("MOVE", "DELETE"):
+            args = _join_points(args, 1, 2 if sub == "MOVE" else 1)
+        else:
+            args = _join_points(args, 0, 2)
         usage = (
             "usage: BOND <x1,y1> <x2,y2> [layer=<n|name>] [width=<dbu>] "
             "[pad=<dbu>] [min=<dbu>] [max=<dbu>] [cell=<name>]\n"
@@ -1833,6 +1873,7 @@ class CommandInterpreter:
         return f"wire bond {p1} -> {p2}  (span {span:.0f} DBU)"
 
     def _cmd_autoroute(self, args):
+        args = _join_points(args, 0, 2)
         usage = (
             "usage: AUTOROUTE <x1,y1> <x2,y2> [layer=<n|name>] [grid=<dbu>] "
             "[width=<dbu>] [clearance=<dbu>] [margin=<dbu>] [boundary=<n|name>] "

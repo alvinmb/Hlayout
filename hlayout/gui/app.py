@@ -458,6 +458,12 @@ class App(tk.Tk):
         toolsm.add_command(label="Run Script File...", command=self.run_script_file)
         toolsm.add_separator()
         toolsm.add_command(label="Command Bar", command=lambda: self.cmd_entry.focus_set())
+        # Start/stop the MCP bridge (what lets Claude's MCP server drive
+        # this window). A checkbutton so the menu also shows whether
+        # it's on -- including when it was started by --mcp.
+        self.mcp_var = tk.BooleanVar(value=getattr(self, "_mcp_bridge", None) is not None)
+        toolsm.add_checkbutton(label="MCP Server (Claude)", variable=self.mcp_var,
+                               command=self.toggle_mcp_bridge)
         toolsm.add_separator()
         toolsm.add_command(
             label="Thick-Film Resistor Designer...",
@@ -4556,8 +4562,51 @@ class App(tk.Tk):
         self.props_text.insert("1.0", text)
         self.props_text.config(state="disabled")
 
+    def start_mcp_bridge(self):
+        """Start the loopback socket that lets the HLayout MCP server
+        (python -m hlayout.mcpserver, i.e. Claude) drive THIS window --
+        see hlayout/mcpserver/bridge.py. Off unless called: hlayout_app.py
+        calls it for --mcp / HLAYOUT_MCP=1, and Tools > MCP Server (Claude)
+        toggles it (toggle_mcp_bridge). Safe to call twice."""
+        if getattr(self, "_mcp_bridge", None) is None:
+            from ..mcpserver.bridge import McpBridge
+            self._mcp_bridge = McpBridge(self).start()
+            self.status.set(f"MCP bridge on (127.0.0.1:{self._mcp_bridge.port})")
+        self._sync_mcp_menu()
+        return self._mcp_bridge
+
+    def stop_mcp_bridge(self):
+        """Stop the MCP bridge (no-op if it's off). A stopped McpBridge
+        can't be restarted, so it's dropped here and start_mcp_bridge()
+        builds a fresh one -- new port, new token -- next time."""
+        bridge = getattr(self, "_mcp_bridge", None)
+        if bridge is not None:
+            bridge.stop()
+            self._mcp_bridge = None
+            self.status.set("MCP bridge off")
+        self._sync_mcp_menu()
+
+    def toggle_mcp_bridge(self):
+        """Tools > MCP Server (Claude): the checkbutton has already
+        flipped self.mcp_var, so start or stop to match it."""
+        if self.mcp_var.get():
+            try:
+                self.start_mcp_bridge()
+            except Exception as e:
+                self._sync_mcp_menu()
+                dialogs.show_error("MCP Server", f"Could not start the MCP bridge:\n{e}", parent=self)
+        else:
+            self.stop_mcp_bridge()
+
+    def _sync_mcp_menu(self):
+        var = getattr(self, "mcp_var", None)
+        if var is not None:
+            var.set(getattr(self, "_mcp_bridge", None) is not None)
+
     def _on_quit(self):
         self._cancel_autosave()
+        if getattr(self, "_mcp_bridge", None) is not None:
+            self._mcp_bridge.stop()
         self.destroy()
 
 

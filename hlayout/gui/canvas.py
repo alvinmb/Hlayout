@@ -13,7 +13,7 @@ from ..core.maskops import layer_to_shapely, shapely_to_polygons
 from ..core.shapes import (ARef, CIRCLE_SEGMENT_CHOICES, MAX_PATH_POINTS, MAX_POLY_POINTS, Path,
                            PathCap, Polygon, Rectangle, SRef, Text)
 from ..core.units import DBU_MM, dbu_to_mm, mm_to_dbu
-from ..io.techfile import load_bond_rules, load_refdes_annotation_layer
+from ..io.techfile import load_bond_rules, load_dielectric_rules, load_refdes_annotation_layer
 
 # Bitmaps used to approximate the 9 stipple/fill patterns on a Tk canvas.
 # Index 0 ("solid") is drawn as a plain filled polygon (no stipple).
@@ -2450,6 +2450,13 @@ class LayoutCanvas(tk.Canvas):
         # ref-des annotation layer's visibility (see
         # _refdes_annotation_layer_visible). Computed once per redraw.
         self._refdes_anno_visible = self._refdes_annotation_layer_visible()
+        # Cached once per redraw (not per shape) -- see _draw_shape's use
+        # of it below. -1 (no layer configured) never matches a real
+        # shape.layer, so the special-casing below is simply skipped.
+        try:
+            self._dielectric_layer_num = int(load_dielectric_rules(self.library)["layer"])
+        except Exception:
+            self._dielectric_layer_num = -1
         if self.show_grid:
             self._draw_grid()
         if self.cell_name and self.cell_name in self.library.cells:
@@ -3012,9 +3019,11 @@ class LayoutCanvas(tk.Canvas):
             for p in shape.points:
                 px, py = self.to_px(*t(p))
                 coords += [px, py]
+            is_dielectric_input = (getattr(shape, "layer", None) == self._dielectric_layer_num
+                                   and getattr(shape, "datatype", 0) == 0)
             if selected:
                 item = self.create_polygon(coords, fill="", outline=color, width=2)
-            elif layer.fill:
+            elif layer.fill and not is_dielectric_input:
                 item = self.create_polygon(coords, fill=color, outline=color,
                                             stipple=stipple if stipple else "", width=1)
             else:

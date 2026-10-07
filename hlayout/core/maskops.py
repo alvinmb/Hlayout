@@ -221,15 +221,30 @@ def layer_to_shapely_flattened(library, cell, layer, point_transform=None, datat
     return unary_union(geoms)
 
 
-def size_geometry(geom, amount: float):
+def size_geometry(geom, amount: float, join_style: str = "mitre"):
     """Grow (amount > 0) or shrink (amount < 0) geometry by `amount`
-    DBU. Mitred joins keep rectilinear corners sharp -- the behaviour
-    expected of an OVERSIZE/UNDERSIZE ("resize") operation on
-    Manhattan mask geometry, matching e.g. Cadence's GDSII resize."""
+    DBU. Mitred joins (the default) keep rectilinear corners sharp --
+    the behaviour expected of an OVERSIZE/UNDERSIZE ("resize")
+    operation on Manhattan mask geometry, matching e.g. Cadence's
+    GDSII resize.
+
+    Pass join_style="round" (or "bevel") instead when the input isn't
+    pure Manhattan geometry -- e.g. a pad shape unioned with a many-
+    facet polygon approximating a circle (a castellation scallop).
+    Mitre offsetting extends each vertex along its own corner bisector,
+    so at a facet-to-straight-edge seam that's only *nearly* tangent
+    (never perfectly, since a faceted circle has no true tangent
+    point) it produces a small but very real spurious spike/notch --
+    correct per the mitre-join definition, but not what "grow this pad
+    by 0.1mm" means for a rounded feature. "round" reproduces the
+    smooth offset curve a real curved edge should have instead."""
     _require_shapely()
     if geom.is_empty or amount == 0:
         return geom
-    return geom.buffer(amount, join_style="mitre", mitre_limit=5.0)
+    kwargs = {"join_style": join_style}
+    if join_style == "mitre":
+        kwargs["mitre_limit"] = 5.0
+    return geom.buffer(amount, **kwargs)
 
 
 def boolean_op(geom_a, geom_b, op: str):

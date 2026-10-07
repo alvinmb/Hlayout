@@ -124,7 +124,24 @@ class Path:
         xs = [p[0] for p in self.points]
         ys = [p[1] for p in self.points]
         half = self.width / 2
-        return (min(xs) - half, min(ys) - half, max(xs) + half, max(ys) + half)
+        if self.cap != PathCap.FLUSH or not half:
+            return (min(xs) - half, min(ys) - half, max(xs) + half, max(ys) + half)
+        # A flush cap stops dead at the end point: the stroke only
+        # reaches half a width sideways there, not past the end. Interior
+        # vertices keep the conservative +/- half box (covers the join).
+        pts = self.points
+        cx, cy = [], []
+        for i, (x, y) in enumerate(pts):
+            ox, oy = pts[1] if i == 0 else pts[-2]
+            length = math.hypot(x - ox, y - oy)
+            if 0 < i < len(pts) - 1 or not length:
+                cx += [x - half, x + half]
+                cy += [y - half, y + half]
+                continue
+            nx, ny = (y - oy) / length * half, (x - ox) / length * half
+            cx += [x - nx, x + nx]
+            cy += [y - ny, y + ny]
+        return (min(cx), min(cy), max(cx), max(cy))
 
 
 @dataclass

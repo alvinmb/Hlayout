@@ -59,15 +59,21 @@ def test_each_lcc_package_has_exactly_its_pin_count_of_pads_numbered_1_to_n():
 
 
 def test_each_lcc_package_has_a_square_body_outline_at_the_bottom_left_origin():
+    # The body outline has the castellation notch cut into it at every
+    # terminal (2026-09 request: a real LCCC's castellation is a
+    # physical scallop in the ceramic body, not just a copper add-on),
+    # so a package with enough pins needs more than one Path element
+    # to stay under MAX_PATH_POINTS -- one or more pieces sharing
+    # endpoints so together they still trace one continuous outline.
     lib = load_gds(OUT_GDS)
     for name in EXPECTED_PACKAGES:
         cell = lib.cells[name]
         outlines = [sh for sh in cell.shapes if isinstance(sh, Path) and sh.layer == 61]
-        assert len(outlines) == 1, name
-        ox0 = min(p[0] for p in outlines[0].points)
-        oy0 = min(p[1] for p in outlines[0].points)
-        ox1 = max(p[0] for p in outlines[0].points)
-        oy1 = max(p[1] for p in outlines[0].points)
+        assert len(outlines) >= 1, name
+        ox0 = min(p[0] for sh in outlines for p in sh.points)
+        oy0 = min(p[1] for sh in outlines for p in sh.points)
+        ox1 = max(p[0] for sh in outlines for p in sh.points)
+        oy1 = max(p[1] for sh in outlines for p in sh.points)
         # square, and its own bottom-left corner at the component origin
         # (matching hlayout.core.smdlib's / component_library's convention)
         assert abs((ox1 - ox0) - (oy1 - oy0)) < 5, name
@@ -121,13 +127,18 @@ def test_body_outline_is_chamfered_with_a_smaller_cut_at_the_pin_1_corner():
 
 
 def test_top_surface_outline_is_inset_from_the_body_outline():
+    # The body outline on layer 61 may be split across several Path
+    # pieces (see the test above) -- gather all of them for the true
+    # combined bounding box rather than next()-ing just the first one.
     lib = load_gds(OUT_GDS)
     for name in EXPECTED_PACKAGES:
         cell = lib.cells[name]
-        outline = next(sh for sh in cell.shapes if isinstance(sh, Path) and sh.layer == 61)
+        outlines = [sh for sh in cell.shapes if isinstance(sh, Path) and sh.layer == 61]
         top = next(sh for sh in cell.shapes if isinstance(sh, Path) and sh.layer == 63)
-        bx0, by0 = min(p[0] for p in outline.points), min(p[1] for p in outline.points)
-        bx1, by1 = max(p[0] for p in outline.points), max(p[1] for p in outline.points)
+        bx0 = min(p[0] for sh in outlines for p in sh.points)
+        by0 = min(p[1] for sh in outlines for p in sh.points)
+        bx1 = max(p[0] for sh in outlines for p in sh.points)
+        by1 = max(p[1] for sh in outlines for p in sh.points)
         tx0, ty0 = min(p[0] for p in top.points), min(p[1] for p in top.points)
         tx1, ty1 = max(p[0] for p in top.points), max(p[1] for p in top.points)
         assert bx0 < tx0 < tx1 < bx1, name

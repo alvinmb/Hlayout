@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "hlayout": {
+      "command": "python",
+      "args": ["-m", "hlayout.mcpserver"]
+    }
+  }
+}

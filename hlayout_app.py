@@ -7,7 +7,14 @@ Usage:
                                          # (its .hlaux sidecar, if any,
                                          # is restored too -- see
                                          # hlayout/io/sidecar.py)
+    python hlayout_app.py --mcp [mydesign.gds]
+                                         # also let Claude drive this
+                                         # window through the MCP server
+                                         # (python -m hlayout.mcpserver;
+                                         # see hlayout/mcpserver/). Same
+                                         # as setting HLAYOUT_MCP=1.
 """
+import os
 import sys
 
 from hlayout.core.errors import LayoutError
@@ -70,9 +77,11 @@ def main():
     library = None
     attached_libraries = None
     attached_paths = None
-    if len(sys.argv) > 1:
+    args = [a for a in sys.argv[1:] if a != "--mcp"]
+    want_mcp = len(args) != len(sys.argv) - 1 or os.environ.get("HLAYOUT_MCP") == "1"
+    if args:
         try:
-            loaded = load_design(sys.argv[1])
+            loaded = load_design(args[0])
         except LayoutError as e:
             # A clean, one-line message instead of a raw traceback (and
             # gdstk's own "[GDSTK] Unable to open GDSII file..." stderr
@@ -85,8 +94,13 @@ def main():
         for msg in loaded.attach_errors:
             print(f"warning: attached library failed to restore: {msg}", file=sys.stderr)
     app = App(library, attached_libraries=attached_libraries, attached_paths=attached_paths)
-    if len(sys.argv) > 1:
-        app.current_path = sys.argv[1]
+    if args:
+        app.current_path = args[0]
+    if want_mcp:
+        try:
+            app.start_mcp_bridge()
+        except Exception as e:  # the app is still fully usable without it
+            print(f"warning: MCP bridge failed to start: {e}", file=sys.stderr)
     app.mainloop()
 
 

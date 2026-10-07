@@ -159,7 +159,15 @@ def step_parts(pin_counts, sizes, pin_pitch, pad_l, pad_w, lid_inset):
     lead sticking out from a smaller body would need -- that keeps the
     3D bounding box matching the 2D outline instead of overshooting it."""
     lead_out = 0.05
-    lead_foot = 0.02
+    # 0.02 mm was invisible at this scale, making the lead read as a
+    # plain right-angle bracket instead of a proper gull-wing
+    # stub/knee/foot profile (see reference photos: 2026-09 bug
+    # report). 0.5 mm gives a clearly visible flat foot, proportional
+    # to this package family's larger lead/pitch scale; it does push
+    # the 3D lead's outer tip a bit past the 2D outline's own edge --
+    # acceptable for this nominal 3D preview model (see step_parts()'s
+    # own docstring on why lead_out/lead_foot were kept tiny here).
+    lead_foot = 0.5
     parts = []
     for pins in pin_counts:
         name = f"KYOCERA-CFP-{pins}"

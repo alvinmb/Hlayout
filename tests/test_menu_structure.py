@@ -1857,3 +1857,24 @@ def test_drc_window_reports_no_violations_when_rules_are_satisfied():
         assert win.status_var.get() == "DRC: no violations found"
     finally:
         app.destroy()
+
+
+def test_tools_menu_mcp_server_item_starts_and_stops_the_bridge(tmp_path, monkeypatch):
+    from hlayout.mcpserver import bridge
+    monkeypatch.setattr(bridge, "BRIDGE_INFO_PATH", str(tmp_path / "mcp_bridge.json"))
+    app = _make_app()
+    try:
+        assert "MCP Server (Claude)" in _submenu_labels(app, "Tools")
+        assert not app.mcp_var.get()
+        app.mcp_var.set(True)       # what clicking the checkbutton does
+        app.toggle_mcp_bridge()
+        first = bridge.read_bridge_info()
+        assert first and first["port"] == app._mcp_bridge.port
+        app.mcp_var.set(False)
+        app.toggle_mcp_bridge()
+        assert app._mcp_bridge is None and bridge.read_bridge_info() is None
+        app.start_mcp_bridge()      # the --mcp route ticks the menu item too
+        assert app.mcp_var.get()
+        assert bridge.read_bridge_info()["token"] != first["token"]
+    finally:
+        app._on_quit()

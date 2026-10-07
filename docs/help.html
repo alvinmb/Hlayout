@@ -159,6 +159,12 @@
   }
   .quickstart h3{font-size:13px; letter-spacing:.04em; color:var(--ink-muted); margin-bottom:9px; font-family:"IBM Plex Sans",sans-serif; text-transform:uppercase; font-weight:600;}
   .quickstart pre{margin:0; font-size:13px;}
+  .quickstart p{font-size:14px; color:var(--ink-muted); margin:0 0 10px; max-width:80ch;}
+  .quickstart pre + p, .quickstart pre + table{margin-top:12px;}
+  .mcptools{border-collapse:collapse; font-size:13.5px; color:var(--ink-muted);}
+  .mcptools td{padding:4px 14px 4px 0; vertical-align:top; border-top:1px solid var(--line);}
+  .sidelink{display:block; font-size:12.5px; padding:0 4px 12px; color:var(--accent); text-decoration:none;}
+  .sidelink:hover{text-decoration:underline;}
 
   section.group-section{margin-bottom:8px;}
   .group-banner{
@@ -219,6 +225,7 @@
       <input id="search" type="text" placeholder="Search commands, methods, arguments&hellip;" autocomplete="off" spellcheck="false">
     </div>
     <div id="resultcount"></div>
+    <a class="sidelink" href="#mcp">Connecting Claude (MCP server)</a>
     <nav id="nav"></nav>
   </aside>
 
@@ -244,6 +251,29 @@ s = Session.new("MYLIB")
 s.new_cell("TOP")
 s.rect(layer=0, x1=0, y1=0, x2=100, y2=50)
 s.save("out.gds")</pre>
+      </div>
+      <div class="quickstart" id="mcp">
+        <h3>Connecting Claude (MCP server)</h3>
+        <p>HLayout ships an <a href="https://modelcontextprotocol.io">MCP</a> server, so an MCP client such as Claude can drive the layout as a set of tools. The client starts the server itself; it is standard-library Python and talks over stdio:</p>
+        <pre class="code">python -m hlayout.mcpserver [--headless] [--design path.gds]</pre>
+        <p><b>Live</b> &mdash; tick <b>Tools &rarr; MCP Server (Claude)</b> in a running HLayout window (or launch with <code>python hlayout_app.py --mcp</code>, or set <code>HLAYOUT_MCP=1</code>). Tool calls then run inside that window: edits show on the canvas and go into the normal undo history. Untick the menu item to stop it; the status bar shows <code>MCP bridge on (127.0.0.1:port)</code> or <code>MCP bridge off</code>.</p>
+        <p><b>Headless</b> &mdash; with no window listening (or with <code>--headless</code>) the server works on its own in-memory session, and nothing appears on screen. Every reply says which of the two was used whenever that changes.</p>
+        <p>The bridge is off until you ask for it, because it lets a local process run Python inside the app. It listens on 127.0.0.1 only, on a random port, and every request must carry a per-run token; both are written to <code>~/.hlayout/mcp_bridge.json</code> and removed when the bridge stops. Each start uses a new port and token, and the server re-reads them on every call, so Claude does not need restarting.</p>
+        <p>Claude Code picks the server up from <code>.mcp.json</code> in the HLayout folder. For the Claude desktop app, add this to <code>claude_desktop_config.json</code> (with your own path):</p>
+        <pre class="code">{"mcpServers": {"hlayout": {
+  "command": "python",
+  "args": ["-m", "hlayout.mcpserver"],
+  "env": {"PYTHONPATH": "C:\\dev\\HLayout"}
+}}}</pre>
+        <table class="mcptools">
+          <tr><td><code>hlayout_status</code></td><td>Live/headless mode, open file, library, current cell, cell list, named layers, undo state.</td></tr>
+          <tr><td><code>hlayout_open</code></td><td>Open a GDSII file.</td></tr>
+          <tr><td><code>hlayout_save</code></td><td>Save the design.</td></tr>
+          <tr><td><code>hlayout_command</code></td><td>Run command-bar lines (everything in the Command Bar section below).</td></tr>
+          <tr><td><code>hlayout_python</code></td><td>Run Python against the design; the <code>Session</code> is <code>s</code> (alias <code>hl</code>), as in the Script Console.</td></tr>
+          <tr><td><code>hlayout_api</code></td><td>List the <code>Session</code> methods, or full docs for one.</td></tr>
+          <tr><td><code>hlayout_describe_cell</code></td><td>Bounding box, shape counts per layer, instances and pins of a cell.</td></tr>
+        </table>
       </div>
     </div>
 

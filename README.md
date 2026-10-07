@@ -138,7 +138,9 @@ home under one of them:
   read-only Properties tab — see Properties panel, below).
 - **Tools** — Script Console (jumps to that tab), Run Script File...
   (browse for and execute a `.py` file against the current session),
-  Command Bar (focuses the command line), Thick-Film Resistor
+  Command Bar (focuses the command line), MCP Server (Claude) (a
+  checkbox that starts/stops the MCP bridge — see Connecting Claude,
+  below), Thick-Film Resistor
   Designer... (opens the resistor sizing tool — see Thick-Film
   Resistor Designer, below), Via Wizard... (creates a via cell and
   saves it into an attached library — see Via Wizard, below), Mask
@@ -960,8 +962,19 @@ shapely`, also listed in `requirements.txt`); the dialog and the
 than failing silently.
 
 - **OVERSIZE** grows every shape on Layer A outward by **Amount**
-  (DBU), on all sides, with mitred (sharp) corners — the sizing stays
-  rectilinear-friendly rather than rounding off 90-degree corners.
+  (DBU), on all sides, with mitred (sharp) corners by default — the
+  sizing stays rectilinear-friendly rather than rounding off 90-degree
+  corners. Pass `join_style="round"` (or `"bevel"`) from
+  `Session.mask_op()`/`size_geometry()` when Layer A isn't pure
+  Manhattan geometry — e.g. a pad unioned with a many-facet polygon
+  approximating a circle (a castellation scallop): mitre-offsetting
+  that combination produces a small spurious spike/notch right at the
+  facet-to-straight-edge seam (correct per the mitre-join definition,
+  but not what "grow this pad by 0.1mm" should look like for a rounded
+  feature); `"round"` reproduces the smooth offset curve a real curved
+  edge should have. Not exposed in the Mask Operations dialog or the
+  `MASKOP` command bar yet — script-only for now via `mask_op(...,
+  join_style="round")`.
 - **UNDERSIZE** is the same, shrinking inward by Amount instead.
 - **AND** writes the intersection of Layer A and Layer B.
 - **OR** writes the union of Layer A and Layer B.
@@ -1044,10 +1057,14 @@ MASKOP XOR <layer_a> <layer_b> result=<layer> [cell=<name>] [flatten=0|1] [simpl
 
 (`flatten` defaults to 1/on, matching the dialog's checkbox) or, from a
 script, `session.mask_op(op, layer_a, result_layer, layer_b=None,
-amount=0.0, cell_names=None, flatten=True, simplify=None)` (see
-`hlayout/scripting/api.py`, backed by `hlayout/core/maskops.py`),
-which returns `{cell_name: polygons_written}` for cells that actually
-produced output.
+amount=0.0, cell_names=None, flatten=True, simplify=None,
+join_style="mitre")` (see `hlayout/scripting/api.py`, backed by
+`hlayout/core/maskops.py`), which returns `{cell_name:
+polygons_written}` for cells that actually produced output.
+`join_style` ("mitre" (default) / "round" / "bevel") is passed
+straight through to OVERSIZE/UNDERSIZE's underlying buffer and ignored
+by AND/OR/NOT/XOR — see the OVERSIZE bullet above for when you'd want
+anything other than the default.
 
 ### Design Rule Check (DRC)
 
@@ -1639,6 +1656,41 @@ So e.g. a 2mm rectangle is `RECT 0 0,0 2000,2000`. Anywhere a
 `<layer>` is expected above, you can pass either its number (0-63) or
 its name (e.g. `RECT Thick-Film-Conductor 0,0 100,50`) once you've
 named it via `LAYER <n> name=...` or the Layers tab.
+
+## Connecting Claude (MCP server)
+
+`python -m hlayout.mcpserver` is a stdio [MCP](https://modelcontextprotocol.io)
+server (standard library only) that exposes HLayout to Claude as tools:
+`hlayout_status`, `hlayout_open`, `hlayout_save`, `hlayout_command`
+(command-bar lines), `hlayout_python` (the scripting `Session` as `s`),
+`hlayout_api` (API reference) and `hlayout_describe_cell`.
+
+- **Live:** tick **Tools > MCP Server (Claude)** in a running window,
+  or start the GUI with `python hlayout_app.py --mcp` (or set
+  `HLAYOUT_MCP=1`). Untick the menu item to stop it again; each start
+  uses a new port and token, and the server re-reads them on every
+  call, so the client doesn't need restarting. Tool calls then run inside that window -- edits
+  show on the canvas and are undoable as usual. The bridge listens on
+  127.0.0.1 only, on a random port with a per-run token
+  (`~/.hlayout/mcp_bridge.json`), and is off unless asked for.
+- **Headless:** with no such window running (or with `--headless`),
+  the server works on its own in-memory session; `--design x.gds`
+  opens a file at start. Every reply says which of the two it used
+  whenever that changes.
+
+Claude Code picks the server up from `.mcp.json` in this folder. For
+the Claude desktop app, add to `claude_desktop_config.json`:
+
+```json
+{"mcpServers": {"hlayout": {
+  "command": "python",
+  "args": ["-m", "hlayout.mcpserver"],
+  "env": {"PYTHONPATH": "C:\\dev\\HLayout"}
+}}}
+```
+
+Code is in `hlayout/mcpserver/` (`ops.py` operations, `bridge.py`
+GUI side, `server.py` protocol); tests in `tests/test_mcp_server.py`.
 
 ## Scripting
 
