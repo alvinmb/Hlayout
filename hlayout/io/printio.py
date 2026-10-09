@@ -123,6 +123,36 @@ def _print_safe_color(hex_color: str) -> str:
     return "#000000" if luminance > PRINT_SAFE_LUMINANCE_CUTOFF else hex_color
 
 
+#: Brightest perceived luminance (0-255, same BT.601 measure as above) a
+#: LINE is allowed to print at. A filled area in a pale colour is still
+#: plainly visible on paper, but a thin stroke in that same colour is
+#: not: a wire bond is a 25-50 micron Path on a layer coloured pale
+#: lilac or yellow for contrast on the dark canvas, which printed as a
+#: hairline too faint to see -- present in the SVG, absent to the eye.
+PRINT_STROKE_MAX_LUMINANCE = 140.0
+
+
+def _print_stroke_color(hex_color: str) -> str:
+    """The colour to draw a LINE in (a Path, an unfilled outline, text):
+    ``_print_safe_color(hex_color)``, darkened -- same hue, every
+    channel scaled down by one factor -- until its luminance is no more
+    than PRINT_STROKE_MAX_LUMINANCE. A colour that's already dark enough
+    comes back unchanged; filled areas keep using _print_safe_color()."""
+    color = _print_safe_color(hex_color)
+    h = (color or "").lstrip("#")
+    if len(h) != 6:
+        return color
+    try:
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    except ValueError:
+        return color
+    luminance = 0.299 * r + 0.587 * g + 0.114 * b
+    if luminance <= PRINT_STROKE_MAX_LUMINANCE:
+        return color
+    k = PRINT_STROKE_MAX_LUMINANCE / luminance
+    return "#%02x%02x%02x" % (int(r * k), int(g * k), int(b * k))
+
+
 def _auto_scale(width_mm: float, height_mm: float) -> float:
     largest = max(width_mm, height_mm, 1e-9)
     if largest >= PRINT_TARGET_MM:
@@ -343,20 +373,25 @@ def render_cell_svg(library: Library, cell_name: str, margin_dbu: float = 2000.0
     for n in layer_order:
         layer = library.layers[n]
         color = _print_safe_color(layer.color)
+        # Lines get a darkened version of a pale layer colour so a thin
+        # Path (a wire bond, say) or an unfilled outline still shows on
+        # white paper; filled areas keep the layer's own colour.
+        line_color = _print_stroke_color(layer.color)
         parts.append(f'<g id="layer-{n}">')
         for pts in polys.get(n, []):
             pts_attr = " ".join(f"{sx(x):.2f},{sy(y):.2f}" for x, y in pts)
             fill = color if layer.fill else "none"
+            outline = color if layer.fill else line_color
             parts.append(f'<polygon points="{pts_attr}" fill="{fill}" '
-                          f'stroke="{color}" stroke-width="{hairline:.4f}"/>')
+                          f'stroke="{outline}" stroke-width="{hairline:.4f}"/>')
         for pts, width_dbu_path in paths.get(n, []):
             pts_attr = " ".join(f"{sx(x):.2f},{sy(y):.2f}" for x, y in pts)
             w = max(hairline, width_dbu_path)
-            parts.append(f'<polyline points="{pts_attr}" fill="none" stroke="{color}" '
+            parts.append(f'<polyline points="{pts_attr}" fill="none" stroke="{line_color}" '
                           f'stroke-width="{w:.4f}" stroke-linecap="round" stroke-linejoin="round"/>')
         for (x, y), text in texts.get(n, []):
             parts.append(f'<text x="{sx(x):.2f}" y="{sy(y):.2f}" font-size="{height_dbu * 0.02:.1f}" '
-                          f'fill="{color}">{html.escape(text)}</text>')
+                          f'fill="{line_color}">{html.escape(text)}</text>')
         parts.append('</g>')
     parts.append('</svg>')
     return "\n".join(parts), layer_order, scale_used

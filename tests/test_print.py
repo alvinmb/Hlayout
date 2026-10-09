@@ -11,6 +11,7 @@ from hlayout.io.printio import (
     PRINT_TARGET_MM,
     _auto_scale,
     _print_safe_color,
+    _print_stroke_color,
     hidden_layers_with_data,
     render_cell_svg,
     send_to_system_printer,
@@ -628,3 +629,40 @@ def test_print_current_view_notes_a_hidden_layer_with_data(monkeypatch):
         assert "hidden" in app.status.get()
     finally:
         app.destroy()
+
+
+# --- _print_stroke_color() -- a thin line in a pale layer colour (a wire ---
+# --- bond on a lilac or yellow layer) must still show on white paper -----
+
+def test_print_stroke_color_darkens_a_pale_color_keeping_its_hue():
+    out = _print_stroke_color("#e6beff")
+    r, g, b = (int(out[i:i + 2], 16) for i in (1, 3, 5))
+    assert 0.299 * r + 0.587 * g + 0.114 * b <= 140.0
+    assert b > r > g  # still lilac, just darker
+
+
+def test_print_stroke_color_leaves_a_dark_color_untouched():
+    assert _print_stroke_color("#008080") == "#008080"
+    assert _print_stroke_color("#000000") == "#000000"
+
+
+def test_print_stroke_color_turns_white_black():
+    assert _print_stroke_color("#ffffff") == "#000000"
+
+
+def test_render_cell_svg_draws_a_pale_wire_bond_path_darkened():
+    s = _design()
+    s.library.layers.set_style(9, color="#e6beff")
+    s.path(9, [(0, 0), (1000, 0)], width=30, cap="round")
+    svg, layer_order, _scale = render_cell_svg(s.library, "TOP", scale=1.0)
+    assert 9 in layer_order
+    assert 'stroke="#e6beff"' not in svg
+    assert f'stroke="{_print_stroke_color("#e6beff")}"' in svg
+
+
+def test_render_cell_svg_keeps_a_pale_fill_in_its_own_color():
+    s = _design()
+    s.library.layers.set_style(9, color="#e6beff", fill=True)
+    s.rect(9, 0, 0, 500, 500)
+    svg, _layer_order, _scale = render_cell_svg(s.library, "TOP", scale=1.0)
+    assert 'fill="#e6beff"' in svg
