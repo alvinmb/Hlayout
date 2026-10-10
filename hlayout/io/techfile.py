@@ -1103,3 +1103,114 @@ def default_component_models(library: Library) -> dict:
     Placed here as the hook a future Setup dialog / role heuristic can
     fill in."""
     return {}
+
+
+# --- Thermal analysis (Tools > Thermal Analysis...) ------------------------
+#
+# Everything hlayout.core.thermal_build needs beyond the layout itself,
+# stored as ONE JSON blob with five sections so a design's thermal setup
+# travels with its technology file / .hlaux sidecar like every other
+# rule set here:
+#
+#   materials  {str(layer): material name or conductivity in W/m.K} --
+#              overrides the role default (conductor / dielectric /
+#              resistor / glaze) for that layer's film. Naming a layer
+#              here also brings a layer with no recognised role into the
+#              thermal stack.
+#   powers     {ref_des: milliwatts} -- a resistor left out takes its
+#              Resistor Designer power; anything else left out is 0.
+#   parts      {cell name or ref_des: {"kind", "body_material",
+#              "body_um", "attach_material", "attach_um", "size_um"}} --
+#              how a die or component is built up above the films.
+#   boundary   substrate, mounting and the base/top boundary conditions.
+#   limits     pass/fail thresholds reported per part.
+#
+# Material names are hlayout.core.thermal.MATERIALS keys; this module
+# only stores them and never imports numpy/scipy.
+
+THERMAL_KEY = "thermal"
+
+DEFAULT_THERMAL = {
+    "materials": {},
+    "powers": {},
+    "parts": {},
+    "boundary": {
+        "substrate_layer": -1,          # -1 = find it by name, else the films' bounding box
+        "substrate_material": "alumina_96",
+        "substrate_um": 635.0,
+        "base_mode": "fixed",           # "fixed" temperature, or "htc" to ambient
+        "base_temp_c": 25.0,
+        "ambient_c": 25.0,
+        "base_htc": 0.0,                # W/m^2.K, base_mode "htc" only
+        "top_htc": 10.0,                # W/m^2.K; 0 = sealed, no loss from the top
+        "mount_material": "",           # "" = substrate sits straight on the base
+        "mount_um": 0.0,
+        "grid_um": 0.0,                 # 0 = choose automatically
+    },
+    "limits": {
+        "resistor_max_c": 150.0,
+        "die_max_c": 125.0,
+        "component_max_c": 125.0,
+        "resistor_max_w_mm2": 0.08,     # about 50 W/in^2, a common thick-film figure
+    },
+}
+
+#: Default build-up of a bare die / a chip component above the films.
+DEFAULT_THERMAL_PART = {
+    "die": {"body_material": "silicon", "body_um": 380.0,
+            "attach_material": "epoxy_ag", "attach_um": 40.0},
+    "component": {"body_material": "ceramic_chip", "body_um": 600.0,
+                  "attach_material": "solder", "attach_um": 50.0},
+}
+
+
+def load_thermal_rules(library: Library) -> dict:
+    """The thermal setup from library.tech_params: always a complete
+    dict with all five sections, DEFAULT_THERMAL filled in key by key."""
+    rules = json.loads(json.dumps(DEFAULT_THERMAL))
+    raw = library.tech_params.get(THERMAL_KEY)
+    if not raw:
+        return rules
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return rules
+    if not isinstance(data, dict):
+        return rules
+    for section in ("materials", "powers", "parts"):
+        if isinstance(data.get(section), dict):
+            rules[section] = {str(k): v for k, v in data[section].items()}
+    for section in ("boundary", "limits"):
+        if isinstance(data.get(section), dict):
+            for k, default in DEFAULT_THERMAL[section].items():
+                if k not in data[section]:
+                    continue
+                v = data[section][k]
+                try:
+                    if isinstance(default, str):
+                        rules[section][k] = str(v)
+                    elif isinstance(default, int):
+                        rules[section][k] = int(v)
+                    else:
+                        rules[section][k] = float(v)
+                except (TypeError, ValueError):
+                    pass
+    return rules
+
+
+def save_thermal_rules(library: Library, rules: dict) -> None:
+    """Write the thermal setup into library.tech_params. Sections left
+    out of ``rules`` keep whatever was saved before."""
+    merged = load_thermal_rules(library)
+    for section in ("materials", "powers", "parts"):
+        if isinstance(rules.get(section), dict):
+            merged[section] = {str(k): v for k, v in rules[section].items()}
+    for section in ("boundary", "limits"):
+        if isinstance(rules.get(section), dict):
+            for k in DEFAULT_THERMAL[section]:
+                if k in rules[section]:
+                    merged[section][k] = rules[section][k]
+    library.tech_params[THERMAL_KEY] = json.dumps(merged)
+    # round-trip through the loader so a bad value typed into a form
+    # falls back to its default instead of being stored as-is
+    library.tech_params[THERMAL_KEY] = json.dumps(load_thermal_rules(library))

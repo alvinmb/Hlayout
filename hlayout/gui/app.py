@@ -45,6 +45,7 @@ from .dxf_batch_window import open_dxf_batch_window
 from .gerber_batch_window import open_gerber_batch_window
 from .maskop_window import open_maskop_batch_window
 from .resistor_designer import open_resistor_designer
+from .thermal_window import open_thermal_window
 
 
 def _unique_arcname(used: set, name: str) -> str:
@@ -477,6 +478,7 @@ class App(tk.Tk):
         toolsm.add_command(label="Top View...", command=self.show_topview_dialog)
         toolsm.add_command(label="DRC...", command=lambda: open_drc_window(self))
         toolsm.add_command(label="Extract Netlist...", command=self.show_extract_netlist_dialog)
+        toolsm.add_command(label="Thermal Analysis...", command=lambda: open_thermal_window(self))
         toolsm.add_command(label="Generate Dielectric Fill...", command=self.show_dielectric_dialog)
         toolsm.add_command(label="Remove Dielectric Fill", command=self.remove_dielectric_fill)
         toolsm.add_separator()
@@ -2375,7 +2377,8 @@ class App(tk.Tk):
         than silently operating on the discarded one."""
         for attr in ("_resistor_designer_window", "_thin_film_designer_window",
                      "_drc_window", "_maskop_batch_window",
-                     "_gerber_batch_window", "_dxf_batch_window"):
+                     "_gerber_batch_window", "_dxf_batch_window",
+                     "_thermal_window"):
             win = getattr(self, attr, None)
             if win is not None:
                 try:

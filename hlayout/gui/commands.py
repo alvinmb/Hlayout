@@ -521,6 +521,46 @@ Tools > Extract Netlist...):
                                        net,ref_des,pin CSV; also available as
                                        Session.extract_netlist()/export_netlist_csv()
 
+Thermal analysis (requires numpy, scipy and shapely; also available as
+Tools > Thermal Analysis...):
+    THERMAL PARTS [cell=<name>]       list every resistor and component that can
+                                       be given a power, with its current power and
+                                       where that power came from
+    THERMAL POWER <ref_des> <mW>      set the power a part dissipates, by reference
+                                       designator; a resistor left unset uses its
+                                       Resistor Designer power, anything else 0.
+                                       THERMAL POWER <ref_des> CLEAR removes it
+    THERMAL SET <key> <value>         change one boundary or limit setting:
+                                       base_temp_c, ambient_c, base_mode (fixed|htc),
+                                       base_htc, top_htc, substrate_material,
+                                       substrate_um, substrate_layer, mount_material,
+                                       mount_um, grid_um, resistor_max_c, die_max_c,
+                                       component_max_c, resistor_max_w_mm2
+    THERMAL MATERIAL <layer> <material|k>
+                                       set a film layer's material by name (THERMAL
+                                       MATERIALS lists them) or its conductivity in
+                                       W/m.K; THERMAL MATERIAL <layer> CLEAR goes back
+                                       to the layer's role default
+    THERMAL MATERIALS                 list the named materials and their conductivity
+    THERMAL RUN [cell=<name>] [grid=<dbu>] [base=<degC>]
+                                       steady-state analysis of the current cell (or
+                                       cell=<name>): builds the stack from the
+                                       substrate outline, each printed film and every
+                                       powered part, solves heat conduction, and
+                                       reports each part's peak and average
+                                       temperature against its limit, hottest first,
+                                       with the energy balance. Never modifies the
+                                       design; also Session.run_thermal()
+    THERMAL REPORT out=<path.html> [csv=<path.csv>]
+                                       write the last THERMAL RUN as an HTML report
+                                       (parts table, temperature maps, stack, setup)
+                                       and optionally a CSV of the parts table
+    THERMAL CONTOURS <layer> [step=<degC>] [slice=<name>]
+                                       draw the last run's isotherms onto <layer> as
+                                       paths, one every step deg C (default 5), over
+                                       the top surface or a named slice; appends --
+                                       CLEAR the layer first for a clean redraw
+
 Scripting:
     PY <python source>                run arbitrary Python against the session
                                        (also the fallback for unrecognised input)
@@ -1994,6 +2034,126 @@ class CommandInterpreter:
         return f"created pad cell {name!r} ({pad_count} pad(s)), saved to {path}"
 
     # --- scripting / help -------------------------------------------------
+    def _cmd_thermal(self, args):
+        usage = ("usage: THERMAL PARTS | POWER <ref_des> <mW> | SET <key> <value> | "
+                 "MATERIAL <layer> <material|k> | MATERIALS | RUN [cell=] [grid=] [base=] | "
+                 "REPORT out=<path.html> [csv=<path.csv>] | CONTOURS <layer> [step=] [slice=]")
+        if not args:
+            raise CommandError(usage)
+        sub, rest = args[0].upper(), args[1:]
+        from ..io.techfile import DEFAULT_THERMAL, load_thermal_rules, save_thermal_rules
+
+        def keyed(items):
+            opts, plain = {}, []
+            for a in items:
+                if "=" in a:
+                    k, v = a.split("=", 1)
+                    opts[k.lower()] = v
+                else:
+                    plain.append(a)
+            return opts, plain
+
+        if sub == "PARTS":
+            opts, _ = keyed(rest)
+            parts = self.session.thermal_parts(opts.get("cell"))
+            if not parts:
+                return "thermal: no resistors or components found"
+            lines = [f"thermal: {len(parts)} part(s)"]
+            for p in parts:
+                src = f" ({p['source']})" if p["source"] else ""
+                lines.append(f"  {p['ref_des']:<12} {p['kind']:<9} {p['power_mw']:8.1f} mW{src}"
+                             f"  [{p['cell']}]")
+            return "\n".join(lines)
+        if sub == "POWER":
+            if len(rest) != 2:
+                raise CommandError("usage: THERMAL POWER <ref_des> <mW|CLEAR>")
+            if rest[1].upper() == "CLEAR":
+                self.session.set_thermal_power(rest[0], None)
+                return f"thermal: power for {rest[0]} cleared"
+            try:
+                mw = float(rest[1])
+            except ValueError:
+                raise CommandError("usage: THERMAL POWER <ref_des> <mW|CLEAR>")
+            self.session.set_thermal_power(rest[0], mw)
+            return f"thermal: {rest[0]} = {mw:g} mW"
+        if sub == "SET":
+            if len(rest) != 2:
+                raise CommandError("usage: THERMAL SET <key> <value>")
+            key = rest[0].lower()
+            section = next((s for s in ("boundary", "limits") if key in DEFAULT_THERMAL[s]),
+                           None)
+            if section is None:
+                raise CommandError(f"unknown thermal setting {rest[0]!r}; one of: "
+                                   + ", ".join(list(DEFAULT_THERMAL["boundary"])
+                                               + list(DEFAULT_THERMAL["limits"])))
+            value = rest[1]
+            if key == "substrate_layer":
+                value = self.session.library.layers.resolve(value) \
+                    if value not in ("-1", "auto") else -1
+            elif key == "base_mode" and value.lower() not in ("fixed", "htc"):
+                raise CommandError("base_mode must be fixed or htc")
+            elif key in ("substrate_material", "mount_material") and value:
+                from ..core.thermal import material_k
+                material_k(value)
+            rules = load_thermal_rules(self.session.library)
+            rules[section][key] = value.lower() if key == "base_mode" else value
+            save_thermal_rules(self.session.library, rules)
+            return f"thermal: {key} = {load_thermal_rules(self.session.library)[section][key]}"
+        if sub == "MATERIALS":
+            from ..core.thermal import MATERIALS
+            return "\n".join(["thermal materials (W/m.K):"]
+                             + [f"  {name:<14} {m['k']:>7g}   {m['label']}"
+                                for name, m in MATERIALS.items()])
+        if sub == "MATERIAL":
+            if len(rest) != 2:
+                raise CommandError("usage: THERMAL MATERIAL <layer> <material|k|CLEAR>")
+            n = self.session.library.layers.resolve(rest[0])
+            rules = load_thermal_rules(self.session.library)
+            if rest[1].upper() == "CLEAR":
+                rules["materials"].pop(str(n), None)
+                save_thermal_rules(self.session.library, rules)
+                return f"thermal: layer {n} back to its role default"
+            from ..core.thermal import material_k
+            k = material_k(rest[1])
+            rules["materials"][str(n)] = rest[1].lower()
+            save_thermal_rules(self.session.library, rules)
+            return f"thermal: layer {n} = {rest[1].lower()} ({k:g} W/m.K)"
+        if sub == "RUN":
+            opts, plain = keyed(rest)
+            if plain or set(opts) - {"cell", "grid", "base"}:
+                raise CommandError("usage: THERMAL RUN [cell=<name>] [grid=<dbu>] [base=<degC>]")
+            try:
+                grid = float(opts["grid"]) if "grid" in opts else None
+                base = float(opts["base"]) if "base" in opts else None
+            except ValueError:
+                raise CommandError("grid= and base= must be numbers")
+            result = self.session.run_thermal(opts.get("cell"), grid=grid, base_temp=base)
+            return "\n".join(result.summary_lines())
+        if sub in ("REPORT", "CONTOURS"):
+            result = getattr(self.session, "last_thermal_result", None)
+            if result is None:
+                raise CommandError("no thermal result yet -- THERMAL RUN first")
+            opts, plain = keyed(rest)
+            if sub == "REPORT":
+                if "out" not in opts and "csv" not in opts:
+                    raise CommandError("usage: THERMAL REPORT out=<path.html> [csv=<path.csv>]")
+                done = []
+                if "out" in opts:
+                    done.append(self.session.export_thermal_report(result, opts["out"]))
+                if "csv" in opts:
+                    done.append(self.session.export_thermal_csv(result, opts["csv"]))
+                return "thermal: wrote " + ", ".join(done)
+            if len(plain) != 1:
+                raise CommandError("usage: THERMAL CONTOURS <layer> [step=<degC>] [slice=<name>]")
+            try:
+                step = float(opts.get("step", 5.0))
+            except ValueError:
+                raise CommandError("step= must be a number")
+            count = self.session.draw_thermal_contours(
+                result, plain[0], step=step, which=opts.get("slice"))
+            return f"thermal: drew {count} contour path(s) every {step:g} C"
+        raise CommandError(usage)
+
     def _cmd_py(self, args):
         code_str = " ".join(args)
         return self.console.run(code_str)
