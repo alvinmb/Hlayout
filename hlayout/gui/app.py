@@ -3233,7 +3233,9 @@ class App(tk.Tk):
                  "design onto a result layer -- components/dies occlude "
                  "conductor/resistor beneath them, then substrate; glaze and "
                  "wire bonds are always shown in full. Leave Explicit layers "
-                 "blank for the role-based default (recommended).",
+                 "blank for the role-based default (recommended). The view is "
+                 "always of the main design cell, drawn into its own Output "
+                 "cell (rebuilt each run), never into the design cell itself.",
             wraplength=440, justify="left",
         ).pack(anchor="w", padx=12, pady=(12, 6))
 
@@ -3250,41 +3252,41 @@ class App(tk.Tk):
                                      values=layer_choices())
         result_combo.grid(row=0, column=1, sticky="w", padx=4, pady=4)
 
-        ttk.Label(form, text="Explicit layers (advanced):").grid(
-            row=1, column=0, sticky="e", padx=4, pady=4)
-        layers_var = tk.StringVar(value="")
-        ttk.Entry(form, textvariable=layers_var, width=24).grid(
+        # The view is drawn into its own cell, never into the cell being
+        # viewed (see Session.mask_op_top_view()); TOPVIEW unless renamed.
+        ttk.Label(form, text="Output cell:").grid(row=1, column=0, sticky="e", padx=4, pady=4)
+        out_cell_var = tk.StringVar(value="TOPVIEW")
+        ttk.Entry(form, textvariable=out_cell_var, width=24).grid(
             row=1, column=1, sticky="w", padx=4, pady=4)
 
-        ttk.Label(form, text="Exclude layers:").grid(row=2, column=0, sticky="e", padx=4, pady=4)
-        exclude_var = tk.StringVar(value="")
-        ttk.Entry(form, textvariable=exclude_var, width=24).grid(
+        ttk.Label(form, text="Explicit layers (advanced):").grid(
+            row=2, column=0, sticky="e", padx=4, pady=4)
+        layers_var = tk.StringVar(value="")
+        ttk.Entry(form, textvariable=layers_var, width=24).grid(
             row=2, column=1, sticky="w", padx=4, pady=4)
 
+        ttk.Label(form, text="Exclude layers:").grid(row=3, column=0, sticky="e", padx=4, pady=4)
+        exclude_var = tk.StringVar(value="")
+        ttk.Entry(form, textvariable=exclude_var, width=24).grid(
+            row=3, column=1, sticky="w", padx=4, pady=4)
+
         ttk.Label(form, text="Hatch conductor (mm, 0=off):").grid(
-            row=3, column=0, sticky="e", padx=4, pady=4)
+            row=4, column=0, sticky="e", padx=4, pady=4)
         hatch_var = tk.DoubleVar(value=0.0)
         hatch_spin = ttk.Spinbox(form, from_=0.0, to=1e6, increment=0.001,
                                   textvariable=hatch_var, width=14)
-        hatch_spin.grid(row=3, column=1, sticky="w", padx=4, pady=4)
+        hatch_spin.grid(row=4, column=1, sticky="w", padx=4, pady=4)
 
         angles_label = ttk.Label(form, text="Hatch angles (deg):")
-        angles_label.grid(row=4, column=0, sticky="e", padx=4, pady=4)
+        angles_label.grid(row=5, column=0, sticky="e", padx=4, pady=4)
         angles_var = tk.StringVar(value="45,-45")
         angles_entry = ttk.Entry(form, textvariable=angles_var, width=24)
-        angles_entry.grid(row=4, column=1, sticky="w", padx=4, pady=4)
+        angles_entry.grid(row=5, column=1, sticky="w", padx=4, pady=4)
 
-        ttk.Label(form, text="Line width (mm):").grid(row=5, column=0, sticky="e", padx=4, pady=4)
+        ttk.Label(form, text="Line width (mm):").grid(row=6, column=0, sticky="e", padx=4, pady=4)
         width_var = tk.DoubleVar(value=dbu_to_mm(100))
         ttk.Spinbox(form, from_=0.001, to=1e6, increment=0.001, textvariable=width_var, width=14).grid(
-            row=5, column=1, sticky="w", padx=4, pady=4)
-
-        ttk.Label(form, text="Apply to:").grid(row=6, column=0, sticky="e", padx=4, pady=4)
-        scope_var = tk.StringVar(value="Current cell")
-        cell_names = list(self.session.library.cells.keys())
-        scope_combo = ttk.Combobox(form, textvariable=scope_var, state="readonly", width=22,
-                                    values=["Current cell"] + cell_names)
-        scope_combo.grid(row=6, column=1, sticky="w", padx=4, pady=4)
+            row=6, column=1, sticky="w", padx=4, pady=4)
 
         flatten_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
@@ -3329,7 +3331,11 @@ class App(tk.Tk):
             if result_layer is None:
                 error_var.set("Pick a Result layer.")
                 return
-            kwargs = {"flatten": flatten_var.get()}
+            out_cell = out_cell_var.get().strip()
+            if not out_cell:
+                error_var.set("Enter an Output cell name (default TOPVIEW).")
+                return
+            kwargs = {"flatten": flatten_var.get(), "out_cell": out_cell}
             explicit_layers = split_layers(layers_var.get())
             if explicit_layers is not None:
                 kwargs["layers"] = explicit_layers
@@ -3359,9 +3365,11 @@ class App(tk.Tk):
                 error_var.set("Line width must be greater than zero.")
                 return
             kwargs["line_width"] = mm_to_dbu(width_mm)
-            scope = scope_var.get()
-            if scope != "Current cell":
-                kwargs["cell_names"] = [scope]
+            # A top view is always of the main design cell (the library's
+            # top cell), whichever cell happens to be open in the editor.
+            main_cell = self.session.library.top_cell_name
+            if main_cell and main_cell in self.session.library.cells:
+                kwargs["cell_names"] = [main_cell]
             try:
                 simplify = mm_to_dbu(simplify_var.get())
             except tk.TclError:
@@ -3388,7 +3396,8 @@ class App(tk.Tk):
             if total == 0:
                 self.status.set(f"TOPVIEW: no output on layer {result_layer}")
             else:
-                msg = f"TOPVIEW: wrote {total} path(s) to layer {result_layer}"
+                msg = (f"TOPVIEW: wrote {total} path(s) to layer {result_layer} "
+                       f"of cell {out_cell}")
                 if made_visible:
                     msg += " (layer visibility turned on)"
                 self.status.set(msg)

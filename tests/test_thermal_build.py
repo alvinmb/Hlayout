@@ -84,6 +84,37 @@ def test_candidate_parts_lists_resistors_then_components_with_power_source():
     assert [p["kind"] for p in s.thermal_parts()][:2] == ["resistor", "resistor"]
 
 
+def test_relabelled_resistor_takes_power_from_the_row_its_cell_came_from():
+    """The notch-filter case: Designer rows R1, R2, R3, R1, R5, R; the
+    fourth resistor was generated from the second "R1" row (cell
+    "R1_1") and labelled R4 on the layout, the sixth from row "R"."""
+    s = Session.new("RELABEL")
+    s.set_layer_style(10, name="Substrate")
+    s.new_cell("TOP")
+    s.rect(10, 0, 0, 12000, 6000)
+    s.generate_resistor(2000, 3000, 1000, 2000, ref_des="R1", resistor_layer=30)
+    s.generate_resistor(6000, 3000, 1000, 2000, ref_des="R1", resistor_layer=30)
+    s.generate_resistor(10000, 3000, 1000, 2000, ref_des="R", resistor_layer=30)
+    s.use_cell("TOP")
+    assert [r.cell_name for r in s.cell.srefs] == ["R1", "R1_1", "R"]
+    s.cell.srefs[1].label = "R4"
+    s.cell.srefs[2].label = "R6"
+    row = {"value": 1000, "tolerance": 5, "body_width": 1000, "selected_ink": 1000}
+    techfile.save_resistor_list(s.library, [
+        dict(row, ref_des="R1", power_mw=100), dict(row, ref_des="R1", power_mw=250),
+        dict(row, ref_des="R", power_mw=60)])
+    parts = {p["ref_des"]: p for p in candidate_parts(s.library, "TOP")}
+    assert (parts["R1"]["power_mw"], parts["R1"]["source"]) == (100, "designer")
+    assert (parts["R4"]["power_mw"], parts["R4"]["source"]) == (250, "cell")   # highest "R1"
+    assert (parts["R6"]["power_mw"], parts["R6"]["source"]) == (60, "cell")
+    s.set_thermal_power("R4", 10)                    # an explicit power still wins
+    assert candidate_parts(s.library, "TOP")[1]["source"] == "thermal"
+    # a resistor whose cell matches no row either still gets nothing
+    s.cell.srefs[2].cell_name = "R"
+    techfile.save_resistor_list(s.library, [dict(row, ref_des="R1", power_mw=100)])
+    assert {p["ref_des"]: p for p in candidate_parts(s.library, "TOP")}["R6"]["source"] == ""
+
+
 def test_build_makes_substrate_film_and_part_slices():
     s = _board(with_die=True)
     s.set_thermal_power("R1", 200)
@@ -201,6 +232,12 @@ def test_thermal_commands():
     assert "energy balance error" in out and "R1" in out
     assert s.last_thermal_result.model.base_temp_c == 60.0
     assert ci.run("THERMAL CONTOURS 56 step=0.05").startswith("thermal: drew ")
+    # a step bigger than the whole temperature range must say so, with a
+    # step that would work, rather than silently drawing nothing
+    ci.run("THERMAL SET top_htc 0")
+    ci.run("THERMAL RUN grid=250")
+    none = ci.run("THERMAL CONTOURS 56 step=500")
+    assert "no contours drawn" in none and "try step=" in none
     assert ci.run("THERMAL POWER R1 CLEAR").endswith("cleared")
     assert ci.run("THERMAL SET nonsense 1").startswith("error: unknown thermal setting")
     assert ci.run("THERMAL").startswith("error: usage: THERMAL")

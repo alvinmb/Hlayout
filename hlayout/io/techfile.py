@@ -853,6 +853,55 @@ def save_gerber_export_jobs(library: Library, jobs) -> None:
     library.tech_params[GERBER_JOBS_KEY] = json.dumps(payload)
 
 
+GERBER_OUTPUT_DIR_KEY = "gerber_output_dir"
+
+
+def load_gerber_output_dir(library: Library) -> str:
+    """The Gerber Export Sets output folder saved with this design, or
+    "" when none was chosen (meaning: use the default, <current dir>/Gerber
+    -- see hlayout.io.gerberio.default_gerber_output_dir())."""
+    value = library.tech_params.get(GERBER_OUTPUT_DIR_KEY)
+    return value.strip() if isinstance(value, str) else ""
+
+
+def save_gerber_output_dir(library: Library, path) -> None:
+    """Remember (or, with an empty path, forget) the Gerber Export Sets
+    output folder in library.tech_params."""
+    path = (path or "").strip()
+    if path:
+        library.tech_params[GERBER_OUTPUT_DIR_KEY] = path
+    else:
+        library.tech_params.pop(GERBER_OUTPUT_DIR_KEY, None)
+
+
+GERBER_SCALE_KEY = "gerber_output_scale"
+
+# Hybrid screen artwork is plotted enlarged, so Gerber Export Sets starts
+# at 5X for a design that has no scale saved yet. (The scripting calls --
+# Session.export_gerber() etc. -- still default to 1, actual size.)
+DEFAULT_GERBER_SCALE = 5.0
+
+
+def load_gerber_scale(library: Library) -> float:
+    """The Gerber Export Sets artwork scale saved with this design
+    (1 = actual size, 5 / 10 = the usual hybrid artwork scales).
+    DEFAULT_GERBER_SCALE (5X) when none is saved or the stored value is
+    unusable."""
+    try:
+        value = float(library.tech_params.get(GERBER_SCALE_KEY))
+    except (TypeError, ValueError):
+        return DEFAULT_GERBER_SCALE
+    ok = value > 0 and value == value and value != float("inf")
+    return value if ok else DEFAULT_GERBER_SCALE
+
+
+def save_gerber_scale(library: Library, scale) -> None:
+    """Remember the Gerber Export Sets artwork scale in
+    library.tech_params. Always stored, 1X included, so an explicit
+    choice of actual size isn't mistaken for "nothing chosen yet"."""
+    library.tech_params[GERBER_SCALE_KEY] = repr(float(scale))
+
+
 # --- DXF export sets (Tools > DXF Export Sets...) --------------------------
 # A saved list of DxfExportJob dicts -- same shape/rationale as Gerber
 # export jobs above: order doesn't matter (a DXF export never modifies

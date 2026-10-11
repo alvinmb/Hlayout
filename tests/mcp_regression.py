@@ -958,7 +958,8 @@ def outline_conversion_and_top_view(c):
     assert s.ev("s.convert_rects_to_outline(50, 100)") == {"T": 1}
     assert s.layer_counts()[50] == {"Path": 1}
     s.py("s.mask_op_top_view(57)")
-    assert set(s.layer_counts()[57]) == {"Path"}
+    assert 57 not in s.layer_counts()                      # not in the viewed cell
+    assert set(s.layer_counts(name="TOPVIEW")[57]) == {"Path"}
 
 
 @test("drc", needs=["shapely"])

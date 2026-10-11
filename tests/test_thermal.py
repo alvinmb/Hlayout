@@ -19,6 +19,7 @@ from hlayout.core.thermal import (  # noqa: E402
     ThermalError,
     ThermalModel,
     contour_segments,
+    nice_contour_step,
     material_k,
     rgb_to_png,
     temps_to_rgb,
@@ -214,6 +215,16 @@ def test_no_heat_path_and_bad_setup_raise():
     with pytest.raises(ThermalError):
         material_k("unobtainium")
     assert material_k("alumina_96") == 24.0 and material_k(12) == 12.0
+
+
+def test_nice_contour_step_fits_the_range_it_is_given():
+    assert nice_contour_step(25.0, 27.46) == 0.5         # ~5 lines over 2.5 C
+    assert nice_contour_step(25.0, 105.0) == 10.0
+    assert nice_contour_step(25.0, 40.3) == 2.0
+    assert nice_contour_step(25.0, 25.0) == 1.0          # flat field: any step, no crash
+    for lo, hi in ((25.0, 27.46), (0.0, 0.013), (20.0, 400.0)):
+        step = nice_contour_step(lo, hi)
+        assert 4 <= (hi - lo) / step <= 10
 
 
 def test_contours_and_png_helpers():

@@ -115,3 +115,75 @@ def test_gerber_run_batch_all_requested_layers_empty(tmp_path):
             win.destroy()
     finally:
         app.destroy()
+
+
+# --- Gerber Export Sets: output folder --------------------------------------
+
+def test_gerber_window_output_folder_defaults_to_gerber_beside_the_design(tmp_path):
+    from hlayout.gui.gerber_batch_window import GerberBatchWindow
+
+    app = _make_app()
+    try:
+        app.current_path = str(tmp_path / "board.gds")
+        win = GerberBatchWindow(app, app.session.library, app=app)
+        try:
+            assert win.out_dir_var.get() == str(tmp_path / "Gerber")
+            assert not (tmp_path / "Gerber").exists()   # not created until used
+        finally:
+            win.destroy()
+    finally:
+        app.destroy()
+
+
+def test_gerber_window_runs_relative_jobs_into_the_chosen_output_folder(tmp_path):
+    from hlayout.gui.gerber_batch_window import GerberBatchWindow
+    from hlayout.io.gerberio import GerberExportJob
+    from hlayout.io.techfile import load_gerber_output_dir
+
+    app = _make_app()
+    try:
+        app.current_path = str(tmp_path / "board.gds")
+        app.session.rect(0, 0, 0, 100, 100)
+        win = GerberBatchWindow(app, app.session.library, app=app)
+        try:
+            chosen = tmp_path / "fab_out"
+            win.out_dir_var.set(str(chosen))
+            win.jobs = [GerberExportJob(name="j1", out_prefix="board", layers=[0])]
+            win._run_batch()
+            assert [p.name for p in chosen.iterdir()] and \
+                all(p.name.startswith("board_L00") for p in chosen.iterdir())
+            # a non-default folder is remembered with the design...
+            assert load_gerber_output_dir(app.session.library) == str(chosen)
+            # ...and Default goes back to <current dir>/Gerber and forgets it
+            win._reset_out_dir()
+            assert win.out_dir_var.get() == str(tmp_path / "Gerber")
+            assert load_gerber_output_dir(app.session.library) == ""
+        finally:
+            win.destroy()
+    finally:
+        app.destroy()
+
+
+def test_gerber_window_scale_box_scales_the_run_and_is_remembered(tmp_path):
+    from hlayout.gui.gerber_batch_window import GerberBatchWindow
+    from hlayout.io.gerberio import GerberExportJob
+    from hlayout.io.techfile import load_gerber_scale
+
+    app = _make_app()
+    try:
+        app.current_path = str(tmp_path / "board.gds")
+        app.session.rect(0, 1000, 2000, 3000, 4000)
+        win = GerberBatchWindow(app, app.session.library, app=app)
+        try:
+            assert win.scale_var.get() == "5X"          # default: 5X artwork
+            win.scale_var.set("10X")
+            win.jobs = [GerberExportJob(name="j1", out_prefix="board", layers=[0])]
+            win._run_batch()
+            (f,) = list((tmp_path / "Gerber").iterdir())
+            assert "X10000000Y20000000D02*" in f.read_text()
+            assert load_gerber_scale(app.session.library) == 10.0
+            assert "10X" in win.status_var.get()
+        finally:
+            win.destroy()
+    finally:
+        app.destroy()

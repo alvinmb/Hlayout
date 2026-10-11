@@ -32,7 +32,9 @@ from tkinter import filedialog, ttk
 from . import dialogs
 from .fonts import section_header_font
 from ..core.errors import LayoutError
+from ..io import toolsets
 from ..io.dxfio import DxfExportJob
+from ..io.techfile import DXF_JOBS_KEY
 
 
 def _layer_label(library, number):
@@ -173,6 +175,14 @@ class DxfBatchWindow(tk.Toplevel):
         self.geometry("1000x700")
         self.library = library
         self.app = app
+        # A design with no jobs of its own starts from the last-used set
+        # rather than an empty table (see hlayout.io.toolsets); a job's
+        # file is re-homed into THIS design's dxf folder.
+        if DXF_JOBS_KEY not in library.tech_params:
+            toolsets.seed_from_last_used(
+                library, DXF_JOBS_KEY,
+                transform=lambda raw: toolsets.dxf_jobs_for_another_design(
+                    raw, self._default_dir()))
         self.jobs = [DxfExportJob.from_dict(j) for j in _load_jobs(library)]
         self._build()
         self._refresh_jobs()
@@ -243,10 +253,13 @@ class DxfBatchWindow(tk.Toplevel):
                           else ", ".join(str(n) for n in job.layers))
             self.job_table.insert("", "end", iid=str(i), values=(
                 job.name, layer_desc, job.path))
-        self.status_var.set(f"{len(self.jobs)} job(s) saved to the technology file")
+        self.status_var.set(f"{len(self.jobs)} job(s) -- kept with the design between sessions")
 
     def _persist(self):
         _save_jobs(self.library, self.jobs)
+        # Written through to disk now, so the jobs survive closing
+        # HLayout without saving the design.
+        toolsets.remember(self.library, [DXF_JOBS_KEY], app=self.app)
 
     def _current_job_row(self):
         sel = self.job_table.selection()

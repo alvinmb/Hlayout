@@ -103,6 +103,47 @@ def test_thermal_window_persists_edits_and_shows_a_run():
         app.destroy()
 
 
+def test_draw_contours_suggests_a_step_that_fits_and_shows_the_layer(monkeypatch):
+    """The reported bug: on a board whose whole range is ~1 C, the old
+    fixed 5 C default drew nothing and said nothing."""
+    from tkinter import simpledialog
+    from hlayout.gui import thermal_window as tw
+    from hlayout.gui.thermal_window import open_thermal_window
+    app = _make_app()
+    try:
+        win = open_thermal_window(app)
+        win.rules["powers"]["R1"] = 100.0
+        win.rules["boundary"]["grid_um"] = 250.0
+        win._persist()
+        win._run()
+        app.session.set_layer_style(56, visible=False)
+        offered = {}
+
+        def fake_float(title, prompt, initialvalue=None, **kw):
+            offered["step"] = initialvalue
+            return initialvalue                      # accept the suggestion
+
+        monkeypatch.setattr(simpledialog, "askstring", lambda *a, **k: "56")
+        monkeypatch.setattr(simpledialog, "askfloat", fake_float)
+        before = len(app.session.cell.shapes)
+        win._contours()
+        assert offered["step"] < 5.0
+        drawn = app.session.cell.shapes[before:]
+        assert drawn and all(sh.layer == 56 for sh in drawn)
+        assert app.session.library.layers[56].visible
+        assert "Drew" in win.status_var.get()
+
+        shown = []
+        monkeypatch.setattr(simpledialog, "askfloat", lambda *a, **k: 50.0)
+        monkeypatch.setattr(tw.dialogs, "show_info", lambda t, m, parent=None: shown.append(m))
+        count = len(app.session.cell.shapes)
+        win._contours()
+        assert len(app.session.cell.shapes) == count
+        assert shown and "No contours were drawn" in shown[0] and "Try a step of" in shown[0]
+    finally:
+        app.destroy()
+
+
 def test_thermal_window_flags_a_part_over_its_limit():
     from hlayout.gui.thermal_window import open_thermal_window
     app = _make_app()

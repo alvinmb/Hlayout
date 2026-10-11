@@ -31,7 +31,8 @@ from .fonts import section_header_font
 from ..core.errors import LayoutError
 from ..core.maskops import BOOLEAN_MASK_OPS, MASK_OPS, MaskOpStep
 from ..core.units import DBU_MM, dbu_to_mm, mm_to_dbu
-from ..io.techfile import load_mask_op_steps, save_mask_op_steps
+from ..io import toolsets
+from ..io.techfile import MASK_OP_STEPS_KEY, load_mask_op_steps, save_mask_op_steps
 
 
 def _layer_choices(library):
@@ -206,6 +207,9 @@ class MaskOpBatchWindow(tk.Toplevel):
         self.geometry("1000x700")
         self.library = library
         self.app = app
+        # A design with no steps of its own starts from the last-used
+        # recipe rather than an empty table (see hlayout.io.toolsets).
+        toolsets.seed_from_last_used(library, MASK_OP_STEPS_KEY)
         self.steps = [MaskOpStep.from_dict(s) for s in load_mask_op_steps(library)]
         self._build()
         self._refresh_steps()
@@ -285,6 +289,9 @@ class MaskOpBatchWindow(tk.Toplevel):
 
     def _persist(self):
         save_mask_op_steps(self.library, self.steps)
+        # Written through to disk now, so the recipe survives closing
+        # HLayout without saving the design.
+        toolsets.remember(self.library, [MASK_OP_STEPS_KEY], app=self.app)
 
     def _current_step_row(self):
         sel = self.step_table.selection()

@@ -31,7 +31,8 @@ from . import dialogs
 from .fonts import section_header_font
 from ..core.drc import DRC_RULE_KINDS, TWO_LAYER_KINDS, DrcRule
 from ..core.errors import LayoutError
-from ..io.techfile import load_drc_rules, save_drc_rules
+from ..io import toolsets
+from ..io.techfile import DRC_RULES_KEY, load_drc_rules, save_drc_rules
 from ..core.units import DBU_MM, dbu_to_mm, mm_to_dbu
 
 # Default palette a new rule's colour is picked from (cycling), so
@@ -259,6 +260,9 @@ class DrcWindow(tk.Toplevel):
         self.geometry("1000x700")
         self.library = library
         self.app = app
+        # A design with no rules of its own starts from the last-used
+        # rule set rather than an empty table (see hlayout.io.toolsets).
+        toolsets.seed_from_last_used(library, DRC_RULES_KEY)
         self.rules = [DrcRule.from_dict(r) for r in load_drc_rules(library)]
         self.violations = []
         self._row_tags = {}  # Treeview -> set of colour-tag names already configured on it
@@ -368,6 +372,9 @@ class DrcWindow(tk.Toplevel):
 
     def _persist(self):
         save_drc_rules(self.library, self.rules)
+        # Written through to disk now, so the rules survive closing
+        # HLayout without saving the design.
+        toolsets.remember(self.library, [DRC_RULES_KEY], app=self.app)
 
     def _current_rule_row(self):
         sel = self.rule_table.selection()

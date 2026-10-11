@@ -176,7 +176,9 @@ class ThermalWindow(tk.Toplevel):
         self.power_table.pack(fill="both", expand=True)
         self.power_table.bind("<Double-1>", lambda e: self._set_power())
         ttk.Label(frame, wraplength=420, justify="left", foreground="#8b949e", text=(
-            "A resistor with no power set here uses its Resistor Designer power. "
+            "A resistor with no power set here uses its Resistor Designer power, "
+            "matched by reference designator; 'cell' means no row had that name, so "
+            "the row its cell was generated from was used. "
             "A die or component is only built into the model once it has a power."
         )).pack(anchor="w", pady=4)
         tabs.add(frame, text="Powers")
@@ -537,20 +539,44 @@ class ThermalWindow(tk.Toplevel):
             "Draw Contours", "Layer (number or name) to draw the isotherms on:", parent=self)
         if not layer:
             return
-        step = simpledialog.askfloat("Draw Contours", "Contour step (C):", initialvalue=5.0,
-                                     minvalue=0.001, parent=self)
+        import numpy as np
+        from ..core.thermal import nice_contour_step
+        grid = self._current_grid()
+        if not np.isfinite(grid).any():
+            dialogs.show_info("Draw Contours", "The displayed slice has no material.",
+                              parent=self)
+            return
+        lo, hi = float(np.nanmin(grid)), float(np.nanmax(grid))
+        # Suggest a step that fits THIS result: a fixed 5 C default draws
+        # nothing on a board whose whole range is a couple of degrees.
+        step = simpledialog.askfloat(
+            "Draw Contours",
+            f"Temperatures span {lo:.2f} to {hi:.2f} C.\nContour step (C):",
+            initialvalue=nice_contour_step(lo, hi), minvalue=0.0001, parent=self)
         if not step:
             return
         which = None if self.slice_var.get() == _TOP_SURFACE else self.slice_var.get()
+        session = self._session()
         try:
-            n = self._session().draw_thermal_contours(self.result, layer.strip(), step=step,
-                                                      which=which)
+            n = session.draw_thermal_contours(self.result, layer.strip(), step=step,
+                                              which=which)
+            if n:
+                # contours on a hidden layer look exactly like no output
+                session.set_layer_style(layer.strip(), visible=True)
         except LayoutError as e:
             dialogs.show_error("Draw Contours", str(e), parent=self)
             return
+        if n == 0:
+            dialogs.show_info(
+                "Draw Contours",
+                f"No contours were drawn: the temperatures only span {lo:.2f} to {hi:.2f} C, "
+                f"which is less than one {step:g} C step.\n\nTry a step of "
+                f"{nice_contour_step(lo, hi):g} C.", parent=self)
+            return
         if self.app is not None:
             self.app.refresh_all()
-        self.status_var.set(f"Drew {n} contour path(s) every {step:g} C (Ctrl+Z undoes them)")
+        self.status_var.set(f"Drew {n} contour path(s) every {step:g} C on layer "
+                            f"{layer.strip()} (Ctrl+Z undoes them)")
 
     def _about(self):
         dialogs.show_info("About Thermal Analysis", (

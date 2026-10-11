@@ -41,6 +41,7 @@ Format conventions:
 """
 
 import math
+import ntpath
 import os
 import re
 from dataclasses import dataclass
@@ -131,9 +132,10 @@ def _safe_layer_slug(layer) -> str:
     return slug or f"layer{layer.number}"
 
 
-def _write_layer_file(path, layer, polys, paths):
+def _write_layer_file(path, layer, polys, paths, scale: float = 1.0):
     lines = [
         f"G04 HLayout Gerber RS-274X export -- layer {layer.number} ({layer.name}) *",
+        f"G04 Artwork scale {scale:g}X (1X = actual size) *",
         "%FSLAX46Y46*%",
         "%MOMM*%",
         # A minimal aperture is required to be "selected" (Dnn) before
@@ -184,8 +186,25 @@ def _write_layer_file(path, layer, polys, paths):
         f.write("\n".join(lines) + "\n")
 
 
+# The largest coordinate the %FSLAX46Y46*% format can hold: 4 integer
+# digits of millimetres.
+_GERBER_MAX_MM = 9999.0
+
+
+def check_gerber_scale(scale) -> float:
+    """Validate an artwork scale factor (1 = actual size; hybrid screen
+    artwork is commonly plotted at 5X or 10X) and return it as a float."""
+    try:
+        value = float(scale)
+    except (TypeError, ValueError):
+        raise GeometryError(f"Gerber scale must be a number, not {scale!r}") from None
+    if not math.isfinite(value) or value <= 0:
+        raise GeometryError(f"Gerber scale must be greater than zero, not {scale!r}")
+    return value
+
+
 def write_gerber_layers(library: Library, cell_name: str, out_prefix: str,
-                         layers: Optional[List[int]] = None):
+                         layers: Optional[List[int]] = None, scale: float = 1.0):
     """Write one Gerber RS-274X file per layer that has data in
     ``cell_name`` (after flattening every Sref), named
     ``<out_prefix>_L<NN>_<layer name>.gbr``.
@@ -199,6 +218,11 @@ def write_gerber_layers(library: Library, cell_name: str, out_prefix: str,
     default (``layers=None``) exports every *visible* layer with data
     -- "export what's on screen".
 
+    ``scale`` enlarges the whole artwork about the design origin (0,0):
+    every coordinate AND every path width is multiplied by it, so 5 or
+    10 gives the 5X / 10X artwork hybrid screens are normally plotted
+    at. The design itself is not changed. 1 (the default) is actual size.
+
     Returns (written, skipped_text):
       written: [(layer_number, file_path), ...], in ascending layer order
       skipped_text: count of Text shapes that were not exported (see
@@ -211,7 +235,22 @@ def write_gerber_layers(library: Library, cell_name: str, out_prefix: str,
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
 
+    scale = check_gerber_scale(scale)
     polys, paths, skipped_text = _flatten_layer_data(library, cell_name, layers=layers)
+    if scale != 1.0:
+        polys = {n: [[(x * scale, y * scale) for x, y in pts] for pts in items]
+                 for n, items in polys.items()}
+        paths = {n: [([(x * scale, y * scale) for x, y in pts], width * scale)
+                     for pts, width in items]
+                 for n, items in paths.items()}
+    extent = max(
+        [abs(c) for items in polys.values() for pts in items for p in pts for c in p]
+        + [abs(c) for items in paths.values() for pts, _w in items for p in pts for c in p]
+        + [0.0]) * DBU_MM
+    if extent > _GERBER_MAX_MM:
+        raise GeometryError(
+            f"Gerber artwork at {scale:g}X reaches {extent:.0f} mm from the origin, "
+            f"beyond the format's {_GERBER_MAX_MM:.0f} mm limit -- use a smaller scale")
     indices = sorted(set(polys.keys()) | set(paths.keys()))
 
     written = []
@@ -224,10 +263,47 @@ def write_gerber_layers(library: Library, cell_name: str, out_prefix: str,
         if not p_list and not w_list:
             continue
         fname = f"{out_prefix}_L{n:02d}_{_safe_layer_slug(layer)}.gbr"
-        _write_layer_file(fname, layer, p_list, w_list)
+        _write_layer_file(fname, layer, p_list, w_list, scale=scale)
         written.append((n, fname))
 
     return written, skipped_text
+
+
+DEFAULT_GERBER_SUBFOLDER = "Gerber"
+
+
+def default_gerber_output_dir(design_path: Optional[str] = None) -> str:
+    """The default Gerber output folder: ``<current dir>/Gerber``, where
+    the current dir is the folder the open design file lives in, or the
+    process working directory for a design that has never been saved.
+    An existing folder of the same name in different case (e.g. an older
+    ``gerber``) is reused rather than creating a second one beside it.
+    Nothing is created here -- the folder is made when files are written."""
+    base = os.path.dirname(os.path.abspath(design_path)) if design_path else os.getcwd()
+    try:
+        for entry in os.listdir(base):
+            if entry.lower() == DEFAULT_GERBER_SUBFOLDER.lower() and \
+                    os.path.isdir(os.path.join(base, entry)):
+                return os.path.join(base, entry)
+    except OSError:
+        pass
+    return os.path.join(base, DEFAULT_GERBER_SUBFOLDER)
+
+
+def _is_absolute(path: str) -> bool:
+    # A Windows path (drive letter or UNC) counts as absolute on any OS,
+    # so a job saved on one machine means the same thing on another.
+    return os.path.isabs(path) or ntpath.isabs(path) or bool(ntpath.splitdrive(path)[0])
+
+
+def resolve_out_prefix(out_prefix: str, out_dir: Optional[str] = None) -> str:
+    """Where a job's files really go. A RELATIVE ``out_prefix`` (a plain
+    name like ``board``, or ``fabA/board``) is placed inside ``out_dir``;
+    an ABSOLUTE one is an explicit override and is used unchanged. With
+    no ``out_dir`` the prefix is returned as given."""
+    if not out_dir or _is_absolute(out_prefix):
+        return out_prefix
+    return os.path.join(out_dir, out_prefix)
 
 
 @dataclass

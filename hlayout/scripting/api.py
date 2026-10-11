@@ -347,7 +347,7 @@ class Session:
         return save_design(self.library, self.attached_libraries, self._attached_paths, path)
 
     def export_gerber(self, out_prefix: str, cell_name: Optional[str] = None,
-                       layers: Optional[List[int]] = None):
+                       layers: Optional[List[int]] = None, scale: float = 1.0):
         """Export the design (default: the current cell) as Gerber
         RS-274X -- one flattened file per *visible* layer that has data,
         named ``<out_prefix>_L<NN>_<layer name>.gbr``. Gerber is a
@@ -357,14 +357,19 @@ class Session:
         shapes are skipped (Gerber has no text primitive).
 
         `layers`, if given, restricts export to that subset of layer
-        numbers. Returns (written, skipped_text) -- see
+        numbers. `scale` enlarges the artwork about the origin -- 5 or
+        10 for the 5X / 10X artwork hybrid screens are plotted at; path
+        widths scale with it and the design itself is untouched.
+        Returns (written, skipped_text) -- see
         hlayout.io.gerberio.write_gerber_layers for details."""
         name = cell_name or self.current_cell_name
         if name is None:
             raise LibraryError("no current cell to export")
-        return write_gerber_layers(self.library, name, out_prefix, layers=layers)
+        return write_gerber_layers(self.library, name, out_prefix, layers=layers,
+                                   scale=scale)
 
-    def run_gerber_export_batch(self, jobs=None, cell_name: Optional[str] = None):
+    def run_gerber_export_batch(self, jobs=None, cell_name: Optional[str] = None,
+                                out_dir: Optional[str] = None, scale: float = 1.0):
         """Run a saved series of Gerber export jobs -- e.g. one job per
         fab house or board revision, each with its own layer subset and
         output prefix -- in one action, instead of using File > Export
@@ -382,6 +387,16 @@ class Session:
         `cell_name` defaults to the current cell (same convention as
         export_gerber() itself) and is used for every job.
 
+        `out_dir` is the output folder for the whole set (Tools > Gerber
+        Export Sets... > Output folder): a job whose out_prefix is
+        RELATIVE (a plain name, or sub/folder/name) is written inside
+        it; a job with an ABSOLUTE out_prefix keeps its own location.
+        The folder is created if needed. With out_dir=None every prefix
+        is used exactly as given (relative to the working directory).
+
+        `scale` is the artwork scale for every job in the set (1 =
+        actual size, 5 / 10 = 5X / 10X artwork) -- see export_gerber().
+
         Gerber export never modifies the design (it only writes files
         to disk), so unlike run_mask_op_batch() this needs no undo
         checkpoint.
@@ -389,7 +404,7 @@ class Session:
         Returns [(job, written, skipped_text), ...] in the order run --
         see export_gerber()/hlayout.io.gerberio.write_gerber_layers for
         what `written`/`skipped_text` mean."""
-        from ..io.gerberio import GerberExportJob
+        from ..io.gerberio import GerberExportJob, resolve_out_prefix
         from ..io.techfile import load_gerber_export_jobs
 
         if jobs is None:
@@ -399,7 +414,8 @@ class Session:
         results = []
         for job in resolved:
             written, skipped_text = self.export_gerber(
-                job.out_prefix, cell_name=cell_name, layers=job.layers,
+                resolve_out_prefix(job.out_prefix, out_dir),
+                cell_name=cell_name, layers=job.layers, scale=scale,
             )
             results.append((job, written, skipped_text))
         return results
@@ -2416,11 +2432,9 @@ class Session:
         shapes (never descending into placed sub-cells -- this deletes
         exactly what's drawn directly in the cell being operated on,
         the same scope mask_op_top_view()/convert_rects_to_outline()
-        use). The obvious use is cleaning up a scratch/result layer --
-        e.g. mask_op_top_view() always APPENDS new paths to its result
-        layer rather than replacing what's there, so repeated runs
-        while iterating on a design accumulate leftover paths from
-        every earlier attempt; clear the layer first for a clean rerun.
+        use). The obvious use is cleaning up a scratch/result layer
+        between runs of a mask operation. (mask_op_top_view() no longer
+        needs this: it rebuilds its own TOPVIEW output cell each run.)
 
         Runs on the current cell by default; pass `cell_names` to
         target other/additional specific cells directly.
@@ -2448,7 +2462,8 @@ class Session:
                           line_width: float = 100.0,
                           cell_names: Optional[List[str]] = None,
                           datatype: int = 0, flatten: bool = True,
-                          simplify: Optional[float] = None) -> dict:
+                          simplify: Optional[float] = None,
+                          out_cell: str = "TOPVIEW") -> dict:
         """Draw a top-down, hidden-line-removal pictorial view of the
         hybrid circuit onto a single output layer -- the classic CAD/
         drafting sense of the term (as in AutoCAD's HIDE): the visible
@@ -2538,15 +2553,28 @@ class Session:
         own body-outline-path convention) is the drawn width of every
         outline segment.
 
-        Writes the result as new Path shapes on `result_layer`.
+        Writes the result as new Path shapes on `result_layer` of a
+        SEPARATE cell named `out_cell` (default "TOPVIEW") -- never
+        into the cell being viewed, so the drawing can't pollute the
+        real design (or get picked up as geometry by DRC, netlist,
+        Gerber or the next top view). The paths keep the viewed cell's
+        own coordinates, so placing an instance of the output cell at
+        0,0 overlays it exactly. The output cell is REBUILT on every
+        run (created if missing, emptied first if it exists), so
+        re-running replaces the previous view rather than piling up on
+        it. With more than one cell in `cell_names`, each gets its own
+        output cell named "<out_cell>_<cell name>". Viewing the output
+        cell itself is an error.
+
         `cell_names`, `datatype`, and `flatten` match mask_op() exactly
         (see that method for what each means); `simplify` applies
         Douglas-Peucker vertex reduction to the line geometry at that
         DBU tolerance before it's drawn, same idea as mask_op()'s own
         `simplify` but operating on lines instead of polygon area.
 
-        Returns {cell_name: paths_written} for cells that actually
-        produced output (empty results are omitted). Requires shapely.
+        Returns {cell_name: paths_written}, keyed by the VIEWED cell's
+        name, for cells that actually produced output (empty results
+        are omitted). Requires shapely.
 
         Note this has nothing to do with fired-film THICKNESS (unlike
         export_freecad()'s 3D stack, which needs a Z-height to extrude
@@ -2643,9 +2671,32 @@ class Session:
                     "glaze/route/bond layers in Setup"
                 )
 
-        self._checkpoint()
         cells = ([self.library.get_cell(n) for n in cell_names] if cell_names
                  else [self.cell])
+        out_cell = (out_cell or "").strip()
+        if not out_cell:
+            raise LayoutError("top view needs an output cell name")
+        out_names = {
+            cell.name: (out_cell if len(cells) == 1 else f"{out_cell}_{cell.name}")
+            for cell in cells
+        }
+        for cell in cells:
+            if cell.name in out_names.values():
+                raise LayoutError(
+                    f"cannot draw a top view of {cell.name!r}: it is the top "
+                    f"view's own output cell -- switch to the design cell first"
+                )
+
+        self._checkpoint()
+        # Empty every existing output cell BEFORE gathering anything, so
+        # a previous view (e.g. one placed back into the design as an
+        # instance) is never read back in as input geometry.
+        for out_name in out_names.values():
+            old = self.library.cells.get(out_name)
+            if old is not None:
+                del old.shapes[:]
+                del old.srefs[:]
+                del old.arefs[:]
         written = {}
         for cell in cells:
             def gather(layer):
@@ -2689,7 +2740,11 @@ class Session:
                 result = result.simplify(simplify, preserve_topology=True)
             new_paths = shapely_lines_to_paths(result, r_layer, width_dbu, datatype=datatype)
             if new_paths:
-                cell.shapes.extend(new_paths)
+                out_name = out_names[cell.name]
+                target = self.library.cells.get(out_name)
+                if target is None:
+                    target = self.library.new_cell(out_name)
+                target.shapes.extend(new_paths)
                 written[cell.name] = len(new_paths)
         self._notify()
         return written
@@ -3381,7 +3436,9 @@ class Session:
         the current cell) that can be given a power, as
         [{"ref_des", "kind", "cell", "power_mw", "source"}, ...].
         ``source`` is "thermal" (set by set_thermal_power()), "designer"
-        (a resistor's Resistor Designer power) or "" (none: 0 mW). This
+        (the Resistor Designer row with that reference designator),
+        "cell" (no row has that reference designator, so the row the
+        resistor's cell was generated from) or "" (none: 0 mW). This
         is the list Tools > Thermal Analysis...'s Powers tab shows.
         Requires shapely."""
         from ..core.thermal_build import candidate_parts
@@ -3494,8 +3551,14 @@ class Session:
             return 0
         lo, hi = float(np.nanmin(grid)), float(np.nanmax(grid))
         ref = model.reference_temp()
-        first = ref + step * (np.floor((lo - ref) / step) + 1)
-        levels = np.arange(first, hi, step)
+        # Levels are the reference temperature plus whole steps, strictly
+        # inside the field's range. The margin keeps solver round-off (a
+        # cell at 24.99999998 C on a 25 C base) from producing a junk
+        # "contour" at the reference temperature itself.
+        tol = 1e-6 * max(hi - lo, 1e-9)
+        k0 = int(np.floor((lo + tol - ref) / step)) + 1
+        k1 = int(np.ceil((hi - tol - ref) / step)) - 1
+        levels = [ref + k * step for k in range(k0, k1 + 1)]
         pitch, (ox, oy) = model.pitch_um, model.origin
         lines = []
         for level in levels:

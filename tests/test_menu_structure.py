@@ -1041,23 +1041,90 @@ def test_topview_dialog_writes_a_hidden_line_result():
         win = _find_toplevels(app)[0]
 
         combos = _collect_widgets(win, ttk.Combobox)
-        # Order on the grid: Result layer, Apply-to scope.
-        result_combo, scope_combo = combos
+        # The only combobox is the Result layer (the view is always of
+        # the main design cell -- there is no Apply-to choice).
+        (result_combo,) = combos
         result_combo.set("1 (L1)")
 
         # ttk.Spinbox/Combobox are themselves ttk.Entry subclasses, so
         # filter to plain Entry widgets only.
         entries = [w for w in _collect_widgets(win, ttk.Entry) if type(w) is ttk.Entry]
-        # Order on the grid: Explicit layers, Exclude layers, Hatch angles.
-        layers_entry, _exclude_entry, _angles_entry = entries
+        # Order on the grid: Output cell, Explicit layers, Exclude layers,
+        # Hatch angles.
+        out_cell_entry, layers_entry, _exclude_entry, _angles_entry = entries
+        assert out_cell_entry.get() == "TOPVIEW"  # the default output cell
         layers_entry.insert(0, "0")  # bypass role-based default, use layer 0 explicitly
 
         apply_btn = next(b for b in _collect_widgets(win, ttk.Button)
                           if b.cget("text") == "Apply")
         apply_btn.invoke()
 
-        assert any(sh.layer == 1 for sh in top.shapes)
+        # The view goes to its own TOPVIEW cell, never into the viewed cell.
+        assert not any(sh.layer == 1 for sh in top.shapes)
+        view = app.session.library.cells["TOPVIEW"]
+        assert any(sh.layer == 1 for sh in view.shapes)
         assert "wrote" in app.status.get()
+        assert "cell TOPVIEW" in app.status.get()
+    finally:
+        app.destroy()
+
+
+def test_topview_dialog_output_cell_can_be_renamed_and_must_not_be_blank():
+    app = _make_app()
+    try:
+        top = app.session.library.cells["TOP"]
+        top.add_rectangle(0, 0, 0, 1000, 1000)
+
+        app.show_topview_dialog()
+        win = _find_toplevels(app)[0]
+        (result_combo,) = _collect_widgets(win, ttk.Combobox)
+        result_combo.set("1 (L1)")
+        entries = [w for w in _collect_widgets(win, ttk.Entry) if type(w) is ttk.Entry]
+        out_cell_entry, layers_entry, _exclude_entry, _angles_entry = entries
+        layers_entry.insert(0, "0")
+        apply_btn = next(b for b in _collect_widgets(win, ttk.Button)
+                          if b.cget("text") == "Apply")
+
+        # Blank name: refused, dialog stays open, nothing created.
+        out_cell_entry.delete(0, "end")
+        apply_btn.invoke()
+        assert win.winfo_exists()
+        assert "TOPVIEW" not in app.session.library.cells
+
+        out_cell_entry.insert(0, "ASSY_VIEW")
+        apply_btn.invoke()
+        assert "TOPVIEW" not in app.session.library.cells
+        view = app.session.library.cells["ASSY_VIEW"]
+        assert any(sh.layer == 1 for sh in view.shapes)
+        assert "cell ASSY_VIEW" in app.status.get()
+    finally:
+        app.destroy()
+
+
+def test_topview_dialog_always_views_the_main_design_cell():
+    # No Apply-to choice: even with a sub-cell open in the editor, the
+    # view is of the library's main (top) cell.
+    app = _make_app()
+    try:
+        lib = app.session.library
+        lib.cells["TOP"].add_rectangle(0, 0, 0, 1000, 1000)
+        sub = lib.new_cell("SUB")
+        sub.add_rectangle(0, 5000, 5000, 5100, 5100)
+        app.session.use_cell("SUB")
+        assert lib.top_cell_name == "TOP"
+
+        app.show_topview_dialog()
+        win = _find_toplevels(app)[0]
+        (result_combo,) = _collect_widgets(win, ttk.Combobox)
+        result_combo.set("1 (L1)")
+        entries = [w for w in _collect_widgets(win, ttk.Entry) if type(w) is ttk.Entry]
+        entries[1].insert(0, "0")  # Explicit layers
+        next(b for b in _collect_widgets(win, ttk.Button)
+             if b.cget("text") == "Apply").invoke()
+
+        xs = [x for sh in lib.cells["TOPVIEW"].shapes for x, _y in sh.points]
+        assert xs and max(xs) <= 1000          # TOP's box, not SUB's
+        assert not any(sh.layer == 1 for sh in sub.shapes)
     finally:
         app.destroy()
 
@@ -1068,7 +1135,7 @@ def test_topview_dialog_hatch_angles_field_disabled_without_a_hatch_pitch():
         app.show_topview_dialog()
         win = _find_toplevels(app)[0]
         entries = [w for w in _collect_widgets(win, ttk.Entry) if type(w) is ttk.Entry]
-        _layers_entry, _exclude_entry, angles_entry = entries
+        _out_cell_entry, _layers_entry, _exclude_entry, angles_entry = entries
         assert str(angles_entry.cget("state")) == "disabled"
 
         spins = _collect_widgets(win, ttk.Spinbox)

@@ -634,6 +634,11 @@ def test_maskop_command_does_not_mention_visibility_when_already_visible():
     assert "visibility" not in out
 
 
+def _tv(s, name="TOPVIEW"):
+    """The top view's own output cell (it never writes into the viewed cell)."""
+    return s.library.get_cell(name)
+
+
 # --- Session.mask_op_top_view() / TOPVIEW: hidden-line-removal top view ----
 
 def test_top_view_keeps_the_full_outline_of_the_topmost_layer():
@@ -644,7 +649,7 @@ def test_top_view_keeps_the_full_outline_of_the_topmost_layer():
     s.rect(20, 400, 400, 1000, 1000)
     written = s.mask_op_top_view(63, layers=[5, 20])
     assert "TOP" in written and written["TOP"] > 0
-    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    paths = [sh for sh in _tv(s).shapes if sh.layer == 63]
     assert paths and all(isinstance(p, Path) for p in paths)
     from hlayout.core.maskops import shape_to_shapely
     from shapely.ops import unary_union
@@ -665,7 +670,7 @@ def test_top_view_removes_the_occluded_part_of_a_lower_layers_outline():
     s.mask_op_top_view(63, layers=[5, 20])
     from hlayout.core.maskops import shape_to_shapely
     from shapely.ops import unary_union
-    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    paths = [sh for sh in _tv(s).shapes if sh.layer == 63]
     drawn = unary_union([shape_to_shapely(p).buffer(0) for p in paths])
     # A point on layer 5's own boundary that lies STRICTLY inside layer
     # 20's filled area (e.g. (500, 600), the middle of the occluded top
@@ -688,7 +693,7 @@ def test_top_view_default_ignores_fired_film_thickness_entirely():
     s.rect(6, 200, 200, 300, 300)  # no thickness saved anywhere -- still included
     written = s.mask_op_top_view(63)
     assert written == {"TOP": 2}  # both layer 5's and layer 6's own outlines
-    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    paths = [sh for sh in _tv(s).shapes if sh.layer == 63]
     xs = [p[0] for path in paths for p in path.points]
     assert max(xs) == 300  # layer 6's box (up to x=300) is present
 
@@ -700,7 +705,7 @@ def test_top_view_default_excludes_a_hidden_or_unfilled_layer():
     s.library.layers[6].visible = False
     written = s.mask_op_top_view(63)
     assert written == {"TOP": 1}  # only layer 5 -- layer 6 is hidden
-    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    paths = [sh for sh in _tv(s).shapes if sh.layer == 63]
     xs = [p[0] for path in paths for p in path.points]
     assert max(xs) == 100
 
@@ -715,7 +720,7 @@ def test_top_view_writes_paths_not_polygons():
     s = _fresh_session()
     s.rect(5, 0, 0, 100, 100)
     s.mask_op_top_view(63, layers=[5])
-    result = [sh for sh in s.cell.shapes if sh.layer == 63]
+    result = [sh for sh in _tv(s).shapes if sh.layer == 63]
     assert result and all(isinstance(sh, Path) for sh in result)
 
 
@@ -723,7 +728,7 @@ def test_top_view_line_width_sets_the_drawn_path_width():
     s = _fresh_session()
     s.rect(5, 0, 0, 100, 100)
     s.mask_op_top_view(63, layers=[5], line_width=250)
-    result = [sh for sh in s.cell.shapes if sh.layer == 63]
+    result = [sh for sh in _tv(s).shapes if sh.layer == 63]
     assert all(sh.width == 250 for sh in result)
 
 
@@ -767,7 +772,7 @@ def test_top_view_hatch_conductor_angles_produces_a_different_pattern_than_defau
         save_resistor_geometry_rules(s.library, _resistor_rules_conductor_only())
         s.rect(3, 0, 0, 1000, 1000)
         s.mask_op_top_view(63, hatch_conductor_pitch=100, **hatch_kwargs)
-        return [sh for sh in s.cell.shapes if sh.layer == 63]
+        return [sh for sh in _tv(s).shapes if sh.layer == 63]
 
     default_paths = _make()
     angled_paths = _make(hatch_conductor_angles=(60, -60))
@@ -801,7 +806,7 @@ def test_top_view_hatch_conductor_pitch_fills_conductor_with_a_cross_hatch():
     # hatching adds a lot of extra line segments beyond the plain outline
     assert with_hatch["TOP"] > without_hatch["TOP"] * 5
     # every hatch/outline point must stay within the conductor's own bounds
-    paths = [sh for sh in s2.cell.shapes if sh.layer == 63]
+    paths = [sh for sh in _tv(s2).shapes if sh.layer == 63]
     xs = [p[0] for path in paths for p in path.points]
     ys = [p[1] for path in paths for p in path.points]
     assert min(xs) >= 0 and max(xs) <= 1000 and min(ys) >= 0 and max(ys) <= 800
@@ -832,7 +837,7 @@ def test_top_view_command_bar():
     interp = CommandInterpreter(s, ScriptConsole(s))
     out = interp.run("TOPVIEW result=63 layers=5,20")
     assert "wrote" in out and "path(s) to layer 63" in out
-    assert any(sh.layer == 63 for sh in s.cell.shapes)
+    assert any(sh.layer == 63 for sh in _tv(s).shapes)
 
 
 def test_top_view_command_bar_reports_no_output():
@@ -917,7 +922,7 @@ def test_top_view_role_order_resistor_occludes_conductor_regardless_of_layer_num
     s.rect(50, 0, 0, 600, 600)      # conductor
     s.rect(5, 400, 400, 1000, 1000)  # resistor, overlapping conductor's corner
     s.mask_op_top_view(63)
-    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    paths = [sh for sh in _tv(s).shapes if sh.layer == 63]
     # conductor's own top edge, at a point strictly inside the resistor's
     # filled footprint, must be genuinely absent (not just "drawn under").
     assert _min_dist_to_paths((500, 600), paths) > 10
@@ -944,7 +949,7 @@ def test_top_view_role_order_glaze_is_a_non_occluding_outline():
     s.rect(10, 400, 400, 800, 800)  # resistor, inside conductor
     s.rect(20, 200, 200, 900, 900)  # glaze, covering both
     s.mask_op_top_view(63)
-    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    paths = [sh for sh in _tv(s).shapes if sh.layer == 63]
     # glaze's own corners, deep inside conductor+resistor's filled area,
     # are still fully present -- glaze is never occluded.
     assert _min_dist_to_paths((200, 200), paths) < 1
@@ -970,7 +975,7 @@ def test_top_view_role_order_unclassified_other_layer_cannot_occlude_conductor()
     s.rect(3, 0, 0, 600, 600)        # conductor, an EXPLICITLY classified role
     s.rect(58, 400, 400, 1000, 1000)  # an unclassified "other" layer, HIGHER number
     s.mask_op_top_view(63)
-    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    paths = [sh for sh in _tv(s).shapes if sh.layer == 63]
     # conductor's top edge, strictly inside the "other" layer's filled
     # footprint, must survive -- an unclassified layer cannot occlude it.
     assert _min_dist_to_paths((500, 600), paths) < 1
@@ -998,7 +1003,7 @@ def test_top_view_role_order_components_and_epoxy_occlude_conductor():
     s.rect(50, 0, 0, 600, 600)
     s.sref("CAP_1210", (100, 100))  # component footprint now (100,100)-(500,650)
     s.mask_op_top_view(63)
-    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    paths = [sh for sh in _tv(s).shapes if sh.layer == 63]
     # the component's own full outline is present...
     assert _min_dist_to_paths((100, 100), paths) < 1
     assert _min_dist_to_paths((500, 650), paths) < 1
@@ -1038,7 +1043,7 @@ def test_top_view_wire_bond_is_not_clipped_by_the_component_it_bonds_to():
     s.path(59, [(0, 300), (300, 300)], width=30, cap="flush")
     written = s.mask_op_top_view(63)
     assert written
-    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    paths = [sh for sh in _tv(s).shapes if sh.layer == 63]
     # the wire's own top edge, at x=250 -- deep inside the component's
     # footprint (which starts at x=100) -- is still fully present, not
     # clipped at the component's edge.
@@ -1064,7 +1069,7 @@ def test_top_view_component_recognition_needs_no_layer_thickness_at_all():
     s.sref("CAP_1210", (100, 100))
     written = s.mask_op_top_view(63)
     assert written  # produced output despite no layer_thickness ever saved
-    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    paths = [sh for sh in _tv(s).shapes if sh.layer == 63]
     assert _min_dist_to_paths((100, 100), paths) < 1
     assert _min_dist_to_paths((300, 600), paths) > 10  # conductor cut under the cap
 
@@ -1101,7 +1106,7 @@ def test_top_view_bare_die_recognized_by_outline_not_role_layers():
     s.sref("ML1", (0, 0))
     written = s.mask_op_top_view(63)
     assert written
-    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    paths = [sh for sh in _tv(s).shapes if sh.layer == 63]
     # the die's own outline notches a real hole into the conductor --
     # its own right edge (the stroked path's outer edge, half the 20-wide
     # stroke beyond the 400 nominal) is present, and conductor strictly
@@ -1138,7 +1143,7 @@ def test_top_view_substrate_cell_with_no_children_is_not_a_component():
     s.sref("Substrate", (0, 0))
     written = s.mask_op_top_view(63)
     assert written
-    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    paths = [sh for sh in _tv(s).shapes if sh.layer == 63]
     # the substrate is walked into like any other non-component cell,
     # so the conductor beneath it still shows up in the result.
     assert _min_dist_to_paths((700, 900), paths) < 1
@@ -1172,7 +1177,7 @@ def test_top_view_device_cell_mixing_role_and_non_role_layers_is_not_swallowed()
     s.sref("R1", (0, 0))
     written = s.mask_op_top_view(63)
     assert written
-    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    paths = [sh for sh in _tv(s).shapes if sh.layer == 63]
     # the nearby trace is untouched -- R1 was walked into, not treated
     # as an occluding component with an oversized keep-out footprint.
     assert _min_dist_to_paths((275, 260), paths) < 1
@@ -1210,13 +1215,13 @@ def test_top_view_exclude_layers_stops_a_sealed_package_case_from_occluding_ever
     # bare: the case swallows the conductor entirely.
     written = s.mask_op_top_view(63)
     assert written
-    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    paths = [sh for sh in _tv(s).shapes if sh.layer == 63]
     assert _min_dist_to_paths((10000, 15000), paths) > 10
 
     # exclude=61 (the case's own outline layer): the conductor is back.
     written2 = s.mask_op_top_view(62, exclude_layers=[61])
     assert written2
-    paths2 = [sh for sh in s.cell.shapes if sh.layer == 62]
+    paths2 = [sh for sh in _tv(s).shapes if sh.layer == 62]
     assert _min_dist_to_paths((10000, 15000), paths2) < 1
 
 
@@ -1279,7 +1284,7 @@ def test_top_view_resistor_device_cell_with_extra_layers_is_not_a_component():
     s.rect(3, 500, 500, 900, 900)  # the board's own conductor, apart from R1
     s.sref("R1_DEVICE", (0, 0))
     s.mask_op_top_view(63)
-    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    paths = [sh for sh in _tv(s).shapes if sh.layer == 63]
     # R1_DEVICE's own layer-4 shape (150,0)-(250,20) must show up as
     # part of the ordinary "conductor and other" tier's output, not be
     # swallowed into a wrongly-topmost "component" footprint that never
@@ -1298,7 +1303,7 @@ def test_top_view_exclude_layers_drops_a_layer_from_the_role_based_default():
     s.rect(3, 0, 0, 500, 500)
     s.rect(7, 600, 600, 900, 900)  # an unrelated "other" layer, off to the side
     written = s.mask_op_top_view(63, exclude_layers=[7])
-    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    paths = [sh for sh in _tv(s).shapes if sh.layer == 63]
     # layer 7 must not appear anywhere in the output...
     assert _min_dist_to_paths((750, 750), paths) > 10
     # ...but conductor (not excluded) is unaffected.
@@ -1331,7 +1336,7 @@ def test_top_view_explicit_layers_bypasses_role_order():
     s.rect(50, 0, 0, 600, 600)       # "conductor" -- but higher layer number
     s.rect(5, 400, 400, 1000, 1000)  # "resistor" -- but lower layer number
     s.mask_op_top_view(63, layers=[5, 50])
-    paths = [sh for sh in s.cell.shapes if sh.layer == 63]
+    paths = [sh for sh in _tv(s).shapes if sh.layer == 63]
     # With plain layer-number order, layer 50 (conductor) is on top, so
     # ITS outline survives in full and layer 5's edge under it is cut --
     # the opposite of the role-based default above.
@@ -1450,3 +1455,78 @@ def test_fracture_polygons_passes_a_small_holefree_polygon_through_unchanged():
     b = box(0, 0, 100, 100)
     out = fracture_polygons(b)
     assert len(out) == 1 and out[0].equals(b)
+
+
+# --- top view writes to its own TOPVIEW cell, never the viewed cell --------
+
+def test_top_view_writes_to_a_topview_cell_not_the_viewed_cell():
+    s = _fresh_session()
+    s.rect(5, 0, 0, 100, 100)
+    before = list(s.cell.shapes)
+    written = s.mask_op_top_view(63, layers=[5])
+    assert written == {"TOP": 1}
+    assert s.cell.name == "TOP"                 # current cell unchanged
+    assert s.cell.shapes == before              # nothing added to it
+    assert [sh.layer for sh in _tv(s).shapes] == [63]
+
+
+def test_top_view_rerun_replaces_the_previous_view():
+    s = _fresh_session()
+    s.rect(5, 0, 0, 100, 100)
+    s.mask_op_top_view(63, layers=[5])
+    first = len(_tv(s).shapes)
+    s.mask_op_top_view(63, layers=[5])
+    assert len(_tv(s).shapes) == first          # rebuilt, not appended
+
+
+def test_top_view_placed_back_in_the_design_is_not_read_back_as_input():
+    s = _fresh_session()
+    s.rect(5, 0, 0, 100, 100)
+    s.mask_op_top_view(63)
+    first = len(_tv(s).shapes)
+    s.library.layers[63].fill = True
+    s.sref("TOPVIEW", (0, 0))                   # overlay it on the design
+    s.mask_op_top_view(63)
+    assert len(_tv(s).shapes) == first
+
+
+def test_top_view_out_cell_name_and_one_cell_per_viewed_cell():
+    s = _fresh_session()
+    s.rect(5, 0, 0, 100, 100)
+    s.mask_op_top_view(63, layers=[5], out_cell="ASSY_VIEW")
+    assert "TOPVIEW" not in s.library.cells
+    assert len(_tv(s, "ASSY_VIEW").shapes) == 1
+    s.new_cell("B")
+    s.rect(5, 0, 0, 50, 50)
+    s.mask_op_top_view(63, layers=[5], cell_names=["TOP", "B"])
+    assert len(_tv(s, "TOPVIEW_TOP").shapes) == 1
+    assert len(_tv(s, "TOPVIEW_B").shapes) == 1
+
+
+def test_top_view_of_its_own_output_cell_is_refused():
+    s = _fresh_session()
+    s.rect(5, 0, 0, 100, 100)
+    s.mask_op_top_view(63, layers=[5])
+    s.use_cell("TOPVIEW")
+    with pytest.raises(LayoutError, match="own output cell"):
+        s.mask_op_top_view(63, layers=[5])
+
+
+def test_top_view_is_one_undo_step_and_removes_the_new_cell():
+    s = _fresh_session()
+    s.rect(5, 0, 0, 100, 100)
+    s.mask_op_top_view(63, layers=[5])
+    assert "TOPVIEW" in s.library.cells
+    s.undo()
+    assert "TOPVIEW" not in s.library.cells
+
+
+def test_top_view_command_bar_out_option():
+    from hlayout.gui.commands import CommandInterpreter
+    from hlayout.scripting import ScriptConsole
+    s = _fresh_session()
+    s.rect(5, 0, 0, 100, 100)
+    interp = CommandInterpreter(s, ScriptConsole(s))
+    out = interp.run("TOPVIEW result=63 layers=5 out=VIEW1")
+    assert "of cell VIEW1" in out
+    assert len(_tv(s, "VIEW1").shapes) == 1

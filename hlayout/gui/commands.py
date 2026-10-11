@@ -119,11 +119,14 @@ Files:
                                        Save As Library / reusable part libraries
     OPEN <path.gds>                   restores the sidecar above, if one sits next to
                                        the file (a plain .gds with none opens as usual)
-    GERBER <output_prefix> [cell=<name>]
+    GERBER <output_prefix> [cell=<name>] [scale=<n>]
                                        export Gerber RS-274X -- one flattened file per
                                        visible layer with data, named
                                        <output_prefix>_L<NN>_<layer name>.gbr;
-                                       cell defaults to the current cell
+                                       cell defaults to the current cell; scale=5 or
+                                       scale=10 plots 5X / 10X artwork (coordinates
+                                       and path widths enlarged about the origin;
+                                       default 1 = actual size)
     FREECAD <path.FCMacro> [cell=<name>]
                                        write a FreeCAD macro that rebuilds the design
                                        as a 3D solid stack (one coloured solid per
@@ -318,13 +321,9 @@ to its stroked-outline polygon first; requires the shapely package):
                                        named cell's OWN shapes (never
                                        descending into placed sub-cells);
                                        cell defaults to the current cell.
-                                       Handy for a scratch/result layer --
-                                       TOPVIEW always APPENDS rather than
-                                       replacing, so repeated runs while
-                                       iterating accumulate leftover paths;
-                                       clear the layer first for a clean
-                                       rerun. Also available as
-                                       Session.clear_layer()
+                                       Handy for a scratch/result layer
+                                       between mask operations. Also
+                                       available as Session.clear_layer()
     MASKOP OVERSIZE <layer_a> result=<layer> amount=<dbu> [cell=<name>] [flatten=0|1]
                                        [simplify=<dbu>]
                                        grow everything on layer_a by amount DBU,
@@ -368,10 +367,17 @@ to its stroked-outline polygon first; requires the shapely package):
                                        cell defaults to the current cell; also
                                        available as Session.convert_rects_to_outline()
     TOPVIEW result=<layer> [layers=<n,n,...>] [exclude=<n,n,...>] [hatch=<dbu>]
-            [width=<dbu>] [cell=<name>] [flatten=0|1] [simplify=<dbu>]
+            [width=<dbu>] [cell=<name>] [out=<cellname>] [flatten=0|1]
+            [simplify=<dbu>]
                                        draw a top-down, hidden-line-removal
                                        pictorial view of the hybrid circuit onto
-                                       result_layer -- the visible OUTLINE edges
+                                       result_layer of a SEPARATE cell named
+                                       TOPVIEW (out=<cellname> to rename it) --
+                                       never into the viewed cell itself; the
+                                       output cell is rebuilt on every run and
+                                       keeps the viewed cell's coordinates, so
+                                       SREF TOPVIEW 0,0 overlays it exactly --
+                                       the visible OUTLINE edges
                                        of the design as seen from directly above
                                        (as in AutoCAD's HIDE), with the part of a
                                        lower entry's edge buried under a higher
@@ -1056,23 +1062,34 @@ class CommandInterpreter:
         return msg
 
     def _cmd_gerber(self, args):
+        usage = "usage: GERBER <output_prefix> [cell=<name>] [scale=<n>]"
         if not args:
-            raise CommandError("usage: GERBER <output_prefix> [cell=<name>]")
+            raise CommandError(usage)
         cell_name = None
         prefix = None
+        scale = 1.0
         for a in args:
             if a.lower().startswith("cell="):
                 cell_name = a.split("=", 1)[1]
+            elif a.lower().startswith("scale="):
+                text = a.split("=", 1)[1].strip().rstrip("xX")
+                try:
+                    scale = float(text)
+                except ValueError:
+                    raise CommandError(f"scale must be a number, e.g. scale=5 (got {text!r})")
             elif prefix is None:
                 prefix = a
             else:
-                raise CommandError("usage: GERBER <output_prefix> [cell=<name>]")
+                raise CommandError(usage)
         if prefix is None:
-            raise CommandError("usage: GERBER <output_prefix> [cell=<name>]")
-        written, skipped_text = self.session.export_gerber(prefix, cell_name=cell_name)
+            raise CommandError(usage)
+        written, skipped_text = self.session.export_gerber(prefix, cell_name=cell_name,
+                                                           scale=scale)
         if not written:
             return "no visible layers had data to export"
         msg = f"wrote {len(written)} Gerber file(s): " + ", ".join(f"L{n}" for n, _ in written)
+        if scale != 1.0:
+            msg += f" at {scale:g}X"
         if skipped_text:
             msg += f" ({skipped_text} text shape(s) skipped -- Gerber has no text primitive)"
         return msg
@@ -1561,7 +1578,7 @@ class CommandInterpreter:
     def _cmd_topview(self, args):
         usage = ("usage: TOPVIEW result=<layer> [layers=<n,n,...>] [exclude=<n,n,...>] "
                  "[hatch=<dbu>] [hatch_angle=<deg>[,<deg>]] [width=<dbu>] [cell=<name>] "
-                 "[flatten=0|1] [simplify=<dbu>]")
+                 "[out=<cellname>] [flatten=0|1] [simplify=<dbu>]")
         kwargs = {}
         for a in args:
             if "=" not in a:
@@ -1583,6 +1600,8 @@ class CommandInterpreter:
                 kwargs["line_width"] = float(v)
             elif k == "cell":
                 kwargs["cell_names"] = [v]
+            elif k == "out":
+                kwargs["out_cell"] = v
             elif k == "flatten":
                 kwargs["flatten"] = v not in ("0", "false", "no")
             elif k == "simplify":
@@ -1603,7 +1622,9 @@ class CommandInterpreter:
             layer_obj.visible = True
             made_visible = True
         suffix = " (layer visibility turned on)" if made_visible else ""
-        return f"TOPVIEW wrote {total} path(s) to layer {result_layer}{suffix}"
+        out_name = kwargs.get("out_cell", "TOPVIEW")
+        return (f"TOPVIEW wrote {total} path(s) to layer {result_layer} "
+                f"of cell {out_name}{suffix}")
 
     # --- DRC (Design Rule Check) -------------------------------------------
     def _cmd_drcrule(self, args):
@@ -2151,6 +2172,17 @@ class CommandInterpreter:
                 raise CommandError("step= must be a number")
             count = self.session.draw_thermal_contours(
                 result, plain[0], step=step, which=opts.get("slice"))
+            if count == 0:
+                import numpy as np
+                from ..core.thermal import nice_contour_step
+                which = opts.get("slice")
+                grid = result.surface_temps() if which is None else result.slice_temps(which)
+                if not np.isfinite(grid).any():
+                    return "thermal: that slice has no material, nothing to draw"
+                lo, hi = float(np.nanmin(grid)), float(np.nanmax(grid))
+                return (f"thermal: no contours drawn -- temperatures only span {lo:.2f} to "
+                        f"{hi:.2f} C, less than one {step:g} C step; try "
+                        f"step={nice_contour_step(lo, hi):g}")
             return f"thermal: drew {count} contour path(s) every {step:g} C"
         raise CommandError(usage)
 

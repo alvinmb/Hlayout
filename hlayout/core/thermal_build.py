@@ -185,7 +185,9 @@ def candidate_parts(library, cell_name: str) -> List[dict]:
     """Every placed resistor and component in ``cell_name`` that could
     be given a power: [{"ref_des", "kind", "cell", "power_mw",
     "source"}, ...]. ``source`` says where the power came from --
-    "thermal" (saved here), "designer" (the Resistor Designer list) or
+    "thermal" (saved here), "designer" (the Resistor Designer row with
+    this reference designator), "cell" (no row has this reference
+    designator, so the row the resistor's cell was generated from) or
     "" (none, 0 mW). Needs no solver; this is what fills the Powers
     table."""
     _require_shapely()
@@ -207,9 +209,13 @@ def _find_parts(library, cell, rules, roles, substrate_layer) -> List[dict]:
     bond = int(load_bond_rules(library).get("layer", -1))
     if bond >= 0:
         ignore.add(bond)
-    designer = {}
+    # Resistor Designer powers by row name. Row names aren't forced to be
+    # unique, so keep every power a name carries: a label match takes the
+    # first row (the Designer's own order), a cell-name match the highest.
+    designer: Dict[str, List[float]] = {}
     for row in load_resistor_list(library):
-        designer.setdefault(str(row.get("ref_des", "")), float(row.get("power_mw", 0.0)))
+        designer.setdefault(str(row.get("ref_des", "")), []).append(
+            float(row.get("power_mw", 0.0)))
     saved = rules["powers"]
     part_rules = rules["parts"]
     parts: List[dict] = []
@@ -223,14 +229,30 @@ def _find_parts(library, cell, rules, roles, substrate_layer) -> List[dict]:
         used.add(out)
         return out
 
-    def power_of(ref, is_resistor):
+    def power_of(ref, is_resistor, cell_name=""):
+        """(mW, source). A power saved for this reference designator
+        wins; then the Resistor Designer row of the same name; then --
+        for a resistor whose label matches no row -- the row its CELL
+        was generated from. generate_resistor() names the device cell
+        after the row ("R1", or "R1_8" when that name was taken), so a
+        resistor placed from row "R1" and later relabelled "R4" on the
+        layout still finds its power. Rows sharing that name may differ,
+        so the highest is used: the safe side for a temperature check."""
         if ref in saved:
             try:
                 return float(saved[ref]), "thermal"
             except (TypeError, ValueError):
                 pass
         if is_resistor and ref in designer:
-            return designer[ref], "designer"
+            return designer[ref][0], "designer"
+        if is_resistor and cell_name:
+            base = cell_name
+            head, sep, tail = cell_name.rpartition("_")
+            if sep and tail.isdigit() and head:
+                base = head
+            for key in (cell_name, base):
+                if key in designer:
+                    return max(designer[key]), "cell"
         return 0.0, ""
 
     def is_die(child):
@@ -250,7 +272,7 @@ def _find_parts(library, cell, rules, roles, substrate_layer) -> List[dict]:
                 continue
             if own & res_layers:
                 name = unique(label or child.name)
-                p, src = power_of(name, True)
+                p, src = power_of(name, True, child.name)
                 ink = _union([_transform_geom(shape_to_shapely(sh), tf)
                               for sh in child.shapes if sh.layer in res_layers
                               and shape_to_shapely(sh) is not None])

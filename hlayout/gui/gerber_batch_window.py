@@ -29,7 +29,10 @@ from tkinter import filedialog, ttk
 from . import dialogs
 from .fonts import section_header_font
 from ..core.errors import LayoutError
-from ..io.gerberio import GerberExportJob
+from ..io import toolsets
+from ..io.techfile import GERBER_JOBS_KEY, GERBER_OUTPUT_DIR_KEY, GERBER_SCALE_KEY
+from ..io.gerberio import (GerberExportJob, check_gerber_scale,
+                           default_gerber_output_dir, resolve_out_prefix)
 
 
 def _layer_label(library, number):
@@ -67,8 +70,10 @@ class JobDialog(tk.Toplevel):
         ttk.Button(form, text="Browse...", command=self._browse).grid(
             row=1, column=2, sticky="w", padx=4, pady=4)
 
-        ttk.Label(form, text="(files are written as <prefix>_L<NN>_<layer name>.gbr)",
-                  foreground="#888888").grid(row=2, column=0, columnspan=3, sticky="w", padx=4)
+        ttk.Label(form, text="(files are written as <prefix>_L<NN>_<layer name>.gbr;\n"
+                             "a plain name goes into the window's Output folder)",
+                  foreground="#888888", justify="left").grid(
+            row=2, column=0, columnspan=3, sticky="w", padx=4)
 
         self.all_layers_var = tk.BooleanVar(value=job is None or not job.layers)
         ttk.Checkbutton(
@@ -114,6 +119,15 @@ class JobDialog(tk.Toplevel):
             initialdir=self.initial_dir,
         )
         if path:
+            # A prefix picked inside the Output folder is kept RELATIVE to
+            # it, so the job follows the folder if that is changed later.
+            if self.initial_dir:
+                try:
+                    rel = os.path.relpath(path, self.initial_dir)
+                except ValueError:  # different drive
+                    rel = None
+                if rel and not rel.startswith(".."):
+                    path = rel
             self.prefix_var.set(path)
 
     def _accept(self):
@@ -149,6 +163,10 @@ class GerberBatchWindow(tk.Toplevel):
         self.geometry("1000x700")
         self.library = library
         self.app = app
+        # A design with no jobs of its own starts from the last-used set
+        # rather than an empty table (see hlayout.io.toolsets).
+        toolsets.seed_from_last_used(library, GERBER_JOBS_KEY,
+                                     transform=toolsets.gerber_jobs_for_another_design)
         self.jobs = [GerberExportJob.from_dict(j) for j in _load_jobs(library)]
         self._build()
         self._refresh_jobs()
@@ -173,6 +191,30 @@ class GerberBatchWindow(tk.Toplevel):
 
         ttk.Button(toolbar, text="Close", command=self.destroy).pack(side="right", padx=2)
         ttk.Button(toolbar, text="About", command=self._about).pack(side="right", padx=2)
+
+        # Output folder for the whole set: defaults to <current dir>/Gerber
+        # (next to the open design), editable, remembered with the design.
+        out_row = ttk.Frame(self, padding=(6, 0, 6, 4))
+        out_row.pack(fill="x")
+        ttk.Label(out_row, text="Output folder:").pack(side="left", padx=(2, 4))
+        self.out_dir_var = tk.StringVar(value=self._initial_out_dir())
+        self.out_dir_entry = ttk.Entry(out_row, textvariable=self.out_dir_var)
+        self.out_dir_entry.pack(side="left", fill="x", expand=True, padx=2)
+        self.out_dir_entry.bind("<FocusOut>", lambda e: self._out_dir_changed())
+        self.out_dir_entry.bind("<Return>", lambda e: self._out_dir_changed())
+        ttk.Button(out_row, text="Browse...", command=self._browse_out_dir).pack(side="left", padx=2)
+        ttk.Button(out_row, text="Default", command=self._reset_out_dir).pack(side="left", padx=2)
+
+        # Artwork scale for the whole set: hybrid screen artwork is
+        # normally plotted at 5X or 10X. Remembered with the design.
+        ttk.Label(out_row, text="Scale:").pack(side="left", padx=(14, 2))
+        self.scale_var = tk.StringVar(value=_scale_label(_load_scale(self.library)))
+        self.scale_combo = ttk.Combobox(out_row, textvariable=self.scale_var, width=6,
+                                        values=["1X", "5X", "10X"])
+        self.scale_combo.pack(side="left", padx=2)
+        self.scale_combo.bind("<<ComboboxSelected>>", lambda e: self._scale_changed())
+        self.scale_combo.bind("<FocusOut>", lambda e: self._scale_changed())
+        self.scale_combo.bind("<Return>", lambda e: self._scale_changed())
 
         body = ttk.Panedwindow(self, orient="vertical")
         body.pack(fill="both", expand=True, padx=4, pady=4)
@@ -217,18 +259,95 @@ class GerberBatchWindow(tk.Toplevel):
             layer_desc = ("all visible layers" if not job.layers
                           else ", ".join(str(n) for n in job.layers))
             self.job_table.insert("", "end", iid=str(i), values=(
-                job.name, layer_desc, job.out_prefix))
-        self.status_var.set(f"{len(self.jobs)} job(s) saved to the technology file")
+                job.name, layer_desc, resolve_out_prefix(job.out_prefix, self.output_dir())))
+        self.status_var.set(f"{len(self.jobs)} job(s) -- kept with the design between sessions")
 
     def _persist(self):
         _save_jobs(self.library, self.jobs)
+        self._remember()
+
+    def _remember(self):
+        """Write the jobs, output folder and scale through to disk now,
+        so they survive closing HLayout without saving the design. Only
+        the jobs are also kept as the user's last-used set -- an output
+        folder or scale belongs to one design."""
+        toolsets.remember(
+            self.library, [GERBER_JOBS_KEY, GERBER_OUTPUT_DIR_KEY, GERBER_SCALE_KEY],
+            app=self.app, last_used_keys=[GERBER_JOBS_KEY])
 
     def _current_job_row(self):
         sel = self.job_table.selection()
         return int(sel[0]) if sel else -1
 
+    # -- output folder -----------------------------------------------------
+    def _default_out_dir(self):
+        """<current dir>/Gerber -- beside the open design file, or under
+        the working directory for a design that has never been saved."""
+        design_path = getattr(self.app, "current_path", None) if self.app is not None else None
+        return default_gerber_output_dir(design_path)
+
+    def _initial_out_dir(self):
+        return _load_out_dir(self.library) or self._default_out_dir()
+
+    def output_dir(self):
+        """The folder jobs are written to: what's in the field, or the
+        default when the field is blank."""
+        return self.out_dir_var.get().strip() or self._default_out_dir()
+
+    def _out_dir_changed(self):
+        value = self.out_dir_var.get().strip()
+        if not value:
+            value = self._default_out_dir()
+            self.out_dir_var.set(value)
+        # Only a folder that differs from the default is saved, so a
+        # design left on the default keeps following wherever it is saved.
+        same = os.path.normcase(os.path.normpath(value)) == \
+            os.path.normcase(os.path.normpath(self._default_out_dir()))
+        before = _load_out_dir(self.library)
+        _save_out_dir(self.library, "" if same else value)
+        if _load_out_dir(self.library) != before:
+            self._remember()
+        self._refresh_jobs()
+
+    def _browse_out_dir(self):
+        start = self.output_dir()
+        while start and not os.path.isdir(start):
+            parent = os.path.dirname(start)
+            if parent == start:
+                break
+            start = parent
+        path = filedialog.askdirectory(title="Gerber Output Folder", parent=self,
+                                       initialdir=start or None, mustexist=False)
+        if path:
+            self.out_dir_var.set(os.path.normpath(path))
+            self._out_dir_changed()
+
+    def _reset_out_dir(self):
+        self.out_dir_var.set(self._default_out_dir())
+        self._out_dir_changed()
+
     def _default_dir(self):
-        return self.app.default_export_dir("gerber") if self.app is not None else None
+        return self.output_dir()
+
+    # -- artwork scale -----------------------------------------------------
+    def scale(self):
+        """The artwork scale in the Scale box as a number ("5X" -> 5.0).
+        Raises LayoutError if it isn't a positive number."""
+        return check_gerber_scale(self.scale_var.get().strip().rstrip("xX").strip() or "1")
+
+    def _scale_changed(self):
+        try:
+            value = self.scale()
+        except LayoutError as e:
+            self.status_var.set(str(e))
+            return False
+        self.scale_var.set(_scale_label(value))
+        changed = GERBER_SCALE_KEY not in self.library.tech_params or \
+            _load_scale(self.library) != value
+        _save_scale(self.library, value)
+        if changed:
+            self._remember()
+        return True
 
     def _add_job(self):
         dlg = JobDialog(self, self.library, initial_dir=self._default_dir())
@@ -271,8 +390,12 @@ class GerberBatchWindow(tk.Toplevel):
         scope = self.scope_var.get()
         cell_name = None if scope == "Current cell" else scope
         try:
-            results = self.app.session.run_gerber_export_batch(self.jobs, cell_name=cell_name)
-        except LayoutError as e:
+            self._out_dir_changed()  # pick up a typed-but-not-yet-committed folder
+            scale = self.scale()
+            self._scale_changed()
+            results = self.app.session.run_gerber_export_batch(
+                self.jobs, cell_name=cell_name, out_dir=self.output_dir(), scale=scale)
+        except (LayoutError, OSError) as e:
             dialogs.show_error("Export All", str(e), parent=self)
             return
         self.result_table.delete(*self.result_table.get_children())
@@ -307,7 +430,8 @@ class GerberBatchWindow(tk.Toplevel):
             total_skipped += skipped_text
         note = f", {total_skipped} text shape(s) skipped (Gerber has no text primitive)" if total_skipped else ""
         self.status_var.set(
-            f"Run All Jobs: {len(results)} job(s) run, {total_files} file(s) written{note}")
+            f"Run All Jobs: {len(results)} job(s) run, {total_files} file(s) written{note}"
+            f" at {scale:g}X -- output folder {self.output_dir()}")
 
     def _quick_export(self):
         """One-off export of every visible layer with data, prompting
@@ -329,8 +453,10 @@ class GerberBatchWindow(tk.Toplevel):
         scope = self.scope_var.get()
         cell_name = None if scope == "Current cell" else scope
         try:
-            written, skipped_text = self.app.session.export_gerber(path, cell_name=cell_name)
-        except LayoutError as e:
+            scale = self.scale()
+            written, skipped_text = self.app.session.export_gerber(
+                path, cell_name=cell_name, scale=scale)
+        except (LayoutError, OSError) as e:
             dialogs.show_error("Quick Export failed", str(e), parent=self)
             return
         if not written:
@@ -339,7 +465,9 @@ class GerberBatchWindow(tk.Toplevel):
         names = "\n".join(f"  L{n}: {os.path.basename(p)}" for n, p in written)
         note = (f"\n\n{skipped_text} text shape(s) were skipped -- "
                 f"Gerber has no text primitive." if skipped_text else "")
-        dialogs.show_info("Quick Export", f"Wrote {len(written)} file(s):\n{names}{note}", parent=self)
+        dialogs.show_info("Quick Export",
+                          f"Wrote {len(written)} file(s) at {scale:g}X:\n{names}{note}",
+                          parent=self)
         self.status_var.set(f"Quick Export: wrote {len(written)} file(s) to {os.path.dirname(path) or '.'}")
 
     def _about(self):
@@ -349,6 +477,15 @@ class GerberBatchWindow(tk.Toplevel):
             "A saved set of Gerber export jobs -- each with its own "
             "layer subset and output prefix -- run together as one "
             "action, e.g. one job per fab house or board revision.\n\n"
+            "Output folder: where the set is written. It defaults to a "
+            "Gerber folder beside the open design. A job whose prefix "
+            "is a plain name goes into it; a job with a full path keeps "
+            "its own location.\n\n"
+            "Scale: the artwork scale for every job and for Quick "
+            "Export -- 1X is actual size; hybrid screen artwork is "
+            "usually plotted at 5X (the default) or 10X. Coordinates and line widths "
+            "are enlarged about the design origin; the design itself "
+            "is not changed.\n\n"
             "Unlike Tools > Mask Operation Batch..., job order doesn't "
             "matter: a Gerber export never modifies the design, it "
             "only writes files, so one job never depends on another's "
@@ -367,6 +504,30 @@ def _load_jobs(library):
 def _save_jobs(library, jobs):
     from ..io.techfile import save_gerber_export_jobs
     save_gerber_export_jobs(library, jobs)
+
+
+def _load_out_dir(library):
+    from ..io.techfile import load_gerber_output_dir
+    return load_gerber_output_dir(library)
+
+
+def _save_out_dir(library, path):
+    from ..io.techfile import save_gerber_output_dir
+    save_gerber_output_dir(library, path)
+
+
+def _load_scale(library):
+    from ..io.techfile import load_gerber_scale
+    return load_gerber_scale(library)
+
+
+def _save_scale(library, scale):
+    from ..io.techfile import save_gerber_scale
+    save_gerber_scale(library, scale)
+
+
+def _scale_label(scale):
+    return f"{scale:g}X"
 
 
 def open_gerber_batch_window(app):

@@ -604,6 +604,23 @@ class ThermalResult:
 
 # --- isotherms ---------------------------------------------------------------
 
+def nice_contour_step(t_min: float, t_max: float, target: int = 8) -> float:
+    """A round contour interval (1, 2 or 5 times a power of ten, deg C)
+    that puts roughly ``target`` isotherms across ``t_min``..``t_max``.
+    A fixed 5 C step draws nothing at all on a board whose whole
+    temperature range is 2 C, which is the common case for a hybrid on
+    a good heatsink -- so callers offer this instead of a constant."""
+    span = float(t_max) - float(t_min)
+    if not span > 0 or not math.isfinite(span):
+        return 1.0
+    raw = span / max(1, int(target))
+    mag = 10.0 ** math.floor(math.log10(raw))
+    for mult in (1.0, 2.0, 5.0, 10.0):
+        if raw <= mult * mag * (1 + 1e-9):
+            return mult * mag
+    return 10.0 * mag
+
+
 def contour_segments(grid: np.ndarray, level: float):
     """Marching-squares line segments of ``grid == level``, in grid
     coordinates where cell (j, i)'s centre is at (i, j). Cells touching
