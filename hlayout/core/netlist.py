@@ -2,52 +2,69 @@
 identity into a list of electrical nets.
 
 Built on the same shapely flattening machinery as hlayout.core.drc and
-hlayout.core.maskops (see maskops's module docstring for why shapely,
-and layer_geoms_flattened() for the general "descend into every placed
-Sref/Aref, folding in its transform" pattern reused here): every shape
-on one of the given conductor layers, anywhere in the design's
-hierarchy, is unioned together and split back into connected
-components -- exactly hlayout.core.drc._connected_components()'s
-technique -- and each component IS an electrical net, since in this
-process the only way two different conductor layers' copper ever
-physically overlaps is a real via (see hlayout.gui's Via Wizard/Route
-tool), so plain geometric touching is a sound proxy for "electrically
-the same net."
+hlayout.core.maskops: every shape on one of the given conductor layers,
+anywhere in the design's hierarchy, is unioned together and split back
+into connected components, and each component is a piece of substrate
+copper. In this process the only way two different conductor layers'
+copper physically overlaps is a real via, so plain geometric touching
+is a sound proxy for "electrically the same net" -- FOR SUBSTRATE
+COPPER.
 
-What layer_geoms_flattened() alone can't give us is which PIN each
-piece of copper belongs to: it returns bare merged geometry with no
-memory of which original shape, in which placed instance, it came
-from. So this module doesn't reuse it directly -- _flatten() below is
-a provenance-carrying variant that, for every shape carrying a
-non-empty `.pin` (see Rectangle.pin/Polygon.pin), also records its own
-untransformed-to-transformed geometry plus the ref designator of the
-SRef that placed it -- specifically the *immediate* parent SRef's
-`.label`, not any label further up the hierarchy, since that's the
-placement that actually corresponds to "this physical part" (a
-resistor's own Sref, a footprint's own Sref -- not some outer
-assembly-level Sref wrapping several parts together).
+That proxy is wrong for two things that live ABOVE the substrate, and
+they are handled separately:
 
-A placed SRef can ALSO be a pin in its own right (SRef.pin), for a
-round lead built from a shared via-cell template (Session.
-create_via_cell()/the Via Wizard): the template's own shapes are
-reused by every placement, so a per-shape pin field would be shared
-by all of them -- SRef.pin instead lives on the placement, one number
-per instance. Such a pin is attributed to the *enclosing* part's ref
-designator (not the via instance's own -- it doesn't have one), since
-it's one lead of the part the level above identifies.
+* WIRE BONDS (`bond_layer`, Setup > Wire Bond Rules...). A bond wire is
+  in the air; it only touches anything at its two ends (ball and
+  stitch). Unioning the drawn O------O figure with the copper would
+  short it to every trace it flies over, and -- worse -- short every
+  bond on a die to each other through the die-attach pad underneath
+  the die. So a bond contributes nothing to the copper union: each
+  bond-layer Path is one link whose two ENDPOINTS (a disc of the wire's
+  half-width, at least) are resolved to whatever they land on.
+  The end-ball circles wire_bond() draws are pictorial and ignored.
+
+* DIE PADS (`die_pad_layers`, Wire Bond Rules... "Die pad layer").
+  Bond pads on top of a bare die are isolated from the substrate copper
+  the die sits on. Each die-pad shape is its own node, never merged
+  with substrate copper or with other die-pad shapes even when they
+  overlap in XY (a die outline drawn on the pad layer would otherwise
+  swallow every pad). A bond end that lands on die-pad shapes connects
+  to the SMALLEST one under it. A die-pad shape that encloses other
+  die-pad shapes is taken to be a die outline, never a landing: a bond
+  end that hits only an outline has missed its pad and is reported in
+  Net.open_bond_ends. A bond end that lands on no die-pad shape at all
+  connects to the substrate copper under it.
+
+Connectivity between substrate components, die pads and bonds is then
+a plain union-find; each resulting group is one Net.
+
+Pins: a shape with a non-empty `.pin` (Rectangle.pin/Polygon.pin) is
+attributed to the label of the *immediate* parent SRef. A placed SRef
+can also be a pin itself (SRef.pin, a lead built from a shared
+via/pad-cell template); it is attributed to the *enclosing* part's ref
+designator and covers whatever copper/die-pad shapes that instance
+draws. A die pad with no pin number at all that has a bond landing on
+it is still reported -- as "<RefDes>.@x,y" (pad centre, DBU), counted
+as unresolved -- so a bonded-but-unnumbered pad is visible instead of
+silently vanishing.
+
+With `bond_layer=None` (legacy callers) every layer in
+`conductor_layers` is plain copper, exactly as before.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Iterable, List, Optional, Tuple
 
-from .errors import GeometryError
+from .errors import GeometryError  # noqa: F401  (re-exported for callers)
 from .maskops import (_compose_transforms, _require_shapely, _sref_point_transform,
-                       _transform_geom, shape_to_shapely, unary_union)
-from .shapes import expand_arefs_to_srefs
+                      _transform_geom, shape_to_shapely, unary_union)
+from .shapes import Path, expand_arefs_to_srefs
 
 try:
+    from shapely.geometry import Point as _ShapelyPoint
     from shapely.geometry import Polygon as _ShapelyPolygon
 except ImportError:  # pragma: no cover - exercised only without shapely installed
+    _ShapelyPoint = None
     _ShapelyPolygon = None
 
 
@@ -56,10 +73,14 @@ class NetPin:
     """One pin's identity within a net: `ref_des` is the label of the
     Sref that placed the part this pin belongs to (empty if that
     instance was never given one -- see Net.unresolved_count), `pin`
-    is the pin number/name itself (Rectangle.pin/Polygon.pin)."""
+    is the pin number/name itself (Rectangle.pin/Polygon.pin/SRef.pin),
+    or "@x,y" for a bonded die pad that has no pin number."""
 
     ref_des: str
     pin: str
+    #: (x, y) DBU in the extracted cell's coordinates -- where this pin
+    #: is, for zooming to it. Not part of equality.
+    xy: Optional[Tuple[int, int]] = field(default=None, compare=False)
 
     def label(self) -> str:
         """"R1.2", or "?.2" if the owning instance has no ref designator."""
@@ -68,151 +89,296 @@ class NetPin:
 
 @dataclass
 class Net:
-    """One electrical net: a connected blob of copper (id is just a
-    sequential "NET1", "NET2", ... label, or "UNASSIGNED" -- see
-    below) and the pins found on it. `unresolved_count` counts members
-    whose `ref_des` is empty -- the pin number is known (someone
-    numbered that pad) but the placed instance carrying it has no ref
-    designator yet (SRef.label wasn't set), so the pin can't yet be
-    tied to a named component in a BOM/schematic sense. A net with
-    `id == "UNASSIGNED"` is not a real net at all -- see extract_netlist()."""
+    """One electrical net (id "NET1", "NET2", ... or "UNASSIGNED").
+    `unresolved_count` counts members with no ref designator or no pin
+    number. `bonds` is how many wire bonds belong to the net;
+    `open_bond_ends` lists (x, y) DBU bond endpoints on this net that
+    landed on nothing -- a bond to a pad that isn't on any conductor/
+    die-pad layer you extracted. A net with id "UNASSIGNED" is not a
+    real net -- see extract_netlist()."""
 
     id: str
     pins: List[NetPin] = field(default_factory=list)
     unresolved_count: int = 0
+    bonds: int = 0
+    open_bond_ends: List[Tuple[int, int]] = field(default_factory=list)
+    #: (x, y) DBU of a point on the net (copper, pad or bond), for
+    #: zooming to a net that has no pins.
+    location: Optional[Tuple[int, int]] = None
 
 
-def _flatten(library, cell, conductor_layers, ref_des: str = "", point_transform=None, _depth=0):
-    """Returns (geoms, pinned): `geoms` is the flat list of shapely
-    geometries on any of `conductor_layers`, anywhere in `cell`'s
-    hierarchy (for the union/connectivity pass); `pinned` is a list of
-    (geom, ref_des, pin) for every shape with a non-empty `.pin`,
-    REGARDLESS of which layer it's on -- a pin set on a shape whose
-    layer isn't in `conductor_layers` (e.g. passed the wrong layer
-    list, or numbered a pin on a documentation shape by mistake) still
-    needs to be reported rather than silently vanishing; see
-    extract_netlist()'s "UNASSIGNED" bucket.
+def _pt(geom) -> Tuple[int, int]:
+    """A point inside `geom` (its centroid when that lies inside it)."""
+    c = geom.centroid
+    if not geom.contains(c):
+        c = geom.representative_point()
+    return (int(round(c.x)), int(round(c.y)))
 
-    `ref_des` is the ref designator this recursion level's shapes
-    should be attributed to -- the label of the immediate parent SRef,
-    reassigned (not accumulated) at every level of Sref nesting, per
-    this module's docstring."""
+
+class _Flat:
+    """Everything _flatten() collects, in top-cell coordinates."""
+
+    def __init__(self):
+        self.copper = []      # shapely geoms on substrate conductor layers
+        self.pads = []        # [geom, owner_ref, [NetPin...]] one per die-pad shape
+        self.bonds = []       # [(landing_geom, (x, y)), (landing_geom, (x, y))]
+        self.pinned = []      # (geom, ref_des, pin, on_copper) for substrate/other pins
+
+
+def _flatten(library, cell, copper_layers, pad_layers, bond_layer,
+             flat, ref_des="", owner_ref="", point_transform=None, _depth=0):
+    """Walk `cell`'s hierarchy into `flat`. Returns (n_copper, n_pads),
+    the index ranges' starts are recorded by the caller to know what an
+    SRef instance itself drew (for SRef.pin).
+
+    `ref_des` is the immediate parent SRef's label (reassigned at every
+    level); `owner_ref` is the nearest NON-empty label up the chain,
+    used only to name an unnumbered bonded die pad."""
     _require_shapely()
-    geoms = []
-    pinned = []
     if _depth > 64:
-        return geoms, pinned
-    layer_set = set(conductor_layers)
+        return
     for shape in cell.shapes:
-        pin = getattr(shape, "pin", "")
-        on_conductor = shape.layer in layer_set
-        if not on_conductor and not pin:
+        layer = shape.layer
+        pin = getattr(shape, "pin", "") or ""
+
+        if bond_layer is not None and layer == bond_layer:
+            if isinstance(shape, Path) and len(shape.points) >= 2:
+                r = max(1.0, float(getattr(shape, "width", 0) or 0) / 2.0)
+                ends = []
+                for p in (shape.points[0], shape.points[-1]):
+                    g = _ShapelyPoint(float(p[0]), float(p[1])).buffer(r, 8)
+                    c = _ShapelyPoint(float(p[0]), float(p[1]))
+                    if point_transform is not None:
+                        g = _transform_geom(g, point_transform)
+                        c = _transform_geom(c, point_transform)
+                    ends.append((g, (int(round(c.x)), int(round(c.y)))))
+                flat.bonds.append(ends)
+            # end-ball circles and anything else on the bond layer are
+            # pictorial -- connectivity comes from the Path endpoints
+            continue
+
+        on_copper = layer in copper_layers
+        on_pad = layer in pad_layers
+        if not (on_copper or on_pad or pin):
             continue
         g = shape_to_shapely(shape)
         if g is None or g.is_empty:
             continue
         if point_transform is not None:
             g = _transform_geom(g, point_transform)
-        if on_conductor:
-            geoms.append(g)
+
+        if on_pad:
+            pins = [NetPin(ref_des=ref_des, pin=pin)] if pin else []
+            flat.pads.append([g, owner_ref, pins])
+            continue
+        if on_copper:
+            flat.copper.append(g)
         if pin:
-            # `on_conductor` rides along so extract_netlist() only ever
-            # tests a pin's geometry against the SAME layers' connectivity
-            # union -- shapely intersection is purely 2D and knows
-            # nothing about layers, so a pin on a layer that isn't in
-            # `conductor_layers` must never be tested against another
-            # layer's copper just because they happen to overlap in XY.
-            pinned.append((g, ref_des, pin, on_conductor))
+            flat.pinned.append((g, ref_des, pin, on_copper))
 
     def _descend(ref, child_ref_des):
         if ref.cell_name not in library.cells:
             return
         child = library.cells[ref.cell_name]
         combined = _compose_transforms(point_transform, _sref_point_transform(ref))
-        child_geoms, child_pinned = _flatten(
-            library, child, conductor_layers, ref_des=child_ref_des,
-            point_transform=combined, _depth=_depth + 1,
-        )
-        geoms.extend(child_geoms)
-        pinned.extend(child_pinned)
-        if ref.pin and child_geoms:
-            # This SRef instance is itself a numbered pin -- e.g. a
-            # round lead built from a shared via-cell template
-            # (Session.create_via_cell()/the Via Wizard), where the pin
-            # number lives on the PLACEMENT (SRef.pin), not on the
-            # template's own shapes (which are shared by every
-            # placement and so can't carry a distinct number). Attribute
-            # the union of whatever conductor-layer copper this
-            # instance's own cell draws to it, under the CURRENT
-            # (enclosing-part) ref_des -- not child_ref_des -- since a
-            # via instance doesn't carry its own separate ref
-            # designator; it's one lead of the part the *enclosing*
-            # SRef's label identifies.
-            pinned.append((unary_union(child_geoms), ref_des, ref.pin, True))
+        c0, p0 = len(flat.copper), len(flat.pads)
+        _flatten(library, child, copper_layers, pad_layers, bond_layer, flat,
+                 ref_des=child_ref_des, owner_ref=child_ref_des or owner_ref,
+                 point_transform=combined, _depth=_depth + 1)
+        if ref.pin:
+            # This placement is itself a numbered pin (round lead from a
+            # shared template): attribute it, under the ENCLOSING part's
+            # ref_des, to whatever this instance drew.
+            child_copper = flat.copper[c0:]
+            if child_copper:
+                flat.pinned.append((unary_union(child_copper), ref_des, ref.pin, True))
+            for pad in flat.pads[p0:]:
+                pad[2].append(NetPin(ref_des=ref_des, pin=ref.pin))
 
     for ref in cell.srefs:
         _descend(ref, ref.label)
     for ref in expand_arefs_to_srefs(cell.arefs):
-        # ARef has no per-instance label of its own (unlike SRef), so
-        # every element of a placed array inherits whatever ref_des
-        # this level already had (usually none) rather than getting a
-        # distinct one -- placing an individually-netlisted pinned
-        # part as an array isn't really supported; arrays are meant
-        # for uniform pads/bond sites, not discrete numbered parts.
+        # ARef has no per-instance label; elements inherit this level's.
         _descend(ref, ref_des)
-    return geoms, pinned
 
 
-def extract_netlist(library, cell, conductor_layers) -> List[Net]:
-    """Extract the netlist of `cell` (descending into every placed
-    instance) as seen across `conductor_layers` -- an iterable of
-    already-resolved layer numbers (see Library.layers.resolve(); the
-    caller, not this function, resolves layer names since this module
-    only knows about hlayout.core, not Session's convenience API).
+class _DSU:
+    def __init__(self, n):
+        self.p = list(range(n))
 
-    Every touching/overlapping piece of copper on any of those layers
-    becomes one Net (see module docstring for why cross-layer overlap
-    is trusted as "same net" without separate via detection). Each
-    net's `pins` list is every pinned shape (Rectangle.pin/Polygon.pin
-    set) whose geometry falls on that net's copper, identified as
-    NetPin(ref_des, pin).
+    def find(self, a):
+        while self.p[a] != a:
+            self.p[a] = self.p[self.p[a]]
+            a = self.p[a]
+        return a
 
-    A pinned shape whose net could not be determined -- its own layer
-    wasn't in `conductor_layers`, so it was never part of the
-    connectivity union at all -- is collected into one final
-    Net(id="UNASSIGNED") instead of being silently dropped; a properly
-    numbered design conductor-layer pad should never end up there, so
-    a non-empty UNASSIGNED net is itself worth investigating (wrong
-    layer list, or a pin set somewhere unexpected).
+    def union(self, a, b):
+        ra, rb = self.find(a), self.find(b)
+        if ra != rb:
+            if rb < ra:
+                ra, rb = rb, ra
+            self.p[rb] = ra
 
-    Requires the shapely package (see hlayout.core.maskops)."""
-    _require_shapely()
-    resolved_layers = list(conductor_layers)
-    geoms, pinned = _flatten(library, cell, resolved_layers)
 
+def _components(geoms):
     merged = unary_union(geoms) if geoms else _ShapelyPolygon()
     if merged.is_empty:
-        components = []
-    elif merged.geom_type == "Polygon":
-        components = [merged]
-    elif merged.geom_type == "MultiPolygon":
-        components = list(merged.geoms)
-    else:
-        components = []
+        return []
+    if merged.geom_type == "Polygon":
+        return [merged]
+    if merged.geom_type in ("MultiPolygon", "GeometryCollection"):
+        return [g for g in merged.geoms if g.geom_type == "Polygon" and not g.is_empty]
+    return []
 
-    nets = [Net(id=f"NET{i}") for i in range(1, len(components) + 1)]
+
+def extract_netlist(library, cell, conductor_layers: Iterable[int],
+                    bond_layer: Optional[int] = None,
+                    die_pad_layers: Iterable[int] = ()) -> List[Net]:
+    """Extract the netlist of `cell` (descending into every placed
+    instance).
+
+    `conductor_layers`: resolved layer numbers of substrate copper.
+    `bond_layer`: resolved wire-bond layer, or None to treat every
+    layer in conductor_layers as plain copper (legacy behaviour).
+    `die_pad_layers`: resolved layer numbers of bare-die bond pads,
+    kept isolated from substrate copper (see module docstring). A layer
+    listed here or as bond_layer is removed from the copper union even
+    if it also appears in conductor_layers.
+
+    A pinned shape on none of those layers is collected into one final
+    Net(id="UNASSIGNED") rather than dropped. Requires shapely."""
+    _require_shapely()
+    pad_layers = {int(l) for l in die_pad_layers if l is not None and int(l) >= 0}
+    b_layer = int(bond_layer) if bond_layer is not None and int(bond_layer) >= 0 else None
+    copper_layers = {int(l) for l in conductor_layers} - pad_layers
+    if b_layer is not None:
+        copper_layers.discard(b_layer)
+
+    flat = _Flat()
+    _flatten(library, cell, copper_layers, pad_layers, b_layer, flat)
+
+    comps = _components(flat.copper)
+    n_c, n_p, n_b = len(comps), len(flat.pads), len(flat.bonds)
+    PAD0, BOND0 = n_c, n_c + n_p
+    dsu = _DSU(n_c + n_p + n_b)
+
+    try:
+        from shapely.strtree import STRtree
+        comp_tree = STRtree(comps) if comps else None
+        pad_tree = STRtree([p[0] for p in flat.pads]) if flat.pads else None
+    except Exception:  # pragma: no cover - very old shapely
+        comp_tree = pad_tree = None
+
+    def _hits(tree, geoms, probe):
+        if not geoms:
+            return []
+        if tree is not None:
+            idx = tree.query(probe)
+            cand = [int(i) for i in idx] if len(idx) and not hasattr(idx[0], "geom_type") \
+                else [geoms.index(g) for g in idx]
+        else:
+            cand = range(len(geoms))
+        return [i for i in cand if geoms[i].intersects(probe)]
+
+    pad_geoms = [p[0] for p in flat.pads]
+    pad_bonded = [False] * n_p
+    # A die-pad shape that encloses other die-pad shapes is a die
+    # outline/body drawn on the pad layer, not a pad: a bond landing on
+    # it and nothing smaller has MISSED its pad -- reported as an open
+    # end rather than letting the outline short every such bond together.
+    is_outline = [False] * n_p
+    for i, g in enumerate(pad_geoms):
+        for j in _hits(pad_tree, pad_geoms, g):
+            if j != i and pad_geoms[j].area < g.area and g.contains(pad_geoms[j].centroid):
+                is_outline[i] = True
+                break
+    open_ends = {}   # bond index -> [(x, y), ...]
+
+    for bi, ends in enumerate(flat.bonds):
+        node = BOND0 + bi
+        for land, xy in ends:
+            pads_hit = _hits(pad_tree, pad_geoms, land)
+            if pads_hit:
+                real = [i for i in pads_hit if not is_outline[i]]
+                if real:
+                    pi = min(real, key=lambda i: pad_geoms[i].area)
+                    dsu.union(node, PAD0 + pi)
+                    pad_bonded[pi] = True
+                else:
+                    open_ends.setdefault(bi, []).append(xy)
+                continue
+            cu_hit = _hits(comp_tree, comps, land)
+            for ci in cu_hit:
+                dsu.union(node, ci)
+            if not cu_hit:
+                open_ends.setdefault(bi, []).append(xy)
+    # bonds stitched on top of one another (stacked stitch, no pad under)
+    for i in range(n_b):
+        for j in range(i + 1, n_b):
+            if any(a[0].intersects(b[0]) for a in flat.bonds[i] for b in flat.bonds[j]):
+                dsu.union(BOND0 + i, BOND0 + j)
+
+    groups = {}   # root -> Net (created lazily, numbered in node order)
+    order = []
+
+    def _node_pt(node):
+        if node < PAD0:
+            return _pt(comps[node])
+        if node < BOND0:
+            return _pt(flat.pads[node - PAD0][0])
+        (_, a), (_, b) = flat.bonds[node - BOND0]
+        return ((a[0] + b[0]) // 2, (a[1] + b[1]) // 2)
+
+    def _net_for(node):
+        root = dsu.find(node)
+        if root not in groups:
+            groups[root] = Net(id="", location=_node_pt(root))
+            order.append(root)
+        return groups[root]
+
+    for ci in range(n_c):
+        _net_for(ci)
+
     unassigned: List[NetPin] = []
-    for geom, ref_des, pin, on_conductor in pinned:
+    for geom, ref_des, pin, on_copper in flat.pinned:
         matched = False
-        if on_conductor:
-            for net, comp in zip(nets, components):
-                if geom.intersects(comp):
-                    net.pins.append(NetPin(ref_des=ref_des, pin=pin))
-                    if not ref_des:
-                        net.unresolved_count += 1
-                    matched = True
+        xy = _pt(geom)
+        if on_copper:
+            for ci in _hits(comp_tree, comps, geom):
+                net = _net_for(ci)
+                net.pins.append(NetPin(ref_des=ref_des, pin=pin, xy=xy))
+                if not ref_des:
+                    net.unresolved_count += 1
+                matched = True
         if not matched:
-            unassigned.append(NetPin(ref_des=ref_des, pin=pin))
+            unassigned.append(NetPin(ref_des=ref_des, pin=pin, xy=xy))
+
+    for pi, (g, owner_ref, pins) in enumerate(flat.pads):
+        if not pins and not pad_bonded[pi]:
+            continue   # unnumbered, unbonded die-pad shape (outline, spare pad)
+        net = _net_for(PAD0 + pi)
+        if pins:
+            for p in pins:
+                p.xy = _pt(g)
+                net.pins.append(p)
+                if not p.ref_des:
+                    net.unresolved_count += 1
+        else:
+            c = g.centroid
+            net.pins.append(NetPin(ref_des=owner_ref,
+                                   pin=f"@{int(round(c.x))},{int(round(c.y))}", xy=_pt(g)))
+            net.unresolved_count += 1
+
+    for bi in range(n_b):
+        net = _net_for(BOND0 + bi)
+        net.bonds += 1
+        net.open_bond_ends.extend(open_ends.get(bi, []))
+
+    nets = []
+    for k, root in enumerate(sorted(order), start=1):
+        net = groups[root]
+        net.id = f"NET{k}"
+        nets.append(net)
 
     if unassigned:
         nets.append(Net(

@@ -49,6 +49,9 @@ from .techfile import (
     load_bond_rules,
     load_component_models,
     load_layer_thickness,
+    load_dielectric_rules,
+    load_resistor_geometry_rules,
+    load_thermal_rules,
 )
 
 _MAX_DEPTH = 64
@@ -57,6 +60,94 @@ _MAX_DEPTH = 64
 _DEFAULT_LOOP_HEIGHT_UM = 250.0
 #: Colour for an extruded component body (RGB 0..1).
 _COMPONENT_RGB = (0.15, 0.15, 0.17)
+#: Fired alumina / ceramic substrate (RGB 0..1) -- white.
+_SUBSTRATE_RGB = (0.97, 0.97, 0.95)
+#: Substrate thickness when the thermal setup doesn't give one (microns).
+_DEFAULT_SUBSTRATE_UM = 635.0
+
+
+def substrate_layers(library):
+    """Layers that ARE the substrate (not printed films): the thermal
+    setup's substrate_layer if set, else every layer whose name says
+    substrate / alumina / ceramic -- the same naming test Top View uses."""
+    try:
+        n = int(load_thermal_rules(library)["boundary"].get("substrate_layer", -1))
+    except Exception:
+        n = -1
+    if n >= 0:
+        return {n}
+    return {i for i in range(len(library.layers))
+            if any(w in (library.layers[i].name or "").lower()
+                   for w in ("substrate", "alumina", "ceramic"))}
+
+
+def substrate_thickness_um(library):
+    try:
+        t = float(load_thermal_rules(library)["boundary"].get("substrate_um", 0) or 0)
+    except Exception:
+        t = 0.0
+    return t if t > 0 else _DEFAULT_SUBSTRATE_UM
+
+
+#: Resistor glaze overprint: green, see-through (RGB 0..1, transparency %).
+_GLAZE_RGB = (0.20, 0.72, 0.35)
+_GLAZE_TRANSPARENCY = 55
+
+
+def dielectric_layer(library):
+    try:
+        n = int(load_dielectric_rules(library).get("layer", -1))
+    except Exception:
+        n = -1
+    return n if n >= 0 else None
+
+
+def keepout_layers(library):
+    """Layers that only mark keep-out areas (never printed): the
+    dielectric rules' extra keep-out layers, the resistor keep-out layer,
+    and any layer whose name says keep-out -- except the dielectric layer
+    itself, whose keep-outs are its datatype-0 inputs (see
+    write_freecad_macro)."""
+    out = set()
+    try:
+        out |= {int(n) for n in load_dielectric_rules(library).get("keepout_layers", [])}
+    except Exception:
+        pass
+    try:
+        k = int(load_resistor_geometry_rules(library).get("keepout_layer", -1))
+        if k >= 0:
+            out.add(k)
+    except Exception:
+        pass
+    for i in range(len(library.layers)):
+        nm = (library.layers[i].name or "").lower().replace("-", "").replace(" ", "")
+        if "keepout" in nm:
+            out.add(i)
+    out.discard(dielectric_layer(library))
+    return {n for n in out if n >= 0}
+
+
+def glaze_layers(library):
+    out = set()
+    try:
+        g = int(load_resistor_geometry_rules(library).get("glaze_layer", -1))
+        if g >= 0:
+            out.add(g)
+    except Exception:
+        pass
+    for i in range(len(library.layers)):
+        if "glaze" in (library.layers[i].name or "").lower():
+            out.add(i)
+    return out
+
+
+def isolated_pad_layers(library):
+    """Wire-bond rules' isolated pad layers (die pads, header pins): part
+    of a component's own body, never a printed film on the substrate."""
+    try:
+        return {int(n) for n in load_bond_rules(library).get("die_pad_layers", [])}
+    except Exception:
+        return set()
 
 
 def _rgb01(hex_color: str):
@@ -109,7 +200,10 @@ def is_component_cell(library, cell_name, film_layers, comp_models):
     c = library.cells.get(cell_name)
     if c is None:
         return False
-    return any(sh.layer not in film_layers for sh in c.shapes)
+    # A cell drawing only the substrate (plus films) is the substrate
+    # itself -- drawn as the white base slab, never as a component box.
+    subs = substrate_layers(library)
+    return any(sh.layer not in film_layers and sh.layer not in subs for sh in c.shapes)
 
 
 def _walk_instances(library, cell_name, film_layers, comp_models):
@@ -263,11 +357,9 @@ _HEADER = '''# FreeCAD 3D view of {design}  (cell {cell})
 import FreeCAD as App
 import Part
 from functools import reduce
-try:
+_GUI = bool(getattr(App, "GuiUp", False))
+if _GUI:
     import FreeCADGui
-    _GUI = True
-except Exception:
-    _GUI = False
 
 V = App.Vector
 _doc = App.newDocument({docname!r})
@@ -284,13 +376,94 @@ def _fuse(solids):
     return reduce(lambda a, b: a.fuse(b), solids[1:], solids[0]) if len(solids) > 1 else solids[0]
 
 
-def _add(name, shape, rgb):
+#: shapes bonds and parts land on: _SURF = films + substrate (what a
+#: component sits on), _PROBE = everything solid so far (what a bond
+#: end lands on -- die pads, header pins, traces).
+_SURF = []
+_PROBE = []
+
+
+def _add(name, shape, rgb, surface=False, transparency=0):
     if shape is None:
         return None
     o = _doc.addObject("Part::Feature", name)
     o.Shape = shape
     if _GUI and o.ViewObject is not None:
         o.ViewObject.ShapeColor = rgb
+        if transparency:
+            o.ViewObject.Transparency = int(transparency)
+    _PROBE.append(o.Shape)
+    if surface:
+        _SURF.append(o.Shape)
+    return o
+
+
+def _top_z(x, y, shapes=None, default=None):
+    """Highest solid surface straight below/at (x, y), or `default`."""
+    best = None
+    for sh in (_PROBE if shapes is None else shapes):
+        bb = sh.BoundBox
+        if not (bb.XMin - 1e-6 <= x <= bb.XMax + 1e-6 and bb.YMin - 1e-6 <= y <= bb.YMax + 1e-6):
+            continue
+        try:
+            sec = sh.section(Part.makeLine(V(x, y, bb.ZMax + 1.0), V(x, y, bb.ZMin - 1.0)))
+        except Exception:
+            continue
+        for v in sec.Vertexes:
+            if best is None or v.Point.z > best:
+                best = v.Point.z
+    return default if best is None else best
+
+
+def _surface_z(x0, y0, x1, y1):
+    """Where a part with footprint (x0,y0)-(x1,y1) rests: the highest
+    film/substrate top under its centre or inset corners (0 if none)."""
+    ix, iy = (x1 - x0) * 0.2, (y1 - y0) * 0.2
+    pts = [((x0 + x1) / 2.0, (y0 + y1) / 2.0), (x0 + ix, y0 + iy), (x1 - ix, y0 + iy),
+           (x1 - ix, y1 - iy), (x0 + ix, y1 - iy)]
+    zs = [_top_z(x, y, _SURF) for x, y in pts]
+    zs = [z for z in zs if z is not None]
+    return max(zs) if zs else 0.0
+
+
+def _place_model(path, name, x, y, z, rot_deg, mirrored):
+    """Bring a STEP/IGES model in at (x, y, z) rotated rot_deg about Z.
+    In the GUI it is imported with ImportGui so the model's own colours
+    survive, grouped in an App::Part named `name`; otherwise (or when
+    mirrored) it is read as a plain shape."""
+    P = App.Placement(V(x, y, z), App.Rotation(V(0, 0, 1), rot_deg))
+    if _GUI and not mirrored:
+        try:
+            import ImportGui
+            before = set(o.Name for o in _doc.Objects)
+            ImportGui.insert(path, _doc.Name)
+            new = [o for o in _doc.Objects if o.Name not in before]
+            if new:
+                part = _doc.addObject("App::Part", name)
+                for o in [o for o in new if not any(p in new for p in o.InList)]:
+                    part.addObject(o)
+                part.Placement = P
+                _doc.recompute()
+                for o in new:
+                    if o.isDerivedFrom("Part::Feature"):
+                        try:
+                            sh = o.Shape.copy()
+                            sh.Placement = o.getGlobalPlacement()   # through the App::Parts
+                            _PROBE.append(sh)
+                        except Exception:
+                            pass
+                return part
+        except Exception as e:
+            App.Console.PrintWarning("HLayout: coloured import of %s failed (%s), "
+                                     "reading plain shape\\n" % (path, e))
+    sh = Part.Shape()
+    sh.read(path)
+    if mirrored:
+        sh = sh.mirror(V(0, 0, 0), V(1, 0, 0))
+    o = _doc.addObject("Part::Feature", name)
+    o.Shape = sh
+    o.Placement = P
+    _PROBE.append(o.Shape)
     return o
 
 
@@ -363,7 +536,19 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
     loop_h_mm = _mm(float(loop_height_um) if loop_height_um is not None
                     else _DEFAULT_LOOP_HEIGHT_UM)
 
-    film_layers = {int(k) for k in thick}
+    # The substrate is the white base slab below z=0, and isolated pad
+    # layers (die pads, header pins) belong to their part's own body --
+    # neither is a printed film, so neither takes a place in the stack.
+    subs = substrate_layers(library)
+    # keep-out markers are never printed, so never exported
+    film_layers = ({int(k) for k in thick} - subs - isolated_pad_layers(library)
+                   - keepout_layers(library))
+    diel = dielectric_layer(library)
+    glazes = glaze_layers(library)
+    # a thickness given to the substrate layer itself wins over the
+    # thermal setup's substrate_um
+    sub_given = [thick[str(n)] for n in sorted(subs) if str(n) in thick]
+    sub_t_mm = _mm(sub_given[0] if sub_given else substrate_thickness_um(library))
 
     # running elevation, layer-number order == print/fire order
     z = 0.0
@@ -382,13 +567,18 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
         if n == bond_layer:
             continue                 # bonds get raised loops, below
         try:
-            geom = layer_to_shapely_flattened(library, cell, n)
+            # the dielectric layer's datatype-0 shapes are the fill's
+            # INPUTS (its boundary and keep-out holes) -- only the
+            # generated fill (datatype 1) is printed dielectric
+            geom = layer_to_shapely_flattened(library, cell, n,
+                                              datatype=1 if n == diel else None)
         except Exception:
             continue
         polys = list(_iter_polygons(geom))
         if not polys:
             continue
-        rgb = _rgb01(library.layers[n].color)
+        rgb = _GLAZE_RGB if n in glazes else _rgb01(library.layers[n].color)
+        transp = _GLAZE_TRANSPARENCY if n in glazes else 0
         lines.append(f"# --- layer {n} ({library.layers[n].name}) : "
                      f"z {zb:.4f}..{zt:.4f} mm ---")
         lines.append("_s = []")
@@ -399,28 +589,27 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
                          f".extrude(V(0,0,{zt - zb:.5f})))")
             n_solids += 1
         lines.append(f"_add({library.layers[n].name!r} + '_L{n}', _fuse(_s), "
-                     f"({rgb[0]:.4f},{rgb[1]:.4f},{rgb[2]:.4f}))")
+                     f"({rgb[0]:.4f},{rgb[1]:.4f},{rgb[2]:.4f}), surface=True"
+                     + (f", transparency={transp})" if transp else ")"))
 
-    # wire bonds -- raised loops on the bond layer
-    if bond_layer >= 0:
-        bz = next((zb for (bn, zb, _zt) in stack if bn == bond_layer), stack_top)
-        segs = _bond_segments(library, cell_name, bond_layer)
-        if segs:
-            lines.append(f"# --- wire bonds (layer {bond_layer}) ---")
-            lines.append("_bw = []")
-            for (p0, p1, w) in segs:
-                (x0, y0), (x1b, y1b) = p0, p1
-                mx, my = (x0 + x1b) / 2.0, (y0 + y1b) / 2.0
-                r_mm = max(_mm(w) / 2.0, 0.005)
-                lines.append(
-                    f"_bw.append(_bondwire("
-                    f"V({_mm(x0):.5f},{_mm(y0):.5f},{bz:.5f}), "
-                    f"V({_mm(mx):.5f},{_mm(my):.5f},{bz + loop_h_mm:.5f}), "
-                    f"V({_mm(x1b):.5f},{_mm(y1b):.5f},{bz:.5f}), {r_mm:.5f}))")
-            rgb = _rgb01(library.layers[bond_layer].color)
-            lines.append(f"_add('wire_bonds', _fuse(_bw), "
-                         f"({rgb[0]:.4f},{rgb[1]:.4f},{rgb[2]:.4f}))")
-            n_solids += len(segs)
+    # substrate -- white slab from -thickness up to z=0, under the films
+    sub_polys = []
+    for n in sorted(subs):
+        try:
+            sub_polys += list(_iter_polygons(layer_to_shapely_flattened(library, cell, n)))
+        except Exception:
+            continue
+    if sub_polys:
+        lines.append(f"# --- substrate (layers {sorted(subs)}) : "
+                     f"z {-sub_t_mm:.4f}..0 mm ---")
+        lines.append("_s = []")
+        for poly in sub_polys:
+            faces = [_ring_literal(poly.exterior.coords, -sub_t_mm)]
+            faces += [_ring_literal(r.coords, -sub_t_mm) for r in poly.interiors]
+            lines.append(f"_s.append(Part.Face([{', '.join(faces)}])"
+                         f".extrude(V(0,0,{sub_t_mm:.5f})))")
+            n_solids += 1
+        lines.append(f"_add('Substrate', _fuse(_s), {_SUBSTRATE_RGB!r}, surface=True)")
 
     # components -- extrude a body or substitute a model
     comp_dir = os.path.dirname(os.path.abspath(path))
@@ -441,7 +630,19 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
         obj_name = f"{label}_{cn}" if label else f"{cn}_{seen_counts[cn]}"
         mode = entry.get("mode", "extrude")
         zoff = _mm(float(entry.get("z_offset_um", 0.0)))
-        base_z = stack_top + zoff
+        bb = _cell_bbox_dbu(library, cn)
+        if entry.get("z_ref") == "substrate_bottom":
+            base_expr = f"{-sub_t_mm + zoff:.5f}"
+        elif bb is not None:
+            # rests on whatever film is under its footprint (resolved in
+            # FreeCAD from the solids already built, not guessed here)
+            cs = [xf(p) for p in ((bb[0], bb[1]), (bb[2], bb[1]), (bb[2], bb[3]), (bb[0], bb[3]))]
+            fx0, fy0 = _mm(min(c[0] for c in cs)), _mm(min(c[1] for c in cs))
+            fx1, fy1 = _mm(max(c[0] for c in cs)), _mm(max(c[1] for c in cs))
+            base_expr = (f"_surface_z({fx0:.5f},{fy0:.5f},{fx1:.5f},{fy1:.5f})"
+                         + (f" + {zoff:.5f}" if zoff else ""))
+        else:
+            base_expr = f"{zoff:.5f}"
 
         if mode == "model" and entry.get("model_path"):
             mp = entry["model_path"]
@@ -457,31 +658,51 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
             total_rot_deg = rot_deg + float(entry.get("rotation_deg", 0.0))
             lines.append(f"# --- component {cn} (model) ---")
             lines.append("try:")
-            lines.append(f"    _sh = Part.Shape(); _sh.read({mp!r})")
-            if mirrored:
-                lines.append(f"    _sh = _sh.mirror(V(0,0,0), V(1,0,0))")
-            lines.append(f"    _o = _doc.addObject('Part::Feature', {obj_name!r})")
-            lines.append("    _o.Shape = _sh")
-            lines.append(f"    _o.Placement = App.Placement("
-                         f"V({_mm(ox_dbu):.5f},{_mm(oy_dbu):.5f},{base_z:.5f}), "
-                         f"App.Rotation(V(0,0,1), {total_rot_deg:.4f}))")
+            lines.append(f"    _place_model({mp!r}, {obj_name!r}, {_mm(ox_dbu):.5f}, "
+                         f"{_mm(oy_dbu):.5f}, {base_expr}, {total_rot_deg:.4f}, {bool(mirrored)})")
             lines.append("except Exception as _e:")
             lines.append(f"    App.Console.PrintWarning('HLayout: could not read "
                          f"{os.path.basename(mp)} for {cn}: %s\\n' % _e)")
             n_comp += 1
             continue
 
-        bb = _cell_bbox_dbu(library, cn)
         if bb is None:
             continue
         x0, y0, x1, y1 = bb
         corners = [xf((x0, y0)), xf((x1, y0)), xf((x1, y1)), xf((x0, y1))]
         h_mm = _mm(float(entry.get("height_um", DEFAULT_COMPONENT_HEIGHT_UM)))
         lines.append(f"# --- component {cn} (extrude {h_mm:.4f} mm) ---")
-        lines.append(f"_add({obj_name!r}, Part.Face({_ring_literal(corners, base_z)})"
-                     f".extrude(V(0,0,{h_mm:.5f})), "
+        lines.append(f"_sh = Part.Face({_ring_literal(corners, 0.0)}).extrude(V(0,0,{h_mm:.5f}))")
+        lines.append(f"_sh.translate(V(0, 0, {base_expr}))")
+        lines.append(f"_add({obj_name!r}, _sh, "
                      f"({_COMPONENT_RGB[0]},{_COMPONENT_RGB[1]},{_COMPONENT_RGB[2]}))")
         n_comp += 1
+
+    # wire bonds -- raised loops, built LAST so each end lands on the
+    # actual surface under it (die pad, header pin head, trace) found in
+    # FreeCAD from the solids above, not on a guessed film height
+    if bond_layer >= 0:
+        segs = _bond_segments(library, cell_name, bond_layer)
+        if segs:
+            lines.append(f"# --- wire bonds (layer {bond_layer}) ---")
+            lines.append("_BONDS = [")
+            for (p0, p1, w) in segs:
+                (x0, y0), (x1b, y1b) = p0, p1
+                r_mm = max(_mm(w) / 2.0, 0.005)
+                lines.append(f"    ({_mm(x0):.5f}, {_mm(y0):.5f}, {_mm(x1b):.5f}, "
+                             f"{_mm(y1b):.5f}, {r_mm:.5f}),")
+            lines.append("]")
+            lines.append("_bw = []")
+            lines.append("for _x0, _y0, _x1, _y1, _r in _BONDS:")
+            lines.append("    _z0 = _top_z(_x0, _y0, default=0.0)")
+            lines.append("    _z1 = _top_z(_x1, _y1, default=0.0)")
+            lines.append(f"    _za = max(_z0, _z1) + {loop_h_mm:.5f}")
+            lines.append("    _bw.append(_bondwire(V(_x0, _y0, _z0), "
+                         "V((_x0 + _x1) / 2.0, (_y0 + _y1) / 2.0, _za), V(_x1, _y1, _z1), _r))")
+            rgb = _rgb01(library.layers[bond_layer].color)
+            lines.append(f"_add('wire_bonds', _fuse(_bw), "
+                         f"({rgb[0]:.4f},{rgb[1]:.4f},{rgb[2]:.4f}))")
+            n_solids += len(segs)
 
     if n_solids == 0 and n_comp == 0:
         raise LayoutError(

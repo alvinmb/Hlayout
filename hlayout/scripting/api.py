@@ -52,6 +52,7 @@ from ..io.techfile import (
     load_component_models,
     load_dielectric_rules,
     load_drc_rules,
+    load_netlist_settings,
     load_resistor_geometry_rules,
     load_route_rules,
     load_thin_film_rules,
@@ -59,6 +60,7 @@ from ..io.techfile import (
     save_techfile,
 )
 from ..core.thinfilm import generate_serpentine_geometry, generate_top_hat_geometry
+from ..core.refdes import DEFAULT_PIN1_GAP, is_connector_refdes, refdes_pin1_offset
 
 
 def _point_seg_dist(p, a, b) -> float:
@@ -2118,8 +2120,42 @@ class Session:
         ref = self.cell.add_sref(cell_name, origin, rotation=rotation,
                                   magnification=magnification, x_reflection=x_reflection,
                                   label=label, pin=pin)
+        # Connectors/headers (J1, P2, ...) get their ref-des beside pin 1.
+        if is_connector_refdes(label):
+            off = refdes_pin1_offset(self.library, ref)
+            if off is not None:
+                ref.label_offset = off
         self._notify()
         return ref
+
+    def refdes_to_pin1(self, target=None, gap: Optional[int] = None,
+                       cell_name: Optional[str] = None) -> List[str]:
+        """Move a placed part's floated ref-des to beside its pin 1
+        (hlayout.core.refdes.refdes_pin1_offset): `gap` DBU beyond pin
+        1's pad, on the outside of the pin row. `target` is an SRef, a
+        ref designator ("J1"), or None for every connector/header
+        (J, P, X, CN, CON, HDR + number) in the cell. Parts without a
+        pin 1 are skipped. Returns the ref designators moved. One undo
+        step. sref()/place_cell() already do this for a connector label
+        given at placement."""
+        cell = self.library.get_cell(cell_name) if cell_name else self.cell
+        if target is None:
+            refs = [r for r in cell.srefs if is_connector_refdes(r.label)]
+        elif isinstance(target, str):
+            refs = [r for r in cell.srefs if r.label == target]
+            if not refs:
+                raise LayoutError(f"no placed instance labelled {target!r} in {cell.name!r}")
+        else:
+            refs = [target]
+        g = DEFAULT_PIN1_GAP if gap is None else int(gap)
+        moves = [(r, refdes_pin1_offset(self.library, r, g)) for r in refs]
+        moves = [(r, off) for r, off in moves if off is not None]
+        if moves:
+            self._checkpoint()
+            for r, off in moves:
+                r.label_offset = off
+            self._notify()
+        return [r.label or r.cell_name for r, _ in moves]
 
     def place_cell(self, cell_name: str, origin, source: Union[str, int, None] = None,
                     rotation: float = 0.0, magnification: float = 1.0, x_reflection: bool = False,
@@ -3577,7 +3613,7 @@ class Session:
         self._notify()
         return len(paths)
 
-    def extract_netlist(self, conductor_layers, cell_name: Optional[str] = None,
+    def extract_netlist(self, conductor_layers=None, cell_name: Optional[str] = None,
                         include_bonds: bool = True) -> List["Net"]:
         """Extract the electrical netlist of `cell_name` (default: the
         current cell), as seen across `conductor_layers` -- an iterable
@@ -3588,9 +3624,10 @@ class Session:
         Polygon.pin plus the owning SRef's .label identify each net's
         members as RefDes.Pin.
 
-        There's no saved "which layers are conductors" setting in the
-        technology file today, so `conductor_layers` must be passed
-        explicitly every call -- e.g. `s.extract_netlist([31])` for a
+        `conductor_layers=None` uses the design's saved selection (the
+        Conductor checkboxes in Tools > Extract Netlist...,
+        techfile.load_netlist_settings()); otherwise pass the layers
+        explicitly -- e.g. `s.extract_netlist([31])` for a
         design whose Resistor Geometry Rules... conductor_layer is 31,
         or `s.extract_netlist([0, 1])` for a two-layer Route (2-Layer)
         design.
@@ -3607,17 +3644,32 @@ class Session:
         a bond layer configured, it's added to `conductor_layers`
         automatically so every WIRE BOND (wire_bond()/BOND) is treated
         as conductor and its net is reported straight through to the
-        die pin it lands on. Pass include_bonds=False to see only the
-        conductor layers you named."""
+        die pin it lands on. Only a bond's two ENDS connect (the wire
+        flies over whatever lies between), and the rules' isolated pad
+        layers (die pads, header pins), if set, are kept isolated from
+        the substrate copper underneath -- see hlayout.core.netlist. Pass include_bonds=False to see
+        only the conductor layers you named (bond layer then treated as
+        plain copper only if you list it)."""
         from ..core.netlist import extract_netlist as _extract_netlist
 
+        if conductor_layers is None:
+            # The design's saved Tools > Extract Netlist... selection
+            # (load_netlist_settings) -- the same layers the dialog's
+            # Conductor checkboxes show.
+            conductor_layers = load_netlist_settings(self.library)["conductor_layers"]
+            if not conductor_layers:
+                raise LayoutError(
+                    "no conductor layers given and none saved -- pass a layer "
+                    "list or tick them in Tools > Extract Netlist..."
+                )
         cell = self.library.get_cell(cell_name) if cell_name else self.cell
         resolved = [self.library.layers.resolve(l) for l in conductor_layers]
-        if include_bonds:
-            b_layer = int(load_bond_rules(self.library)["layer"])
-            if b_layer >= 0 and b_layer not in resolved:
-                resolved.append(b_layer)
-        return _extract_netlist(self.library, cell, resolved)
+        rules = load_bond_rules(self.library)
+        die_pads = list(rules.get("die_pad_layers", []))
+        b_layer = int(rules["layer"]) if include_bonds else -1
+        return _extract_netlist(self.library, cell, resolved,
+                                bond_layer=b_layer if b_layer >= 0 else None,
+                                die_pad_layers=die_pads)
 
     def export_netlist_csv(self, nets: List["Net"], path: str) -> None:
         """Write `nets` (as returned by extract_netlist()) to a CSV file,

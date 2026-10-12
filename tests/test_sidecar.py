@@ -371,8 +371,13 @@ def test_archive_design_refuses_when_the_design_has_never_been_saved(monkeypatch
 def test_autosave_toggle_schedules_and_cancels_the_timer():
     app = _make_app()
     try:
-        assert app.autosave_var.get() is False
-        assert getattr(app, "_autosave_job", None) is None
+        # On by default, with the timer already armed at startup.
+        assert app.autosave_var.get() is True
+        assert getattr(app, "_autosave_job", None) is not None
+
+        app.autosave_var.set(False)
+        app._on_autosave_toggle()
+        assert app._autosave_job is None
 
         app.autosave_var.set(True)
         app._on_autosave_toggle()
@@ -461,3 +466,18 @@ def test_app_new_library_clears_attached_libraries(tmp_path):
         assert app.session._attached_paths == []
     finally:
         app.destroy()
+
+
+def test_autosave_off_choice_is_remembered_for_the_next_session():
+    app = _make_app()
+    try:
+        app.autosave_var.set(False)
+        app._on_autosave_toggle()
+    finally:
+        app.destroy()
+    again = _make_app()                      # same settings file = next session
+    try:
+        assert again.autosave_var.get() is False
+        assert getattr(again, "_autosave_job", None) is None
+    finally:
+        again.destroy()

@@ -214,3 +214,130 @@ def test_netlist_run_command_requires_a_layer():
     interp = CommandInterpreter(s, console=None)
     out = interp.run("NETLIST RUN")
     assert out.startswith("error:")
+
+
+# --- wire bonds / die pads ---------------------------------------------------
+
+def _die_with_two_bonds(s, die_pins=("1", "2")):
+    """A die (cell DIE, pads on layer 58, pin-numbered) sitting on a
+    layer-31 die-attach pad, each die pad bonded (layer 59) out to its
+    own layer-31 substrate pad. The bond wires fly over the attach pad."""
+    from hlayout.io.techfile import load_bond_rules, save_bond_rules
+    rules = load_bond_rules(s.library)
+    rules.update(layer=59, die_pad_layers=[58], width=25, pad=60)
+    save_bond_rules(s.library, rules)
+    s.new_cell("DIE")
+    s.use_cell("DIE")
+    s.rect(58, -500, -500, 500, 500)                          # die outline on pad layer
+    s.cell.shapes[-1].pin = ""
+    s.rect(58, -400, -50, -300, 50); s.cell.shapes[-1].pin = die_pins[0]
+    s.rect(58, 300, -50, 400, 50);   s.cell.shapes[-1].pin = die_pins[1]
+    s.use_cell("TOP")
+    s.rect(31, -800, -800, 800, 800)                          # die-attach pad
+    s.sref("DIE", (0, 0), label="U1")
+    s.rect(31, -3000, -200, -2600, 200)                       # left landing
+    s.rect(31, 2600, -200, 3000, 200)                         # right landing
+    s.wire_bond([(-350, 0), (-2800, 0)], min_length=0, max_length=10000)
+    s.wire_bond([(350, 0), (2800, 0)], min_length=0, max_length=10000)
+
+
+def test_bonds_on_one_die_are_not_shorted_through_the_die_attach_pad():
+    s = _fresh_session()
+    _die_with_two_bonds(s)
+    nets = s.extract_netlist([31])
+    pins = [sorted(p.label() for p in n.pins) for n in nets]
+    assert ["U1.1"] in pins and ["U1.2"] in pins
+    bonded = [n for n in nets if n.bonds]
+    assert len(bonded) == 2 and all(n.bonds == 1 for n in bonded)
+    assert not any(n.open_bond_ends for n in nets)
+
+
+def test_bond_wire_does_not_short_to_a_trace_it_flies_over():
+    s = _fresh_session()
+    _die_with_two_bonds(s)
+    s.rect(31, -1800, -2000, -1600, 2000)        # trace under the left bond's span
+    nets = s.extract_netlist([31])
+    left = next(n for n in nets if any(p.label() == "U1.1" for p in n.pins))
+    assert left.bonds == 1
+    assert len([n for n in nets if not n.pins and not n.bonds]) >= 1   # trace stays alone
+
+
+def test_unnumbered_bonded_die_pad_is_reported_and_off_pad_bond_is_open():
+    s = _fresh_session()
+    _die_with_two_bonds(s, die_pins=("", ""))
+    s.wire_bond([(0, 300), (0, 2500)], min_length=0, max_length=10000)   # lands on outline only
+    nets = s.extract_netlist([31])
+    labels = [p.label() for n in nets for p in n.pins]
+    assert sum(1 for l in labels if l.startswith("U1.@")) == 2
+    assert any((0, 300) in n.open_bond_ends for n in nets)
+
+
+def test_include_bonds_false_ignores_bonds():
+    s = _fresh_session()
+    _die_with_two_bonds(s)
+    nets = s.extract_netlist([31], include_bonds=False)
+    assert not any(n.bonds for n in nets)
+
+
+def test_bond_rules_isolated_pad_layers_round_trip_and_legacy_form():
+    import json
+    from hlayout.io.techfile import BOND_RULES_KEY, load_bond_rules, save_bond_rules
+    s = _fresh_session()
+    save_bond_rules(s.library, {"layer": 59, "die_pad_layers": [58, 49, 58]})
+    assert load_bond_rules(s.library)["die_pad_layers"] == [49, 58]
+    s.library.tech_params[BOND_RULES_KEY] = json.dumps({"layer": 59, "die_pad_layer": 58})
+    assert load_bond_rules(s.library)["die_pad_layers"] == [58]
+
+
+def test_header_pin_on_isolated_layer_joins_only_through_its_bond():
+    s = _fresh_session()
+    _die_with_two_bonds(s)
+    from hlayout.io.techfile import load_bond_rules, save_bond_rules
+    r = load_bond_rules(s.library); r["die_pad_layers"] = [58, 49]; save_bond_rules(s.library, r)
+    s.new_cell("HPIN"); s.use_cell("HPIN"); s.circle(49, (0, 0), 400, segments=16)
+    s.new_cell("HDR"); s.use_cell("HDR")
+    s.sref("HPIN", (0, 0), pin="1")
+    s.sref("HPIN", (2540, 0), pin="2")
+    s.use_cell("TOP")
+    s.sref("HDR", (-2800, -3000), label="J1")
+    s.rect(31, -4000, -3200, 1000, -2800)       # trace under both header pins
+    s.wire_bond([(-2800, -200), (-2800, -3000)], min_length=0, max_length=10000)
+    nets = s.extract_netlist([31])
+    pins = [sorted(p.label() for p in n.pins) for n in nets]
+    assert ["J1.1", "U1.1"] in pins
+    assert ["J1.2"] in pins                      # not shorted via the trace under it
+
+
+def test_netlist_settings_persist_and_drive_default_extraction():
+    from hlayout.io.techfile import load_netlist_settings, save_netlist_settings
+    s = _fresh_session()
+    assert load_netlist_settings(s.library)["saved"] is False
+    save_netlist_settings(s.library, {"conductor_layers": [31, 31, 5], "include_bonds": False,
+                                      "used_only": False})
+    st = load_netlist_settings(s.library)
+    assert st["saved"] and st["conductor_layers"] == [5, 31]
+    assert st["include_bonds"] is False and st["used_only"] is False
+    _two_resistors_bridged(s)
+    assert len(s.extract_netlist()) == 3          # uses the saved layers
+
+
+def test_netlist_run_command_uses_saved_layers():
+    from hlayout.io.techfile import save_netlist_settings
+    s = _fresh_session()
+    _two_resistors_bridged(s)
+    save_netlist_settings(s.library, {"conductor_layers": [31]})
+    out = CommandInterpreter(s, console=None).run("NETLIST RUN")
+    assert "3 net(s)" in out
+
+
+def test_pins_and_nets_carry_locations_for_zooming():
+    s = _fresh_session()
+    _die_with_two_bonds(s, die_pins=("", ""))
+    s.rect(31, 5000, 5000, 5400, 5400)              # isolated copper, no pins
+    nets = s.extract_netlist([31])
+    bonded = [p for n in nets for p in n.pins if p.pin.startswith("@")]
+    assert sorted(p.xy for p in bonded) == [(-350, 0), (350, 0)]
+    lonely = [n for n in nets if not n.pins and not n.bonds and n.location
+              and 5000 <= n.location[0] <= 5400]
+    assert len(lonely) == 1
+    assert all(p.xy is not None for n in nets for p in n.pins)

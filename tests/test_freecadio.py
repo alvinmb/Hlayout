@@ -93,7 +93,9 @@ def test_write_freecad_macro_is_valid_python_with_stacked_solids(tmp_path):
     # one Part.Face(...).extrude(...) per merged film polygon, at least
     # one per drawn film layer
     assert src.count(".extrude(") >= 3
-    assert "# --- layer 4 (Substrate)" in src
+    # the substrate is a white slab below z=0, not a printed film
+    assert "# --- substrate (layers [4]) : z -0.6350..0 mm ---" in src
+    assert "# --- layer 4 (Substrate)" not in src
     assert "# --- layer 5 (Conductor)" in src
     assert "# --- layer 6 (ResInk)" in src
     # the CHIP instance is a component (draws on non-film L20) -> a body
@@ -111,9 +113,10 @@ def test_macro_stacks_layers_in_number_order_by_thickness(tmp_path):
     # z ranges appear in the layer header comments, cumulative & ordered
     import re
     zs = re.findall(r"# --- layer \d+ \([^)]*\) : z ([\d.]+)\.\.([\d.]+) mm", src)
-    assert zs[0] == ("0.0000", "0.1000")     # L4: 100 um
-    assert zs[1] == ("0.1000", "0.1100")     # L5: +10 um
-    assert zs[2] == ("0.1100", "0.1300")     # L6: +20 um
+    assert zs[0] == ("0.0000", "0.0100")     # L5: 10 um, straight on the substrate
+    assert zs[1] == ("0.0100", "0.0300")     # L6: +20 um
+    assert len(zs) == 2                      # L4 (Substrate) is not a film
+    assert "# --- substrate (layers [4]) : z -0.1000..0 mm ---" in src   # its own 100 um
 
 
 def test_macro_emits_a_wire_bond_loop(tmp_path):
@@ -171,7 +174,7 @@ def test_export_freecad_applies_rotation_deg_on_top_of_placement_rotation(tmp_pa
         "CHIP": {"mode": "model", "model_path": step_path, "rotation_deg": 90.0}})
     src = open(path).read()
     compile(src, path, "exec")
-    assert "App.Rotation(V(0,0,1), 135.0000)" in src
+    assert ", 135.0000, False)" in src       # _place_model(..., rot, mirrored)
 
 
 def test_export_freecad_model_mode_defaults_to_zero_rotation_correction(tmp_path):
@@ -183,7 +186,7 @@ def test_export_freecad_model_mode_defaults_to_zero_rotation_correction(tmp_path
     path = str(tmp_path / "no_correction.FCMacro")
     s.export_freecad(path, component_models={"CHIP": {"mode": "model", "model_path": step_path}})
     src = open(path).read()
-    assert "App.Rotation(V(0,0,1), 0.0000)" in src
+    assert ", 0.0000, False)" in src
 
 
 def test_export_freecad_names_repeat_instances_by_ref_designator(tmp_path):
@@ -205,11 +208,11 @@ def test_export_freecad_names_repeat_instances_by_ref_designator(tmp_path):
     s.export_freecad(path, component_models={"CHIP": {"mode": "model", "model_path": step_path}})
     src = open(path).read()
     compile(src, path, "exec")
-    assert "addObject('Part::Feature', 'C1_CHIP')" in src
-    assert "addObject('Part::Feature', 'C2_CHIP')" in src
+    assert "'C1_CHIP'" in src
+    assert "'C2_CHIP'" in src
     # the original fixture's un-labelled CHIP instance still gets a name,
     # just not one that collides with the labelled ones
-    assert "addObject('Part::Feature', 'CHIP_1')" in src
+    assert "'CHIP_1'" in src
 
 
 def test_export_freecad_names_repeat_unlabelled_instances_with_a_counter(tmp_path):
@@ -227,8 +230,8 @@ def test_export_freecad_names_repeat_unlabelled_instances_with_a_counter(tmp_pat
     s.export_freecad(path, component_models={"CHIP": {"mode": "model", "model_path": step_path}})
     src = open(path).read()
     compile(src, path, "exec")
-    assert "addObject('Part::Feature', 'CHIP_1')" in src
-    assert "addObject('Part::Feature', 'CHIP_2')" in src
+    assert "'CHIP_1'" in src
+    assert "'CHIP_2'" in src
 
 
 def test_match_freecad_components_requires_step_dir(tmp_path):
@@ -308,3 +311,62 @@ def test_setup_layer_thickness_dialog_saves(tmp_path):
         assert 33.0 in load_layer_thickness(app.session.library).values()
     finally:
         app.destroy()
+
+
+
+def test_components_rest_on_the_film_under_them_and_z_ref_substrate_bottom(tmp_path):
+    lib = _design()
+    s = Session(lib)
+    s.use_cell("TOP")
+    step_path = str(tmp_path / "CHIP.step")
+    open(step_path, "w").close()
+    path = str(tmp_path / "zref.FCMacro")
+    s.export_freecad(path, component_models={"CHIP": {"mode": "model", "model_path": step_path}})
+    src = open(path).read()
+    assert "_surface_z(" in src                      # resolved in FreeCAD
+    s.export_freecad(path, component_models={"CHIP": {
+        "mode": "model", "model_path": step_path, "z_ref": "substrate_bottom"}})
+    src = open(path).read()
+    assert ", -0.63500, 0.0000, False)" in src       # floor at the substrate underside
+
+
+def test_substrate_only_cell_is_not_a_component_and_bonds_probe_surfaces(tmp_path):
+    from hlayout.io.techfile import save_bond_rules
+    lib = _design()
+    sub = lib.new_cell("SUBST")
+    sub.add_rectangle(4, -6000, -6000, 6000, 6000)
+    lib.cells["TOP"].add_sref("SUBST", (0, 0))
+    save_bond_rules(lib, {"layer": 9, "width": 25, "pad": 75})
+    lib.cells["TOP"].add_path(9, [(-1500, 0), (1500, 0)], width=25)
+    path = str(tmp_path / "subst.FCMacro")
+    write_freecad_macro(lib, "TOP", path)
+    src = open(path).read()
+    compile(src, path, "exec")
+    assert "# --- component SUBST" not in src
+    assert "_BONDS = [" in src and "_top_z(_x0, _y0" in src
+
+
+
+def test_keepouts_not_exported_and_glaze_green_transparent(tmp_path):
+    from hlayout.io.techfile import (save_dielectric_rules, save_layer_thickness,
+                                     save_resistor_geometry_rules, load_resistor_geometry_rules)
+    lib = _design()
+    lib.layers.set_style(7, name="Dielectric Keepout", fill=True, visible=True)
+    lib.layers.set_style(8, name="Dielectric", fill=True, visible=True)
+    lib.layers.set_style(9, name="Glaze", fill=True, visible=True)
+    top = lib.cells["TOP"]
+    top.add_rectangle(7, -800, -800, 800, 800)                     # keep-out marker
+    top.add_rectangle(8, -3000, -3000, 3000, 3000)                 # fill input (dt 0)
+    top.add_rectangle(9, -1100, -250, 1100, 250)                   # glaze
+    save_dielectric_rules(lib, {"layer": 8, "margin": 0, "clearance": 0, "keepout_layers": []})
+    save_layer_thickness(lib, {"5": 10, "6": 20, "7": 10, "8": 30, "9": 15})
+    path = str(tmp_path / "ko.FCMacro")
+    write_freecad_macro(lib, "TOP", path)
+    src = open(path).read()
+    compile(src, path, "exec")
+    assert "# --- layer 7 " not in src            # keep-out layer never exported
+    assert "# --- layer 8 " not in src            # dielectric inputs only, no fill yet
+    assert "'Glaze' + '_L9'" in src and "transparency=55" in src
+    top.add_rectangle(8, -3000, -3000, 3000, 3000, datatype=1)    # generated fill
+    write_freecad_macro(lib, "TOP", path)
+    assert "# --- layer 8 (Dielectric)" in open(path).read()

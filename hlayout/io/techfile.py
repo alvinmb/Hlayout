@@ -30,6 +30,7 @@ names, colours, or arbitrary global parameters), with the shape::
 
 import json
 import os
+import re
 
 from ..core.errors import LayoutError
 from ..core.layers import NUM_LAYERS
@@ -622,6 +623,9 @@ def save_dielectric_rules(library: Library, rules: dict) -> None:
 # jumper. The bond layer is treated as a conductor by
 # Session.extract_netlist()/NETLIST RUN (folded in automatically), so a
 # net's connectivity is reported right through the bond to the die pin.
+# "die_pad_layers" lists isolated bond-pad layers (bare-die pads, header
+# pins): Extract Netlist keeps every shape on them isolated from the
+# substrate copper underneath and connects it only where a bond lands.
 # Same one-JSON-blob-per-tech_params-entry persistence as the rest.
 # layer = -1 means "not configured -- BOND has nowhere to draw".
 
@@ -633,9 +637,32 @@ DEFAULT_BOND_RULES = {
     "pad": 100,         # DBU -- ball/stitch bond footprint diameter at each end
     "min_length": 300,  # DBU -- shortest span a bonder can reliably loop
     "max_length": 5000, # DBU -- longest unsupported span before sag/shorting
+    "die_pad_layers": [],  # isolated bond-pad layers (bare-die pads, header
+                           # pins): never merged with substrate copper by
+                           # extract_netlist(), connected only by bonds
 }
 
 _BOND_RULE_KEYS = ("layer", "width", "pad", "min_length", "max_length")
+
+
+def _layer_list(value) -> list:
+    """Normalise a pad-layer setting -- a list, a single int, or a
+    "58, 49" string -- to a sorted list of distinct non-negative ints."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = [v for v in re.split(r"[,\s]+", value) if v]
+    elif not isinstance(value, (list, tuple, set)):
+        value = [value]
+    out = set()
+    for v in value:
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            continue
+        if n >= 0:
+            out.add(n)
+    return sorted(out)
 
 
 def load_bond_rules(library: Library) -> dict:
@@ -656,6 +683,10 @@ def load_bond_rules(library: Library) -> dict:
                     rules[k] = int(data[k])
                 except (TypeError, ValueError):
                     pass
+        if "die_pad_layers" in data:
+            rules["die_pad_layers"] = _layer_list(data["die_pad_layers"])
+        elif "die_pad_layer" in data:          # single-layer form, pre-list
+            rules["die_pad_layers"] = _layer_list(data["die_pad_layer"])
     return rules
 
 
@@ -663,8 +694,62 @@ def save_bond_rules(library: Library, rules: dict) -> None:
     """Write the wire-bond rules into library.tech_params so
     Setup > Save Technology File... / TECH SAVE and the per-design
     .hlaux sidecar capture them."""
-    library.tech_params[BOND_RULES_KEY] = json.dumps({
-        k: int(rules.get(k, DEFAULT_BOND_RULES[k])) for k in _BOND_RULE_KEYS
+    out = {k: int(rules.get(k, DEFAULT_BOND_RULES[k])) for k in _BOND_RULE_KEYS}
+    pads = rules.get("die_pad_layers")
+    if pads is None and "die_pad_layer" in rules:
+        pads = rules["die_pad_layer"]
+    out["die_pad_layers"] = _layer_list(pads)
+    library.tech_params[BOND_RULES_KEY] = json.dumps(out)
+
+
+# --- Netlist extraction settings (Tools > Extract Netlist...) ----------------
+#
+# Which layers Extract Netlist treats as substrate conductor, whether
+# wire bonds are included, and whether the dialog lists only layers that
+# carry geometry. Persisted per design (sidecar/technology file) so the
+# selection is there next time without re-picking it. The isolated pad
+# layers (die pads, header pins) are NOT stored here: they belong to the
+# wire-bond rules above (die_pad_layers), which the extractor reads.
+
+NETLIST_SETTINGS_KEY = "netlist_settings"
+
+DEFAULT_NETLIST_SETTINGS = {
+    "conductor_layers": [],
+    "include_bonds": True,
+    "used_only": True,
+}
+
+
+def load_netlist_settings(library: Library) -> dict:
+    """Read the saved Extract Netlist settings. Always returns a complete
+    dict; ``saved`` is True only if the design has its own saved entry
+    (so a caller can pick sensible defaults the first time)."""
+    out = {k: (list(v) if isinstance(v, list) else v)
+           for k, v in DEFAULT_NETLIST_SETTINGS.items()}
+    out["saved"] = False
+    raw = library.tech_params.get(NETLIST_SETTINGS_KEY)
+    if not raw:
+        return out
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return out
+    if isinstance(data, dict):
+        out["saved"] = True
+        if "conductor_layers" in data:
+            out["conductor_layers"] = _layer_list(data["conductor_layers"])
+        for k in ("include_bonds", "used_only"):
+            if k in data:
+                out[k] = bool(data[k])
+    return out
+
+
+def save_netlist_settings(library: Library, settings: dict) -> None:
+    """Write the Extract Netlist settings into library.tech_params."""
+    library.tech_params[NETLIST_SETTINGS_KEY] = json.dumps({
+        "conductor_layers": _layer_list(settings.get("conductor_layers", [])),
+        "include_bonds": bool(settings.get("include_bonds", True)),
+        "used_only": bool(settings.get("used_only", True)),
     })
 
 
@@ -1084,7 +1169,8 @@ def save_layer_thickness(library: Library, thickness: dict) -> None:
 # Each placed cell instance is shown in the 3D export as either a flat
 # extrusion of a fixed body height ("extrude") or by substituting an
 # external STEP/IGES model FreeCAD imports and positions ("model").
-# {cell_name: {"mode","height_um","z_offset_um","model_path","rotation_deg"}}.
+# {cell_name: {"mode","height_um","z_offset_um","model_path","rotation_deg",
+#  "z_ref"}} -- z_ref: see COMPONENT_Z_REFS below.
 # rotation_deg (degrees, default 0.0) is an extra correction applied ON
 # TOP of the placement's own rotation in "model" mode -- see
 # hlayout.io.freecadio's model-substitution block and
@@ -1125,7 +1211,8 @@ def load_component_models(library: Library) -> dict:
                      "height_um": float(d.get("height_um", DEFAULT_COMPONENT_HEIGHT_UM)),
                      "z_offset_um": float(d.get("z_offset_um", 0.0)),
                      "model_path": str(d.get("model_path", "") or ""),
-                     "rotation_deg": float(d.get("rotation_deg", 0.0))}
+                     "rotation_deg": float(d.get("rotation_deg", 0.0)),
+                     "z_ref": _z_ref(d.get("z_ref"))}
             out[str(name)] = entry
     return out
 
@@ -1142,8 +1229,21 @@ def save_component_models(library: Library, models: dict) -> None:
             "z_offset_um": float(d.get("z_offset_um", 0.0)),
             "model_path": str(d.get("model_path", "") or ""),
             "rotation_deg": float(d.get("rotation_deg", 0.0)),
+            "z_ref": _z_ref(d.get("z_ref")),
         }
     library.tech_params[COMPONENT_MODELS_KEY] = json.dumps(payload)
+
+
+#: Where a component's z=0 goes in the 3D export: "surface" -- the top
+#: of whatever printed film lies under its footprint (a chip on its pads,
+#: a die on its attach area); "substrate_bottom" -- the underside of the
+#: substrate (a package the substrate sits IN, e.g. a header/bathtub
+#: package whose model has the well floor at z=0).
+COMPONENT_Z_REFS = ("surface", "substrate_bottom")
+
+
+def _z_ref(value) -> str:
+    return value if value in COMPONENT_Z_REFS else "surface"
 
 
 def default_component_models(library: Library) -> dict:

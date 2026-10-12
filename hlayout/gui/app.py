@@ -41,6 +41,7 @@ from .layer_panel import LayerPanel
 from .line_editing import bind_console_style_editing
 from .component_library_window import open_component_library_window
 from .drc_window import open_drc_window
+from .netlist_window import open_netlist_window
 from .dxf_batch_window import open_dxf_batch_window
 from .gerber_batch_window import open_gerber_batch_window
 from .maskop_window import open_maskop_batch_window
@@ -184,6 +185,7 @@ class App(tk.Tk):
         self.canvas.on_chip_pins_done = self._on_chip_pins_done
         self.canvas.on_chip_pins_cancel = self._on_chip_pins_cancel
         self.canvas.on_draw_mode_changed = lambda mode: self.mode_var.set(mode)
+        self.canvas.on_request_mode = self._pick_mode
         self._chip_wizard = None
         self._on_route_opts_change()
 
@@ -404,6 +406,15 @@ class App(tk.Tk):
         viewm.add_separator()
         viewm.add_radiobutton(label="Zoom Window", value="zoomwin", variable=self.mode_var,
                                command=self._on_mode_change, accelerator="W")
+        viewm.add_radiobutton(label="Pan", value="pan", variable=self.mode_var,
+                               command=self._on_mode_change, accelerator="P")
+        panm = tk.Menu(viewm, tearoff=False)
+        viewm.add_cascade(label="Pan Step", menu=panm)
+        for label, d, acc in (("Left", "left", "Ctrl+Left"), ("Right", "right", "Ctrl+Right"),
+                              ("Up", "up", "Ctrl+Up"), ("Down", "down", "Ctrl+Down")):
+            panm.add_command(label=label, accelerator=acc,
+                             command=lambda d=d: self.canvas.pan_step(d))
+        viewm.add_command(label="Pan to Point...", command=self.show_pan_to_dialog)
         viewm.add_separator()
         viewm.add_command(label="New View Window", command=self.new_view_window)
 
@@ -442,6 +453,7 @@ class App(tk.Tk):
         editm.add_command(label="Insert Vertex on Edge", command=self._insert_vertex_on_edge)
         editm.add_command(label="Continue Path...", command=self._continue_path)
         editm.add_command(label="Number Pins...", command=self._number_pins)
+        editm.add_command(label="Ref-Des to Pin 1", command=self._refdes_to_pin1)
         editm.add_command(label="Auto-Route Two Pins", command=self._auto_route_two_pins)
         editm.add_command(label="Move Wire Bond", command=self._move_wire_bond_tool)
         editm.add_command(label="Delete Wire Bond", command=self._delete_wire_bond_tool)
@@ -477,7 +489,7 @@ class App(tk.Tk):
         toolsm.add_command(label="Mask Operation Batch...", command=lambda: open_maskop_batch_window(self))
         toolsm.add_command(label="Top View...", command=self.show_topview_dialog)
         toolsm.add_command(label="DRC...", command=lambda: open_drc_window(self))
-        toolsm.add_command(label="Extract Netlist...", command=self.show_extract_netlist_dialog)
+        toolsm.add_command(label="Extract Netlist...", command=lambda: open_netlist_window(self))
         toolsm.add_command(label="Thermal Analysis...", command=lambda: open_thermal_window(self))
         toolsm.add_command(label="Generate Dielectric Fill...", command=self.show_dielectric_dialog)
         toolsm.add_command(label="Remove Dielectric Fill", command=self.remove_dielectric_fill)
@@ -844,14 +856,19 @@ class App(tk.Tk):
         self.layer_combo.bind("<FocusOut>", lambda e: self._on_layer_change())
 
         # Auto-save: a plain on/off switch, same convention as Snap to
-        # grid/Ortho 45 degree routing elsewhere -- off by default, and
-        # a per-session setting only (not saved into the technology
-        # file), since it's about this editing session, not the design
-        # itself. See _on_autosave_toggle()/_run_autosave().
+        # grid/Ortho 45 degree routing elsewhere. It belongs to the
+        # user, not the design, so it is not saved into the technology
+        # file. See _on_autosave_toggle()/_run_autosave().
         ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=(16, 8), pady=2)
-        self.autosave_var = tk.BooleanVar(value=False)
+        # On by default; the user's own on/off choice is remembered
+        # between sessions (app settings), so switching it off sticks.
+        from ..io.app_settings import load_app_settings
+        self.autosave_var = tk.BooleanVar(
+            value=bool(load_app_settings().get(self.AUTOSAVE_SETTING_KEY, True)))
         ttk.Checkbutton(bar, text="Auto-save (15 min)", variable=self.autosave_var,
                          command=self._on_autosave_toggle).pack(side="left", pady=2)
+        if self.autosave_var.get():
+            self._schedule_autosave()
 
     def _build_bottom_toolbar(self):
         """The toolbar row at the bottom of the window (above the status
@@ -883,6 +900,7 @@ class App(tk.Tk):
             ("Fit", lambda: self.canvas.fit_view()),
             ("Select", lambda: _pick_mode("select")),
             ("Zoom Win", lambda: _pick_mode("zoomwin")),
+            ("Pan", lambda: _pick_mode("pan")),
             ("Grid", lambda: self.canvas.toggle_grid()),
             ("New View", self.new_view_window),
         ]:
@@ -906,7 +924,7 @@ class App(tk.Tk):
         # Path Width/Cap moved to Setup > Path Style... (see _show_path_style_dialog);
         # width_var/cap_var still back the canvas's path drawing options, just
         # no longer edited from a toolbar field.
-        self.width_var = tk.IntVar(value=2)
+        self.width_var = tk.IntVar(value=300)  # DBU: 0.3 mm default path width
         self.cap_var = tk.StringVar(value="round")
 
         # Circle Segments moved to Setup > Circle Segments... (see
@@ -980,6 +998,69 @@ class App(tk.Tk):
 
     def _toolbar_button(self, parent, text, command):
         return ttk.Button(parent, text=text, command=command, width=self.TOOLBAR_BUTTON_WIDTH)
+
+    def _refdes_to_pin1(self):
+        """Edit > Ref-Des to Pin 1: the selected instance (or the one
+        whose ref-des is selected); with nothing selected, every
+        connector/header in the cell (J, P, X, CN, CON, HDR)."""
+        sel = self.canvas.selected
+        target = None
+        if sel is not None and sel[0] in ("sref", "sref_label", "sref_reftext"):
+            target = sel[1]
+        try:
+            moved = self.session.refdes_to_pin1(target)
+        except LayoutError as e:
+            self.status.set(str(e))
+            return
+        self.canvas.redraw()
+        self.status.set("Ref-des moved beside pin 1: " + ", ".join(moved) if moved
+                        else "No part with a pin 1 to move a ref-des to"
+                        + ("" if target is not None else " (no connector/header labels found)"))
+
+    def _pick_mode(self, mode):
+        """Switch the canvas tool and keep the menu radio buttons, mode
+        hint and context bar in step (used by canvas keys such as P)."""
+        self.mode_var.set(mode)
+        self._on_mode_change()
+
+    def show_pan_to_dialog(self):
+        """View > Pan to Point...: centre the view on typed X/Y (mm)
+        without changing the zoom. Same as the PAN TO command."""
+        win = tk.Toplevel(self)
+        win.title("Pan to Point")
+        win.transient(self)
+        win.resizable(False, False)
+        cx, cy = self.canvas.view_center()
+        x_var = tk.StringVar(value=f"{dbu_to_mm(cx):.3f}")
+        y_var = tk.StringVar(value=f"{dbu_to_mm(cy):.3f}")
+        form = ttk.Frame(win)
+        form.pack(padx=12, pady=(12, 4))
+        ttk.Label(form, text="X (mm):").grid(row=0, column=0, sticky="e", padx=4, pady=4)
+        x_entry = ttk.Entry(form, textvariable=x_var, width=12)
+        x_entry.grid(row=0, column=1, padx=4, pady=4)
+        ttk.Label(form, text="Y (mm):").grid(row=1, column=0, sticky="e", padx=4, pady=4)
+        ttk.Entry(form, textvariable=y_var, width=12).grid(row=1, column=1, padx=4, pady=4)
+        err = tk.StringVar(value="")
+        ttk.Label(win, textvariable=err, foreground="red").pack(padx=12)
+
+        def go(event=None):
+            try:
+                x, y = mm_to_dbu(float(x_var.get())), mm_to_dbu(float(y_var.get()))
+            except ValueError:
+                err.set("X and Y must be numbers (mm).")
+                return
+            self.canvas.pan_to(x, y)
+            self.status.set(f"View centred on {float(x_var.get()):.3f}, {float(y_var.get()):.3f} mm")
+            win.destroy()
+
+        btns = ttk.Frame(win)
+        btns.pack(pady=(4, 12))
+        ttk.Button(btns, text="Pan", command=go).pack(side="left", padx=6)
+        ttk.Button(btns, text="Cancel", command=win.destroy).pack(side="left", padx=6)
+        win.bind("<Return>", go)
+        win.bind("<Escape>", lambda e: win.destroy())
+        x_entry.focus_set()
+        x_entry.select_range(0, "end")
 
     def _on_mode_change(self):
         self.canvas.set_mode(self.mode_var.get())
@@ -1743,7 +1824,10 @@ class App(tk.Tk):
                  "drawn on the bond layer as a ball of the given diameter at each\n"
                  "end joined by a wire of the given width. The span must fall\n"
                  "between min and max, and a new bond may not cross an existing\n"
-                 "one. Extract Netlist treats this layer as conductor.",
+                 "one. Extract Netlist connects a bond at its two ends only;\n"
+                 "pads on the isolated pad layers (die pads, header pins)\n"
+                 "are kept apart from the copper underneath and joined only\n"
+                 "by bonds. List several layers separated by commas.",
             justify="left", foreground="#555",
         ).pack(anchor="w", padx=12, pady=(12, 8))
 
@@ -1776,10 +1860,17 @@ class App(tk.Tk):
         ttk.Spinbox(form, from_=0, to=100.0, increment=0.1, width=10,
                     textvariable=max_var).grid(row=4, column=1, sticky="w", padx=4, pady=4)
 
+        ttk.Label(form, text="Isolated pad layers:").grid(row=5, column=0, sticky="e", padx=4, pady=4)
+        die_var = tk.StringVar(value=", ".join(str(n) for n in rules["die_pad_layers"]))
+        ttk.Entry(form, textvariable=die_var, width=26).grid(
+            row=5, column=1, sticky="w", padx=4, pady=4)
+
         def apply():
             text = layer_var.get().strip()
             try:
                 layer = -1 if not text else self._resolve_layer_field(text)
+                die_layers = [self._resolve_layer_field(t.strip())
+                              for t in die_var.get().split(",") if t.strip()]
             except LayoutError as exc:
                 return str(exc)
             try:
@@ -1796,6 +1887,7 @@ class App(tk.Tk):
             save_bond_rules(self.session.library, {
                 "layer": layer, "width": width, "pad": pad,
                 "min_length": min_len, "max_length": max_len,
+                "die_pad_layers": die_layers,
             })
             self.status.set(
                 "wire bond layer: "
@@ -2376,7 +2468,7 @@ class App(tk.Tk):
         Designer, reloads its saved list from -- the new design rather
         than silently operating on the discarded one."""
         for attr in ("_resistor_designer_window", "_thin_film_designer_window",
-                     "_drc_window", "_maskop_batch_window",
+                     "_drc_window", "_netlist_window", "_maskop_batch_window",
                      "_gerber_batch_window", "_dxf_batch_window",
                      "_thermal_window"):
             win = getattr(self, attr, None)
@@ -2475,6 +2567,10 @@ class App(tk.Tk):
     #: Auto-save switch is on -- see _on_autosave_toggle().
     AUTOSAVE_INTERVAL_MS = 15 * 60 * 1000
 
+    #: App-settings key the Auto-save switch's on/off state is kept
+    #: under (absent = on, the default).
+    AUTOSAVE_SETTING_KEY = "autosave"
+
     def _on_autosave_toggle(self):
         """Top toolbar > Auto-save (15 min): flips the recurring
         self.after() timer on/off. Turning it on schedules the first
@@ -2483,6 +2579,13 @@ class App(tk.Tk):
         it off cancels whatever's pending. A per-session setting only,
         not saved into the technology file or restored on reopen."""
         self._cancel_autosave()
+        try:
+            from ..io.app_settings import load_app_settings, save_app_settings
+            settings = load_app_settings()
+            settings[self.AUTOSAVE_SETTING_KEY] = bool(self.autosave_var.get())
+            save_app_settings(settings)
+        except OSError:
+            pass  # not being able to remember the choice must not block it
         if self.autosave_var.get():
             self._schedule_autosave()
             self.status.set("auto-save on -- every 15 minutes while a file is open")
@@ -2786,6 +2889,11 @@ class App(tk.Tk):
             return
         self.status.set(f"FreeCAD 3D macro written to {written} "
                         f"-- run it inside FreeCAD (Macro > Macros...)")
+        self._show_freecad_output(
+            "Export to FreeCAD",
+            "The FreeCAD 3D macro was written to the file below. Run it inside "
+            "FreeCAD (Macro > Macros... > Execute) to build the 3D model.",
+            written)
 
     def build_component_library_macro(self):
         """File > Build FreeCAD Component Library...: write a .FCMacro
@@ -2825,6 +2933,41 @@ class App(tk.Tk):
             return
         self.status.set(f"Component library macro written to {written} "
                         f"-- run it inside FreeCAD to generate the STEP files")
+        self._show_freecad_output(
+            "Build Component Library",
+            "The component library macro was written to the file below. Run it "
+            "inside FreeCAD to generate the STEP files in the same folder.",
+            written)
+
+    @staticmethod
+    def _find_freecad_exe():
+        """FreeCAD's GUI executable: on PATH, else the newest
+        C:\\Program Files\\FreeCAD*\\bin\\freecad.exe. None if not found."""
+        import glob
+        import shutil
+        exe = shutil.which("freecad") or shutil.which("FreeCAD")
+        if exe:
+            return exe
+        found = sorted(glob.glob(os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"),
+                                              "FreeCAD*", "bin", "freecad.exe")))
+        return found[-1] if found else None
+
+    def _show_freecad_output(self, title, message, path):
+        """Tell the user exactly where a FreeCAD macro went: full path,
+        Open Folder, Copy Path, and Open in FreeCAD (runs the macro)
+        when FreeCAD is installed."""
+        extra = []
+        exe = self._find_freecad_exe()
+        if exe:
+            def _run_in_freecad():
+                import subprocess
+                try:
+                    subprocess.Popen([exe, os.path.abspath(path)])
+                    self.status.set(f"Opening {os.path.basename(path)} in FreeCAD...")
+                except OSError as e:
+                    dialogs.show_error(title, f"Could not start FreeCAD: {e}", parent=self)
+            extra.append(("Open in FreeCAD", _run_in_freecad))
+        dialogs.show_file_written(title, message, path, parent=self, extra_buttons=extra)
 
     def change_component_library_dir(self):
         """Setup > FreeCAD Component Library Folder...: view/change the
@@ -3411,102 +3554,9 @@ class App(tk.Tk):
         win.bind("<Escape>", lambda e: win.destroy())
 
     def show_extract_netlist_dialog(self):
-        """Tools > Extract Netlist...: pick the conductor layer(s) to
-        treat as electrically connected copper, run
-        Session.extract_netlist() against the current cell (or another
-        cell), and show the resulting nets -- each as a comma-separated
-        list of RefDes.Pin members (Rectangle.pin/Polygon.pin plus the
-        placing Sref's Label). See hlayout.core.netlist for exactly how
-        a net is determined; see Edit > Number Pins... and PAD/RESGEN's
-        auto-numbering for how pins get set in the first place. Same
-        operation as the command bar's NETLIST RUN command. Requires
-        the shapely package."""
-        win = tk.Toplevel(self)
-        win.title("Extract Netlist")
-        win.transient(self)
-        win.grab_set()
-
-        ttk.Label(
-            win,
-            text="Pick every conductor layer that's electrically connected copper "
-                 "in this design (Ctrl/Shift-click for more than one). Touching or "
-                 "overlapping shapes on those layers become one net; each net's "
-                 "members are read from Rectangle/Polygon pin numbers (Edit > "
-                 "Number Pins...) and the ref designator (Label) of the cell "
-                 "instance that placed them.",
-            wraplength=460, justify="left",
-        ).pack(anchor="w", padx=12, pady=(12, 6))
-
-        form = ttk.Frame(win)
-        form.pack(padx=12, fill="x")
-
-        ttk.Label(form, text="Conductor layers:").grid(row=0, column=0, sticky="ne", padx=4, pady=4)
-        layers_list = tk.Listbox(form, selectmode="extended", height=8, exportselection=False)
-        for n in range(len(self.session.library.layers)):
-            layers_list.insert("end", f"{n} ({self.session.library.layers[n].name})")
-        layers_list.grid(row=0, column=1, sticky="w", padx=4, pady=4)
-
-        ttk.Label(form, text="Cell:").grid(row=1, column=0, sticky="e", padx=4, pady=4)
-        cell_var = tk.StringVar(value=self.session.current_cell_name or "")
-        cell_names = list(self.session.library.cells.keys())
-        ttk.Combobox(form, textvariable=cell_var, state="readonly", width=22,
-                     values=cell_names).grid(row=1, column=1, sticky="w", padx=4, pady=4)
-
-        error_var = tk.StringVar(value="")
-        ttk.Label(win, textvariable=error_var, foreground="red", wraplength=460,
-                  justify="left").pack(anchor="w", padx=12)
-
-        columns = ("net", "members", "unresolved")
-        results = ttk.Treeview(win, columns=columns, show="headings", height=10)
-        results.heading("net", text="Net")
-        results.heading("members", text="Members")
-        results.heading("unresolved", text="Unresolved")
-        results.column("net", width=90, anchor="w")
-        results.column("members", width=340, anchor="w")
-        results.column("unresolved", width=80, anchor="center")
-        results.pack(padx=12, pady=(6, 6), fill="both", expand=True)
-
-        state = {"nets": []}
-
-        def run_extract():
-            error_var.set("")
-            sel = [layers_list.get(i).split(" ", 1)[0] for i in layers_list.curselection()]
-            if not sel:
-                error_var.set("Pick at least one conductor layer.")
-                return
-            layers = [int(n) for n in sel]
-            for row in results.get_children():
-                results.delete(row)
-            try:
-                nets = self.session.extract_netlist(layers, cell_name=cell_var.get() or None)
-            except LayoutError as e:
-                error_var.set(str(e))
-                return
-            state["nets"] = nets
-            for net in nets:
-                members = ", ".join(p.label() for p in net.pins) or "(no pins)"
-                results.insert("", "end", values=(net.id, members, net.unresolved_count))
-            self.status.set(f"Extract Netlist: {len(nets)} net(s) found")
-
-        def export_csv():
-            if not state["nets"]:
-                error_var.set("Run extraction first.")
-                return
-            path = filedialog.asksaveasfilename(
-                parent=win, title="Export Netlist CSV", initialfile="netlist.csv",
-                defaultextension=".csv", filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")])
-            if not path:
-                return
-            self.session.export_netlist_csv(state["nets"], path)
-            self.status.set(f"Netlist exported to {path}")
-
-        btn_row = ttk.Frame(win)
-        btn_row.pack(pady=(0, 12))
-        ttk.Button(btn_row, text="Run", command=run_extract).pack(side="left", padx=6)
-        ttk.Button(btn_row, text="Export CSV...", command=export_csv).pack(side="left", padx=6)
-        ttk.Button(btn_row, text="Close", command=win.destroy).pack(side="left", padx=6)
-
-        win.bind("<Escape>", lambda e: win.destroy())
+        """Tools > Extract Netlist...: opens the checkbox-table window
+        (hlayout.gui.netlist_window). Kept by name for scripts/MCP."""
+        return open_netlist_window(self)
 
     def show_via_wizard(self, on_created=None):
         """Tools > Via Wizard...: create a via cell -- a square or round

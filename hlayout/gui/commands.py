@@ -63,6 +63,20 @@ View:
                                        the view -- the typed/scripted equivalent
                                        of dragging a Zoom Window box in the GUI
                                        (View > Zoom Window, or the toolbar button)
+    PAN <dx,dy>                        move the view by dx,dy DBU (+x right, +y up)
+                                       without changing the zoom
+    PAN TO <x,y>                       centre the view on point x,y (DBU)
+    PAN LEFT | RIGHT | UP | DOWN [f]   step the view by fraction f of the visible
+                                       width/height (default 0.25) -- same as
+                                       Ctrl+arrow keys / View > Pan Step
+                                       (View > Pan, or P on the canvas, is the
+                                       drag-to-pan tool)
+    REFDES PIN1 [<refdes>|ALL] [gap=<dbu>]
+                                       put a placed part's ref-des beside its
+                                       pin 1 (outside the pin row); no ref-des
+                                       = every connector/header (J, P, X, CN,
+                                       CON, HDR). Done automatically when a
+                                       connector is placed/labelled with one
     FIT                                shorthand for ZOOM FIT -- fit the whole
                                         current cell in the active view
     GRID                              show whether the grid is on/off and its
@@ -512,7 +526,7 @@ Edit > Auto-Route Two Pins tool):
 
 Netlist Extraction (requires the shapely package; also available as
 Tools > Extract Netlist...):
-    NETLIST RUN <layer1> [layer2 ...] [cell=<name>] [export=<path.csv>] [bonds=0|1]
+    NETLIST RUN [layer1 layer2 ...] [cell=<name>] [export=<path.csv>] [bonds=0|1]
                                        extract the netlist across the given conductor
                                        layer(s) of the current cell (or cell=<name>),
                                        descending into every placed cell instance
@@ -520,10 +534,15 @@ Tools > Extract Netlist...):
                                        are identified as RefDes.Pin from Rectangle.pin/
                                        Polygon.pin and the placing Sref's Label (Edit
                                        Selected... "Label", or PAD/RESGEN's built-in
-                                       auto-numbering); the Wire Bond Rules... bond
-                                       layer is folded in automatically so bonds carry
-                                       connectivity through to the die pin (bonds=0 to
-                                       opt out); export=<path.csv> also writes a
+                                       auto-numbering); wire bonds on the Wire Bond
+                                       Rules... bond layer are included automatically,
+                                       each joining what its two ENDS land on (bonds=0
+                                       to opt out); the rules' isolated pad layers (die
+                                       pads, header pins) stay apart from substrate
+                                       copper and join only via bonds -- for chip-and-
+                                       wire list only the substrate copper layers;
+                                       output flags [open bond end(s)] that landed on
+                                       nothing; export=<path.csv> also writes a
                                        net,ref_des,pin CSV; also available as
                                        Session.extract_netlist()/export_netlist_csv()
 
@@ -873,6 +892,61 @@ class CommandInterpreter:
         else:
             self.view.zoom(float(args[0]))
         return f"zoom {arg.lower()}"
+
+    def _cmd_pan(self, args):
+        """PAN <dx,dy> | PAN TO <x,y> | PAN LEFT|RIGHT|UP|DOWN [fraction]:
+        move the view without changing the zoom (canvas.pan_by/pan_to/
+        pan_step). Coordinates are DBU, like ZOOM WINDOW."""
+        usage = "usage: PAN <dx,dy> | PAN TO <x,y> | PAN LEFT|RIGHT|UP|DOWN [fraction]"
+        if self.view is None:
+            raise CommandError("PAN requires an attached view")
+        if not args:
+            raise CommandError(usage)
+        head = args[0].upper()
+        if head in ("LEFT", "RIGHT", "UP", "DOWN"):
+            if len(args) > 2:
+                raise CommandError(usage)
+            frac = float(args[1]) if len(args) == 2 else None
+            self.view.pan_step(head.lower(), frac)
+            cx, cy = self.view.view_center()
+            return f"pan {head.lower()} -- view centre {cx:.0f},{cy:.0f}"
+        if head == "TO":
+            args = _join_points(args, 1, 1)
+            if len(args) != 2:
+                raise CommandError(usage)
+            x, y = _parse_point(args[1])
+            self.view.pan_to(x, y)
+            return f"view centred on {x:g},{y:g}"
+        args = _join_points(args, 0, 1)
+        if len(args) != 1:
+            raise CommandError(usage)
+        dx, dy = _parse_point(args[0])
+        self.view.pan_by(dx, dy)
+        cx, cy = self.view.view_center()
+        return f"pan {dx:g},{dy:g} -- view centre {cx:.0f},{cy:.0f}"
+
+    def _cmd_refdes(self, args):
+        """REFDES PIN1 [<refdes>|ALL] [gap=<dbu>]: move a placed part's
+        floated ref-des beside its pin 1 (Session.refdes_to_pin1). No
+        ref-des / ALL = every connector/header (J, P, X, CN, CON, HDR)."""
+        usage = "usage: REFDES PIN1 [<refdes>|ALL] [gap=<dbu>]"
+        if not args or args[0].upper() != "PIN1":
+            raise CommandError(usage)
+        target, gap = None, None
+        for a in args[1:]:
+            if a.lower().startswith("gap="):
+                gap = int(float(a.split("=", 1)[1]))
+            elif a.upper() == "ALL":
+                target = None
+            elif target is None:
+                target = a
+            else:
+                raise CommandError(usage)
+        moved = self.session.refdes_to_pin1(target, gap=gap)
+        if not moved:
+            return "no connector/header with a pin 1 found" if target is None else \
+                f"{target} has no pin 1"
+        return "ref-des moved beside pin 1: " + ", ".join(moved)
 
     def _cmd_fit(self, args):
         """FIT with no arguments: shorthand for ZOOM FIT -- fit the
@@ -1706,8 +1780,9 @@ class CommandInterpreter:
         raise CommandError(usage)
 
     def _cmd_netlist(self, args):
-        usage = ("usage: NETLIST RUN <layer1> [layer2 ...] [cell=<name>] "
-                 "[export=<path.csv>] [bonds=0|1]")
+        usage = ("usage: NETLIST RUN [layer1 layer2 ...] [cell=<name>] "
+                 "[export=<path.csv>] [bonds=0|1]  (no layers = the design's saved "
+                 "Extract Netlist selection)")
         if not args or args[0].upper() != "RUN":
             raise CommandError(usage)
         cell_name = None
@@ -1724,7 +1799,12 @@ class CommandInterpreter:
             else:
                 layers.append(a)
         if not layers:
-            raise CommandError(f"{usage}\n(at least one conductor layer is required)")
+            from ..io.techfile import load_netlist_settings
+            layers = load_netlist_settings(self.session.library)["conductor_layers"]
+            if not layers:
+                raise CommandError(
+                    f"{usage}\n(at least one conductor layer is required -- none given "
+                    "and none saved in Tools > Extract Netlist...)")
         nets = self.session.extract_netlist(layers, cell_name=cell_name,
                                             include_bonds=include_bonds)
         if export_path:
@@ -1733,6 +1813,11 @@ class CommandInterpreter:
         for net in nets:
             members = ", ".join(p.label() for p in net.pins) or "(no pins)"
             extra = f" [{net.unresolved_count} unresolved]" if net.unresolved_count else ""
+            if getattr(net, "bonds", 0):
+                extra += f" [{net.bonds} bond(s)]"
+            opens = getattr(net, "open_bond_ends", [])
+            if opens:
+                extra += " [open bond end(s): " + ", ".join(f"{x},{y}" for x, y in opens) + "]"
             lines.append(f"  {net.id}: {members}{extra}")
         if export_path:
             lines.append(f"exported to {export_path}")

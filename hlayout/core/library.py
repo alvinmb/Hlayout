@@ -242,7 +242,8 @@ class Library:
                                         rotation=ref.rotation, magnification=ref.magnification,
                                         x_reflection=ref.x_reflection,
                                         label=ref.label, label_height=ref.label_height,
-                                        label_offset=ref.label_offset))
+                                        label_offset=ref.label_offset,
+                                        pin=getattr(ref, "pin", "")))
             new_arefs = []
             for ref in src_cell.arefs:
                 child_name = visit(ref.cell_name)

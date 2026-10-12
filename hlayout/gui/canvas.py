@@ -13,6 +13,7 @@ from ..core.maskops import layer_to_shapely, shapely_to_polygons
 from ..core.shapes import (ARef, CIRCLE_SEGMENT_CHOICES, MAX_PATH_POINTS, MAX_POLY_POINTS, Path,
                            PathCap, Polygon, Rectangle, SRef, Text)
 from ..core.units import DBU_MM, dbu_to_mm, mm_to_dbu
+from ..core.refdes import is_connector_refdes, refdes_pin1_offset
 from ..io.techfile import load_bond_rules, load_dielectric_rules, load_refdes_annotation_layer
 
 # Bitmaps used to approximate the 9 stipple/fill patterns on a Tk canvas.
@@ -61,6 +62,11 @@ class LayoutCanvas(tk.Canvas):
         self.library = library
         self.cell_name = library.top_cell_name
         self.on_status = on_status or (lambda msg: None)
+        # Netlist/check issue markers (see set_issue_markers()): drawn on
+        # top of everything by every redraw() while the canvas shows the
+        # cell they were found in, until clear_issue_markers().
+        self.issue_markers = []
+        self.issue_marker_cell = None
 
         self.scale = self.PX_PER_MM_DEFAULT * DBU_MM  # pixels per DBU
         self.offset_x = 0.0  # pixels
@@ -109,7 +115,7 @@ class LayoutCanvas(tk.Canvas):
         # tool never permanently changes a user's View > Show Pin Numbers
         # preference, it just guarantees a stamp is visible WHILE numbering.
         self._pin_number_prev_show = None
-        self.path_width = 2
+        self.path_width = 300  # DBU: 0.3 mm, matches the App's default
         self.path_cap = "round"
         self.circle_segments = 32  # one of CIRCLE_SEGMENT_CHOICES
         # --- two-layer Route tool (Create > Route (2-Layer)) -------------
@@ -266,6 +272,15 @@ class LayoutCanvas(tk.Canvas):
         # typing in the command bar.
         self.bind("<r>", lambda e: self.rotate_selected(90))
         self.bind("<R>", lambda e: self.rotate_selected(90))
+        # P: the Pan tool (left-drag pans); Ctrl+arrows step the view a
+        # quarter of a screen. Canvas-only, like R, so typing elsewhere
+        # is unaffected. Middle/right-drag still pans in any tool.
+        self.bind("<p>", lambda e: self._request_mode("pan"))
+        self.bind("<P>", lambda e: self._request_mode("pan"))
+        self.bind("<Control-Left>", lambda e: self.pan_step("left"))
+        self.bind("<Control-Right>", lambda e: self.pan_step("right"))
+        self.bind("<Control-Up>", lambda e: self.pan_step("up"))
+        self.bind("<Control-Down>", lambda e: self.pan_step("down"))
         # Arrow keys: nudge the current selection by one grid unit (see
         # nudge_selected()) -- DBU y is up, so Up/Down add/subtract
         # grid_dbu from y and Left/Right subtract/add it from x (see
@@ -368,6 +383,57 @@ class LayoutCanvas(tk.Canvas):
         self.show_grid = not self.show_grid
         self.redraw()
 
+    # --- panning (View > Pan, PAN command) -------------------------------
+    #: fraction of the visible width/height one pan_step() moves the view
+    PAN_STEP_FRACTION = 0.25
+
+    def view_center(self):
+        """(x, y) DBU at the centre of the visible area."""
+        w = max(self.winfo_width(), 1)
+        h = max(self.winfo_height(), 1)
+        return self.to_dbu(w / 2, h / 2)
+
+    def pan_by(self, dx_dbu, dy_dbu):
+        """Move the VIEW by (dx, dy) DBU -- positive dx looks further
+        right, positive dy further up (the design appears to move the
+        other way). Scale is unchanged."""
+        self.offset_x -= dx_dbu * self.scale
+        self.offset_y += dy_dbu * self.scale
+        self.redraw()
+
+    def pan_to(self, x_dbu, y_dbu):
+        """Centre the view on (x, y) DBU without changing the zoom."""
+        cx, cy = self.view_center()
+        self.pan_by(x_dbu - cx, y_dbu - cy)
+
+    def pan_step(self, direction, fraction=None):
+        """Step the view left/right/up/down by `fraction` (default
+        PAN_STEP_FRACTION) of the visible width or height."""
+        f = self.PAN_STEP_FRACTION if fraction is None else float(fraction)
+        w = max(self.winfo_width(), 1) / self.scale
+        h = max(self.winfo_height(), 1) / self.scale
+        d = direction.lower()
+        if d == "left":
+            self.pan_by(-w * f, 0)
+        elif d == "right":
+            self.pan_by(w * f, 0)
+        elif d == "up":
+            self.pan_by(0, h * f)
+        elif d == "down":
+            self.pan_by(0, -h * f)
+        else:
+            raise ValueError(f"pan direction must be left/right/up/down, got {direction!r}")
+
+    def _request_mode(self, mode):
+        """A canvas key asking for a tool: go through the App's mode
+        picker when there is one (so the menu radio buttons follow),
+        else switch directly."""
+        picker = getattr(self, "on_request_mode", None)
+        if picker:
+            picker(mode)
+        else:
+            self.set_mode(mode)
+
     def toggle_pin_numbers(self):
         self.show_pin_numbers = not self.show_pin_numbers
         self.redraw()
@@ -398,6 +464,8 @@ class LayoutCanvas(tk.Canvas):
         if mode == "route":
             self._route_active_layer = self.route_layer_a
         self.draw_mode = mode
+        self.configure(cursor="fleur" if mode == "pan" else "crosshair")
+        self._pan_start = None
         self.redraw()
         self.on_mode_status(self._mode_hint())
         self.on_select()
@@ -442,6 +510,8 @@ class LayoutCanvas(tk.Canvas):
                       "double-click to edit, Delete to remove -- or drag "
                       "a box over empty space to window-select multiple",
             "zoomwin": "Zoom Window: drag a box around the area you want to see",
+            "pan": "Pan: drag to move the view (Ctrl+arrows step it; middle/right-drag "
+                   "pans in any tool) -- Esc or another tool to stop",
             "rect": "Rectangle: click first corner, then the opposite corner",
             "poly": "Polygon: click each vertex, double-click/Enter to finish (Esc cancels, Backspace/Undo drops the last point)",
             "path": "Path: click each point, double-click/Enter to finish (Esc cancels, Backspace/Undo drops the last point)",
@@ -512,6 +582,14 @@ class LayoutCanvas(tk.Canvas):
         self._zoomwin_start = None
         if self.draw_mode == "route":
             self._route_active_layer = self.route_layer_a
+        if self.draw_mode == "pan":
+            # Esc leaves the Pan tool for Select (direct, not via
+            # set_mode(), which itself calls cancel_draw()).
+            self._pan_start = None
+            self.draw_mode = "select"
+            self.configure(cursor="crosshair")
+            self.on_mode_status(self._mode_hint())
+            self.on_draw_mode_changed("select")
         if self.draw_mode == "pin_number":
             # Esc stops the pin-numbering tool and drops back to Select,
             # same as any other one-shot/modal tool (Zoom Window, ...).
@@ -892,6 +970,9 @@ class LayoutCanvas(tk.Canvas):
 
     def _on_click(self, e):
         self.focus_set()
+        if self.draw_mode == "pan":
+            self._pan_start_evt(e)
+            return
         if self.draw_mode == "select":
             self._select_click(e)
             return
@@ -1162,6 +1243,9 @@ class LayoutCanvas(tk.Canvas):
         self.redraw()
 
     def _on_drag_motion(self, e):
+        if self.draw_mode == "pan":
+            self._pan_move_evt(e)
+            return
         if self.draw_mode == "zoomwin":
             if self._zoomwin_start is not None:
                 self._update_zoomwin_preview(e.x, e.y)
@@ -1301,6 +1385,9 @@ class LayoutCanvas(tk.Canvas):
         self.redraw()
 
     def _on_release(self, e):
+        if self.draw_mode == "pan":
+            self._pan_end_evt(e)
+            return
         if self.draw_mode == "zoomwin":
             self._finish_zoomwin(e)
             return
@@ -2462,6 +2549,66 @@ class LayoutCanvas(tk.Canvas):
         if self.cell_name and self.cell_name in self.library.cells:
             self._draw_cell(self.cell_name, ox=0, oy=0, rot=0, mag=1, mirror=False, depth=0)
         self._draw_selection_highlight()
+        self._draw_issue_markers()
+
+    # --- issue markers (Extract Netlist, ...) -----------------------------
+    #: marker kind -> outline colour
+    ISSUE_MARKER_COLORS = {
+        "open": "#ff3b30",        # open bond end
+        "unresolved": "#ffcc00",  # pin with no RefDes / no pin number
+        "unassigned": "#ff3b30",  # pin on an unticked layer
+        "floating": "#ff9500",    # net with no pins
+        "pin": "#00d0ff",         # an ordinary member of the selected net
+    }
+
+    def set_issue_markers(self, markers, cell_name=None):
+        """Show markers on the canvas. `markers` is a list of dicts with
+        "x", "y" (DBU, in `cell_name`'s coordinates), "kind" (a key of
+        ISSUE_MARKER_COLORS), optional "label" and "active" (bool -- the
+        one the user picked, drawn larger with its label). Markers only
+        draw while the canvas shows `cell_name` (default: current)."""
+        self.issue_markers = list(markers)
+        self.issue_marker_cell = cell_name or self.cell_name
+        self.delete("issue_marker")
+        self._draw_issue_markers()
+
+    def clear_issue_markers(self):
+        self.issue_markers = []
+        self.issue_marker_cell = None
+        self.delete("issue_marker")
+
+    def _draw_issue_markers(self):
+        if not self.issue_markers or self.issue_marker_cell != self.cell_name:
+            return
+        tag = "issue_marker"
+        actives = []
+        for m in self.issue_markers:
+            if m.get("active"):
+                actives.append(m)
+                continue
+            px, py = self.to_px(m["x"], m["y"])
+            col = self.ISSUE_MARKER_COLORS.get(m.get("kind"), "#ff3b30")
+            r = 6
+            self.create_oval(px - r, py - r, px + r, py + r, outline=col, width=2, tags=tag)
+        for m in actives:   # drawn last so they sit on top
+            px, py = self.to_px(m["x"], m["y"])
+            col = self.ISSUE_MARKER_COLORS.get(m.get("kind"), "#ff3b30")
+            r, arm = 12, 22
+            self.create_oval(px - r, py - r, px + r, py + r, outline=col, width=3, tags=tag)
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                self.create_line(px + dx * (r - 4), py + dy * (r - 4),
+                                 px + dx * arm, py + dy * arm,
+                                 fill=col, width=2, tags=tag)
+            label = m.get("label")
+            if label:
+                tid = self.create_text(px + arm + 4, py - arm, text=label, anchor="w",
+                                       fill="white", font=("TkDefaultFont", 9), tags=tag)
+                bb = self.bbox(tid)
+                if bb:
+                    self.create_rectangle(bb[0] - 3, bb[1] - 1, bb[2] + 3, bb[3] + 1,
+                                          fill="#0d1117", outline=col, tags=tag)
+                    self.tag_raise(tid)
+        self.tag_raise(tag)
 
     def _draw_grid(self):
         w = self.winfo_width()
@@ -3640,6 +3787,7 @@ def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
                 shape.magnification = mag
                 shape.x_reflection = bool(int(entries["Mirror (0/1)"].get()))
             else:  # sref
+                old_label = shape.label
                 shape.label = entries["Label"].get()
                 label_height = int(round(float(entries["Label Size (px)"].get())))
                 if label_height <= 0:
@@ -3651,6 +3799,15 @@ def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
                 )
                 shape.origin = (int(round(float(entries["X"].get()))),
                                  int(round(float(entries["Y"].get()))))
+                # A connector/header just given its ref-des (J1, P2, ...)
+                # with the label still at the default centre: put it
+                # beside pin 1 instead.
+                if (shape.label != old_label and tuple(shape.label_offset) == (0, 0)
+                        and is_connector_refdes(shape.label)):
+                    lib = getattr(parent, "library", None)
+                    off = refdes_pin1_offset(lib, shape) if lib is not None else None
+                    if off is not None:
+                        shape.label_offset = off
                 shape.rotation = float(entries["Rotation (deg)"].get())
                 mag = float(entries["Magnification"].get())
                 if mag <= 0:

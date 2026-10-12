@@ -1,0 +1,637 @@
+{
+ "capabilities": {
+  "tk": true,
+  "shapely": true,
+  "version": "0.1.0"
+ },
+ "counts": {
+  "PASS": 89
+ },
+ "results": [
+  {
+   "group": "protocol",
+   "name": "initialize_reports_server_and_echoes_version",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.21
+  },
+  {
+   "group": "protocol",
+   "name": "initialize_falls_back_on_unknown_version",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.21
+  },
+  {
+   "group": "protocol",
+   "name": "tools_list_is_the_seven_tools_with_schemas",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.43
+  },
+  {
+   "group": "protocol",
+   "name": "ping_unknown_method_and_unknown_tool",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.45
+  },
+  {
+   "group": "protocol",
+   "name": "parse_error_does_not_kill_the_server",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.5
+  },
+  {
+   "group": "protocol",
+   "name": "notifications_get_no_reply",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.48
+  },
+  {
+   "group": "protocol",
+   "name": "batch_request_returns_a_batch",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.53
+  },
+  {
+   "group": "protocol",
+   "name": "non_object_request_is_invalid",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.51
+  },
+  {
+   "group": "protocol",
+   "name": "design_flag_opens_a_file_at_start",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 1.08
+  },
+  {
+   "group": "tools",
+   "name": "status_of_a_fresh_headless_session",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.41
+  },
+  {
+   "group": "tools",
+   "name": "first_reply_says_which_mode_it_is_in_and_later_ones_do_not",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 1.02
+  },
+  {
+   "group": "tools",
+   "name": "status_tracks_cells_top_cells_layers_and_undo",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.46
+  },
+  {
+   "group": "tools",
+   "name": "describe_cell_reports_layers_instances_and_size",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.44
+  },
+  {
+   "group": "tools",
+   "name": "describe_cell_errors_and_max_items",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.46
+  },
+  {
+   "group": "tools",
+   "name": "api_listing_detail_and_commands",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.47
+  },
+  {
+   "group": "python",
+   "name": "expression_value_print_and_persistent_variables",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.71
+  },
+  {
+   "group": "python",
+   "name": "errors_are_reported_and_the_session_survives",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.55
+  },
+  {
+   "group": "python",
+   "name": "stdout_from_scripts_never_corrupts_the_protocol",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.63
+  },
+  {
+   "group": "geometry",
+   "name": "every_shape_type_and_bbox",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.58
+  },
+  {
+   "group": "geometry",
+   "name": "rectangle_corners_are_normalised",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.51
+  },
+  {
+   "group": "geometry",
+   "name": "circle_segment_counts",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.61
+  },
+  {
+   "group": "geometry",
+   "name": "path_caps",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.5
+  },
+  {
+   "group": "geometry",
+   "name": "flush_path_bbox_stops_at_its_ends",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.6
+  },
+  {
+   "group": "geometry",
+   "name": "square_path_bbox_includes_the_cap",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.57
+  },
+  {
+   "group": "geometry",
+   "name": "invalid_geometry_is_rejected",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.5
+  },
+  {
+   "group": "geometry",
+   "name": "polygon_at_the_200_point_limit",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.58
+  },
+  {
+   "group": "geometry",
+   "name": "remove_and_shapes_on_layer",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.65
+  },
+  {
+   "group": "geometry",
+   "name": "bulk_2000_shapes_in_one_batch",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.67
+  },
+  {
+   "group": "cells",
+   "name": "new_cell_use_cell_and_errors",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.92
+  },
+  {
+   "group": "cells",
+   "name": "sref_transforms_show_in_the_bbox",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.66
+  },
+  {
+   "group": "cells",
+   "name": "aref_grid_and_smash",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.61
+  },
+  {
+   "group": "cells",
+   "name": "find_cells_list_library_and_place_cell",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.53
+  },
+  {
+   "group": "cells",
+   "name": "save_refuses_a_dangling_sref",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.79
+  },
+  {
+   "group": "cells",
+   "name": "cyclic_references_are_refused",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.66
+  },
+  {
+   "group": "undo",
+   "name": "undo_redo_single_steps",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.59
+  },
+  {
+   "group": "undo",
+   "name": "a_new_edit_clears_the_redo_stack",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.59
+  },
+  {
+   "group": "undo",
+   "name": "undo_everything_back_to_empty",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.58
+  },
+  {
+   "group": "layers",
+   "name": "named_layers_work_everywhere_a_layer_is_taken",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.73
+  },
+  {
+   "group": "layers",
+   "name": "remap_and_clear_layer",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.75
+  },
+  {
+   "group": "pins",
+   "name": "pin_list_and_set",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.94
+  },
+  {
+   "group": "files",
+   "name": "gds_round_trip_preserves_everything",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 1.53
+  },
+  {
+   "group": "files",
+   "name": "gds_round_trip_keeps_shape_order",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 1.7
+  },
+  {
+   "group": "files",
+   "name": "save_writes_a_sidecar_that_restores_layer_names",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 1.08
+  },
+  {
+   "group": "files",
+   "name": "save_defaults_to_the_open_file_and_needs_a_path_otherwise",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 1.21
+  },
+  {
+   "group": "files",
+   "name": "open_errors_and_replaces_the_document",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 1.46
+  },
+  {
+   "group": "files",
+   "name": "plain_save_with_a_library_name",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 1.07
+  },
+  {
+   "group": "files",
+   "name": "merge_gds_renames_clashing_cells",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 2.03
+  },
+  {
+   "group": "files",
+   "name": "technology_file_round_trip",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 1.73
+  },
+  {
+   "group": "libraries",
+   "name": "attach_list_place_and_detach",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 1.26
+  },
+  {
+   "group": "libraries",
+   "name": "at_most_two_attached_libraries",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 1.28
+  },
+  {
+   "group": "libraries",
+   "name": "attached_libraries_survive_save_and_open",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 2.19
+  },
+  {
+   "group": "libraries",
+   "name": "via_and_pad_cells_are_written_into_the_attached_library",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 1.56
+  },
+  {
+   "group": "libraries",
+   "name": "drop_via_and_chip_cell",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.55
+  },
+  {
+   "group": "generators",
+   "name": "thick_film_resistor",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.48
+  },
+  {
+   "group": "generators",
+   "name": "pin_function_table",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.6
+  },
+  {
+   "group": "generators",
+   "name": "drawing_sheet_sizes",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.58
+  },
+  {
+   "group": "generators",
+   "name": "resistor_table_needs_saved_rows",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.54
+  },
+  {
+   "group": "maskops",
+   "name": "oversize_and_undersize",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.51
+  },
+  {
+   "group": "maskops",
+   "name": "boolean_ops_areas",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.74
+  },
+  {
+   "group": "maskops",
+   "name": "mask_op_errors_paths_and_flatten",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.48
+  },
+  {
+   "group": "maskops",
+   "name": "outline_conversion_and_top_view",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.93
+  },
+  {
+   "group": "drc",
+   "name": "width_space_and_area_rules",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.93
+  },
+  {
+   "group": "drc",
+   "name": "between_layer_rules_descend_into_instances_and_mark_errors",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.57
+  },
+  {
+   "group": "netlist",
+   "name": "nets_follow_touching_copper",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.75
+  },
+  {
+   "group": "bonds",
+   "name": "wire_bond_rules_find_move_delete",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.61
+  },
+  {
+   "group": "bonds",
+   "name": "two_bonds_may_share_an_end",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.49
+  },
+  {
+   "group": "bonds",
+   "name": "deleting_a_bond_leaves_a_neighbour_sharing_its_end_intact",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.74
+  },
+  {
+   "group": "dielectric",
+   "name": "fill_with_holes_and_clear",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.53
+  },
+  {
+   "group": "routing",
+   "name": "auto_route_dodges_an_obstacle",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.53
+  },
+  {
+   "group": "routing",
+   "name": "auto_route_reports_when_boxed_in",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.61
+  },
+  {
+   "group": "routing",
+   "name": "auto_route_does_not_cross_copper_next_to_an_endpoint",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.98
+  },
+  {
+   "group": "exports",
+   "name": "gerber_one_file_per_layer",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.52
+  },
+  {
+   "group": "exports",
+   "name": "dxf_freecad_and_print",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.95
+  },
+  {
+   "group": "commands",
+   "name": "drawing_commands_and_case_insensitivity",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.64
+  },
+  {
+   "group": "commands",
+   "name": "space_separated_points_are_accepted",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.62
+  },
+  {
+   "group": "commands",
+   "name": "instances_delete_last_undo_redo",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.79
+  },
+  {
+   "group": "commands",
+   "name": "delete_last_can_be_undone",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.53
+  },
+  {
+   "group": "commands",
+   "name": "delete_last_removes_the_most_recent_item",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.69
+  },
+  {
+   "group": "commands",
+   "name": "a_failing_line_stops_the_rest",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.62
+  },
+  {
+   "group": "commands",
+   "name": "python_fallback_and_py_and_help",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.75
+  },
+  {
+   "group": "commands",
+   "name": "layer_commands",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.91
+  },
+  {
+   "group": "commands",
+   "name": "file_and_library_commands",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 1.57
+  },
+  {
+   "group": "commands",
+   "name": "tech_commands",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 1.34
+  },
+  {
+   "group": "commands",
+   "name": "pin_commands",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.54
+  },
+  {
+   "group": "commands",
+   "name": "maskop_outline_and_clear_commands",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.46
+  },
+  {
+   "group": "commands",
+   "name": "drc_commands",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.58
+  },
+  {
+   "group": "commands",
+   "name": "netlist_bond_autoroute_dielectric_commands",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.85
+  },
+  {
+   "group": "commands",
+   "name": "table_sheet_resgen_and_export_commands",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 0.51
+  },
+  {
+   "group": "scenario",
+   "name": "twenty_pin_package_build",
+   "outcome": "PASS",
+   "message": "",
+   "seconds": 1.12
+  }
+ ],
+ "python": "3.14.4 (tags/v3.14.4:23116f9, Apr  7 2026, 14:10:54) [MSC v.1944 64 bit (AMD64)]",
+ "platform": "win32"
+}

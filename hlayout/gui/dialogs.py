@@ -92,6 +92,74 @@ def show_info(title, message, parent):
     _show(parent, title, message, _INFO)
 
 
+def reveal_in_folder(path):
+    """Open the folder holding `path` in the system file manager, with
+    the file selected where the platform supports it (Explorer, Finder).
+    Returns False if nothing could be launched."""
+    import os
+    import subprocess
+    import sys
+    path = os.path.abspath(path)
+    folder = path if os.path.isdir(path) else os.path.dirname(path)
+    try:
+        if sys.platform.startswith("win"):
+            if os.path.isfile(path):
+                subprocess.Popen(["explorer", "/select,", path])
+            else:
+                os.startfile(folder)
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", path] if os.path.isfile(path) else ["open", folder])
+        else:
+            subprocess.Popen(["xdg-open", folder])
+        return True
+    except Exception:
+        return False
+
+
+def show_file_written(title, message, path, parent, extra_buttons=()):
+    """Success dialog for an export: `message`, then the full output
+    path in a selectable field, with Open Folder (reveals the file in
+    Explorer/Finder), Copy Path and OK. `extra_buttons` is a sequence of
+    (label, callback) added before OK."""
+    import os
+    win, body = _build(parent, title, message, _INFO)
+
+    path = os.path.abspath(path)
+    path_var = tk.StringVar(value=path)
+    entry = ttk.Entry(body, textvariable=path_var, width=max(48, min(len(path) + 2, 90)),
+                      state="readonly")
+    entry.pack(fill="x", pady=(0, 12))
+
+    status = tk.StringVar(value="")
+    ttk.Label(body, textvariable=status, foreground="#555").pack(anchor="w")
+
+    def copy_path():
+        win.clipboard_clear()
+        win.clipboard_append(path)
+        status.set("Path copied to the clipboard.")
+
+    def open_folder():
+        if not reveal_in_folder(path):
+            status.set("Could not open the folder.")
+
+    btn_row = ttk.Frame(body)
+    btn_row.pack(anchor="e")
+    ttk.Button(btn_row, text="Open Folder", command=open_folder).pack(side="left", padx=(6, 0))
+    ttk.Button(btn_row, text="Copy Path", command=copy_path).pack(side="left", padx=(6, 0))
+    for label, cb in extra_buttons:
+        ttk.Button(btn_row, text=label, command=cb).pack(side="left", padx=(6, 0))
+    ok = ttk.Button(btn_row, text="OK", command=win.destroy)
+    ok.pack(side="left", padx=(6, 0))
+
+    win.bind("<Return>", lambda e: win.destroy())
+    win.bind("<Escape>", lambda e: win.destroy())
+    win.protocol("WM_DELETE_WINDOW", win.destroy)
+    _center_over(win, parent)
+    win.grab_set()
+    ok.focus_set()
+    win.wait_window()
+
+
 def show_warning(title, message, parent):
     """Drop-in replacement for tkinter.messagebox.showwarning."""
     _show(parent, title, message, _WARNING)
