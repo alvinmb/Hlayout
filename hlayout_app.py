@@ -96,6 +96,7 @@ def main():
     app = App(library, attached_libraries=attached_libraries, attached_paths=attached_paths)
     if args:
         app.current_path = args[0]
+        app.fit_view_when_shown()     # open zoomed to the whole design
     if want_mcp:
         try:
             app.start_mcp_bridge()

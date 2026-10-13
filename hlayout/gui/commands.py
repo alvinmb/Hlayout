@@ -10,6 +10,7 @@ use File > Command Reference in the GUI) for the categorized command
 list below, at any time — see ``COMMAND_REFERENCE``.
 """
 
+import os
 import shlex
 from typing import Callable, Optional
 
@@ -380,9 +381,12 @@ to its stroked-outline polygon first; requires the shapely package):
                                        outline instead of a filled, closed shape;
                                        cell defaults to the current cell; also
                                        available as Session.convert_rects_to_outline()
+    TOPVIEW                            rebuild the top view with the settings
+                                       saved in Tools > Top View...
     TOPVIEW result=<layer> [layers=<n,n,...>] [exclude=<n,n,...>] [hatch=<dbu>]
             [width=<dbu>] [cell=<name>] [out=<cellname>] [flatten=0|1]
-            [simplify=<dbu>]
+            [simplify=<dbu>] [refdes=0|1] [refdes_height=<dbu>]
+                                       (refdes=1: ref-des written last, on top)
                                        draw a top-down, hidden-line-removal
                                        pictorial view of the hybrid circuit onto
                                        result_layer of a SEPARATE cell named
@@ -526,7 +530,8 @@ Edit > Auto-Route Two Pins tool):
 
 Netlist Extraction (requires the shapely package; also available as
 Tools > Extract Netlist...):
-    NETLIST RUN [layer1 layer2 ...] [cell=<name>] [export=<path.csv>] [bonds=0|1]
+    NETLIST RUN [layer1 layer2 ...] [cell=<name>] [export=<path>]
+                [format=csv|report|kicad|tango] [bonds=0|1]
                                        extract the netlist across the given conductor
                                        layer(s) of the current cell (or cell=<name>),
                                        descending into every placed cell instance
@@ -542,9 +547,12 @@ Tools > Extract Netlist...):
                                        copper and join only via bonds -- for chip-and-
                                        wire list only the substrate copper layers;
                                        output flags [open bond end(s)] that landed on
-                                       nothing; export=<path.csv> also writes a
-                                       net,ref_des,pin CSV; also available as
-                                       Session.extract_netlist()/export_netlist_csv()
+                                       nothing; export=<path> also writes the
+                                       netlist to a file -- .csv (net,ref_des,pin),
+                                       .txt (report with issues), .net (KiCad) or
+                                       .tng (Tango/Protel), or the format= given;
+                                       also available as Session.extract_netlist()/
+                                       export_netlist()
 
 Thermal analysis (requires numpy, scipy and shapely; also available as
 Tools > Thermal Analysis...):
@@ -1652,7 +1660,22 @@ class CommandInterpreter:
     def _cmd_topview(self, args):
         usage = ("usage: TOPVIEW result=<layer> [layers=<n,n,...>] [exclude=<n,n,...>] "
                  "[hatch=<dbu>] [hatch_angle=<deg>[,<deg>]] [width=<dbu>] [cell=<name>] "
-                 "[out=<cellname>] [flatten=0|1] [simplify=<dbu>]")
+                 "[out=<cellname>] [flatten=0|1] [simplify=<dbu>] [refdes=0|1] "
+                 "[refdes_height=<dbu>]   "
+                 "(TOPVIEW alone = the settings saved in Tools > Top View...)")
+        if not args:
+            from ..io.techfile import load_topview_settings
+            try:
+                written = self.session.top_view_from_settings()
+            except LayoutError as e:
+                raise CommandError(f"{e}\n{usage}")
+            st = load_topview_settings(self.session.library)
+            total = sum(written.values())
+            layer_obj = self.session.library.layers[int(st["result_layer"])]
+            if total and not layer_obj.visible:
+                layer_obj.visible = True
+            return (f"TOPVIEW (saved settings) wrote {total} path(s) to layer "
+                    f"{st['result_layer']} of cell {st['out_cell']}")
         kwargs = {}
         for a in args:
             if "=" not in a:
@@ -1680,6 +1703,10 @@ class CommandInterpreter:
                 kwargs["flatten"] = v not in ("0", "false", "no")
             elif k == "simplify":
                 kwargs["simplify"] = float(v)
+            elif k == "refdes":
+                kwargs["refdes"] = v not in ("0", "false", "no")
+            elif k == "refdes_height":
+                kwargs["refdes_height"] = float(v)
             else:
                 raise CommandError(f"unknown TOPVIEW option {k!r}")
         if "result_layer" not in kwargs:
@@ -1781,16 +1808,20 @@ class CommandInterpreter:
 
     def _cmd_netlist(self, args):
         usage = ("usage: NETLIST RUN [layer1 layer2 ...] [cell=<name>] "
-                 "[export=<path.csv>] [bonds=0|1]  (no layers = the design's saved "
-                 "Extract Netlist selection)")
+                 "[export=<path>] [format=csv|report|kicad|tango] [bonds=0|1]  "
+                 "(no layers = the design's saved Extract Netlist selection; the "
+                 "export format follows the extension: .csv .txt .net(KiCad) .tng(Tango))")
         if not args or args[0].upper() != "RUN":
             raise CommandError(usage)
         cell_name = None
         export_path = None
+        export_fmt = None
         include_bonds = True
         layers = []
         for a in args[1:]:
-            if a.lower().startswith("cell="):
+            if a.lower().startswith("format="):
+                export_fmt = a.split("=", 1)[1].lower()
+            elif a.lower().startswith("cell="):
                 cell_name = a.split("=", 1)[1]
             elif a.lower().startswith("export="):
                 export_path = a.split("=", 1)[1]
@@ -1808,7 +1839,11 @@ class CommandInterpreter:
         nets = self.session.extract_netlist(layers, cell_name=cell_name,
                                             include_bonds=include_bonds)
         if export_path:
-            self.session.export_netlist_csv(nets, export_path)
+            try:
+                used_fmt = self.session.export_netlist(nets, export_path, fmt=export_fmt,
+                                                       cell_name=cell_name)
+            except ValueError as e:
+                raise CommandError(str(e))
         lines = [f"netlist: {len(nets)} net(s)"]
         for net in nets:
             members = ", ".join(p.label() for p in net.pins) or "(no pins)"
@@ -1820,7 +1855,7 @@ class CommandInterpreter:
                 extra += " [open bond end(s): " + ", ".join(f"{x},{y}" for x, y in opens) + "]"
             lines.append(f"  {net.id}: {members}{extra}")
         if export_path:
-            lines.append(f"exported to {export_path}")
+            lines.append(f"exported ({used_fmt}) to {os.path.abspath(export_path)}")
         return "\n".join(lines)
 
     def _cmd_drc(self, args):

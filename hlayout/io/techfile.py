@@ -702,6 +702,79 @@ def save_bond_rules(library: Library, rules: dict) -> None:
     library.tech_params[BOND_RULES_KEY] = json.dumps(out)
 
 
+# --- Top View settings (Tools > Top View...) ---------------------------------
+#
+# Everything the Top View window asks for, saved with the design so the
+# next run (window, or TOPVIEW with no arguments) starts from the same
+# choices. "excluded" lists the layers unticked in the window -- stored
+# as exclusions, so a layer drawn later is included by default.
+
+TOPVIEW_SETTINGS_KEY = "topview_settings"
+
+DEFAULT_TOPVIEW_SETTINGS = {
+    "result_layer": -1,
+    "out_cell": "TOPVIEW",
+    "excluded": [],
+    "line_width_um": 100.0,
+    "hatch": False,
+    "hatch_pitch_um": 250.0,
+    "hatch_angles": [45.0, -45.0],
+    "flatten": True,
+    "simplify_um": 0.0,
+    "used_only": True,
+    "refdes": True,
+    "refdes_height_um": 600.0,
+}
+
+
+def load_topview_settings(library: Library) -> dict:
+    """The saved Top View settings, complete (defaults filled in);
+    ``saved`` is True only when the design has its own entry."""
+    out = json.loads(json.dumps(DEFAULT_TOPVIEW_SETTINGS))
+    out["saved"] = False
+    raw = library.tech_params.get(TOPVIEW_SETTINGS_KEY)
+    if not raw:
+        return out
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return out
+    if not isinstance(data, dict):
+        return out
+    out["saved"] = True
+    try:
+        out["result_layer"] = int(data.get("result_layer", -1))
+    except (TypeError, ValueError):
+        pass
+    if isinstance(data.get("out_cell"), str) and data["out_cell"].strip():
+        out["out_cell"] = data["out_cell"].strip()
+    if "excluded" in data:
+        out["excluded"] = _layer_list(data["excluded"])
+    for k in ("line_width_um", "hatch_pitch_um", "simplify_um", "refdes_height_um"):
+        try:
+            out[k] = float(data.get(k, out[k]))
+        except (TypeError, ValueError):
+            pass
+    for k in ("hatch", "flatten", "used_only", "refdes"):
+        if k in data:
+            out[k] = bool(data[k])
+    try:
+        ang = [float(a) for a in data.get("hatch_angles", out["hatch_angles"])]
+        if ang:
+            out["hatch_angles"] = ang
+    except (TypeError, ValueError):
+        pass
+    return out
+
+
+def save_topview_settings(library: Library, settings: dict) -> None:
+    cur = load_topview_settings(library)
+    cur.update({k: v for k, v in (settings or {}).items() if k in DEFAULT_TOPVIEW_SETTINGS})
+    payload = {k: cur[k] for k in DEFAULT_TOPVIEW_SETTINGS}
+    payload["excluded"] = _layer_list(payload["excluded"])
+    library.tech_params[TOPVIEW_SETTINGS_KEY] = json.dumps(payload)
+
+
 # --- Netlist extraction settings (Tools > Extract Netlist...) ----------------
 #
 # Which layers Extract Netlist treats as substrate conductor, whether

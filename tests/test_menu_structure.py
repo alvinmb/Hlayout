@@ -1031,171 +1031,121 @@ def test_mask_op_dialog_boolean_op_turns_on_a_hidden_result_layer():
         app.destroy()
 
 
-def test_topview_dialog_writes_a_hidden_line_result():
+
+def _tv(app):
+    from hlayout.gui.topview_window import TopViewWindow
+    return next(w for w in _find_toplevels(app) if isinstance(w, TopViewWindow))
+
+
+def _tv_button(win, text):
+    return next(b for b in _collect_widgets(win, ttk.Button) if b.cget("text").startswith(text))
+
+
+def test_topview_window_writes_a_hidden_line_result_and_saves_settings():
+    from hlayout.io.techfile import load_topview_settings
     app = _make_app()
     try:
         top = app.session.library.cells["TOP"]
         top.add_rectangle(0, 0, 0, 1000, 1000)
-
         app.show_topview_dialog()
-        win = _find_toplevels(app)[0]
-
-        combos = _collect_widgets(win, ttk.Combobox)
-        # The only combobox is the Result layer (the view is always of
-        # the main design cell -- there is no Apply-to choice).
-        (result_combo,) = combos
-        result_combo.set("1 (L1)")
-
-        # ttk.Spinbox/Combobox are themselves ttk.Entry subclasses, so
-        # filter to plain Entry widgets only.
-        entries = [w for w in _collect_widgets(win, ttk.Entry) if type(w) is ttk.Entry]
-        # Order on the grid: Output cell, Explicit layers, Exclude layers,
-        # Hatch angles.
-        out_cell_entry, layers_entry, _exclude_entry, _angles_entry = entries
-        assert out_cell_entry.get() == "TOPVIEW"  # the default output cell
-        layers_entry.insert(0, "0")  # bypass role-based default, use layer 0 explicitly
-
-        apply_btn = next(b for b in _collect_widgets(win, ttk.Button)
-                          if b.cget("text") == "Apply")
-        apply_btn.invoke()
-
-        # The view goes to its own TOPVIEW cell, never into the viewed cell.
+        win = _tv(app)
+        assert 0 in win._rows                       # the drawn layer is listed
+        win.result_combo.set(win._layer_label(1))
+        win._on_result()
+        _tv_button(win, "Build").invoke()
         assert not any(sh.layer == 1 for sh in top.shapes)
         view = app.session.library.cells["TOPVIEW"]
         assert any(sh.layer == 1 for sh in view.shapes)
-        assert "wrote" in app.status.get()
-        assert "cell TOPVIEW" in app.status.get()
+        assert "wrote" in app.status.get() and "cell TOPVIEW" in app.status.get()
+        st = load_topview_settings(app.session.library)
+        assert st["saved"] and st["result_layer"] == 1 and st["out_cell"] == "TOPVIEW"
     finally:
         app.destroy()
 
 
-def test_topview_dialog_output_cell_can_be_renamed_and_must_not_be_blank():
+def test_topview_window_output_cell_can_be_renamed():
     app = _make_app()
     try:
-        top = app.session.library.cells["TOP"]
-        top.add_rectangle(0, 0, 0, 1000, 1000)
-
+        app.session.library.cells["TOP"].add_rectangle(0, 0, 0, 1000, 1000)
         app.show_topview_dialog()
-        win = _find_toplevels(app)[0]
-        (result_combo,) = _collect_widgets(win, ttk.Combobox)
-        result_combo.set("1 (L1)")
-        entries = [w for w in _collect_widgets(win, ttk.Entry) if type(w) is ttk.Entry]
-        out_cell_entry, layers_entry, _exclude_entry, _angles_entry = entries
-        layers_entry.insert(0, "0")
-        apply_btn = next(b for b in _collect_widgets(win, ttk.Button)
-                          if b.cget("text") == "Apply")
-
-        # Blank name: refused, dialog stays open, nothing created.
-        out_cell_entry.delete(0, "end")
-        apply_btn.invoke()
-        assert win.winfo_exists()
+        win = _tv(app)
+        win.result_combo.set(win._layer_label(1))
+        win._on_result()
+        win.out_cell_var.set("ASSY_VIEW")
+        _tv_button(win, "Build").invoke()
+        assert "ASSY_VIEW" in app.session.library.cells
         assert "TOPVIEW" not in app.session.library.cells
-
-        out_cell_entry.insert(0, "ASSY_VIEW")
-        apply_btn.invoke()
-        assert "TOPVIEW" not in app.session.library.cells
-        view = app.session.library.cells["ASSY_VIEW"]
-        assert any(sh.layer == 1 for sh in view.shapes)
-        assert "cell ASSY_VIEW" in app.status.get()
     finally:
         app.destroy()
 
 
-def test_topview_dialog_always_views_the_main_design_cell():
-    # No Apply-to choice: even with a sub-cell open in the editor, the
-    # view is of the library's main (top) cell.
+def test_topview_window_always_views_the_main_design_cell():
     app = _make_app()
     try:
         lib = app.session.library
         lib.cells["TOP"].add_rectangle(0, 0, 0, 1000, 1000)
-        sub = lib.new_cell("SUB")
-        sub.add_rectangle(0, 5000, 5000, 5100, 5100)
-        app.session.use_cell("SUB")
-        assert lib.top_cell_name == "TOP"
-
+        other = lib.new_cell("OTHER")
+        other.add_rectangle(0, 5000, 5000, 6000, 6000)
+        app.session.use_cell("OTHER")
         app.show_topview_dialog()
-        win = _find_toplevels(app)[0]
-        (result_combo,) = _collect_widgets(win, ttk.Combobox)
-        result_combo.set("1 (L1)")
-        entries = [w for w in _collect_widgets(win, ttk.Entry) if type(w) is ttk.Entry]
-        entries[1].insert(0, "0")  # Explicit layers
-        next(b for b in _collect_widgets(win, ttk.Button)
-             if b.cget("text") == "Apply").invoke()
-
-        xs = [x for sh in lib.cells["TOPVIEW"].shapes for x, _y in sh.points]
-        assert xs and max(xs) <= 1000          # TOP's box, not SUB's
-        assert not any(sh.layer == 1 for sh in sub.shapes)
+        win = _tv(app)
+        win.result_combo.set(win._layer_label(1))
+        win._on_result()
+        _tv_button(win, "Build").invoke()
+        xs = [pt[0] for sh in lib.cells["TOPVIEW"].shapes for pt in getattr(sh, "points", [])]
+        assert xs and max(xs) <= 1100              # TOP's square, not OTHER's
     finally:
         app.destroy()
 
 
-def test_topview_dialog_hatch_angles_field_disabled_without_a_hatch_pitch():
+def test_topview_window_hatch_fields_follow_the_hatch_box():
     app = _make_app()
     try:
         app.show_topview_dialog()
-        win = _find_toplevels(app)[0]
-        entries = [w for w in _collect_widgets(win, ttk.Entry) if type(w) is ttk.Entry]
-        _out_cell_entry, _layers_entry, _exclude_entry, angles_entry = entries
-        assert str(angles_entry.cget("state")) == "disabled"
-
-        spins = _collect_widgets(win, ttk.Spinbox)
-        # Order on the grid: Hatch conductor, Line width, Simplify.
-        hatch_spin, _width_spin, _simplify_spin = spins
-        hatch_spin.delete(0, "end")
-        hatch_spin.insert(0, "0.1")
-        hatch_spin.event_generate("<KeyRelease>")
-        app.update()
-        assert str(angles_entry.cget("state")) == "normal"
+        win = _tv(app)
+        assert "disabled" in win.hatch_pitch_entry.state()
+        win.hatch_var.set(True)
+        win._on_hatch()
+        assert "disabled" not in win.hatch_pitch_entry.state()
+        win.hatch_pitch_var.set("")                # cleared while typing: no crash
+        assert "pitch" in win.msg_var.get().lower()
+        win.hatch_pitch_var.set("0.25")
+        win.hatch_angles_var.set("45, x")
+        assert "angles" in win.msg_var.get().lower()
     finally:
         app.destroy()
 
 
-def test_topview_dialog_clearing_the_hatch_field_does_not_crash():
-    # Confirmed live: clearing the Hatch conductor spinbox to type a new
-    # value (a normal editing gesture) left it transiently empty, and
-    # sync_fields()'s own hatch_var.get() -- fired via the DoubleVar's
-    # own write trace -- raised _tkinter.TclError: "expected
-    # floating-point number but got \"\"" instead of just treating an
-    # unparseable/empty value the same as "no hatch". Set the
-    # underlying Tcl variable directly (the exact mechanism a real
-    # keystroke drives) rather than the widget's own .delete(), which
-    # doesn't reliably round-trip back through the trace in a test.
+def test_topview_window_requires_a_result_layer():
     app = _make_app()
     try:
+        app.session.library.cells["TOP"].add_rectangle(0, 0, 0, 1000, 1000)
         app.show_topview_dialog()
-        win = _find_toplevels(app)[0]
-        spins = _collect_widgets(win, ttk.Spinbox)
-        hatch_spin, _width_spin, _simplify_spin = spins
-        var_name = hatch_spin.cget("textvariable")
-
-        # An uncaught exception in a Tk variable trace goes through
-        # App._report_callback_exception, which shows a blocking modal
-        # error dialog -- exactly what the user's own screenshot
-        # showed. Capture it directly instead, so a real bug here
-        # fails the test rather than hanging it waiting for a dialog
-        # nothing will ever dismiss.
-        captured = []
-        app.report_callback_exception = lambda exc, val, tb: captured.append(val)
-        app.tk.globalsetvar(var_name, "")
-        assert not captured, f"sync_fields raised: {captured}"
+        win = _tv(app)
+        win.result_var.set("")
+        _tv_button(win, "Build").invoke()
+        assert "Result layer" in win.msg_var.get()
+        assert "TOPVIEW" not in app.session.library.cells
     finally:
         app.destroy()
 
 
-def test_topview_dialog_requires_a_result_layer():
+def test_topview_window_unticked_layer_is_remembered_and_left_out():
+    from hlayout.io.techfile import load_topview_settings
     app = _make_app()
     try:
+        app.session.library.cells["TOP"].add_rectangle(0, 0, 0, 1000, 1000)
         app.show_topview_dialog()
-        win = _find_toplevels(app)[0]
-        apply_btn = next(b for b in _collect_widgets(win, ttk.Button)
-                          if b.cget("text") == "Apply")
-        apply_btn.invoke()
-        # validation blocked Apply -- the dialog is still open, not
-        # destroyed the way a successful Apply would leave it.
-        assert win.winfo_exists()
+        win = _tv(app)
+        cb, var, _lbl, _role = win._rows[0]
+        var.set(False)
+        win._on_toggle(0)
+        assert load_topview_settings(app.session.library)["excluded"] == [0]
+        win.destroy()
+        app.show_topview_dialog()
+        assert _tv(app)._rows[0][1].get() is False
     finally:
         app.destroy()
-
 
 def test_setup_menu_has_technology_file_items():
     app = _make_app()

@@ -1212,11 +1212,15 @@ def test_top_view_exclude_layers_stops_a_sealed_package_case_from_occluding_ever
     s.rect(3, 5000, 5000, 15000, 15000)  # conductor, well inside the case's footprint
     s.sref("PKG_20", (0, 0))
 
-    # bare: the case swallows the conductor entirely.
+    # A case spanning the whole design is now recognised as an ENCLOSING
+    # package and drawn at the bottom of the stack (under everything),
+    # so even without exclude= the conductor inside it shows, and the
+    # case's own outer edge is still drawn.
     written = s.mask_op_top_view(63)
     assert written
     paths = [sh for sh in _tv(s).shapes if sh.layer == 63]
-    assert _min_dist_to_paths((10000, 15000), paths) > 10
+    assert _min_dist_to_paths((10000, 15000), paths) < 1
+    assert _min_dist_to_paths((26000, 10000), paths) < 1
 
     # exclude=61 (the case's own outline layer): the conductor is back.
     written2 = s.mask_op_top_view(62, exclude_layers=[61])
@@ -1530,3 +1534,14 @@ def test_top_view_command_bar_out_option():
     out = interp.run("TOPVIEW result=63 layers=5 out=VIEW1")
     assert "of cell VIEW1" in out
     assert len(_tv(s, "VIEW1").shapes) == 1
+
+
+def test_top_view_substrate_on_a_hidden_layer_still_shows():
+    s = _fresh_session()
+    s.library.layers.set_style(57, name="substrate", visible=False, fill=False)
+    s.rect(57, 0, 0, 20000, 10000)
+    s.rect(3, 2000, 2000, 4000, 4000)
+    assert s.top_view_layer_roles().get(57) == "substrate"
+    s.mask_op_top_view(63)
+    paths = [sh for sh in _tv(s).shapes if sh.layer == 63]
+    assert _min_dist_to_paths((20000, 5000), paths) < 1      # substrate edge drawn

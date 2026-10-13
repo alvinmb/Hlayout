@@ -33,6 +33,7 @@ other issues ringed around it. Markers stay until Clear markers, the
 next Run, or the window closing.
 """
 
+import os
 import tkinter as tk
 from tkinter import filedialog, ttk
 
@@ -77,8 +78,7 @@ class NetlistWindow(tk.Toplevel):
         self.session = app.session
         self.title("Extract Netlist")
         self.transient(master)
-        self.geometry("780x880")
-        self.minsize(620, 560)
+        self.minsize(620, 520)
 
         lib = self.session.library
         settings = load_netlist_settings(lib)
@@ -100,12 +100,23 @@ class NetlistWindow(tk.Toplevel):
         self._populate_layers()
         self.bind("<Escape>", lambda e: self.destroy())
         self.bind("<F5>", lambda e: self.run())
+        # natural size, never taller than the screen (the tables scroll)
+        self.update_idletasks()
+        self.geometry(f"{max(self.winfo_reqwidth(), 780)}x"
+                      f"{min(max(self.winfo_reqheight(), 700), self.winfo_screenheight() - 90)}")
         if settings["saved"] is False and conductors:
             self._save()
 
     # ------------------------------------------------------------------ UI
 
     def _build(self):
+        # Buttons packed FIRST at the bottom so they always keep their
+        # space -- the tables shrink instead when the window is short.
+        btns = ttk.Frame(self)
+        btns.pack(side="bottom", pady=(4, 12))
+        ttk.Button(btns, text="Export...", command=self.export_file).pack(side="left", padx=6)
+        ttk.Button(btns, text="Clear markers", command=self.clear_markers).pack(side="left", padx=6)
+        ttk.Button(btns, text="Close", command=self.destroy).pack(side="left", padx=6)
         ttk.Label(
             self,
             text="Tick Conductor for substrate copper (routing layers, printed pads). "
@@ -193,11 +204,6 @@ class NetlistWindow(tk.Toplevel):
         self.issues.bind("<<TreeviewSelect>>", self._on_issue_select)
         panes.add(issues_frame, weight=2)
 
-        btns = ttk.Frame(self)
-        btns.pack(pady=(0, 12))
-        ttk.Button(btns, text="Export CSV...", command=self.export_csv).pack(side="left", padx=6)
-        ttk.Button(btns, text="Clear markers", command=self.clear_markers).pack(side="left", padx=6)
-        ttk.Button(btns, text="Close", command=self.destroy).pack(side="left", padx=6)
 
     @staticmethod
     def _make_tree(parent, columns, height):
@@ -514,17 +520,55 @@ class NetlistWindow(tk.Toplevel):
         self.clear_markers()
         super().destroy()
 
-    def export_csv(self):
+    def export_file(self):
+        """Export... : write the last Run's netlist to a file -- CSV, a
+        text report (nets + issues), a KiCad netlist or a Tango/Protel
+        netlist, picked by the file type chosen in the save dialog
+        (hlayout.io.netlistio). Saves into <design folder>/netlist by
+        default and then shows where the file went."""
+        from ..io.netlistio import FORMATS, FORMAT_LABELS
+        from . import dialogs
         if not self._nets:
             self._set_summary("Run extraction first.", error=True)
             return
-        path = filedialog.asksaveasfilename(
-            parent=self, title="Export Netlist CSV", initialfile="netlist.csv",
-            defaultextension=".csv", filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")])
+        order = ("csv", "report", "kicad", "tango")
+        types = [(f"{FORMAT_LABELS[f]} (*{FORMATS[f]})", f"*{FORMATS[f]}") for f in order]
+        type_var = tk.StringVar(master=self, value=types[0][0])
+        cell = self._run_cell or self.session.current_cell_name or "TOP"
+        base = f"{self.session.library.name}_{cell}_netlist"
+        initial_dir = None
+        try:
+            initial_dir = self.app.default_export_dir("netlist")
+        except Exception:
+            pass
+        kw = dict(parent=self, title="Export Netlist", initialfile=base + ".csv",
+                  defaultextension=".csv", filetypes=types + [("All Files", "*.*")],
+                  typevariable=type_var)
+        if initial_dir:
+            kw["initialdir"] = initial_dir
+        try:
+            path = filedialog.asksaveasfilename(**kw)
+        except tk.TclError:              # Tk without -typevariable
+            kw.pop("typevariable")
+            path = filedialog.asksaveasfilename(**kw)
         if not path:
             return
-        self.session.export_netlist_csv(self._nets, path)
-        self._set_summary(f"Netlist exported to {path}")
+        # the chosen file type decides the format; make the extension match it
+        chosen = next((f for f, (label, _pat) in zip(order, types) if label == type_var.get()), None)
+        ext = os.path.splitext(path)[1].lower()
+        if chosen and ext != FORMATS[chosen] and ext in FORMATS.values():
+            chosen = next(f for f in order if FORMATS[f] == ext)    # typed extension wins
+        elif chosen and ext not in FORMATS.values():
+            path = os.path.splitext(path)[0] + FORMATS[chosen]
+        try:
+            fmt = self.session.export_netlist(self._nets, path, fmt=chosen, cell_name=cell)
+        except (OSError, ValueError) as e:
+            self._set_summary(f"Export failed: {e}", error=True)
+            return
+        self._set_summary(f"Netlist exported ({FORMAT_LABELS[fmt]}) to {path}")
+        dialogs.show_file_written(
+            "Export Netlist", f"The netlist was written as a {FORMAT_LABELS[fmt]} to:",
+            path, parent=self)
 
 
 def open_netlist_window(app):

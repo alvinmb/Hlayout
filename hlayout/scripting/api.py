@@ -94,7 +94,7 @@ def _segments_cross(p1, p2, p3, p4) -> bool:
 
 
 def _matched_component_footprint(library, cell_name, component_models, role_layers=frozenset(),
-                                  excluded_layers=frozenset()):
+                                  excluded_layers=frozenset(), split_packages=False):
     """The union, in world DBU coordinates, of every placed instance's
     OWN shapes (every layer -- pads included, not just an outline)
     whose cell is a recognized real component: an explicit
@@ -236,7 +236,7 @@ def _matched_component_footprint(library, cell_name, component_models, role_laye
             return True
         return False
 
-    geoms = []
+    geoms = []          # (component cell name, geometry) per placed shape
 
     def walk(name, transform, depth=0):
         if depth > 64 or name not in library.cells:
@@ -250,12 +250,41 @@ def _matched_component_footprint(library, cell_name, component_models, role_laye
                     for shape in target.shapes:
                         g = shape_to_shapely(shape)
                         if g is not None and not g.is_empty:
-                            geoms.append(_transform_geom(g, child_transform))
+                            geoms.append((ref.cell_name, _transform_geom(g, child_transform)))
             else:
                 walk(ref.cell_name, child_transform, depth + 1)
 
     walk(cell_name, None)
-    return _fill_holes(unary_union(geoms)) if geoms else unary_union([])
+
+    def _union(items):
+        return _fill_holes(unary_union([g for _n, g in items])) if items else unary_union([])
+
+    if not split_packages:
+        return _union(geoms)
+    # An ENCLOSING package -- a header/bathtub can the substrate sits
+    # in -- is underneath the circuit, not on top of it: a component
+    # model referenced to the substrate underside (z_ref
+    # "substrate_bottom"), or a part whose footprint spans most of the
+    # whole design. Returned separately so the top view can put it at
+    # the bottom of the stack instead of letting it hide everything.
+    pkg_names = {n for n, d in base_models.items()
+                 if isinstance(d, dict) and d.get("z_ref") == "substrate_bottom"}
+    try:
+        bx = library.cell_bbox(cell_name)
+    except Exception:
+        bx = None
+    if bx is not None:
+        design_area = max((bx[2] - bx[0]) * (bx[3] - bx[1]), 1)
+        per_cell = {}
+        for n, g in geoms:
+            per_cell.setdefault(n, []).append(g)
+        for n, gs in per_cell.items():
+            b = unary_union(gs).bounds
+            if (b[2] - b[0]) * (b[3] - b[1]) >= 0.6 * design_area:
+                pkg_names.add(n)
+    top = [(n, g) for n, g in geoms if n not in pkg_names]
+    pkgs = [(n, g) for n, g in geoms if n in pkg_names]
+    return _union(top), _union(pkgs)
 
 
 # ISO 216 sheet sizes in mm, stored as (short_edge, long_edge) --
@@ -2491,6 +2520,168 @@ class Session:
         self._notify()
         return written
 
+    def _top_view_refdes_texts(self, cell_name, layer, height, datatype=0):
+        """One Text per labelled placement anywhere under `cell_name`, at
+        the position the canvas shows its ref-des: the part's baked
+        ref-des Text if its cell has one with exactly that label, else
+        the centre of the placed part's bounding box plus its
+        label_offset. Centred on that point, `height` DBU tall."""
+        from ..core.library import _transform_bbox
+        from ..core.maskops import _compose_transforms, _sref_point_transform
+        from ..core.shapes import Text
+        lib = self.library
+        h = max(1, int(round(height)))
+        out = []
+
+        def centred(text, x, y):
+            w = 0.6 * h * max(len(text), 1)
+            return Text(layer, (x - w / 2.0, y - h / 2.0), text, height=h, datatype=datatype)
+
+        def walk(name, xf, depth):
+            if depth > 64 or name not in lib.cells:
+                return
+            for ref in lib.cells[name].srefs:
+                child_xf = _compose_transforms(xf, _sref_point_transform(ref))
+                if ref.label:
+                    child = lib.cells.get(ref.cell_name)
+                    baked = None
+                    if child is not None:
+                        baked = next((sh for sh in child.shapes
+                                      if isinstance(sh, Text) and sh.text == ref.label), None)
+                    if baked is not None:
+                        bx, by, bx2, by2 = baked.bbox()
+                        x, y = child_xf(((bx + bx2) / 2.0, (by + by2) / 2.0))
+                    else:
+                        box = lib.cell_bbox(ref.cell_name)
+                        if box is None:
+                            x, y = child_xf((0.0, 0.0))
+                        else:
+                            x1, y1, x2, y2 = _transform_bbox(box, ref)
+                            cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+                            if xf is not None:
+                                cx, cy = xf((cx, cy))
+                            x, y = cx + ref.label_offset[0], cy + ref.label_offset[1]
+                    out.append(centred(ref.label, x, y))
+                walk(ref.cell_name, child_xf, depth + 1)
+
+        walk(cell_name, None, 0)
+        return out
+
+    def top_view_from_settings(self, **overrides) -> dict:
+        """Run the Top View with the design's saved settings (Tools > Top
+        View..., techfile.load_topview_settings()) -- of the main design
+        cell, into the saved output cell -- with any keyword overrides.
+        Returns mask_op_top_view()'s {layer: paths written}."""
+        from ..io.techfile import load_topview_settings
+        st = load_topview_settings(self.library)
+        st.update(overrides)
+        if int(st.get("result_layer", -1)) < 0:
+            raise LayoutError("no Top View result layer set -- pick one in Tools > Top View...")
+        kwargs = {"out_cell": st["out_cell"], "flatten": bool(st["flatten"]),
+                  "line_width": float(st["line_width_um"])}
+        excluded = list(st.get("excluded") or [])
+        if int(st["result_layer"]) not in excluded:
+            excluded.append(int(st["result_layer"]))    # never read the output back in
+        kwargs["exclude_layers"] = excluded
+        if st.get("hatch") and float(st.get("hatch_pitch_um", 0)) > 0:
+            kwargs["hatch_conductor_pitch"] = float(st["hatch_pitch_um"])
+            kwargs["hatch_conductor_angles"] = tuple(st.get("hatch_angles") or (45.0, -45.0))
+        if float(st.get("simplify_um", 0)) > 0:
+            kwargs["simplify"] = float(st["simplify_um"])
+        kwargs["refdes"] = bool(st.get("refdes", True))
+        kwargs["refdes_height"] = float(st.get("refdes_height_um", 600.0))
+        main = self.library.top_cell_name
+        if main and main in self.library.cells and main != st["out_cell"]:
+            kwargs["cell_names"] = [main]
+        return self.mask_op_top_view(int(st["result_layer"]), **kwargs)
+
+    def top_view_layer_roles(self) -> dict:
+        """{layer: role} for the role-based Top View stacking (and the
+        Top View window's layer table): "resistor", "conductor", "glaze",
+        "bond", "substrate" or "other". Roles come from the Setup rules
+        (resistor geometry, route layers, wire bonds, dielectric fill);
+        "substrate"/"other" are layers with drawn, visible, filled
+        geometry not otherwise claimed. Components (placed parts) are not
+        a layer role -- they are always composited on top."""
+        from ..io.techfile import load_bond_rules, load_dielectric_rules, \
+            load_resistor_geometry_rules, load_route_rules
+        resistor_layers, conductor_layers, glaze_layers, bond_layers = set(), set(), set(), set()
+        try:
+            rg = load_resistor_geometry_rules(self.library)
+            if isinstance(rg.get("resistor_layer"), int) and rg["resistor_layer"] >= 0:
+                resistor_layers.add(rg["resistor_layer"])
+            for n in (rg.get("ink_layers") or {}).values():
+                if isinstance(n, int) and n >= 0:
+                    resistor_layers.add(n)
+            if isinstance(rg.get("conductor_layer"), int) and rg["conductor_layer"] >= 0:
+                conductor_layers.add(rg["conductor_layer"])
+            if isinstance(rg.get("glaze_layer"), int) and rg["glaze_layer"] >= 0:
+                glaze_layers.add(rg["glaze_layer"])
+        except Exception:
+            pass
+        try:
+            rr = load_route_rules(self.library)
+            for n in (rr.get("layer_a"), rr.get("layer_b")):
+                if isinstance(n, int) and n >= 0:
+                    conductor_layers.add(n)
+        except Exception:
+            pass
+        try:
+            b = int(load_bond_rules(self.library)["layer"])
+            if b >= 0:
+                bond_layers.add(b)
+        except Exception:
+            pass
+        try:
+            d = int(load_dielectric_rules(self.library)["layer"])
+            if d >= 0:
+                conductor_layers.add(d)
+        except Exception:
+            pass
+
+        # Every OTHER layer that actually has drawn, visible, filled
+        # geometry anywhere in the library -- no thickness lookup,
+        # just "is there really something here worth showing" (same
+        # idea hlayout.io.techfile.default_layer_thickness() uses for
+        # its own generic-film catch-all, minus the thickness
+        # requirement -- see this method's own docstring for why).
+        drawn = set()
+        for c in self.library.cells.values():
+            for sh in c.shapes:
+                drawn.add(sh.layer)
+        role_layers = resistor_layers | conductor_layers | glaze_layers | bond_layers
+        generic_layers = {
+            n for n in drawn
+            if 0 <= n < len(self.library.layers)
+            and self.library.layers[n].visible and self.library.layers[n].fill
+        }
+        # The substrate is the substrate whether or not its layer happens
+        # to be shown/filled on screen (a design often hides it to see
+        # the films): any DRAWN layer named substrate/alumina/ceramic,
+        # or the Thermal setup's substrate layer.
+        substrate_layers = {
+            n for n in drawn
+            if 0 <= n < len(self.library.layers)
+            and any(w in (self.library.layers[n].name or "").lower()
+                    for w in ("substrate", "alumina", "ceramic"))
+        } - role_layers
+        try:
+            from ..io.techfile import load_thermal_rules
+            t = int(load_thermal_rules(self.library)["boundary"].get("substrate_layer", -1))
+            if t >= 0 and t in drawn:
+                substrate_layers.add(t)
+        except Exception:
+            pass
+        other_layers = generic_layers - role_layers - substrate_layers
+
+        roles = {}
+        for role, group in (("other", other_layers), ("substrate", substrate_layers),
+                            ("bond", bond_layers), ("glaze", glaze_layers),
+                            ("conductor", conductor_layers), ("resistor", resistor_layers)):
+            for n in group:
+                roles[n] = role
+        return roles
+
     def mask_op_top_view(self, result_layer, layers: Optional[List] = None,
                           exclude_layers: Optional[List] = None,
                           hatch_conductor_pitch: Optional[float] = None,
@@ -2499,8 +2690,16 @@ class Session:
                           cell_names: Optional[List[str]] = None,
                           datatype: int = 0, flatten: bool = True,
                           simplify: Optional[float] = None,
-                          out_cell: str = "TOPVIEW") -> dict:
-        """Draw a top-down, hidden-line-removal pictorial view of the
+                          out_cell: str = "TOPVIEW",
+                          refdes: bool = False,
+                          refdes_height: float = 600.0) -> dict:
+        """`refdes=True` also writes every placed part's reference
+        designator as a Text on the result layer, AFTER all the outlines
+        (the last thing in the view, never hidden), `refdes_height` DBU
+        tall, centred where the canvas shows it (or at the baked ref-des
+        Text inside the part, when it has one).
+
+        Draw a top-down, hidden-line-removal pictorial view of the
         hybrid circuit onto a single output layer -- the classic CAD/
         drafting sense of the term (as in AutoCAD's HIDE): the visible
         OUTLINE edges of the design as seen from directly above, with
@@ -2631,62 +2830,13 @@ class Session:
             if not layer_set:
                 raise LayoutError("no layers to composite -- pass a non-empty layers=")
         else:
-            resistor_layers, conductor_layers, glaze_layers, bond_layers = set(), set(), set(), set()
-            try:
-                rg = load_resistor_geometry_rules(self.library)
-                if isinstance(rg.get("resistor_layer"), int) and rg["resistor_layer"] >= 0:
-                    resistor_layers.add(rg["resistor_layer"])
-                for n in (rg.get("ink_layers") or {}).values():
-                    if isinstance(n, int) and n >= 0:
-                        resistor_layers.add(n)
-                if isinstance(rg.get("conductor_layer"), int) and rg["conductor_layer"] >= 0:
-                    conductor_layers.add(rg["conductor_layer"])
-                if isinstance(rg.get("glaze_layer"), int) and rg["glaze_layer"] >= 0:
-                    glaze_layers.add(rg["glaze_layer"])
-            except Exception:
-                pass
-            try:
-                rr = load_route_rules(self.library)
-                for n in (rr.get("layer_a"), rr.get("layer_b")):
-                    if isinstance(n, int) and n >= 0:
-                        conductor_layers.add(n)
-            except Exception:
-                pass
-            try:
-                b = int(load_bond_rules(self.library)["layer"])
-                if b >= 0:
-                    bond_layers.add(b)
-            except Exception:
-                pass
-            try:
-                d = int(load_dielectric_rules(self.library)["layer"])
-                if d >= 0:
-                    conductor_layers.add(d)
-            except Exception:
-                pass
-
-            # Every OTHER layer that actually has drawn, visible, filled
-            # geometry anywhere in the library -- no thickness lookup,
-            # just "is there really something here worth showing" (same
-            # idea hlayout.io.techfile.default_layer_thickness() uses for
-            # its own generic-film catch-all, minus the thickness
-            # requirement -- see this method's own docstring for why).
-            drawn = set()
-            for c in self.library.cells.values():
-                for sh in c.shapes:
-                    drawn.add(sh.layer)
-            role_layers = resistor_layers | conductor_layers | glaze_layers | bond_layers
-            generic_layers = {
-                n for n in drawn
-                if 0 <= n < len(self.library.layers)
-                and self.library.layers[n].visible and self.library.layers[n].fill
-            }
-            substrate_layers = {
-                n for n in generic_layers
-                if any(w in self.library.layers[n].name.lower()
-                       for w in ("substrate", "alumina", "ceramic"))
-            }
-            other_layers = generic_layers - role_layers - substrate_layers
+            roles = self.top_view_layer_roles()
+            resistor_layers = {n for n, r in roles.items() if r == "resistor"}
+            conductor_layers = {n for n, r in roles.items() if r == "conductor"}
+            glaze_layers = {n for n, r in roles.items() if r == "glaze"}
+            bond_layers = {n for n, r in roles.items() if r == "bond"}
+            substrate_layers = {n for n, r in roles.items() if r == "substrate"}
+            other_layers = {n for n, r in roles.items() if r == "other"}
 
             excluded = {resolve(n) for n in exclude_layers} if exclude_layers else set()
             if excluded:
@@ -2741,9 +2891,10 @@ class Session:
                 return layer_to_shapely(cell.shapes_on_layer(layer))
 
             if role_based:
-                comp_geom = _matched_component_footprint(
+                comp_geom, pkg_geom = _matched_component_footprint(
                     self.library, cell.name, load_component_models(self.library),
-                    resistor_layers | conductor_layers | glaze_layers | bond_layers, excluded)
+                    resistor_layers | conductor_layers | glaze_layers | bond_layers, excluded,
+                    split_packages=True)
                 layer_geoms = [(comp_geom, True)]
                 for n in sorted(resistor_layers, reverse=True):
                     layer_geoms.append((gather(n), True))
@@ -2756,6 +2907,9 @@ class Session:
                     layer_geoms.append((gather(n), True))
                 for n in sorted(substrate_layers, reverse=True):
                     layer_geoms.append((gather(n), True))
+                # an enclosing package (header can) is UNDER the substrate:
+                # only the part of it outside the substrate shows
+                layer_geoms.append((pkg_geom, True))
                 for n in sorted(glaze_layers):
                     layer_geoms.append((gather(n), False))
                 for n in sorted(bond_layers):
@@ -2775,6 +2929,10 @@ class Session:
             if simplify:
                 result = result.simplify(simplify, preserve_topology=True)
             new_paths = shapely_lines_to_paths(result, r_layer, width_dbu, datatype=datatype)
+            if refdes:
+                # ref-des LAST: drawn over the finished outlines, never hidden
+                new_paths = list(new_paths) + self._top_view_refdes_texts(
+                    cell.name, r_layer, refdes_height, datatype)
             if new_paths:
                 out_name = out_names[cell.name]
                 target = self.library.cells.get(out_name)
@@ -3670,6 +3828,21 @@ class Session:
         return _extract_netlist(self.library, cell, resolved,
                                 bond_layer=b_layer if b_layer >= 0 else None,
                                 die_pad_layers=die_pads)
+
+    def export_netlist(self, nets: List["Net"], path: str, fmt: Optional[str] = None,
+                       cell_name: Optional[str] = None) -> str:
+        """Write `nets` (from extract_netlist()) to a file another tool can
+        read -- see hlayout.io.netlistio. `fmt` is "csv", "report",
+        "kicad" or "tango"; None picks it from the extension (.csv, .txt,
+        .net = KiCad, .tng = Tango/Protel). `cell_name` (default: the
+        current cell) supplies the component list the EDA formats need.
+        Returns the format written."""
+        from ..io.netlistio import write_netlist
+        from ..io.techfile import load_netlist_settings
+        cell = cell_name or self.current_cell_name or ""
+        layers = load_netlist_settings(self.library)["conductor_layers"]
+        return write_netlist(nets, path, fmt=fmt, library=self.library, cell_name=cell,
+                             design=self.library.name, layers=layers)
 
     def export_netlist_csv(self, nets: List["Net"], path: str) -> None:
         """Write `nets` (as returned by extract_netlist()) to a CSV file,

@@ -205,7 +205,7 @@ def test_netlist_run_command_reports_nets_and_exports(tmp_path):
 
     path = str(tmp_path / "cli_netlist.csv")
     out2 = interp.run(f"NETLIST RUN 31 export={path}")
-    assert f"exported to {path}" in out2
+    assert f"exported (csv) to {path}" in out2
     assert os.path.exists(path)
 
 
@@ -341,3 +341,40 @@ def test_pins_and_nets_carry_locations_for_zooming():
               and 5000 <= n.location[0] <= 5400]
     assert len(lonely) == 1
     assert all(p.xy is not None for n in nets for p in n.pins)
+
+
+
+def test_export_netlist_all_formats(tmp_path):
+    s = _fresh_session()
+    _two_resistors_bridged(s)
+    nets = s.extract_netlist([31])
+    got = {}
+    for ext in (".csv", ".txt", ".net", ".tng"):
+        p = tmp_path / ("n" + ext)
+        got[ext] = (s.export_netlist(nets, str(p)), p.read_text())
+    assert got[".csv"][0] == "csv" and got[".csv"][1].splitlines()[0] == "net,ref_des,pin"
+    assert got[".txt"][0] == "report" and "R1.2, R2.1" in got[".txt"][1] and "Issues: 0" in got[".txt"][1]
+    kicad = got[".net"][1]
+    assert got[".net"][0] == "kicad" and kicad.startswith("(export (version D)")
+    assert '(comp (ref "R1")' in kicad and '(node (ref "R2") (pin "1"))' in kicad
+    assert kicad.count("(") == kicad.count(")")
+    tango = got[".tng"][1]
+    assert got[".tng"][0] == "tango" and "R1-2" in tango and "[" in tango
+
+
+def test_export_netlist_format_override_and_bad_format(tmp_path):
+    s = _fresh_session()
+    _two_resistors_bridged(s)
+    nets = s.extract_netlist([31])
+    p = tmp_path / "x.dat"
+    assert s.export_netlist(nets, str(p), fmt="kicad") == "kicad"
+    with pytest.raises(ValueError):
+        s.export_netlist(nets, str(p), fmt="spice")
+
+
+def test_netlist_run_command_export_picks_format_from_extension(tmp_path):
+    s = _fresh_session()
+    _two_resistors_bridged(s)
+    out = CommandInterpreter(s, console=None).run(f"NETLIST RUN 31 export={tmp_path / 'b.net'}")
+    assert "exported (kicad)" in out
+    assert (tmp_path / "b.net").read_text().startswith("(export")
