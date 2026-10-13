@@ -237,6 +237,21 @@ def _matched_component_footprint(library, cell_name, component_models, role_laye
         return False
 
     geoms = []          # (component cell name, geometry) per placed shape
+    detail = []         # (component cell name, geometry) -- every shape, nested too
+
+    def deep(name, transform, owner, depth):
+        """Every shape of `name` and of everything placed inside it --
+        an enclosing package's pins/seals are placed instances."""
+        if depth > 64 or name not in library.cells:
+            return
+        c = library.cells[name]
+        for shape in c.shapes:
+            g = shape_to_shapely(shape)
+            if g is not None and not g.is_empty:
+                detail.append((owner, _transform_geom(g, transform)))
+        for r in list(c.srefs) + expand_arefs_to_srefs(c.arefs):
+            deep(r.cell_name, _compose_transforms(transform, _sref_point_transform(r)),
+                 owner, depth + 1)
 
     def walk(name, transform, depth=0):
         if depth > 64 or name not in library.cells:
@@ -251,6 +266,8 @@ def _matched_component_footprint(library, cell_name, component_models, role_laye
                         g = shape_to_shapely(shape)
                         if g is not None and not g.is_empty:
                             geoms.append((ref.cell_name, _transform_geom(g, child_transform)))
+                    if split_packages:
+                        deep(ref.cell_name, child_transform, ref.cell_name, 0)
             else:
                 walk(ref.cell_name, child_transform, depth + 1)
 
@@ -283,8 +300,13 @@ def _matched_component_footprint(library, cell_name, component_models, role_laye
             if (b[2] - b[0]) * (b[3] - b[1]) >= 0.6 * design_area:
                 pkg_names.add(n)
     top = [(n, g) for n, g in geoms if n not in pkg_names]
-    pkgs = [(n, g) for n, g in geoms if n in pkg_names]
-    return _union(top), _union(pkgs)
+    # An enclosing package is drawn in DETAIL, not as one filled
+    # silhouette: each of its shapes (outer case, well, pin seals, pins
+    # -- nested placements included) as its own tier, smallest on top,
+    # so the case edge, the well wall and every pin show wherever the
+    # substrate doesn't cover them.
+    pkg_parts = sorted((g for n, g in detail if n in pkg_names), key=lambda g: g.area)
+    return _union(top), pkg_parts, pkg_names
 
 
 # ISO 216 sheet sizes in mm, stored as (short_edge, long_edge) --
@@ -2885,16 +2907,30 @@ class Session:
                 del old.arefs[:]
         written = {}
         for cell in cells:
+            src = {"cell": cell}
+
             def gather(layer):
+                c = src["cell"]
                 if flatten:
-                    return layer_to_shapely_flattened(self.library, cell, layer)
-                return layer_to_shapely(cell.shapes_on_layer(layer))
+                    return layer_to_shapely_flattened(self.library, c, layer)
+                return layer_to_shapely(c.shapes_on_layer(layer))
 
             if role_based:
-                comp_geom, pkg_geom = _matched_component_footprint(
+                comp_geom, pkg_geom, pkg_names = _matched_component_footprint(
                     self.library, cell.name, load_component_models(self.library),
                     resistor_layers | conductor_layers | glaze_layers | bond_layers, excluded,
                     split_packages=True)
+                if pkg_names:
+                    # the layer tiers must not pick up an enclosing
+                    # package's own pads/outline again (they'd sit above
+                    # the substrate and hide its pins) -- gather from a
+                    # view of the cell without those placements
+                    from ..core.cell import Cell as _Cell
+                    view = _Cell(cell.name)
+                    view.shapes = cell.shapes
+                    view.srefs = [r for r in cell.srefs if r.cell_name not in pkg_names]
+                    view.arefs = [a for a in cell.arefs if a.cell_name not in pkg_names]
+                    src["cell"] = view
                 layer_geoms = [(comp_geom, True)]
                 for n in sorted(resistor_layers, reverse=True):
                     layer_geoms.append((gather(n), True))
@@ -2908,8 +2944,10 @@ class Session:
                 for n in sorted(substrate_layers, reverse=True):
                     layer_geoms.append((gather(n), True))
                 # an enclosing package (header can) is UNDER the substrate:
-                # only the part of it outside the substrate shows
-                layer_geoms.append((pkg_geom, True))
+                # only the part of it outside the substrate shows -- its
+                # pins, well and case edge each as their own tier
+                for g in pkg_geom:
+                    layer_geoms.append((g, True))
                 for n in sorted(glaze_layers):
                     layer_geoms.append((gather(n), False))
                 for n in sorted(bond_layers):

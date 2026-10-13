@@ -1545,3 +1545,26 @@ def test_top_view_substrate_on_a_hidden_layer_still_shows():
     s.mask_op_top_view(63)
     paths = [sh for sh in _tv(s).shapes if sh.layer == 63]
     assert _min_dist_to_paths((20000, 5000), paths) < 1      # substrate edge drawn
+
+
+def test_top_view_enclosing_package_drawn_in_detail_with_pins_and_well():
+    s = _fresh_session()
+    s.new_cell("LEAD")
+    s.circle(63, (0, 0), 300, segments=32)
+    s.circle(49, (0, 0), 800, segments=32)
+    s.new_cell("CAN")
+    s.rect(61, -3400, -3400, 26000, 24600)       # case
+    s.rect(61, -2100, -1700, 24900, 22900)       # well
+    for i in range(3):
+        s.sref("LEAD", (i * 2540, 0), pin=str(i + 1))
+    s.use_cell("TOP")
+    s.library.layers.set_style(57, name="substrate")
+    s.rect(57, 0, 5000, 20000, 15000)
+    s.sref("CAN", (0, 0))
+    s.mask_op_top_view(62)
+    paths = [sh for sh in _tv(s).shapes if sh.layer == 62]
+    assert _min_dist_to_paths((300, 0), paths) < 5        # pin 1 itself
+    assert _min_dist_to_paths((800, 0), paths) < 5        # its glass seal
+    assert _min_dist_to_paths((-2100, 2000), paths) < 1   # the well wall
+    assert _min_dist_to_paths((-3400, 2000), paths) < 1   # the case edge
+    assert _min_dist_to_paths((10000, 5000), paths) < 1   # substrate edge on top
