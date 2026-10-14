@@ -76,3 +76,23 @@ def test_top_view_writes_refdes_last_and_can_leave_them_out():
     save_topview_settings(lib, {"refdes": False})
     s.top_view_from_settings()
     assert not any(isinstance(sh, Text) for sh in lib.cells["TOPVIEW"].shapes)
+
+
+
+def test_top_view_refdes_sits_on_the_part_centroid_not_the_floated_label():
+    from hlayout.core.shapes import Text
+    s = _session()
+    lib = s.library
+    part = lib.new_cell("PART")
+    part.add_rectangle(3, 0, 0, 2000, 1000)
+    part.add_text(62, (5000, 5000), "U7", height=100)        # baked label off to one side
+    ref = lib.cells["TOP"].add_sref("PART", (10000, 0), rotation=90, label="U7")
+    ref.label_offset = (3000, 3000)                           # dragged on the canvas
+    save_topview_settings(lib, {"result_layer": 1, "refdes_height_um": 500, "excluded": [62]})
+    s.top_view_from_settings()
+    t = [sh for sh in lib.cells["TOPVIEW"].shapes if isinstance(sh, Text)][0]
+    from hlayout.core.library import _transform_bbox
+    bx0, by0, bx1, by1 = _transform_bbox((0, 0, 2000, 1000), ref)   # body only, not the text
+    cx, cy = (bx0 + bx1) / 2, (by0 + by1) / 2
+    assert abs(t.origin[0] + 0.6 * 500 * 2 / 2 - cx) <= 1
+    assert abs(t.origin[1] + 500 / 2 - cy) <= 1

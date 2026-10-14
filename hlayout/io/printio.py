@@ -164,6 +164,43 @@ def _auto_scale(width_mm: float, height_mm: float) -> float:
     return _NICE_SCALES[-1]
 
 
+def _text_angle(shape_rotation, frame_rot, mirrored):
+    """World reading angle of a Text drawn at ``shape_rotation`` inside a
+    frame rotated ``frame_rot`` and possibly mirrored. Text is never drawn
+    mirror-imaged (no plotter/print font does that); a mirrored frame
+    just flips which way its baseline runs."""
+    a = (-shape_rotation if mirrored else shape_rotation) + frame_rot
+    return a % 360.0
+
+
+#: Size of a synthesized label (floating ref-des, pin number) on paper --
+#: matches DXF export's own (hlayout.io.dxfio.REFDES_EXPORT_HEIGHT_DBU).
+LABEL_TEXT_HEIGHT_DBU = 500.0
+
+#: Printed text: cap height of the SVG font as a fraction of font-size
+#: (Arial/Helvetica ~0.716), so a Text shape's `height` -- its CAP height,
+#: like hlayout.core.strokefont -- comes out that tall on paper.
+_FONT_CAP_RATIO = 0.716
+#: Printed text is squeezed/stretched to this width per character (x the
+#: cap height) -- the same estimate Text.bbox() and every table/title
+#: generator centres with, so printed text lands exactly where it was laid
+#: out and never runs over a cell border.
+_CHAR_WIDTH_RATIO = 0.6
+_PRINT_FONT = "'Arial Narrow', 'Liberation Sans Narrow', Arial, Helvetica, sans-serif"
+
+
+class _PrintText(tuple):
+    """One flattened text entry: still compares/unpacks as the plain
+    ``((x, y), string)`` pair it always was, and also carries its
+    world-space cap ``height`` (DBU) and ``rotation`` (degrees CCW)."""
+
+    def __new__(cls, pos, text, height=LABEL_TEXT_HEIGHT_DBU, rotation=0.0):
+        obj = super().__new__(cls, (pos, text))
+        obj.height = float(height)
+        obj.rotation = float(rotation)
+        return obj
+
+
 def _flatten_for_print(library: Library, cell_name: str, pin_label_layers=None):
     """Walk the Sref/Aref hierarchy starting at ``cell_name``, applying
     each instance's transform, and bucket the resulting *world-space*
@@ -211,7 +248,7 @@ def _flatten_for_print(library: Library, cell_name: str, pin_label_layers=None):
     refdes_layer = load_refdes_annotation_layer(library)
     pin_layers = {int(n) for n in pin_label_layers} if pin_label_layers else set()
 
-    def walk(name, transform, scale, depth):
+    def walk(name, transform, scale, depth, rot=0.0, mirrored=False):
         if depth > _MAX_DEPTH or name not in library.cells:
             return
         cell = library.cells[name]
@@ -222,13 +259,15 @@ def _flatten_for_print(library: Library, cell_name: str, pin_label_layers=None):
                 if pin and shape.layer in pin_layers:
                     x0, y0, x1, y1 = shape.bbox()
                     texts.setdefault(shape.layer, []).append(
-                        (transform(((x0 + x1) / 2.0, (y0 + y1) / 2.0)), pin)
+                        _PrintText(transform(((x0 + x1) / 2.0, (y0 + y1) / 2.0)), pin)
                     )
             elif isinstance(shape, Path):
                 paths.setdefault(shape.layer, []).append(
                     ([transform(p) for p in shape.points], shape.width * scale))
             elif isinstance(shape, Text):
-                texts.setdefault(shape.layer, []).append((transform(shape.origin), shape.text))
+                texts.setdefault(shape.layer, []).append(_PrintText(
+                    transform(shape.origin), shape.text, shape.height * scale,
+                    _text_angle(shape.rotation, rot, mirrored)))
         for ref in cell.srefs + expand_arefs_to_srefs(cell.arefs):
             theta = math.radians(ref.rotation)
             cos_t, sin_t = math.cos(theta), math.sin(theta)
@@ -272,7 +311,7 @@ def _flatten_for_print(library: Library, cell_name: str, pin_label_layers=None):
                     # above -- so it goes through the accumulated
                     # ancestor `transform`, not `child_transform`.
                     texts.setdefault(refdes_layer, []).append(
-                        (transform((cx + lox, cy + loy)), ref.label)
+                        _PrintText(transform((cx + lox, cy + loy)), ref.label)
                     )
 
             ref_pin = getattr(ref, "pin", "")
@@ -286,10 +325,14 @@ def _flatten_for_print(library: Library, cell_name: str, pin_label_layers=None):
                         # as ref.label's -- the accumulated ancestor
                         # `transform`, not `child_transform`.
                         texts.setdefault(pin_layer, []).append(
-                            (transform(ref.origin), ref_pin)
+                            _PrintText(transform(ref.origin), ref_pin)
                         )
 
-            walk(ref.cell_name, child_transform, scale * mag, depth + 1)
+            # world angle of the child's +x axis, and whether its frame is
+            # mirrored (an odd number of x_reflections on the way down)
+            child_rot = rot + (-ref.rotation if mirrored else ref.rotation)
+            walk(ref.cell_name, child_transform, scale * mag, depth + 1,
+                 child_rot, mirrored != bool(xr))
 
     walk(cell_name, lambda p: (float(p[0]), float(p[1])), 1.0, 0)
     return polys, paths, texts
@@ -335,9 +378,14 @@ def render_cell_svg(library: Library, cell_name: str, margin_dbu: float = 2000.0
         for pts, _w in paths.get(n, []):
             xs += [p[0] for p in pts]
             ys += [p[1] for p in pts]
-        for (x, y), _s in texts.get(n, []):
-            xs.append(x)
-            ys.append(y)
+        for t in texts.get(n, []):
+            (x, y), _s = t
+            h = getattr(t, "height", LABEL_TEXT_HEIGHT_DBU)
+            w = h * _CHAR_WIDTH_RATIO * len(_s)
+            a = math.radians(getattr(t, "rotation", 0.0))
+            for dx, dy in ((0, 0), (w, 0), (0, h), (w, h)):
+                xs.append(x + dx * math.cos(a) - dy * math.sin(a))
+                ys.append(y + dx * math.sin(a) + dy * math.cos(a))
 
     if not xs:
         # An empty (or fully-hidden) cell still prints -- as a blank
@@ -389,9 +437,19 @@ def render_cell_svg(library: Library, cell_name: str, margin_dbu: float = 2000.0
             w = max(hairline, width_dbu_path)
             parts.append(f'<polyline points="{pts_attr}" fill="none" stroke="{line_color}" '
                           f'stroke-width="{w:.4f}" stroke-linecap="round" stroke-linejoin="round"/>')
-        for (x, y), text in texts.get(n, []):
-            parts.append(f'<text x="{sx(x):.2f}" y="{sy(y):.2f}" font-size="{height_dbu * 0.02:.1f}" '
-                          f'fill="{line_color}">{html.escape(text)}</text>')
+        for t in texts.get(n, []):
+            (x, y), text = t
+            if not text.strip():
+                continue
+            h = getattr(t, "height", LABEL_TEXT_HEIGHT_DBU)
+            rot = getattr(t, "rotation", 0.0)
+            length = h * _CHAR_WIDTH_RATIO * len(text)
+            turn = f' transform="rotate({-rot:.3f} {sx(x):.2f} {sy(y):.2f})"' if rot else ""
+            parts.append(
+                f'<text x="{sx(x):.2f}" y="{sy(y):.2f}" font-size="{h / _FONT_CAP_RATIO:.2f}" '
+                f'font-family="{_PRINT_FONT}" textLength="{length:.2f}" '
+                f'lengthAdjust="spacingAndGlyphs" xml:space="preserve" '
+                f'fill="{line_color}"{turn}>{html.escape(text)}</text>')
         parts.append('</g>')
     parts.append('</svg>')
     return "\n".join(parts), layer_order, scale_used

@@ -327,6 +327,25 @@ a resistor; this draws it):
                                        (SREF) wherever needed, e.g. behind the
                                        assembly drawing, for PRINT. Also available as
                                        Session.generate_drawing_sheet()
+    ASSEMBLY [<key>=<value> ...]
+                                       build the complete assembly drawing in one
+                                       go: drawing SHEET + a TOPVIEW of the design
+                                       at the largest standard scale that fits +
+                                       PINTABLE + RESTABLE, each its own cell
+                                       (ASSY_SHEET, ASSY_TOPVIEW, ASSY_PINTABLE,
+                                       ASSY_RESTABLE), placed into cell ASSEMBLY.
+                                       Keys: size=A4|A3 orientation=portrait|
+                                       landscape scale=<n> layout=auto|side|bottom
+                                       title= dwgno= issue= drawnby= drawndate=
+                                       checkedby= checkeddate= approvedby=
+                                       approveddate= pins=<n> pergroup=<n>
+                                       pintable=0|1 restable=0|1 tabletext=<mm>
+                                       design=<cell> cell=<name> layer=<n|name>,
+                                       or any assembly setting by its own name.
+                                       Settings are saved with the design, so a
+                                       bare ASSEMBLY rebuilds the last drawing.
+                                       Also available as
+                                       Session.generate_assembly_drawing()
 
 Layer-based mask operations (resize/boolean, like a GDSII CAM system's
 Size/AND/OR deck operators -- any Path on an input layer is converted
@@ -1547,6 +1566,56 @@ class CommandInterpreter:
         except LayoutError as e:
             raise CommandError(str(e))
         return f"generated drawing sheet cell {name!r}"
+
+    _ASSEMBLY_ALIASES = {
+        "dwgno": "dwg_no", "drawnby": "drawn_by", "drawndate": "drawn_date",
+        "checkedby": "checked_by", "checkeddate": "checked_date",
+        "approvedby": "approved_by", "approveddate": "approved_date",
+        "pins": "pin_count", "pergroup": "pins_per_group",
+        "tabletext": "table_text_mm", "design": "design_cell", "cell": "cell_name",
+        "restable": "resistor_table", "pintable": "pin_table",
+    }
+
+    def _cmd_assembly(self, args):
+        from ..scripting.assembly import DEFAULT_ASSEMBLY_SETTINGS, _scale_text
+        usage = ("usage: ASSEMBLY [size=A4|A3] [orientation=portrait|landscape] "
+                 "[scale=<n>] [layout=auto|side|bottom] [title=<text>] [dwgno=<text>] "
+                 "[issue=<text>] [drawnby=<text>] ... [pins=<n>] [pergroup=<n>] "
+                 "[pintable=0|1] [restable=0|1] [tabletext=<mm>] [design=<cell>] "
+                 "[cell=<name>] [layer=<n|name>]  (no args = rebuild from saved settings)")
+        kwargs = {}
+        for a in args:
+            if "=" not in a:
+                raise CommandError(usage)
+            k, v = a.split("=", 1)
+            k = self._ASSEMBLY_ALIASES.get(k.lower(), k.lower())
+            if k not in DEFAULT_ASSEMBLY_SETTINGS or k == "pin_functions":
+                raise CommandError(f"unknown ASSEMBLY option {k!r}")
+            default = DEFAULT_ASSEMBLY_SETTINGS[k]
+            try:
+                if k in ("layer", "line_layer"):
+                    kwargs[k] = self.session.library.layers.resolve(v)
+                elif isinstance(default, bool):
+                    kwargs[k] = v.lower() not in ("0", "false", "no", "off")
+                elif isinstance(default, float) or k == "scale":
+                    kwargs[k] = float(v) if v else None
+                elif k in ("pin_count", "pins_per_group"):
+                    kwargs[k] = int(v) if v else None
+                elif default is None:
+                    kwargs[k] = v or None
+                else:
+                    kwargs[k] = v
+            except ValueError:
+                raise CommandError(f"bad value for ASSEMBLY option {k!r}: {v!r}")
+        try:
+            r = self.session.generate_assembly_drawing(**kwargs)
+        except LayoutError as e:
+            raise CommandError(str(e))
+        msg = (f"generated assembly drawing {r['cell']!r} -- top view at "
+               f"{_scale_text(r['scale'])}, tables {r['layout']}")
+        if r["warnings"]:
+            msg += "; " + "; ".join(r["warnings"])
+        return msg
 
     # --- mask ops ---------------------------------------------------------
     def _cmd_clear(self, args):

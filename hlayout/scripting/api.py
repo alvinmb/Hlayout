@@ -29,7 +29,7 @@ from ..core.cell import Cell
 from ..core.errors import LayoutError, LibraryError
 from ..core.library import Library, merge_libraries
 from ..core.shapes import Polygon, Rectangle
-from ..core.units import mm_to_dbu
+from ..core.units import format_rkm, mm_to_dbu
 from ..core.maskops import (
     MASK_OPS,
     boolean_op,
@@ -1666,12 +1666,15 @@ class Session:
         # clear that, not just leave a fraction of row_height that can
         # be smaller than the text itself (confirmed live: it was,
         # and the grid line cut right through the text).
-        top_pad = text_height * 1.2
-        if top_pad >= row_height:
+        if text_height * 1.2 >= row_height:
             raise LayoutError(
                 f"row_height ({row_height:g}) must be bigger than "
-                f"text_height*1.2 ({top_pad:g}) to leave room for the grid lines"
+                f"text_height*1.2 ({text_height * 1.2:g}) to leave room for the grid lines"
             )
+        # Grid line above a row's baseline: half the spare row height
+        # above the text, so the text sits vertically CENTRED in its row
+        # (equal gap above the cap height and below the baseline).
+        top_pad = (row_height + text_height) / 2.0
 
         with self._batch():
             cell = self.library.new_cell(cell_name)
@@ -1698,10 +1701,10 @@ class Session:
                 ink = row.get("selected_ink")
                 put_row(y, (
                     row["ref_des"],
-                    f"{value:,.0f}",
+                    format_rkm(value),
                     tol,
-                    f"{aim:,.0f}",
-                    f"{ink:,.0f}" if ink is not None else "—",
+                    format_rkm(aim),
+                    format_rkm(ink) if ink is not None else "—",
                 ))
 
             n_data_rows = len(rows)
@@ -1811,12 +1814,15 @@ class Session:
         grid_width = int(round(line_width))
         functions = functions or {}
         h = int(round(text_height))
-        top_pad = text_height * 1.2
-        if top_pad >= row_height:
+        if text_height * 1.2 >= row_height:
             raise LayoutError(
                 f"row_height ({row_height:g}) must be bigger than "
-                f"text_height*1.2 ({top_pad:g}) to leave room for the grid lines"
+                f"text_height*1.2 ({text_height * 1.2:g}) to leave room for the grid lines"
             )
+        # Grid line above a row's baseline: half the spare row height
+        # above the text, so the text sits vertically CENTRED in its row
+        # (equal gap above the cap height and below the baseline).
+        top_pad = (row_height + text_height) / 2.0
 
         n_groups = pin_count // pins_per_group
         group_width = sum(col_widths)
@@ -2543,11 +2549,12 @@ class Session:
         return written
 
     def _top_view_refdes_texts(self, cell_name, layer, height, datatype=0):
-        """One Text per labelled placement anywhere under `cell_name`, at
-        the position the canvas shows its ref-des: the part's baked
-        ref-des Text if its cell has one with exactly that label, else
-        the centre of the placed part's bounding box plus its
-        label_offset. Centred on that point, `height` DBU tall."""
+        """One Text per labelled placement anywhere under `cell_name`,
+        centred on the placed part's CENTROID (the centre of its placed
+        bounding box), `height` DBU tall -- an assembly drawing labels
+        each part in the middle of its body. Where the canvas floats the
+        ref-des (dragged label_offset, ref-des moved to pin 1, a baked
+        ref-des Text off to one side) is deliberately ignored here."""
         from ..core.library import _transform_bbox
         from ..core.maskops import _compose_transforms, _sref_point_transform
         from ..core.shapes import Text
@@ -2559,30 +2566,54 @@ class Session:
             w = 0.6 * h * max(len(text), 1)
             return Text(layer, (x - w / 2.0, y - h / 2.0), text, height=h, datatype=datatype)
 
+        body_cache = {}
+
+        def body_bbox(name, depth=0):
+            """Bounding box of a cell's real geometry, ignoring Text --
+            so a baked ref-des or a note doesn't drag the centroid."""
+            if name in body_cache:
+                return body_cache[name]
+            cell = lib.cells.get(name)
+            boxes = []
+            if cell is not None and depth <= 64:
+                boxes = [sh.bbox() for sh in cell.shapes if not isinstance(sh, Text)]
+                for r in cell.srefs:
+                    b = body_bbox(r.cell_name, depth + 1)
+                    if b is not None:
+                        boxes.append(_transform_bbox(b, r))
+                for ar in getattr(cell, "arefs", []):
+                    try:
+                        boxes.append(lib.cell_bbox(ar.cell_name) and
+                                     _transform_bbox(lib.cell_bbox(ar.cell_name), ar))
+                    except Exception:
+                        pass
+            boxes = [b for b in boxes if b]
+            box = None
+            if boxes:
+                box = (min(b[0] for b in boxes), min(b[1] for b in boxes),
+                       max(b[2] for b in boxes), max(b[3] for b in boxes))
+            elif cell is not None:
+                try:
+                    box = lib.cell_bbox(name)      # text-only cell: fall back
+                except Exception:
+                    box = None
+            body_cache[name] = box
+            return box
+
         def walk(name, xf, depth):
             if depth > 64 or name not in lib.cells:
                 return
             for ref in lib.cells[name].srefs:
                 child_xf = _compose_transforms(xf, _sref_point_transform(ref))
                 if ref.label:
-                    child = lib.cells.get(ref.cell_name)
-                    baked = None
-                    if child is not None:
-                        baked = next((sh for sh in child.shapes
-                                      if isinstance(sh, Text) and sh.text == ref.label), None)
-                    if baked is not None:
-                        bx, by, bx2, by2 = baked.bbox()
-                        x, y = child_xf(((bx + bx2) / 2.0, (by + by2) / 2.0))
+                    box = body_bbox(ref.cell_name)
+                    if box is None:
+                        x, y = child_xf((0.0, 0.0))
                     else:
-                        box = lib.cell_bbox(ref.cell_name)
-                        if box is None:
-                            x, y = child_xf((0.0, 0.0))
-                        else:
-                            x1, y1, x2, y2 = _transform_bbox(box, ref)
-                            cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
-                            if xf is not None:
-                                cx, cy = xf((cx, cy))
-                            x, y = cx + ref.label_offset[0], cy + ref.label_offset[1]
+                        x1, y1, x2, y2 = _transform_bbox(box, ref)
+                        x, y = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+                        if xf is not None:
+                            x, y = xf((x, y))
                     out.append(centred(ref.label, x, y))
                 walk(ref.cell_name, child_xf, depth + 1)
 
@@ -2616,6 +2647,25 @@ class Session:
         if main and main in self.library.cells and main != st["out_cell"]:
             kwargs["cell_names"] = [main]
         return self.mask_op_top_view(int(st["result_layer"]), **kwargs)
+
+    def generate_assembly_drawing(self, save: bool = True, **settings) -> dict:
+        """Build (or rebuild) the complete assembly drawing -- drawing sheet,
+        a top view of the design at the largest standard scale that fits,
+        a pin function table and a resistor table -- each as its own cell,
+        all placed as Srefs into one assembly cell (default "ASSEMBLY").
+        Sheet, text and line sizes are in real paper millimetres.
+
+        Any key of hlayout.scripting.assembly.DEFAULT_ASSEMBLY_SETTINGS may
+        be passed (title=, dwg_no=, size=, orientation=, scale=, layout=,
+        pin_count=, pin_functions=, ...); anything not passed comes from the
+        design's saved assembly settings, and with ``save`` (default True)
+        the passed keys are saved back -- so a bare
+        ``generate_assembly_drawing()`` rebuilds the last drawing, e.g.
+        after editing resistors or moving parts. One undo step.
+
+        Returns {"cell", "scale", "layout", "parts", "warnings"}."""
+        from .assembly import generate_assembly_drawing
+        return generate_assembly_drawing(self, save=save, **settings)
 
     def top_view_layer_roles(self) -> dict:
         """{layer: role} for the role-based Top View stacking (and the

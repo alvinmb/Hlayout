@@ -451,7 +451,7 @@ def test_generate_resistor_table_aim_value_matches_the_designers_own_formula():
     name = s.generate_resistor_table("RESTABLE_TEST", 62)
     cell = s.library.cells[name]
     assert _table_row(cell, 0) == ["REF DES", "VALUE (OHMS)", "TOL%", "AIM VALUE", "INK (OHMS/SQ)"]
-    assert _table_row(cell, -250) == ["R1", "680,000", "5%", "544,000", "300,000"]
+    assert _table_row(cell, -250) == ["R1", "680K", "5%", "544K", "300K"]
 
 
 def test_generate_resistor_table_handles_a_row_with_no_selected_ink():
@@ -559,7 +559,8 @@ def test_generate_resistor_table_title_row_defaults_on_and_spans_full_width():
     outer = [ln for ln in vert if ln.points[0][0] in (0.0, total_width)]
     inner = [ln for ln in vert if ln.points[0][0] not in (0.0, total_width)]
     default_text_height = 150.0  # generate_resistor_table()'s own default
-    title_top = default_text_height * 1.2 + row_height
+    # grid lines sit half the spare height above the text (centred rows)
+    title_top = (row_height + default_text_height) / 2.0 + row_height
     assert all(max(ln.points[0][1], ln.points[1][1]) == title_top for ln in outer)
     assert all(max(ln.points[0][1], ln.points[1][1]) < title_top for ln in inner)
 

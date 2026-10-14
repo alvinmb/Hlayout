@@ -43,6 +43,7 @@ from .component_library_window import open_component_library_window
 from .drc_window import open_drc_window
 from .netlist_window import open_netlist_window
 from .topview_window import open_topview_window
+from .assembly_window import open_assembly_window
 from .dxf_batch_window import open_dxf_batch_window
 from .gerber_batch_window import open_gerber_batch_window
 from .maskop_window import open_maskop_batch_window
@@ -489,6 +490,7 @@ class App(tk.Tk):
         toolsm.add_command(label="Mask Operations...", command=self.show_mask_op_dialog)
         toolsm.add_command(label="Mask Operation Batch...", command=lambda: open_maskop_batch_window(self))
         toolsm.add_command(label="Top View...", command=lambda: open_topview_window(self))
+        toolsm.add_command(label="Assembly Drawing...", command=lambda: open_assembly_window(self))
         toolsm.add_command(label="DRC...", command=lambda: open_drc_window(self))
         toolsm.add_command(label="Extract Netlist...", command=lambda: open_netlist_window(self))
         toolsm.add_command(label="Thermal Analysis...", command=lambda: open_thermal_window(self))
@@ -3377,6 +3379,13 @@ class App(tk.Tk):
         """Tools > Top View...: opens the layer-table Top View window
         (hlayout.gui.topview_window). Kept by name for scripts/MCP."""
         return open_topview_window(self)
+
+    def show_assembly_dialog(self):
+        """Tools > Assembly Drawing...: opens the assembly drawing window
+        (hlayout.gui.assembly_window) -- sheet, title block, scaled top
+        view and pin/resistor tables in one cell. Kept by name for
+        scripts/MCP."""
+        return open_assembly_window(self)
 
     def show_extract_netlist_dialog(self):
         """Tools > Extract Netlist...: opens the checkbox-table window
