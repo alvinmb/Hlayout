@@ -1375,6 +1375,14 @@ DEFAULT_THERMAL = {
         "component_max_c": 125.0,
         "resistor_max_w_mm2": 0.08,     # about 50 W/in^2, a common thick-film figure
     },
+    # how the temperature maps are drawn (window and report) -- see
+    # hlayout.core.thermal.MapView
+    "display": {
+        "style": "banded",              # "banded" solid colour steps, or "smooth"
+        "bands": 10,
+        "quantity": "rise",             # "rise" above base/ambient, or "temperature"
+        "spacing": "cool",              # "cool" = bands closer at the cool end, or "even"
+    },
 }
 
 #: Default build-up of a bare die / a chip component above the films.
@@ -1388,7 +1396,7 @@ DEFAULT_THERMAL_PART = {
 
 def load_thermal_rules(library: Library) -> dict:
     """The thermal setup from library.tech_params: always a complete
-    dict with all five sections, DEFAULT_THERMAL filled in key by key."""
+    dict with every section, DEFAULT_THERMAL filled in key by key."""
     rules = json.loads(json.dumps(DEFAULT_THERMAL))
     raw = library.tech_params.get(THERMAL_KEY)
     if not raw:
@@ -1402,7 +1410,7 @@ def load_thermal_rules(library: Library) -> dict:
     for section in ("materials", "powers", "parts"):
         if isinstance(data.get(section), dict):
             rules[section] = {str(k): v for k, v in data[section].items()}
-    for section in ("boundary", "limits"):
+    for section in ("boundary", "limits", "display"):
         if isinstance(data.get(section), dict):
             for k, default in DEFAULT_THERMAL[section].items():
                 if k not in data[section]:
@@ -1427,7 +1435,7 @@ def save_thermal_rules(library: Library, rules: dict) -> None:
     for section in ("materials", "powers", "parts"):
         if isinstance(rules.get(section), dict):
             merged[section] = {str(k): v for k, v in rules[section].items()}
-    for section in ("boundary", "limits"):
+    for section in ("boundary", "limits", "display"):
         if isinstance(rules.get(section), dict):
             for k in DEFAULT_THERMAL[section]:
                 if k in rules[section]:

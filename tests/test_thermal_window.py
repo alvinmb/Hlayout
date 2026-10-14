@@ -169,3 +169,45 @@ def test_thermal_window_is_closed_when_the_library_is_replaced():
         assert not win.winfo_exists() and app._thermal_window is None
     finally:
         app.destroy()
+
+
+
+def test_thermal_window_banded_map_has_legend_axes_and_saves_style():
+    from hlayout.gui.thermal_window import open_thermal_window
+    app = _make_app()
+    try:
+        win = open_thermal_window(app)
+        win.rules["powers"]["R1"] = 100.0
+        win._persist()
+        win._run()
+        win.update()
+        texts = [win.map_canvas.itemcget(i, "text") for i in win.map_canvas.find_all()
+                 if win.map_canvas.type(i) == "text"]
+        assert "LEGEND" in texts and "Length [mm]" in texts and "Width [mm]" in texts
+        assert win._map_view.banded and len(win._map_view.levels) == 10
+        win.bands_var.set("6")
+        win.quantity_var.set("Temperature")
+        win._on_display()
+        assert len(win._map_view.levels) == 6 and not win._map_view.rise
+        disp = techfile.load_thermal_rules(app.session.library)["display"]
+        assert disp == {"style": "banded", "bands": 6, "quantity": "temperature",
+                        "spacing": "cool"}
+        win.style_var.set("Smooth")
+        assert not win._map_view.banded
+        assert str(win.bands_spin.cget("state")) == "disabled"
+    finally:
+        app.destroy()
+
+
+def test_thermal_report_has_banded_figure(tmp_path):
+    app = _make_app()
+    try:
+        s = app.session
+        techfile.save_thermal_rules(s.library, {"powers": {"R1": 100.0}})
+        res = s.run_thermal()
+        html = open(s.export_thermal_report(res, str(tmp_path / "r.html")),
+                    encoding="utf-8").read()
+        assert "LEGEND" in html and "Length [mm]" in html and "Rise above base" in html
+        assert html.count("<svg") == 2                      # surface + substrate
+    finally:
+        app.destroy()

@@ -3795,8 +3795,10 @@ class Session:
         (parts table with failures first, temperature maps, stack and
         materials, boundary conditions, energy balance). Returns
         ``path``."""
+        from ..io.techfile import load_thermal_rules
         from ..io.thermalio import write_thermal_html
-        return write_thermal_html(result, path)
+        return write_thermal_html(result, path,
+                                  display=load_thermal_rules(self.library)["display"])
 
     def export_thermal_csv(self, result, path: str) -> str:
         """Write run_thermal()'s parts table to a CSV file, hottest part

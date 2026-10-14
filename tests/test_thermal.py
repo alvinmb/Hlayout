@@ -237,3 +237,35 @@ def test_contours_and_png_helpers():
     assert rgb.shape == (2, 2, 3) and tuple(rgb[1, 1]) == (255, 255, 255)
     png = rgb_to_png(rgb, scale=3)
     assert png[:8] == b"\x89PNG\r\n\x1a\n" and b"IEND" in png
+
+
+
+# --- banded display ---------------------------------------------------------------
+
+def test_band_levels_even_and_cool_spacing():
+    from hlayout.core.thermal import band_levels
+    even = band_levels(0.0, 9.0, 10, "even")
+    assert even == pytest.approx([float(k) for k in range(10)])
+    cool = band_levels(0.0, 81.0, 10, "cool")
+    assert cool[0] == 0.0 and cool[-1] == pytest.approx(81.0)
+    assert cool[1] == pytest.approx(1.0) and cool[2] == pytest.approx(4.0)
+    gaps = np.diff(cool)
+    assert (np.diff(gaps) > 0).all()                 # bands widen toward the hot end
+
+
+def test_band_index_and_banded_rgb():
+    from hlayout.core.thermal import BAND_PALETTE, band_index, temps_to_banded_rgb
+    levels = [0.0, 1.0, 2.0]
+    g = np.array([[0.5, 1.5], [2.5, np.nan]])
+    assert band_index(g, levels).tolist() == [[0, 1], [2, -1]]
+    rgb = temps_to_banded_rgb(g, levels, background=(1, 2, 3))
+    assert tuple(rgb[1, 0]) == (128, 40, 170) == BAND_PALETTE[0]     # row 0 is the top
+    assert tuple(rgb[0, 1]) == (1, 2, 3)
+    assert len({tuple(c) for c in rgb.reshape(-1, 3)}) == 4           # solid steps only
+
+
+def test_band_colors_counts():
+    from hlayout.core.thermal import BAND_PALETTE, band_colors
+    assert band_colors(10) == BAND_PALETTE
+    five = band_colors(5)
+    assert len(five) == 5 and five[0] == BAND_PALETTE[0] and five[-1] == BAND_PALETTE[-1]

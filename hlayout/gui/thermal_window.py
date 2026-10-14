@@ -46,6 +46,11 @@ _LIMIT_FIELDS = [
 ]
 _MAP_PIXELS = 560
 _TOP_SURFACE = "Top surface"
+_STYLE_TEXT = {"banded": "Banded", "smooth": "Smooth"}
+_QUANTITY_TEXT = {"rise": "Rise", "temperature": "Temperature"}
+_SPACING_TEXT = {"cool": "Closer at cool end", "even": "Even"}
+# map layout on the canvas: frame margin, axis room left/bottom, legend room right
+_MAP_PAD, _MAP_LEFT, _MAP_TOP, _MAP_BOTTOM, _LEGEND_W = 10, 64, 30, 34, 150
 
 
 def _material_names():
@@ -72,7 +77,10 @@ class ThermalWindow(tk.Toplevel):
         self._photo = None
         self._map_grid = None
         self._map_scale = 1
+        self._map_view = None
+        self._map_origin = (0, 0)
         self._build()
+        self._on_display()
         self._refresh_powers()
         self._refresh_stack()
         self.bind("<Escape>", lambda e: self.destroy())
@@ -119,7 +127,36 @@ class ThermalWindow(tk.Toplevel):
         self.slice_box.pack(side="right")
         self.slice_box.bind("<<ComboboxSelected>>", lambda e: self._draw_map())
         ttk.Label(head, text="Slice:").pack(side="right", padx=(0, 4))
-        self.map_canvas = tk.Canvas(map_frame, background="#0d1117", highlightthickness=0,
+        # display style -- saved with the design (thermal rules "display")
+        disp = self.rules.get("display") or {}
+        opts = ttk.Frame(map_frame)
+        opts.pack(fill="x", padx=4, pady=(2, 0))
+        self.style_var = tk.StringVar(value=_STYLE_TEXT.get(disp.get("style"), "Banded"))
+        self.bands_var = tk.StringVar(value=str(disp.get("bands", 10)))
+        self.quantity_var = tk.StringVar(value=_QUANTITY_TEXT.get(disp.get("quantity"), "Rise"))
+        self.spacing_var = tk.StringVar(value=_SPACING_TEXT.get(disp.get("spacing"),
+                                                                "Closer at cool end"))
+        ttk.Label(opts, text="Style:").pack(side="left")
+        ttk.Combobox(opts, textvariable=self.style_var, values=list(_STYLE_TEXT.values()),
+                     width=8, state="readonly").pack(side="left", padx=(2, 8))
+        ttk.Label(opts, text="Bands:").pack(side="left")
+        self.bands_spin = ttk.Spinbox(opts, from_=3, to=20, textvariable=self.bands_var,
+                                      width=4, command=self._on_display)
+        self.bands_spin.pack(side="left", padx=(2, 8))
+        ttk.Label(opts, text="Show:").pack(side="left")
+        ttk.Combobox(opts, textvariable=self.quantity_var,
+                     values=list(_QUANTITY_TEXT.values()), width=12,
+                     state="readonly").pack(side="left", padx=(2, 8))
+        ttk.Label(opts, text="Spacing:").pack(side="left")
+        self.spacing_box = ttk.Combobox(opts, textvariable=self.spacing_var,
+                                        values=list(_SPACING_TEXT.values()), width=18,
+                                        state="readonly")
+        self.spacing_box.pack(side="left", padx=2)
+        for v in (self.style_var, self.quantity_var, self.spacing_var):
+            v.trace_add("write", lambda *_: self._on_display())
+        self.bands_spin.bind("<Return>", lambda e: self._on_display())
+        self.bands_spin.bind("<FocusOut>", lambda e: self._on_display())
+        self.map_canvas = tk.Canvas(map_frame, background="#000000", highlightthickness=0,
                                     width=_MAP_PIXELS, height=360)
         self.map_canvas.pack(fill="both", expand=True, padx=4, pady=4)
         self.map_canvas.bind("<Motion>", self._on_probe)
@@ -447,42 +484,102 @@ class ThermalWindow(tk.Toplevel):
             return self.result.surface_temps()
         return self.result.slice_temps(which)
 
+    def _display_settings(self):
+        """The window's display choices as a thermal-rules "display" dict."""
+        def key(var, table, default):
+            return next((k for k, v in table.items() if v == var.get()), default)
+        try:
+            bands = max(3, min(20, int(self.bands_var.get())))
+        except ValueError:
+            bands = int((self.rules.get("display") or {}).get("bands", 10))
+        return {"style": key(self.style_var, _STYLE_TEXT, "banded"), "bands": bands,
+                "quantity": key(self.quantity_var, _QUANTITY_TEXT, "rise"),
+                "spacing": key(self.spacing_var, _SPACING_TEXT, "cool")}
+
+    def _on_display(self):
+        disp = self._display_settings()
+        banded = disp["style"] == "banded"
+        self.bands_spin.configure(state="normal" if banded else "disabled")
+        self.spacing_box.configure(state="readonly" if banded else "disabled")
+        if disp != self.rules.get("display"):
+            self.rules["display"] = disp
+            save_thermal_rules(self.library, {"display": disp})
+        self._draw_map()
+
     def _draw_map(self):
         if self.result is None:
             return
         import numpy as np
-        from ..core.thermal import rgb_to_png, temps_to_rgb
+        from ..core.thermal import MapView, rgb_to_png
         grid = self._current_grid()
         self._map_grid = grid
-        finite = np.isfinite(grid)
-        if not finite.any():
-            self.map_canvas.delete("all")
+        canvas = self.map_canvas
+        if not np.isfinite(grid).any():
+            canvas.delete("all")
             self.scale_var.set("This slice has no material.")
             return
-        t_min, t_max = float(np.nanmin(grid)), float(np.nanmax(grid))
-        rgb = temps_to_rgb(grid, t_min, t_max, background=(13, 17, 23))
+        view = MapView(self.result, grid, self._display_settings(), background=(0, 0, 0))
+        self._map_view = view
         self.update_idletasks()
-        avail_w = max(self.map_canvas.winfo_width(), 200)
-        avail_h = max(self.map_canvas.winfo_height(), 150)
+        avail_w = max(canvas.winfo_width(), 300) - _MAP_LEFT - _MAP_PAD - _LEGEND_W
+        avail_h = max(canvas.winfo_height(), 200) - _MAP_TOP - _MAP_BOTTOM
+        rgb = view.rgb
         self._map_scale = max(1, min(avail_w // rgb.shape[1], avail_h // rgb.shape[0]))
-        png = rgb_to_png(rgb, self._map_scale)
+        s = self._map_scale
+        ox, oy = _MAP_LEFT, _MAP_TOP
+        self._map_origin = (ox, oy)
+        iw, ih = rgb.shape[1] * s, rgb.shape[0] * s
+        png = rgb_to_png(rgb, s)
         self._photo = tk.PhotoImage(data=base64.b64encode(png).decode("ascii"))
-        self.map_canvas.delete("all")
-        self.map_canvas.create_image(0, 0, image=self._photo, anchor="nw", tags="map")
-        self.scale_var.set(f"{t_min:.1f} C (dark blue) to {t_max:.1f} C (red)")
+        canvas.delete("all")
+        canvas.create_image(ox, oy, image=self._photo, anchor="nw", tags="map")
+        ink, small = "#e6e6e6", ("TkDefaultFont", 9)
+        x0, y0, x1, y1 = ox - _MAP_PAD, oy - _MAP_PAD, ox + iw + _MAP_PAD, oy + ih + _MAP_PAD
+        canvas.create_rectangle(x0, y0, x1, y1, outline="#1f8f3a", width=2)
+        canvas.create_text(x0, y0 - 4, text="Width [mm]", fill=ink, anchor="sw", font=small)
+        canvas.create_text(x1 + 4, y1, text="Length [mm]", fill=ink, anchor="w", font=small)
+        for mm in view.axis_ticks(view.width_mm):
+            x = ox + (mm / view.width_mm * iw if view.width_mm else 0)
+            canvas.create_text(x, y1 + 4, text=f"{mm:.2f}", fill=ink, anchor="n", font=small)
+        for mm in view.axis_ticks(view.height_mm):
+            y = oy + ih - (mm / view.height_mm * ih if view.height_mm else 0)
+            canvas.create_text(x0 - 4, y, text=f"{mm:.2f}", fill=ink, anchor="e", font=small)
+        lx = x1 + 70
+        canvas.create_text(lx, oy - 4, text="LEGEND", fill=ink, anchor="sw",
+                           font=("TkDefaultFont", 9, "bold"))
+        canvas.create_text(lx, oy + 2, text=view.unit, fill="#9a9a9a", anchor="nw",
+                           font=("TkDefaultFont", 8))
+        y = oy + 20
+        for (r, g_, b), label in view.legend():
+            colour = "#%02x%02x%02x" % (r, g_, b)
+            canvas.create_rectangle(lx, y, lx + 66, y + 15, fill=colour, outline="#555")
+            light = (r * 299 + g_ * 587 + b * 114) / 1000 > 140
+            canvas.create_text(lx + 62, y + 8, text=label, anchor="e", font=small,
+                               fill="#000000" if light else "#ffffff")
+            y += 18
+        what = "rise above " + ("base" if self.result.model.base_mode == "fixed"
+                                else "ambient") if view.rise else "temperature"
+        self.scale_var.set(f"{what}: {view.lo:.2f} to {view.hi:.2f} C"
+                           + (f", {len(view.levels)} bands" if view.banded else ""))
         self._mark_selected_part()
 
     def _on_probe(self, event):
         if self._map_grid is None:
             return
         ny, nx = self._map_grid.shape
-        i = event.x // self._map_scale
-        j = ny - 1 - event.y // self._map_scale       # image row 0 is the top
+        ox, oy = getattr(self, "_map_origin", (0, 0))
+        if event.x < ox or event.y < oy:
+            self.probe_var.set("")
+            return
+        i = (event.x - ox) // self._map_scale
+        j = ny - 1 - (event.y - oy) // self._map_scale       # image row 0 is the top
         if 0 <= i < nx and 0 <= j < ny:
             t = self._map_grid[j, i]
             x, y = self.result.model.cell_center(j, i)
             if t == t:
-                self.probe_var.set(f"({x / 1000:.2f}, {y / 1000:.2f}) mm   {t:.1f} C")
+                rise = t - self.result.model.reference_temp()
+                self.probe_var.set(f"({x / 1000:.2f}, {y / 1000:.2f}) mm   "
+                                   f"{t:.2f} C  (+{rise:.2f})")
             else:
                 self.probe_var.set(f"({x / 1000:.2f}, {y / 1000:.2f}) mm   no material")
         else:
@@ -500,9 +597,10 @@ class ThermalWindow(tk.Toplevel):
         js, is_ = np.nonzero(part.mask)
         ny = part.mask.shape[0]
         s = self._map_scale
+        ox, oy = getattr(self, "_map_origin", (0, 0))
         self.map_canvas.create_rectangle(
-            int(is_.min()) * s - 2, (ny - 1 - int(js.max())) * s - 2,
-            (int(is_.max()) + 1) * s + 2, (ny - int(js.min())) * s + 2,
+            ox + int(is_.min()) * s - 2, oy + (ny - 1 - int(js.max())) * s - 2,
+            ox + (int(is_.max()) + 1) * s + 2, oy + (ny - int(js.min())) * s + 2,
             outline="#ffffff", width=2, tags="mark")
 
     # -- outputs -----------------------------------------------------------

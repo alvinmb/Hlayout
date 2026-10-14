@@ -154,15 +154,30 @@ def test_help_menu_has_user_manual():
         app.destroy()
 
 
-def test_show_user_manual_opens_the_docx_with_the_os_default_handler(monkeypatch):
-    from hlayout.gui import app as app_module
+def test_show_user_manual_opens_the_pdf_with_the_os_default_handler(monkeypatch):
     app = _make_app()
     try:
         opened = []
+        monkeypatch.setattr(sys, "platform", "win32")
         monkeypatch.setattr(os, "startfile", lambda p: opened.append(p), raising=False)
         app.show_user_manual()
         assert len(opened) == 1
-        assert opened[0].endswith("HLayout_User_Manual.docx")
+        assert opened[0].endswith("HLayout_User_Manual.pdf")
+    finally:
+        app.destroy()
+
+
+def test_show_user_manual_falls_back_to_the_docx_without_a_pdf(monkeypatch):
+    app = _make_app()
+    try:
+        real_isfile = os.path.isfile
+        monkeypatch.setattr(os.path, "isfile",
+                            lambda p: False if p.endswith(".pdf") else real_isfile(p))
+        opened = []
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setattr(os, "startfile", lambda p: opened.append(p), raising=False)
+        app.show_user_manual()
+        assert len(opened) == 1 and opened[0].endswith("HLayout_User_Manual.docx")
     finally:
         app.destroy()
 
@@ -190,6 +205,7 @@ def test_show_user_manual_reports_when_nothing_can_open_it(monkeypatch):
     try:
         def _fail(p):
             raise OSError("no application is associated")
+        monkeypatch.setattr(sys, "platform", "win32")
         monkeypatch.setattr(os, "startfile", _fail, raising=False)
         errors = []
         monkeypatch.setattr(app_module.dialogs, "show_error",

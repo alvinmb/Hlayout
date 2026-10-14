@@ -32,6 +32,10 @@ datas = [
     # A missing splash image fails silently by design, which is exactly
     # why this was easy to ship wrong without any error to catch it.
     (str(ROOT / "hlayout" / "gui" / "assets" / "splash.png"), "hlayout/gui/assets"),
+    # Help > User Manual opens docs/HLayout_User_Manual.pdf found next to
+    # the hlayout package (App.user_manual_path()) -- in a frozen build
+    # that's _internal/, so the PDF lands at _internal/docs/.
+    (str(ROOT / "docs" / "HLayout_User_Manual.pdf"), "docs"),
 ]
 binaries = []
 hiddenimports = []

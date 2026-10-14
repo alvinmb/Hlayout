@@ -720,3 +720,137 @@ def rgb_to_png(rgb: np.ndarray, scale: int = 1) -> bytes:
             + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
             + chunk(b"IDAT", zlib.compress(raw.tobytes(), 6))
             + chunk(b"IEND", b""))
+
+
+
+# --- banded (stepped) display ----------------------------------------------------
+#
+# The classic thermal-simulator look: a handful of solid colour bands, cold
+# purple through blue, teal, green, yellow, orange and red to a white
+# hottest spot, with a legend giving each band's lower value.
+
+BAND_PALETTE = [
+    (128, 40, 170),   # purple   -- coolest
+    (20, 80, 160),    # blue
+    (115, 190, 200),  # teal
+    (50, 160, 60),    # green
+    (185, 225, 60),   # yellow-green
+    (250, 240, 40),   # yellow
+    (230, 185, 60),   # gold
+    (235, 130, 40),   # orange
+    (225, 35, 35),    # red
+    (255, 255, 255),  # white    -- hottest
+]
+
+#: display settings understood by map_view() (also the thermal rules'
+#: "display" section defaults -- see hlayout.io.techfile.DEFAULT_THERMAL)
+DEFAULT_DISPLAY = {"style": "banded", "bands": 10, "quantity": "rise", "spacing": "cool"}
+
+
+def band_colors(n: int) -> List[Tuple[int, int, int]]:
+    """``n`` band colours, cold to hot: BAND_PALETTE itself for 10,
+    otherwise sampled evenly along it."""
+    n = max(2, int(n))
+    if n == len(BAND_PALETTE):
+        return list(BAND_PALETTE)
+    pal = np.array(BAND_PALETTE, dtype=float)
+    pos = np.linspace(0.0, len(BAND_PALETTE) - 1, n)
+    idx = np.arange(len(BAND_PALETTE))
+    return [tuple(int(round(np.interp(p, idx, pal[:, c]))) for c in range(3)) for p in pos]
+
+
+def band_levels(lo: float, hi: float, n: int = 10, spacing: str = "cool") -> List[float]:
+    """Lower value of each of ``n`` bands, from ``lo`` (first) to ``hi``
+    (last -- the top band is the hottest spot itself). ``spacing``
+    "even" splits the range equally; "cool" (default) squares the
+    fraction, so bands crowd together at the cool end where most of the
+    board is and the hot spots still get their own colours."""
+    n = max(2, int(n))
+    lo, hi = float(lo), float(hi)
+    if not hi > lo:
+        hi = lo + 1e-9
+    out = []
+    for k in range(n):
+        f = k / (n - 1)
+        if spacing == "cool":
+            f = f * f
+        out.append(lo + (hi - lo) * f)
+    return out
+
+
+def band_index(grid: np.ndarray, levels) -> np.ndarray:
+    """Band number (0..len(levels)-1) of every cell; NaN cells get -1."""
+    g = np.asarray(grid, dtype=float)
+    lv = np.asarray(levels, dtype=float)
+    idx = np.searchsorted(lv, np.where(np.isnan(g), lv[0], g), side="right") - 1
+    idx = np.clip(idx, 0, len(lv) - 1)
+    return np.where(np.isnan(g), -1, idx)
+
+
+def temps_to_banded_rgb(grid: np.ndarray, levels, colors=None,
+                        background=(255, 255, 255)) -> np.ndarray:
+    """Like temps_to_rgb() but stepped: each cell takes its band's solid
+    colour. Row 0 at the TOP; NaN cells take ``background``."""
+    colors = colors or band_colors(len(levels))
+    idx = band_index(grid, levels)
+    table = np.array(list(colors) + [background], dtype=np.uint8)   # -1 -> background
+    rgb = table[idx]
+    return rgb[::-1].copy()
+
+
+class MapView:
+    """Everything needed to draw one temperature map with its legend and
+    axes, the same way in the window and the report: the image, the
+    values it shows, and the legend entries."""
+
+    def __init__(self, result, grid: np.ndarray, display: Optional[dict] = None,
+                 background=(255, 255, 255), lo: float = None, hi: float = None):
+        d = dict(DEFAULT_DISPLAY)
+        d.update({k: v for k, v in (display or {}).items() if k in DEFAULT_DISPLAY})
+        self.display = d
+        m = result.model
+        self.reference = m.reference_temp()
+        self.rise = d["quantity"] == "rise"
+        g = np.asarray(grid, dtype=float)
+        self.values = g - self.reference if self.rise else g
+        finite = np.isfinite(self.values)
+        if lo is None:
+            lo = float(np.nanmin(self.values)) if finite.any() else 0.0
+        elif self.rise:
+            lo -= self.reference
+        if hi is None:
+            hi = float(np.nanmax(self.values)) if finite.any() else 1.0
+        elif self.rise:
+            hi -= self.reference
+        self.lo, self.hi = lo, hi
+        self.banded = d["style"] == "banded"
+        if self.banded:
+            self.levels = band_levels(lo, hi, int(d["bands"]), d["spacing"])
+            self.colors = band_colors(len(self.levels))
+            self.rgb = temps_to_banded_rgb(self.values, self.levels, self.colors, background)
+        else:
+            self.levels, self.colors = None, None
+            self.rgb = temps_to_rgb(self.values, lo, hi, background=background)
+        self.width_mm = m.nx * m.pitch_um / 1000.0
+        self.height_mm = m.ny * m.pitch_um / 1000.0
+        self.unit = "Rise above %s [C]" % ("base" if m.base_mode == "fixed" else "ambient") \
+            if self.rise else "Temperature [C]"
+
+    def legend(self) -> List[Tuple[Tuple[int, int, int], str]]:
+        """[(colour, label), ...] cold to hot -- one per band, or for the
+        smooth style a handful of sample stops."""
+        if self.banded:
+            return [(c, f"{v:.2f}") for c, v in zip(self.colors, self.levels)]
+        out = []
+        for k in range(6):
+            f = k / 5.0
+            out.append((heat_color(f), f"{self.lo + (self.hi - self.lo) * f:.2f}"))
+        return out
+
+    def axis_ticks(self, length_mm: float, target: int = 4) -> List[float]:
+        step = nice_contour_step(0.0, length_mm, target)
+        ticks, v = [], 0.0
+        while v <= length_mm * (1 + 1e-9):
+            ticks.append(round(v, 6))
+            v += step
+        return ticks

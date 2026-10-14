@@ -91,6 +91,20 @@ class ViewWindow(tk.Toplevel):
         self.after(50, self.canvas.fit_view)
 
 
+
+def open_with_default_app(path):
+    """Open ``path`` with whatever the OS has registered for it (a PDF
+    viewer, Word, a browser, ...): os.startfile on Windows, ``open`` on
+    macOS, ``xdg-open`` elsewhere. Raises on failure."""
+    import subprocess
+    import sys
+    if sys.platform == "win32":
+        os.startfile(path)
+    elif sys.platform == "darwin":
+        subprocess.run(["open", path], check=True)
+    else:
+        subprocess.Popen(["xdg-open", path])
+
 class App(tk.Tk):
     # The Layers/Console panel keeps this fixed pixel width, anchored to
     # the right edge of the window (see _build_body). The canvas gets
@@ -4336,53 +4350,48 @@ class App(tk.Tk):
         ttk.Button(win, text="Place", command=do_place).pack(padx=8, pady=(0, 8))
 
     def show_user_manual(self):
-        """Help > User Manual: open docs/HLayout_User_Manual.docx --
-        a walkthrough of every menu, dialog, and built-in tool,
-        organized by what you're trying to do -- with whatever's
-        registered to handle .docx on this machine (Word, LibreOffice
-        Writer, ...). Complements Help > Command Reference /
-        docs/help.html, which is the exhaustive command-bar/Python API
-        syntax reference rather than a guided tour. Shows an info
-        dialog if the file can't be found (e.g. a copy of the app
-        distributed without its docs/ folder) instead of silently
-        doing nothing, and an error dialog if the OS can't figure out
-        how to open a .docx at all."""
-        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        manual_path = os.path.join(repo_root, "docs", "HLayout_User_Manual.docx")
-        if not os.path.isfile(manual_path):
+        """Help > User Manual: open the user manual PDF
+        (docs/HLayout_User_Manual.pdf) -- a walkthrough of every menu,
+        dialog and built-in tool, organized by what you're trying to do
+        -- in the system's PDF viewer. Falls back to the Word original
+        (docs/HLayout_User_Manual.docx) when the PDF isn't there (e.g. a
+        source checkout where it hasn't been exported yet).
+        Complements Help > Command Reference / docs/help.html, the
+        exhaustive command-bar/Python API reference. Shows an info
+        dialog if neither file can be found, and an error dialog if the
+        OS can't open it."""
+        manual_path = self.user_manual_path()
+        if manual_path is None:
             dialogs.show_info(
                 "User Manual",
-                f"Couldn't find the user manual at {manual_path} -- "
+                "Couldn't find the user manual (HLayout_User_Manual.pdf) -- "
                 "it may be missing from this copy of the app.",
                 parent=self,
             )
             return
         try:
-            os.startfile(manual_path)   # Windows: launch its registered .docx handler
-            return
-        except (AttributeError, OSError):
-            # AttributeError: not Windows, os.startfile doesn't exist.
-            # OSError: it exists but nothing's registered to open .docx
-            # here -- either way, fall through and try the other
-            # platforms' own "open with the default app" mechanism.
-            pass
-        try:
-            import subprocess
-            import sys
-            if sys.platform == "darwin":
-                subprocess.run(["open", manual_path], check=True)
-            elif sys.platform.startswith("linux"):
-                subprocess.run(["xdg-open", manual_path], check=True)
-            else:
-                raise RuntimeError("no known way to open a file with its default app here")
-            return
+            open_with_default_app(manual_path)
+            self.status.set(f"Opened {os.path.basename(manual_path)}")
         except Exception as e:
             dialogs.show_error(
                 "User Manual",
                 f"Couldn't open {manual_path} automatically ({e}). "
-                "Open it directly with Word or another .docx viewer.",
+                "Open it directly with a PDF viewer.",
                 parent=self,
             )
+
+    @staticmethod
+    def user_manual_path():
+        """The user manual to open: the PDF if present, else the .docx,
+        else None. Looks in docs/ next to the hlayout package -- the
+        repo root in a source checkout, the bundle's _internal/ folder
+        in an installed (PyInstaller) build."""
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        for name in ("HLayout_User_Manual.pdf", "HLayout_User_Manual.docx"):
+            path = os.path.join(root, "docs", name)
+            if os.path.isfile(path):
+                return path
+        return None
 
     def show_command_reference(self):
         """Open the full HTML command bar + Python API reference

@@ -49,8 +49,64 @@ def _scale_bar(t_min, t_max) -> str:
             f'<span>{t_max:.1f} &deg;C</span></div>')
 
 
-def write_thermal_html(result, path: str, title: Optional[str] = None) -> str:
-    """Write the report. Returns ``path``."""
+def _map_figure(result, grid, display=None, lo=None, hi=None, max_px: int = 640,
+                caption: str = "") -> str:
+    """One temperature map as an inline SVG figure in the classic
+    thermal-simulator layout: the map inside a frame with Length/Width
+    axes in mm, and a LEGEND of band colours and values on the right."""
+    from ..core.thermal import MapView, rgb_to_png
+    v = MapView(result, grid, display, background=(0, 0, 0), lo=lo, hi=hi)
+    h_px, w_px = v.rgb.shape[:2]
+    scale = max(1, min(8, max_px // max(w_px, 1)))
+    data = base64.b64encode(rgb_to_png(v.rgb, scale)).decode("ascii")
+    iw, ih = w_px * scale, h_px * scale
+    pad = 14                                   # frame margin round the map
+    left, top = 70, 34
+    fx0, fy0, fx1, fy1 = left - pad, top - pad, left + iw + pad, top + ih + pad
+    legend_x = fx1 + 60
+    entries = v.legend()
+    row = 18
+    width = legend_x + 120
+    height = max(fy1 + 40, top + 24 + row * len(entries) + 20)
+    ink, frame = "#e6e6e6", "#1f8f3a"
+    out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+           f'viewBox="0 0 {width} {height}" style="max-width:100%;background:#000;'
+           f'font-family:Segoe UI,Arial,sans-serif;font-size:12px">',
+           f'<rect x="0" y="0" width="{width}" height="{height}" fill="#000"/>',
+           f'<image x="{left}" y="{top}" width="{iw}" height="{ih}" '
+           f'style="image-rendering:pixelated" href="data:image/png;base64,{data}"/>',
+           f'<rect x="{fx0}" y="{fy0}" width="{fx1 - fx0}" height="{fy1 - fy0}" '
+           f'fill="none" stroke="{frame}" stroke-width="2"/>',
+           f'<text x="{fx0}" y="{fy0 - 6}" fill="{ink}">Width [mm]</text>',
+           f'<text x="{fx1 + 6}" y="{fy1 + 4}" fill="{ink}">Length [mm]</text>']
+    for mm in v.axis_ticks(v.width_mm):
+        x = left + mm / v.width_mm * iw if v.width_mm else left
+        out.append(f'<text x="{x:.1f}" y="{fy1 + 18}" fill="{ink}" '
+                   f'text-anchor="middle">{mm:.2f}</text>')
+    for mm in v.axis_ticks(v.height_mm):
+        y = top + ih - (mm / v.height_mm * ih if v.height_mm else 0)
+        out.append(f'<text x="{fx0 - 6}" y="{y + 4:.1f}" fill="{ink}" '
+                   f'text-anchor="end">{mm:.2f}</text>')
+    out.append(f'<text x="{legend_x}" y="{top}" fill="{ink}" font-weight="bold">LEGEND</text>')
+    out.append(f'<text x="{legend_x}" y="{top + 14}" fill="#9a9a9a" '
+               f'font-size="10">{html.escape(v.unit)}</text>')
+    y = top + 26
+    for (r, g_, b), label in entries:          # coolest at the top, like the window
+        out.append(f'<rect x="{legend_x}" y="{y}" width="64" height="{row - 3}" '
+                   f'fill="rgb({r},{g_},{b})" stroke="#666" stroke-width="0.5"/>')
+        dark = (r * 299 + g_ * 587 + b * 114) / 1000 > 140
+        out.append(f'<text x="{legend_x + 60}" y="{y + row - 7}" text-anchor="end" '
+                   f'fill="{"#000" if dark else "#fff"}">{html.escape(label)}</text>')
+        y += row
+    out.append("</svg>")
+    cap = f"<p class='note'>{html.escape(caption)}</p>" if caption else ""
+    return cap + "<div style='margin:6px 0 16px'>" + "".join(out) + "</div>"
+
+
+def write_thermal_html(result, path: str, title: Optional[str] = None,
+                       display: Optional[dict] = None) -> str:
+    """Write the report. ``display`` is the map style (thermal rules'
+    "display" section; see hlayout.core.thermal.MapView). Returns ``path``."""
     import numpy as np
     m = result.model
     meta = getattr(m, "meta", {}) or {}
@@ -96,15 +152,14 @@ def write_thermal_html(result, path: str, title: Optional[str] = None) -> str:
     surface = result.surface_temps()
     t_min = float(np.nanmin(surface)) if np.isfinite(surface).any() else ref
     t_max = result.max_temp
-    out.append("<h2>Temperature maps</h2><p class='note'>Top surface: the topmost material "
-               "in every column, as an infrared camera looking down would see it.</p>")
-    out.append(_map_image(result, surface, t_min, t_max))
-    out.append(_scale_bar(t_min, t_max))
+    out.append("<h2>Temperature maps</h2>")
+    out.append(_map_figure(result, surface, display, t_min, t_max,
+                           caption="Top surface: the topmost material in every column, "
+                                   "as an infrared camera looking down would see it."))
     sub_top = max((i for i, s in enumerate(m.slices) if s.role == "substrate"), default=None)
     if sub_top is not None:
-        out.append("<p class='note'>Top of the substrate.</p>")
-        out.append(_map_image(result, result.slice_temps(sub_top), t_min, t_max))
-        out.append(_scale_bar(t_min, t_max))
+        out.append(_map_figure(result, result.slice_temps(sub_top), display, t_min, t_max,
+                               caption="Top of the substrate (same scale)."))
 
     out.append("<h2>Stack, bottom to top</h2><table><tr><th class='l'>Slice</th>"
                "<th>Thickness (&micro;m)</th><th>k (W/m&middot;K)</th>"
