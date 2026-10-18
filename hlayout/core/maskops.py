@@ -63,6 +63,7 @@ BOOLEAN_MASK_OPS = ("AND", "OR", "NOT", "XOR")
 try:
     from shapely import set_precision
     from shapely.geometry import LineString
+    from shapely.geometry import MultiLineString
     from shapely.geometry import Polygon as _ShapelyPolygon
     from shapely.geometry import box as _box
     from shapely.ops import transform as _shapely_transform
@@ -70,6 +71,7 @@ try:
     _SHAPELY_IMPORT_ERROR = None
 except ImportError as _exc:  # pragma: no cover - exercised only without shapely installed
     LineString = None
+    MultiLineString = None
     _ShapelyPolygon = None
     _box = None
     unary_union = None
@@ -271,7 +273,7 @@ def boolean_op(geom_a, geom_b, op: str):
 DEFAULT_HATCH_ANGLES = (45.0, -45.0)
 
 
-def cross_hatch_lines(region, pitch: float, angles=DEFAULT_HATCH_ANGLES):
+def cross_hatch_lines(region, pitch: float, angles=DEFAULT_HATCH_ANGLES, tile: float = None):
     """One evenly-spaced set of parallel lines PER angle in ``angles``
     (degrees from the X axis, e.g. the default 45/-45 for a standard
     cross-hatch, or any other combination such as 60/-60), clipped to
@@ -282,33 +284,71 @@ def cross_hatch_lines(region, pitch: float, angles=DEFAULT_HATCH_ANGLES):
     ``pitch`` is the DBU spacing between adjacent parallel lines,
     measured perpendicular to them -- each angle's own set is
     independent, so two angles produce a grid (diamonds for 45/-45,
-    parallelograms otherwise), not a single set of parallel lines."""
+    parallelograms otherwise), not a single set of parallel lines.
+
+    The lines are NOT noded against each other: a 45 and a -45 line
+    cross without being split there, so each visible run of a hatch
+    line is one piece. The region is cut into square tiles (``tile``
+    DBU, default 16 pitches) so each clip is against a small polygon --
+    a whole routed board's conductor is one huge polygon, and clipping
+    hundreds of full-length lines against it one by one took tens of
+    seconds -- and the pieces are joined back up across tile edges."""
     _require_shapely()
     if region is None or region.is_empty or pitch <= 0 or not angles:
         return LineString()
+    import numpy as _np
+    import shapely as _shp
 
     x0, y0, x1, y1 = region.bounds
     cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
     diag = math.hypot(x1 - x0, y1 - y0) + pitch
     n_steps = int(diag / pitch) + 1
+    tile = float(tile) if tile else 16.0 * pitch
 
-    lines = []
+    tiles = []
+    ty = y0
+    while ty < y1:
+        tx = x0
+        while tx < x1:
+            g = _shp.clip_by_rect(region, tx, ty, min(tx + tile, x1), min(ty + tile, y1))
+            if not g.is_empty and g.area > 0:
+                tiles.append((tx, ty, min(tx + tile, x1), min(ty + tile, y1), g))
+            tx += tile
+        ty += tile
+
+    out = []
     for angle_deg in angles:
         theta = math.radians(angle_deg)
         dx, dy = math.cos(theta), math.sin(theta)  # unit direction along the line
         nx, ny = -dy, dx                            # unit normal (perpendicular)
-        for i in range(-n_steps, n_steps + 1):
-            c = i * pitch
+        pieces = []
+        for bx0, by0, bx1, by1, g in tiles:
+            # which lines (offset c = i*pitch along the normal) cross this tile
+            cs = [(px - cx) * nx + (py - cy) * ny
+                  for px, py in ((bx0, by0), (bx1, by0), (bx0, by1), (bx1, by1))]
+            i_lo = max(-n_steps, int(math.floor(min(cs) / pitch)))
+            i_hi = min(n_steps, int(math.ceil(max(cs) / pitch)))
+            if i_hi < i_lo:
+                continue
+            c = _np.arange(i_lo, i_hi + 1) * pitch
             ox, oy = cx + nx * c, cy + ny * c
-            seg = LineString([(ox - dx * diag, oy - dy * diag),
-                               (ox + dx * diag, oy + dy * diag)])
-            clipped = seg.intersection(region)
-            if not clipped.is_empty:
-                lines.append(clipped)
+            coords = _np.stack([_np.stack([ox - dx * diag, oy - dy * diag], axis=1),
+                                _np.stack([ox + dx * diag, oy + dy * diag], axis=1)], axis=1)
+            segs = _shp.linestrings(coords)
+            clipped = _shp.intersection(segs, g)
+            for part in _shp.get_parts(clipped[~_shp.is_empty(clipped)]):
+                if part.geom_type == "LineString" and part.length > 0:
+                    pieces.append(part)
+        if not pieces:
+            continue
+        # rejoin the runs a tile edge cut in two (snap first, so the two
+        # halves' shared endpoint is bit-for-bit the same point)
+        merged = _shp.line_merge(set_precision(MultiLineString(pieces), grid_size=1.0))
+        out.extend(_shp.get_parts(merged))
 
-    if not lines:
+    if not out:
         return LineString()
-    return unary_union(lines)
+    return MultiLineString([g for g in out if g.geom_type == "LineString"])
 
 
 def hidden_line_top_view(layer_geoms):
@@ -384,6 +424,10 @@ def hidden_line_top_view(layer_geoms):
 
     covered = _ShapelyPolygon()  # nothing covered yet, working top-down
     visible_edges = []
+    # hatch lines are kept OUT of the final union: noding them against
+    # each other (and every outline) would split each line at every
+    # crossing -- several times the paths, for no visible difference
+    hatches = []
     for entry in layer_geoms:
         geom, occludes = entry[0], entry[1]
         hatch_spec = entry[2] if len(entry) > 2 else None
@@ -412,12 +456,22 @@ def hidden_line_top_view(layer_geoms):
             if hatch_pitch:
                 hatch = cross_hatch_lines(visible_region, hatch_pitch, hatch_angles)
                 if not hatch.is_empty:
-                    visible_edges.append(hatch)
+                    hatches.append(hatch)
         covered = geom if covered.is_empty else set_precision(covered.union(geom), grid_size=1.0)
 
-    if not visible_edges:
+    if not visible_edges and not hatches:
         return LineString()
-    return set_precision(unary_union(visible_edges), grid_size=1.0)
+    edges = set_precision(unary_union(visible_edges), grid_size=1.0) if visible_edges \
+        else LineString()
+    if not hatches:
+        return edges
+    import shapely as _shp
+    parts = [g for g in _shp.get_parts(edges) if g.geom_type == "LineString"] \
+        if not edges.is_empty else []
+    for h in hatches:
+        parts.extend(g for g in _shp.get_parts(set_precision(h, grid_size=1.0))
+                     if g.geom_type == "LineString" and not g.is_empty)
+    return MultiLineString(parts)
 
 
 def _signed_area(ring) -> float:

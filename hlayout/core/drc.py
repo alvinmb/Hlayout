@@ -185,6 +185,10 @@ def _marker_from_points(a, b):
     return geom
 
 
+#: DBU: a MIN_WIDTH leftover thinner than twice this is numerical noise
+MIN_WIDTH_TOLERANCE = 1.0
+
+
 def _check_min_width(rule: DrcRule, geoms: list) -> list:
     _require_shapely()
     if not geoms:
@@ -192,11 +196,19 @@ def _check_min_width(rule: DrcRule, geoms: list) -> list:
     merged = unary_union(geoms)
     if merged.is_empty:
         return []
-    half = rule.value / 2.0
+    # a track drawn exactly AT the limit must pass: erode by a hair less
+    # than half the width, or it erodes to nothing and is all "violation"
+    half = max(rule.value / 2.0 - MIN_WIDTH_TOLERANCE, 0.0)
     opened = merged.buffer(-half, join_style="mitre", mitre_limit=5.0)
     if not opened.is_empty:
         opened = opened.buffer(half, join_style="mitre", mitre_limit=5.0)
     violation = merged.difference(opened) if not opened.is_empty else merged
+    if not violation.is_empty:
+        # drop numerical slivers: the curve approximation of a round cap
+        # or arc, or a track drawn exactly at the limit, leaves hair-thin
+        # leftovers that aren't a real narrowing
+        tol = MIN_WIDTH_TOLERANCE
+        violation = violation.buffer(-tol, join_style="mitre").buffer(tol, join_style="mitre")
     return [violation] if not violation.is_empty and violation.area > 0 else []
 
 

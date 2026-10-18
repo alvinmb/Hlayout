@@ -522,7 +522,6 @@
     "refdes_annotation_layer": "62",
     "dielectric_rules": "{\"layer\": 4, \"margin\": 1000, \"clearance\": 150, \"keepout_layers\": []}",
     "bond_rules": "{\"layer\": 59, \"width\": 30, \"pad\": 100, \"min_length\": 300, \"max_length\": 5000}",
-    "resistor_list": "[{\"ref_des\": \"R1\", \"value\": 680000.0, \"tolerance\": \"5%\", \"power_mw\": 125.0, \"body_width\": 2000.0, \"selected_ink\": 300000.0}, {\"ref_des\": \"R2\", \"value\": 680000.0, \"tolerance\": \"5%\", \"power_mw\": 125.0, \"body_width\": 2000.0, \"selected_ink\": 300000.0}, {\"ref_des\": \"R3\", \"value\": 340000.0, \"tolerance\": \"5%\", \"power_mw\": 125.0, \"body_width\": 2000.0, \"selected_ink\": 300000.0}]",
     "drc_rules": "[{\"kind\": \"MIN_WIDTH\", \"layer_a\": 3, \"layer_b\": null, \"value\": 300.0, \"name\": \"1st con min_width\", \"color\": \"#e6194b\"}, {\"kind\": \"MIN_SPACE_BETWEEN\", \"layer_a\": 3, \"layer_b\": 3, \"value\": 300.0, \"name\": \"1st con metal_2_metal\", \"color\": \"#3cb44b\"}]",
     "mask_op_steps": "[{\"kind\": \"XOR\", \"layer_a\": 3, \"result_layer\": 55, \"layer_b\": 3, \"amount\": 0.0, \"name\": \"\", \"flatten\": true, \"simplify\": 0}]"
   }

@@ -15,3 +15,16 @@ hlayout_project.zip
 # (and by their tests); the scripts are the source of truth, not these.
 /examples/*.gds
 /examples/*.gds.hlaux
+
+# Hybrid router: the Freerouting checkout is its own repo (upstream 5aa1b24 +
+# router/freerouting-overlay copied in); only the overlay is tracked here.
+/router/freerouting/
+/router/examples/win_run/
+# Router hand-off packages and scratch output
+/hlayout-router-phase*.zip
+/router_phase4.zip
+/hlayout/examples/freerouting/
+# Editor backups left by manual/design edits
+*.bak
+*.bak[0-9]
+*.bak_*

@@ -370,10 +370,15 @@ def _poly(points):
 
 
 def _fuse(solids):
+    # A compound, not a boolean fuse: every layer's polygons were already
+    # merged (shapely unary_union) before being written here, so the
+    # solids are disjoint and fusing them is pure cost -- a sequential
+    # BRep fuse of ~100 many-vertex traces took minutes and looked like
+    # a hang. A compound renders, exports and section-probes the same.
     solids = [s for s in solids if s is not None and not s.isNull()]
     if not solids:
         return None
-    return reduce(lambda a, b: a.fuse(b), solids[1:], solids[0]) if len(solids) > 1 else solids[0]
+    return solids[0] if len(solids) == 1 else Part.makeCompound(solids)
 
 
 #: shapes bonds and parts land on: _SURF = films + substrate (what a
@@ -381,6 +386,17 @@ def _fuse(solids):
 #: end lands on -- die pads, header pins, traces).
 _SURF = []
 _PROBE = []
+
+
+def _parts(shape):
+    """A shape's individual solids (or the shape itself) -- what the
+    probes below test one by one, so their bounding-box prefilter skips
+    almost everything instead of sectioning a whole layer compound."""
+    try:
+        sol = list(shape.Solids)
+    except Exception:
+        sol = []
+    return sol or [shape]
 
 
 def _add(name, shape, rgb, surface=False, transparency=0):
@@ -392,9 +408,9 @@ def _add(name, shape, rgb, surface=False, transparency=0):
         o.ViewObject.ShapeColor = rgb
         if transparency:
             o.ViewObject.Transparency = int(transparency)
-    _PROBE.append(o.Shape)
+    _PROBE.extend(_parts(o.Shape))
     if surface:
-        _SURF.append(o.Shape)
+        _SURF.extend(_parts(o.Shape))
     return o
 
 
@@ -426,14 +442,54 @@ def _surface_z(x0, y0, x1, y1):
     return max(zs) if zs else 0.0
 
 
+_MODEL_SHAPES = {{}}     # path -> shape read once (probing + headless/mirrored use)
+_MODEL_TEMPLATES = {{}}  # path -> first coloured GUI import, re-used via App::Link
+
+
+def _progress(msg):
+    """Report progress and keep the FreeCAD window painting while the
+    macro runs -- otherwise a long GUI run looks frozen ("Not
+    Responding") although it is still working."""
+    App.Console.PrintMessage("HLayout: %s\\n" % msg)
+    if _GUI:
+        try:
+            FreeCADGui.updateGui()
+        except Exception:
+            pass
+
+
+def _model_shape(path):
+    sh = _MODEL_SHAPES.get(path)
+    if sh is None:
+        sh = Part.Shape()
+        sh.read(path)
+        _MODEL_SHAPES[path] = sh
+    return sh
+
+
 def _place_model(path, name, x, y, z, rot_deg, mirrored):
     """Bring a STEP/IGES model in at (x, y, z) rotated rot_deg about Z.
-    In the GUI it is imported with ImportGui so the model's own colours
-    survive, grouped in an App::Part named `name`; otherwise (or when
-    mirrored) it is read as a plain shape."""
+
+    Each file is read ONCE. In the GUI the first instance is imported
+    with ImportGui (so the model's own colours survive) into an
+    App::Part named `name`; every further instance of the same file is
+    an App::Link to that part -- re-importing the STEP per instance was
+    what made a GUI run of a populated board take minutes. Headless (or
+    mirrored) instances are plain Part::Features sharing one read."""
+    _progress("placing %s" % name)
     P = App.Placement(V(x, y, z), App.Rotation(V(0, 0, 1), rot_deg))
+    base = _model_shape(path)
+    probe = base.copy()
+    probe.Placement = P
     if _GUI and not mirrored:
         try:
+            tpl = _MODEL_TEMPLATES.get(path)
+            if tpl is not None:
+                link = _doc.addObject("App::Link", name)
+                link.setLink(tpl)
+                link.Placement = P
+                _PROBE.extend(_parts(probe))
+                return link
             import ImportGui
             before = set(o.Name for o in _doc.Objects)
             ImportGui.insert(path, _doc.Name)
@@ -443,27 +499,19 @@ def _place_model(path, name, x, y, z, rot_deg, mirrored):
                 for o in [o for o in new if not any(p in new for p in o.InList)]:
                     part.addObject(o)
                 part.Placement = P
-                _doc.recompute()
-                for o in new:
-                    if o.isDerivedFrom("Part::Feature"):
-                        try:
-                            sh = o.Shape.copy()
-                            sh.Placement = o.getGlobalPlacement()   # through the App::Parts
-                            _PROBE.append(sh)
-                        except Exception:
-                            pass
+                _MODEL_TEMPLATES[path] = part
+                _PROBE.extend(_parts(probe))
                 return part
         except Exception as e:
             App.Console.PrintWarning("HLayout: coloured import of %s failed (%s), "
                                      "reading plain shape\\n" % (path, e))
-    sh = Part.Shape()
-    sh.read(path)
+    sh = base.copy()
     if mirrored:
         sh = sh.mirror(V(0, 0, 0), V(1, 0, 0))
     o = _doc.addObject("Part::Feature", name)
     o.Shape = sh
     o.Placement = P
-    _PROBE.append(o.Shape)
+    _PROBE.extend(_parts(o.Shape))
     return o
 
 
@@ -496,6 +544,22 @@ if _GUI:
     except Exception:
         pass
 '''
+
+
+def _rest_z(surf_geoms, x0, y0, x1, y1):
+    """Seat height (mm) for a part whose footprint is the DBU box
+    (x0,y0)-(x1,y1): the highest film top under its centre or its four
+    20%-inset corners, else 0 (the substrate top) -- the same sample
+    points the macro's own _surface_z() probe uses."""
+    from shapely.geometry import Point
+    ix, iy = (x1 - x0) * 0.2, (y1 - y0) * 0.2
+    pts = [((x0 + x1) / 2.0, (y0 + y1) / 2.0), (x0 + ix, y0 + iy), (x1 - ix, y0 + iy),
+           (x1 - ix, y1 - iy), (x0 + ix, y1 - iy)]
+    best = 0.0
+    for geom, zt in surf_geoms:
+        if zt > best and any(geom.intersects(Point(x, y)) for x, y in pts):
+            best = zt
+    return best
 
 
 def write_freecad_macro(library: Library, cell_name: str, path: str, *,
@@ -545,6 +609,30 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
                    - keepout_layers(library))
     diel = dielectric_layer(library)
     glazes = glaze_layers(library)
+    # Pad layers (any layer carrying numbered pads -- package footprint
+    # lands, module I/O pads) are drawn in the 2nd routing conductor's
+    # colour: they're the same printed metal, so they should read as such
+    # in 3D rather than in whatever on-screen colour the layer happens to
+    # have. Falls back to each layer's own colour when no 2nd conductor
+    # is configured.
+    pad_rgb = None
+    try:
+        from .techfile import load_route_rules
+        lb = load_route_rules(library).get("layer_b")
+        if isinstance(lb, int) and 0 <= lb < len(library.layers):
+            pad_rgb = _rgb01(library.layers[lb].color)
+    except Exception:
+        pad_rgb = None
+    pad_layers = {sh.layer for c in library.cells.values() for sh in c.shapes
+                  if getattr(sh, "pin", "")}
+    # ...but never recolour a routing conductor itself just because some
+    # pads were drawn on it (I/O pads on the 1st conductor, say)
+    try:
+        from .techfile import load_route_rules as _lrr
+        _rr = _lrr(library)
+        pad_layers -= {_rr.get("layer_a"), _rr.get("layer_b")}
+    except Exception:
+        pass
     # a thickness given to the substrate layer itself wins over the
     # thermal setup's substrate_um
     sub_given = [thick[str(n)] for n in sorted(subs) if str(n) in thick]
@@ -563,6 +651,7 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
                             docname=f"{library.name}_{cell_name}")]
 
     n_solids = 0
+    surf_geoms = []          # (merged film geometry, its top z) -- see _rest_z()
     for (n, zb, zt) in stack:
         if n == bond_layer:
             continue                 # bonds get raised loops, below
@@ -577,7 +666,13 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
         polys = list(_iter_polygons(geom))
         if not polys:
             continue
-        rgb = _GLAZE_RGB if n in glazes else _rgb01(library.layers[n].color)
+        surf_geoms.append((geom, zt))
+        if n in glazes:
+            rgb = _GLAZE_RGB
+        elif pad_rgb is not None and n in pad_layers:
+            rgb = pad_rgb
+        else:
+            rgb = _rgb01(library.layers[n].color)
         transp = _GLAZE_TRANSPARENCY if n in glazes else 0
         lines.append(f"# --- layer {n} ({library.layers[n].name}) : "
                      f"z {zb:.4f}..{zt:.4f} mm ---")
@@ -634,13 +729,15 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
         if entry.get("z_ref") == "substrate_bottom":
             base_expr = f"{-sub_t_mm + zoff:.5f}"
         elif bb is not None:
-            # rests on whatever film is under its footprint (resolved in
-            # FreeCAD from the solids already built, not guessed here)
+            # rests on whatever film is under its footprint -- worked out
+            # here from the same merged 2D film geometry the slabs were
+            # built from (the films are flat, so a point-in-polygon test
+            # gives the exact top), instead of BRep-sectioning every
+            # solid in FreeCAD per part, which took seconds per part
             cs = [xf(p) for p in ((bb[0], bb[1]), (bb[2], bb[1]), (bb[2], bb[3]), (bb[0], bb[3]))]
-            fx0, fy0 = _mm(min(c[0] for c in cs)), _mm(min(c[1] for c in cs))
-            fx1, fy1 = _mm(max(c[0] for c in cs)), _mm(max(c[1] for c in cs))
-            base_expr = (f"_surface_z({fx0:.5f},{fy0:.5f},{fx1:.5f},{fy1:.5f})"
-                         + (f" + {zoff:.5f}" if zoff else ""))
+            fx0, fy0 = min(c[0] for c in cs), min(c[1] for c in cs)
+            fx1, fy1 = max(c[0] for c in cs), max(c[1] for c in cs)
+            base_expr = f"{_rest_z(surf_geoms, fx0, fy0, fx1, fy1) + zoff:.5f}"
         else:
             base_expr = f"{zoff:.5f}"
 
@@ -648,7 +745,13 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
             mp = entry["model_path"]
             if not os.path.isabs(mp):
                 mp = os.path.join(comp_dir, mp)
-            ox_dbu, oy_dbu = xf((0.0, 0.0))
+            # entry["origin_um"] (cell-local, DBU = um) is where the
+            # model's own (0, 0) belongs in the footprint -- e.g. the pad
+            # ring centre for a centred LCC/PLCC model (see
+            # hlayout.io.component_match.match_chip_carrier_by_name()).
+            # Default: the cell origin, as before.
+            org = entry.get("origin_um") or (0.0, 0.0)
+            ox_dbu, oy_dbu = xf((float(org[0]), float(org[1])))
             # entry["rotation_deg"] is an extra correction ON TOP OF the
             # placement's own rot_deg -- e.g. from an auto-match that
             # identified this package via its footprint's Y axis instead

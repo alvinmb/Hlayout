@@ -11,6 +11,7 @@ ISO sheet:
       +- ASSY_TOPVIEW   mask_op_top_view(), placed at a standard scale
       +- ASSY_PINTABLE  generate_pin_function_table()
       +- ASSY_RESTABLE  generate_resistor_table()
+      +- ASSY_BONDTABLE generate_bond_table() (chip-and-wire designs with a bond diagram)
 
 Everything on the sheet is specified in real paper millimetres. The top
 view is regenerated with its line width, hatch pitch and ref-des height
@@ -48,6 +49,7 @@ STANDARD_SCALES = (100.0, 50.0, 25.0, 20.0, 10.0, 5.0, 4.0, 2.5, 2.0, 1.0,
 _GEN_TEXT_DBU = 150.0
 _PIN_ROW, _PIN_COLS = 250.0, (800.0, 2000.0)
 _RES_ROW, _RES_COLS = 250.0, (1200.0, 2500.0, 1000.0, 2000.0, 2000.0)
+_BOND_ROW, _BOND_COLS = 250.0, (600.0, 900.0, 1500.0, 1500.0, 1500.0, 1100.0, 1000.0, 900.0)
 
 DEFAULT_ASSEMBLY_SETTINGS = {
     "cell_name": "ASSEMBLY",
@@ -82,9 +84,10 @@ DEFAULT_ASSEMBLY_SETTINGS = {
     "pins_per_group": 10,
     "pin_functions": None,        # {pin: "function"}
     "resistor_table": True,
+    "bond_table": True,           # only when the design has a bond diagram
 }
 
-_PART_NAMES = ("SHEET", "TOPVIEW", "PINTABLE", "RESTABLE")
+_PART_NAMES = ("SHEET", "TOPVIEW", "PINTABLE", "RESTABLE", "BONDTABLE")
 
 
 # --- settings ----------------------------------------------------------------
@@ -345,6 +348,13 @@ def generate_assembly_drawing(session, save: bool = True, **overrides) -> dict:
                     text_height=_GEN_TEXT_DBU * k, line_layer=line_layer,
                     line_width=table_line)
                 tables.append(names["RESTABLE"])
+        if st.get("bond_table", True) and session.bond_diagram():
+            session.generate_bond_table(
+                names["BONDTABLE"], layer,
+                row_height=_BOND_ROW * k, col_widths=tuple(c * k for c in _BOND_COLS),
+                text_height=_GEN_TEXT_DBU * k, line_layer=line_layer,
+                line_width=table_line)
+            tables.append(names["BONDTABLE"])
         tsz = {t: _size(lib.cell_bbox(t)) for t in tables}
 
         # 3. layout + scale -------------------------------------------------------

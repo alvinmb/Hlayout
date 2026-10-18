@@ -1,7 +1,8 @@
 """HLayout-generated FreeCAD macro: builds a small 3D component
 library (generic ceramic chip capacitors, a 20-pin sealed
-metal/ceramic hybrid flatpack, and the SOT small-outline-
-transistor gull-wing package family) and exports each as its
+metal/ceramic hybrid flatpack, the SOT small-outline-
+transistor gull-wing package family, and the ceramic LCC /
+plastic PLCC chip-carrier families) and exports each as its
 own STEP file, ready to be referenced from Setup > Technology
 Properties..."s Resistors/component_models "model" mode -- see
 hlayout.io.component_library.write_component_library_macro().
@@ -13,7 +14,7 @@ import FreeCAD as App
 import Part
 
 V = App.Vector
-OUT_DIR = 'C:/dev/HLayout/examples/step_models'
+OUT_DIR = 'C:\\dev\\HLayout/examples/step_models'
 os.makedirs(OUT_DIR, exist_ok=True)
 
 
@@ -130,6 +131,103 @@ def make_sot(L, W, H, lead_t, lead_out, lead_foot,
     return shape
 
 
+def _side_positions(n_side, pitch):
+    span = (n_side - 1) * pitch
+    return [-span / 2.0 + i * pitch for i in range(n_side)]
+
+
+def _four_sides(side_shapes):
+    """side_shapes: shapes built for the +Y edge; returns them plus
+    copies rotated 90/180/270 degrees about the Z axis through (0, 0)."""
+    out = list(side_shapes)
+    for ang in (90, 180, 270):
+        for s in side_shapes:
+            c = s.copy()
+            c.rotate(V(0, 0, 0), V(0, 0, 1), ang)
+            out.append(c)
+    return out
+
+
+def _pin1_x(n_side, pitch):
+    # pin 1 is the top-edge terminal at (or just left of) centre --
+    # counter-clockwise numbering starting from the top centre
+    return 0.0 if n_side % 2 else -pitch / 2.0
+
+
+def make_lcc(B, H, n_side, pitch=1.27, term_w=0.64, term_len=1.15,
+             term_t=0.05, lid_inset=1.27, lid_t=0.08, cast_r=0.3, plate_t=0.03):
+    """A ceramic leadless chip carrier (LCCC): a B x B body, H tall
+    (seated), n_side castellated terminals per edge at ``pitch``.
+    CENTRED on (0, 0) in X/Y, sitting on Z=0.
+
+    Every terminal is a castellation: a half-round notch of radius
+    ``cast_r`` cut into the body edge, full height of the ceramic,
+    lined with ``plate_t`` of metal, which joins a ``term_w`` x
+    ``term_len`` termination pad on the underside (Z=0..term_t, notched
+    the same way so the plating runs straight down into it)."""
+    zb = term_t
+    hb = H - term_t - lid_t                       # ceramic base height
+    xs = _side_positions(n_side, pitch)
+
+    def _side(make):
+        return _four_sides([make(x) for x in xs])
+
+    # ceramic body with every castellation notch cut out in one boolean
+    body = Part.makeBox(B, B, hb, V(-B / 2.0, -B / 2.0, zb))
+    notches = _side(lambda x: Part.makeCylinder(cast_r, hb + 0.2, V(x, B / 2.0, zb - 0.1)))
+    body = body.cut(Part.makeCompound(notches))
+    shapes = [body]
+
+    lid = B - 2 * lid_inset
+    if lid > 0:
+        shapes.append(Part.makeBox(lid, lid, lid_t, V(-lid / 2.0, -lid / 2.0, H - lid_t)))
+
+    def plating(x):
+        ring = Part.makeCylinder(cast_r + plate_t, hb, V(x, B / 2.0, zb)).cut(
+            Part.makeCylinder(cast_r, hb, V(x, B / 2.0, zb)))
+        inside = Part.makeBox(2 * (cast_r + plate_t), cast_r + plate_t, hb,
+                              V(x - cast_r - plate_t, B / 2.0 - cast_r - plate_t, zb))
+        return ring.common(inside)                # the half lining the notch
+
+    def pad(x):
+        p = Part.makeBox(term_w, term_len, term_t, V(x - term_w / 2.0, B / 2.0 - term_len, 0))
+        return p.cut(Part.makeCylinder(cast_r, term_t, V(x, B / 2.0, 0)))
+
+    shapes.extend(_side(plating))
+    shapes.extend(_side(pad))
+    rim = min(lid_inset, 1.0) / 2.0
+    shapes.append(Part.makeCylinder(min(0.3, rim), 0.03,
+                                    V(_pin1_x(n_side, pitch), B / 2.0 - rim, H - lid_t)))
+    return Part.makeCompound(shapes)
+
+
+def make_plcc(B, E, H, n_side, pitch=1.27, lead_w=0.43, lead_t=0.2,
+              standoff=0.6, tuck=0.5):
+    """A plastic J-lead chip carrier (PLCC): a B x B moulded body from
+    Z=standoff to H, n_side J-leads per edge whose outer faces lie on
+    the E x E overall outline and whose curled feet rest on Z=0 tucked
+    ``tuck`` under the body edge. CENTRED on (0, 0) in X/Y."""
+    shapes = [Part.makeBox(B, B, H - standoff, V(-B / 2.0, -B / 2.0, standoff))]
+    shoulder = standoff + (H - standoff) * 0.4
+    y_out = E / 2.0
+    side = []
+    for x in _side_positions(n_side, pitch):
+        x0 = x - lead_w / 2.0
+        # shoulder: out of the body wall to the overall outline
+        side.append(Part.makeBox(lead_w, y_out - B / 2.0, lead_t,
+                                 V(x0, B / 2.0, shoulder - lead_t)))
+        # outer vertical run down to the board
+        side.append(Part.makeBox(lead_w, lead_t, shoulder,
+                                 V(x0, y_out - lead_t, 0)))
+        # J foot curling back under the body
+        side.append(Part.makeBox(lead_w, y_out - (B / 2.0 - tuck), lead_t,
+                                 V(x0, B / 2.0 - tuck, 0)))
+    shapes.extend(_four_sides(side))
+    shapes.append(Part.makeCylinder(0.5, 0.03,
+                                    V(_pin1_x(n_side, pitch), B / 2.0 - 1.2, H)))
+    return Part.makeCompound(shapes)
+
+
 def export(shape, name, out_dir):
     path = os.path.join(out_dir, name + ".step")
     if os.path.isfile(path):
@@ -158,4 +256,18 @@ export(make_sot(L=6.5, W=3.5, H=1.6, lead_t=0.25, lead_out=0.8, lead_foot=1.0, l
 export(make_sot(L=8.65, W=3.9, H=1.75, lead_t=0.2, lead_out=0.4, lead_foot=0.6, leads_neg_y=[(-3.81, 0.4), (-2.54, 0.4), (-1.27, 0.4), (0.0, 0.4), (1.27, 0.4), (2.54, 0.4), (3.81, 0.4)], leads_pos_y=[(-3.81, 0.4), (-2.54, 0.4), (-1.27, 0.4), (0.0, 0.4), (1.27, 0.4), (2.54, 0.4), (3.81, 0.4)]), 'SOT_14', OUT_DIR)
 export(make_sot(L=9.9, W=3.9, H=1.75, lead_t=0.2, lead_out=0.4, lead_foot=0.6, leads_neg_y=[(-4.445, 0.4), (-3.175, 0.4), (-1.905, 0.4), (-0.635, 0.4), (0.635, 0.4), (1.905, 0.4), (3.175, 0.4), (4.445, 0.4)], leads_pos_y=[(-4.445, 0.4), (-3.175, 0.4), (-1.905, 0.4), (-0.635, 0.4), (0.635, 0.4), (1.905, 0.4), (3.175, 0.4), (4.445, 0.4)]), 'SOT_16', OUT_DIR)
 export(make_sot(L=11.16, W=3.9, H=1.75, lead_t=0.2, lead_out=0.4, lead_foot=0.6, leads_neg_y=[(-5.08, 0.4), (-3.81, 0.4), (-2.54, 0.4), (-1.27, 0.4), (0.0, 0.4), (1.27, 0.4), (2.54, 0.4), (3.81, 0.4), (5.08, 0.4)], leads_pos_y=[(-5.08, 0.4), (-3.81, 0.4), (-2.54, 0.4), (-1.27, 0.4), (0.0, 0.4), (1.27, 0.4), (2.54, 0.4), (3.81, 0.4), (5.08, 0.4)]), 'SOT_18', OUT_DIR)
+export(make_lcc(B=8.89, H=1.9, n_side=5, pitch=1.27), 'LCC20', OUT_DIR)
+export(make_lcc(B=11.43, H=1.9, n_side=7, pitch=1.27), 'LCC28', OUT_DIR)
+export(make_lcc(B=12.7, H=1.9, n_side=8, pitch=1.27), 'LCC32', OUT_DIR)
+export(make_lcc(B=16.51, H=2.0, n_side=11, pitch=1.27), 'LCC44', OUT_DIR)
+export(make_lcc(B=19.05, H=2.0, n_side=13, pitch=1.27), 'LCC52', OUT_DIR)
+export(make_lcc(B=24.13, H=2.3, n_side=17, pitch=1.27), 'LCC68', OUT_DIR)
+export(make_lcc(B=29.21, H=2.3, n_side=21, pitch=1.27), 'LCC84', OUT_DIR)
+export(make_plcc(B=8.97, E=9.91, H=4.37, n_side=5, pitch=1.27), 'PLCC20', OUT_DIR)
+export(make_plcc(B=11.51, E=12.45, H=4.37, n_side=7, pitch=1.27), 'PLCC28', OUT_DIR)
+export(make_plcc(B=12.78, E=13.72, H=4.37, n_side=8, pitch=1.27), 'PLCC32', OUT_DIR)
+export(make_plcc(B=16.59, E=17.53, H=4.37, n_side=11, pitch=1.27), 'PLCC44', OUT_DIR)
+export(make_plcc(B=19.13, E=20.07, H=4.37, n_side=13, pitch=1.27), 'PLCC52', OUT_DIR)
+export(make_plcc(B=24.21, E=25.15, H=4.57, n_side=17, pitch=1.27), 'PLCC68', OUT_DIR)
+export(make_plcc(B=29.29, E=30.23, H=4.57, n_side=21, pitch=1.27), 'PLCC84', OUT_DIR)
 App.Console.PrintMessage("HLayout: component library build complete.\n")

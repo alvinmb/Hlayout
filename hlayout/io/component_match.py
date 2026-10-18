@@ -60,7 +60,9 @@ from ..core.shapes import Polygon, Rectangle
 from ..core.units import DBU_MM
 from .component_library import (
     DEFAULT_CERAMIC_CAPS,
+    DEFAULT_LCC_PACKAGES,
     DEFAULT_PKG20,
+    DEFAULT_PLCC_PACKAGES,
     DEFAULT_SOT_PACKAGES,
     _soic_leads,
 )
@@ -81,7 +83,7 @@ class Match:
     write_freecad_macro() ``component_models`` entry."""
     cell_name: str
     package: str          # e.g. "CAP_0805" or "SOT_23"
-    category: str          # "passive" | "gullwing"
+    category: str          # "passive" | "gullwing" | "chip_carrier"
     reason: str            # human-readable, for the report
     entry: dict             # {"mode": "model", "model_path": ...}
 
@@ -333,6 +335,93 @@ def _gullwing_rotation_correction(stats: dict, table: dict, package: str,
     return 0.0
 
 
+#: "LCC20", "LCC_LCC20", "lccc-28", "PLCC84", "LCC_PLCC44" ... -> the
+#: family and pin count. The look-behind stops the "LCC" inside "PLCC"
+#: (or a "LCC_" library prefix with no number) from matching on its own.
+_CHIP_CARRIER_RE = re.compile(r"(?<![A-Z])(PLCC|LCCC|LCC)[_\-]?(\d+)", re.I)
+
+
+def match_chip_carrier_by_name(cell_name: str, lcc_packages=None,
+                               plcc_packages=None) -> Optional[str]:
+    """The LCC/PLCC package a cell name refers to (e.g. "LCC_PLCC84" ->
+    "PLCC84", "LCC_LCC20" -> "LCC20", "LCCC28" -> "LCC28"), or None --
+    only when that package exists in the (given or default) tables."""
+    lccs = DEFAULT_LCC_PACKAGES if lcc_packages is None else (lcc_packages or {})
+    plccs = DEFAULT_PLCC_PACKAGES if plcc_packages is None else (plcc_packages or {})
+    found = None
+    for fam, n in _CHIP_CARRIER_RE.findall(cell_name):
+        fam = fam.upper()
+        name = f"PLCC{int(n)}" if fam == "PLCC" else f"LCC{int(n)}"
+        if name in (plccs if fam == "PLCC" else lccs):
+            found = name                    # last token wins ("LCC_PLCC84")
+    return found
+
+
+def chip_carrier_placement(cell) -> Tuple[Tuple[float, float], float]:
+    """Where a centred LCC/PLCC model goes in ``cell``: ``((cx, cy),
+    rotation_deg)`` -- the centre of the footprint's pad ring (pinned
+    pads if any, else every Rectangle/Polygon) in cell-local DBU, and
+    the extra rotation that puts the model's pin 1 (top-edge centre,
+    +Y) on the footprint's pin "1" pad, to the nearest 90 degrees
+    (0 when no pad is numbered "1")."""
+    import math
+    pads = [s for s in cell.shapes
+            if isinstance(s, (Rectangle, Polygon)) and getattr(s, "pin", "")]
+    pool = pads or [s for s in cell.shapes if isinstance(s, (Rectangle, Polygon))]
+    if not pool:
+        return (0.0, 0.0), 0.0
+    boxes = [s.bbox() for s in pool]
+    cx = (min(b[0] for b in boxes) + max(b[2] for b in boxes)) / 2.0
+    cy = (min(b[1] for b in boxes) + max(b[3] for b in boxes)) / 2.0
+    rot = 0.0
+    p1 = [s for s in pads if str(s.pin).strip() == "1"]
+    if p1:
+        x0, y0, x1, y1 = p1[0].bbox()
+        ang = math.degrees(math.atan2((y0 + y1) / 2.0 - cy, (x0 + x1) / 2.0 - cx))
+        rot = float((round((ang - 90.0) / 90.0) * 90) % 360)
+    return (cx, cy), rot
+
+
+def passive_placement(cell, package: str, ceramic_caps=None):
+    """Where a 2-terminal chip model (built with its body's BOTTOM-LEFT
+    corner at (0, 0), long axis along X -- see component_library) goes
+    in ``cell``: ``((ox, oy), rotation_deg)`` in cell-local DBU, so the
+    model's body is centred on the footprint's pads and its long axis
+    runs along the line through its two numbered pads (no rotation when
+    the pads aren't numbered). Centres on the pinned pads, else every
+    Rectangle/Polygon; returns ``(None, 0.0)`` when the package size
+    isn't known or there's nothing to measure."""
+    import math
+    caps = DEFAULT_CERAMIC_CAPS if ceramic_caps is None else ceramic_caps
+    dims = {name: (L, W) for name, L, W, _h, _t in caps}
+    if package not in dims:
+        return None, 0.0
+    L_um, W_um = dims[package][0] * 1000.0, dims[package][1] * 1000.0
+    pads = [s for s in cell.shapes
+            if isinstance(s, (Rectangle, Polygon)) and getattr(s, "pin", "")]
+    pool = pads or [s for s in cell.shapes if isinstance(s, (Rectangle, Polygon))]
+    if not pool:
+        return None, 0.0
+    boxes = [s.bbox() for s in pool]
+    cx = (min(b[0] for b in boxes) + max(b[2] for b in boxes)) / 2.0
+    cy = (min(b[1] for b in boxes) + max(b[3] for b in boxes)) / 2.0
+    rot = 0.0
+    if len(pads) >= 2:
+        (a0, a1, a2, a3), (b0, b1, b2, b3) = pads[0].bbox(), pads[1].bbox()
+        dx = (b0 + b2 - a0 - a2) / 2.0
+        dy = (b1 + b3 - a1 - a3) / 2.0
+        if abs(dy) > abs(dx):
+            rot = 90.0
+    # without two numbered pads there's no reliable axis -- keep the
+    # model's own X orientation and just centre it
+    # the model's centre, (L/2, W/2) in its own frame, rotated by rot,
+    # must land on (cx, cy)
+    r = math.radians(rot)
+    mx = (L_um / 2.0) * math.cos(r) - (W_um / 2.0) * math.sin(r)
+    my = (L_um / 2.0) * math.sin(r) + (W_um / 2.0) * math.cos(r)
+    return (cx - mx, cy - my), rot
+
+
 def find_step_file(step_dir: str, package_name: str) -> Optional[str]:
     """Absolute path to ``<step_dir>/<package_name>.step`` if it
     already exists, else None -- the point at which a match is
@@ -345,6 +434,7 @@ def find_step_file(step_dir: str, package_name: str) -> Optional[str]:
 def build_match_report(library: Library, cell_name: str, step_dir: str, *,
                         component_models: Optional[dict] = None,
                         ceramic_caps=None, sot_packages=None, pkg20=None,
+                        lcc_packages=None, plcc_packages=None,
                         tolerance: float = X_SPAN_TOLERANCE) -> MatchReport:
     """The dry run: walk ``cell_name``'s flattened hierarchy exactly
     like write_freecad_macro() will (via freecadio._walk_instances(),
@@ -398,9 +488,20 @@ def build_match_report(library: Library, cell_name: str, step_dir: str, *,
             report.skipped_manual.append(cn)
             continue
 
-        package = match_passive_by_name(cn, tokens)
-        category = "passive"
+        origin = None
+        package = match_chip_carrier_by_name(cn, lcc_packages, plcc_packages)
+        category = "chip_carrier"
         rotation_deg = 0.0
+        if package is not None:
+            c = library.cells.get(cn)
+            if c is not None:
+                origin, rotation_deg = chip_carrier_placement(c)
+        else:
+            package = match_passive_by_name(cn, tokens)
+            category = "passive"
+            c = library.cells.get(cn)
+            if package is not None and c is not None:
+                origin, rotation_deg = passive_placement(c, package, ceramic_caps)
         if package is None:
             c = library.cells.get(cn)
             stats = footprint_pin_stats(c) if c is not None else None
@@ -422,8 +523,10 @@ def build_match_report(library: Library, cell_name: str, step_dir: str, *,
                     f"run File > Build FreeCAD Component Library... first"))
             continue
 
-        reason = "name" if category == "passive" else "footprint"
+        reason = "footprint" if category == "gullwing" else "name"
         entry = {"mode": "model", "model_path": step_path}
+        if origin is not None and (origin[0] or origin[1]):
+            entry["origin_um"] = [round(origin[0], 1), round(origin[1], 1)]
         if rotation_deg:
             entry["rotation_deg"] = rotation_deg
         report.matches.append(Match(

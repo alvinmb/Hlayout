@@ -1,0 +1,597 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://freerouting.app/schemas/hybrid-v1.json",
+  "title": "Freerouting hybrid design (chip-and-wire, thick film)",
+  "description": "Router input written by HLayout. All lengths are integer micrometres; origin at the substrate's lower-left corner, y up. Printed resistors arrive already sized by HLayout, as two-pin components.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "substrate",
+    "stack"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "name": {
+      "type": "string"
+    },
+    "substrate": {
+      "$ref": "#/$defs/substrate"
+    },
+    "stack": {
+      "type": "object",
+      "required": [
+        "layers"
+      ],
+      "properties": {
+        "layers": {
+          "description": "Print order: first printed (closest to the ceramic) first.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/layer"
+          }
+        }
+      }
+    },
+    "dies": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/die"
+      }
+    },
+    "substratePads": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/substratePad"
+      }
+    },
+    "wires": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/wire"
+      }
+    },
+    "components": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/twoPinComponent"
+      }
+    },
+    "routing": {
+      "$ref": "#/$defs/routing"
+    },
+    "rules": {
+      "$ref": "#/$defs/rules"
+    }
+  },
+  "$defs": {
+    "um": {
+      "type": "integer"
+    },
+    "positiveUm": {
+      "type": "integer",
+      "exclusiveMinimum": 0
+    },
+    "point": {
+      "type": "object",
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": {
+          "$ref": "#/$defs/um"
+        },
+        "y": {
+          "$ref": "#/$defs/um"
+        }
+      },
+      "additionalProperties": false
+    },
+    "rotation": {
+      "enum": [
+        "R0",
+        "R90",
+        "R180",
+        "R270"
+      ],
+      "description": "Counter-clockwise."
+    },
+    "substrate": {
+      "type": "object",
+      "required": [
+        "widthUm",
+        "heightUm"
+      ],
+      "properties": {
+        "technology": {
+          "enum": [
+            "THICK_FILM",
+            "LTCC"
+          ],
+          "default": "THICK_FILM"
+        },
+        "material": {
+          "type": "string"
+        },
+        "widthUm": {
+          "$ref": "#/$defs/positiveUm"
+        },
+        "heightUm": {
+          "$ref": "#/$defs/positiveUm"
+        },
+        "thicknessUm": {
+          "$ref": "#/$defs/positiveUm"
+        }
+      }
+    },
+    "layer": {
+      "type": "object",
+      "required": [
+        "name",
+        "kind"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "CONDUCTOR",
+            "DIELECTRIC",
+            "RESISTOR",
+            "OVERGLAZE"
+          ]
+        },
+        "thicknessUm": {
+          "$ref": "#/$defs/positiveUm"
+        }
+      }
+    },
+    "bondPad": {
+      "type": "object",
+      "required": [
+        "id",
+        "position",
+        "widthUm",
+        "heightUm"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "net": {
+          "type": "string",
+          "description": "Empty or absent for a no-connect pad."
+        },
+        "position": {
+          "$ref": "#/$defs/point",
+          "description": "Pad centre, die-local."
+        },
+        "widthUm": {
+          "$ref": "#/$defs/positiveUm"
+        },
+        "heightUm": {
+          "$ref": "#/$defs/positiveUm"
+        }
+      }
+    },
+    "die": {
+      "type": "object",
+      "required": [
+        "refdes",
+        "origin",
+        "widthUm",
+        "heightUm",
+        "pads"
+      ],
+      "properties": {
+        "refdes": {
+          "type": "string",
+          "minLength": 1
+        },
+        "partName": {
+          "type": "string"
+        },
+        "origin": {
+          "$ref": "#/$defs/point",
+          "description": "Substrate position of the die's lower-left corner before rotation."
+        },
+        "rotation": {
+          "$ref": "#/$defs/rotation"
+        },
+        "widthUm": {
+          "$ref": "#/$defs/positiveUm"
+        },
+        "heightUm": {
+          "$ref": "#/$defs/positiveUm"
+        },
+        "thicknessUm": {
+          "$ref": "#/$defs/positiveUm"
+        },
+        "attachKeepoutUm": {
+          "$ref": "#/$defs/um"
+        },
+        "pads": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/bondPad"
+          }
+        }
+      }
+    },
+    "substratePad": {
+      "type": "object",
+      "required": [
+        "id",
+        "position",
+        "widthUm",
+        "heightUm",
+        "layer"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "net": {
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "BOND_FINGER",
+            "JUMPER_LAND",
+            "EXTERNAL"
+          ],
+          "default": "BOND_FINGER"
+        },
+        "position": {
+          "$ref": "#/$defs/point"
+        },
+        "widthUm": {
+          "$ref": "#/$defs/positiveUm"
+        },
+        "heightUm": {
+          "$ref": "#/$defs/positiveUm"
+        },
+        "layer": {
+          "type": "string",
+          "description": "A CONDUCTOR layer name."
+        }
+      }
+    },
+    "endpoint": {
+      "type": "object",
+      "required": [
+        "kind",
+        "pad"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "DIE_PAD",
+            "SUBSTRATE_PAD"
+          ]
+        },
+        "die": {
+          "type": "string",
+          "description": "Die refdes; required when kind is DIE_PAD."
+        },
+        "pad": {
+          "type": "string"
+        }
+      }
+    },
+    "wireSpec": {
+      "type": "object",
+      "properties": {
+        "material": {
+          "enum": [
+            "GOLD",
+            "ALUMINIUM"
+          ],
+          "default": "GOLD"
+        },
+        "diameterUm": {
+          "$ref": "#/$defs/positiveUm"
+        },
+        "bondType": {
+          "enum": [
+            "BALL_WEDGE",
+            "WEDGE_WEDGE"
+          ],
+          "default": "BALL_WEDGE"
+        },
+        "loopHeightUm": {
+          "$ref": "#/$defs/positiveUm"
+        }
+      }
+    },
+    "wire": {
+      "type": "object",
+      "description": "Die pad to substrate pad = die bond; die to die; substrate to substrate = jumper (allowed, high cost).",
+      "required": [
+        "id",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "net": {
+          "type": "string"
+        },
+        "from": {
+          "$ref": "#/$defs/endpoint",
+          "description": "First (ball) bond."
+        },
+        "to": {
+          "$ref": "#/$defs/endpoint"
+        },
+        "spec": {
+          "$ref": "#/$defs/wireSpec",
+          "description": "Absent = 25 µm gold, ball-wedge, 150 µm loop."
+        },
+        "fixed": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "componentPin": {
+      "type": "object",
+      "required": [
+        "position",
+        "widthUm",
+        "heightUm",
+        "layer"
+      ],
+      "properties": {
+        "net": {
+          "type": "string"
+        },
+        "position": {
+          "$ref": "#/$defs/point",
+          "description": "Pad centre, component-local (origin at body centre)."
+        },
+        "widthUm": {
+          "$ref": "#/$defs/positiveUm"
+        },
+        "heightUm": {
+          "$ref": "#/$defs/positiveUm"
+        },
+        "layer": {
+          "type": "string",
+          "description": "A CONDUCTOR layer name."
+        }
+      }
+    },
+    "twoPinComponent": {
+      "type": "object",
+      "description": "Fixed two-pin part sized and rule-checked by HLayout. The router routes to its pins and treats the body plus keep-out as an obstacle.",
+      "required": [
+        "refdes",
+        "centre",
+        "bodyLengthUm",
+        "bodyWidthUm",
+        "pinA",
+        "pinB"
+      ],
+      "properties": {
+        "refdes": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "PRINTED_RESISTOR",
+            "CHIP"
+          ],
+          "default": "PRINTED_RESISTOR"
+        },
+        "centre": {
+          "$ref": "#/$defs/point"
+        },
+        "rotation": {
+          "$ref": "#/$defs/rotation"
+        },
+        "bodyLengthUm": {
+          "$ref": "#/$defs/positiveUm",
+          "description": "Along local x (current direction for a resistor)."
+        },
+        "bodyWidthUm": {
+          "$ref": "#/$defs/positiveUm"
+        },
+        "keepoutUm": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "obstacleLayers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "pinA": {
+          "$ref": "#/$defs/componentPin"
+        },
+        "pinB": {
+          "$ref": "#/$defs/componentPin"
+        },
+        "value": {
+          "type": "string",
+          "description": "Informational, e.g. \"10k\"."
+        }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "description": "Routable layers and interconnect costs (multiples of 1 mm of trace). Single-layer mode: exactly one routable conductor layer; wire-bond jumpers are then the only way to cross.",
+      "properties": {
+        "routingLayers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "CONDUCTOR layers the router may place traces on. Empty or absent = every conductor layer. One name = single-layer mode."
+        },
+        "crossoverCost": {
+          "type": "number",
+          "default": 10.0,
+          "description": "Dielectric window; unused in single-layer mode."
+        },
+        "jumperCost": {
+          "type": "number",
+          "default": 50.0
+        },
+        "jumpersAllowed": {
+          "type": "boolean",
+          "default": true
+        },
+        "maxJumpers": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "0 = no limit."
+        },
+        "gridUm": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Routing grid pitch; 0 = half the smaller of min line and min space, at least 25."
+        }
+      },
+      "additionalProperties": false
+    },
+    "rules": {
+      "type": "object",
+      "description": "Router-side design rules, micrometres unless noted. Any value left out takes its default. Resistor rules are not here: HLayout owns them.",
+      "properties": {
+        "conductor": {
+          "type": "object",
+          "properties": {
+            "minLineUm": {
+              "type": "integer",
+              "default": 150
+            },
+            "minSpaceUm": {
+              "type": "integer",
+              "default": 150,
+              "description": "Edge to edge, different nets, same layer."
+            },
+            "edgeClearanceUm": {
+              "type": "integer",
+              "default": 250,
+              "description": "Conductor to substrate edge."
+            },
+            "windowMinUm": {
+              "type": "integer",
+              "default": 250,
+              "description": "Dielectric window size."
+            },
+            "windowEnclosureUm": {
+              "type": "integer",
+              "default": 100
+            }
+          },
+          "additionalProperties": false
+        },
+        "bondWire": {
+          "type": "object",
+          "properties": {
+            "minLengthUm": {
+              "type": "integer",
+              "default": 500
+            },
+            "maxLengthUm": {
+              "type": "integer",
+              "default": 3000
+            },
+            "maxAngleDeg": {
+              "type": "number",
+              "default": 45,
+              "description": "Off the outward normal of the die edge."
+            },
+            "spacingDiameters": {
+              "type": "number",
+              "default": 2.0,
+              "description": "Plan-view gap, in wire diameters."
+            },
+            "crossingsAllowed": {
+              "type": "boolean",
+              "default": false
+            },
+            "minLoopSeparationUm": {
+              "type": "integer",
+              "default": 100,
+              "description": "Loop-height difference at an allowed crossing."
+            },
+            "fingerPitchUm": {
+              "type": "integer",
+              "default": 150,
+              "description": "Bond finger centre to centre."
+            },
+            "capillaryClearanceUm": {
+              "type": "integer",
+              "default": 250,
+              "description": "Second-bond centre to any other object."
+            },
+            "dieToFingerMinUm": {
+              "type": "integer",
+              "default": 250
+            },
+            "dieToFingerMaxUm": {
+              "type": "integer",
+              "default": 1500
+            }
+          },
+          "additionalProperties": false
+        },
+        "jumper": {
+          "type": "object",
+          "properties": {
+            "minLengthUm": {
+              "type": "integer",
+              "default": 500
+            },
+            "maxLengthUm": {
+              "type": "integer",
+              "default": 3000
+            },
+            "minLoopHeightUm": {
+              "type": "integer",
+              "default": 150
+            }
+          },
+          "additionalProperties": false
+        },
+        "pads": {
+          "type": "object",
+          "description": "Sizes of pads the router creates.",
+          "properties": {
+            "fingerWidthUm": {
+              "type": "integer",
+              "default": 150
+            },
+            "fingerLengthUm": {
+              "type": "integer",
+              "default": 200
+            },
+            "jumperLandUm": {
+              "type": "integer",
+              "default": 200
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "name": "single-die-op-amp",
+  "substrate": {
+    "technology": "THICK_FILM",
+    "material": "96% alumina",
+    "widthUm": 10000,
+    "heightUm": 8000,
+    "thicknessUm": 635
+  },
+  "stack": {
+    "layers": [
+      { "name": "COND1", "kind": "CONDUCTOR", "thicknessUm": 12 },
+      { "name": "DIEL1", "kind": "DIELECTRIC", "thicknessUm": 40 },
+      { "name": "COND2", "kind": "CONDUCTOR", "thicknessUm": 12 },
+      { "name": "RES", "kind": "RESISTOR", "thicknessUm": 15 },
+      { "name": "GLAZE", "kind": "OVERGLAZE", "thicknessUm": 10 }
+    ]
+  },
+  "dies": [
+    {
+      "refdes": "U1",
+      "partName": "opamp-die",
+      "origin": { "x": 4000, "y": 3000 },
+      "rotation": "R0",
+      "widthUm": 2000,
+      "heightUm": 2000,
+      "thicknessUm": 250,
+      "attachKeepoutUm": 150,
+      "pads": [
+        { "id": "1", "net": "GND", "position": { "x": 500, "y": 150 }, "widthUm": 100, "heightUm": 100 },
+        { "id": "2", "net": "IN", "position": { "x": 1500, "y": 150 }, "widthUm": 100, "heightUm": 100 },
+        { "id": "3", "net": "FB", "position": { "x": 1850, "y": 500 }, "widthUm": 100, "heightUm": 100 },
+        { "id": "4", "net": "OUT", "position": { "x": 1850, "y": 1500 }, "widthUm": 100, "heightUm": 100 },
+        { "id": "5", "net": "VCC", "position": { "x": 1500, "y": 1850 }, "widthUm": 100, "heightUm": 100 },
+        { "id": "6", "net": "BIAS", "position": { "x": 500, "y": 1850 }, "widthUm": 100, "heightUm": 100 },
+        { "id": "7", "net": "GND", "position": { "x": 150, "y": 1500 }, "widthUm": 100, "heightUm": 100 },
+        { "id": "8", "net": "", "position": { "x": 150, "y": 500 }, "widthUm": 100, "heightUm": 100 }
+      ]
+    }
+  ],
+  "substratePads": [
+    { "id": "F1", "net": "GND", "role": "BOND_FINGER", "position": { "x": 4500, "y": 2500 }, "widthUm": 150, "heightUm": 200, "layer": "COND1" },
+    { "id": "F2", "net": "IN", "role": "BOND_FINGER", "position": { "x": 5500, "y": 2500 }, "widthUm": 150, "heightUm": 200, "layer": "COND1" },
+    { "id": "F3", "net": "FB", "role": "BOND_FINGER", "position": { "x": 6500, "y": 3500 }, "widthUm": 200, "heightUm": 150, "layer": "COND1" },
+    { "id": "F4", "net": "OUT", "role": "BOND_FINGER", "position": { "x": 6500, "y": 4500 }, "widthUm": 200, "heightUm": 150, "layer": "COND1" },
+    { "id": "F5", "net": "VCC", "role": "BOND_FINGER", "position": { "x": 5500, "y": 5500 }, "widthUm": 150, "heightUm": 200, "layer": "COND1" },
+    { "id": "F6", "net": "BIAS", "role": "BOND_FINGER", "position": { "x": 4500, "y": 5500 }, "widthUm": 150, "heightUm": 200, "layer": "COND1" },
+    { "id": "F7", "net": "GND", "role": "BOND_FINGER", "position": { "x": 3500, "y": 4500 }, "widthUm": 200, "heightUm": 150, "layer": "COND1" },
+    { "id": "JA", "net": "GND", "role": "JUMPER_LAND", "position": { "x": 3500, "y": 6500 }, "widthUm": 200, "heightUm": 200, "layer": "COND1" },
+    { "id": "JB", "net": "GND", "role": "JUMPER_LAND", "position": { "x": 3500, "y": 7300 }, "widthUm": 200, "heightUm": 200, "layer": "COND1" }
+  ],
+  "wires": [
+    { "id": "W1", "net": "GND", "from": { "kind": "DIE_PAD", "die": "U1", "pad": "1" }, "to": { "kind": "SUBSTRATE_PAD", "pad": "F1" } },
+    { "id": "W2", "net": "IN", "from": { "kind": "DIE_PAD", "die": "U1", "pad": "2" }, "to": { "kind": "SUBSTRATE_PAD", "pad": "F2" } },
+    { "id": "W3", "net": "FB", "from": { "kind": "DIE_PAD", "die": "U1", "pad": "3" }, "to": { "kind": "SUBSTRATE_PAD", "pad": "F3" } },
+    { "id": "W4", "net": "OUT", "from": { "kind": "DIE_PAD", "die": "U1", "pad": "4" }, "to": { "kind": "SUBSTRATE_PAD", "pad": "F4" } },
+    { "id": "W5", "net": "VCC", "from": { "kind": "DIE_PAD", "die": "U1", "pad": "5" }, "to": { "kind": "SUBSTRATE_PAD", "pad": "F5" } },
+    { "id": "W6", "net": "BIAS", "from": { "kind": "DIE_PAD", "die": "U1", "pad": "6" }, "to": { "kind": "SUBSTRATE_PAD", "pad": "F6" } },
+    { "id": "W7", "net": "GND", "from": { "kind": "DIE_PAD", "die": "U1", "pad": "7" }, "to": { "kind": "SUBSTRATE_PAD", "pad": "F7" } },
+    {
+      "id": "WJ1",
+      "net": "GND",
+      "from": { "kind": "SUBSTRATE_PAD", "pad": "JA" },
+      "to": { "kind": "SUBSTRATE_PAD", "pad": "JB" },
+      "spec": { "material": "GOLD", "diameterUm": 25, "bondType": "BALL_WEDGE", "loopHeightUm": 200 },
+      "fixed": true
+    }
+  ],
+  "components": [
+    {
+      "refdes": "R1", "kind": "PRINTED_RESISTOR", "value": "1k",
+      "centre": { "x": 8000, "y": 2500 }, "rotation": "R0",
+      "bodyLengthUm": 750, "bodyWidthUm": 1000, "keepoutUm": 250,
+      "obstacleLayers": ["COND1"],
+      "pinA": { "net": "IN", "position": { "x": -375, "y": 0 }, "widthUm": 400, "heightUm": 1200, "layer": "COND1" },
+      "pinB": { "net": "FB", "position": { "x": 375, "y": 0 }, "widthUm": 400, "heightUm": 1200, "layer": "COND1" }
+    },
+    {
+      "refdes": "R2", "kind": "PRINTED_RESISTOR", "value": "10k",
+      "centre": { "x": 8000, "y": 4500 }, "rotation": "R0",
+      "bodyLengthUm": 600, "bodyWidthUm": 800, "keepoutUm": 250,
+      "obstacleLayers": ["COND1"],
+      "pinA": { "net": "FB", "position": { "x": -300, "y": 0 }, "widthUm": 400, "heightUm": 1000, "layer": "COND1" },
+      "pinB": { "net": "OUT", "position": { "x": 300, "y": 0 }, "widthUm": 400, "heightUm": 1000, "layer": "COND1" }
+    },
+    {
+      "refdes": "R3", "kind": "PRINTED_RESISTOR", "value": "100R",
+      "centre": { "x": 8000, "y": 6500 }, "rotation": "R90",
+      "bodyLengthUm": 1200, "bodyWidthUm": 1600, "keepoutUm": 250,
+      "obstacleLayers": ["COND1"],
+      "pinA": { "net": "BIAS", "position": { "x": -600, "y": 0 }, "widthUm": 400, "heightUm": 1800, "layer": "COND1" },
+      "pinB": { "net": "VCC", "position": { "x": 600, "y": 0 }, "widthUm": 400, "heightUm": 1800, "layer": "COND1" }
+    }
+  ],
+  "rules": {
+    "conductor": { "minSpaceUm": 125 },
+    "bondWire": { "maxLengthUm": 2500, "fingerPitchUm": 175 },
+    "jumper": { "minLoopHeightUm": 175 }
+  },
+  "routing": { "crossoverCost": 10.0, "jumperCost": 50.0, "jumpersAllowed": true, "maxJumpers": 0 }
+}

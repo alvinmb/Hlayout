@@ -30,6 +30,7 @@ import os
 #: locate one) -- os.path.expanduser("~") is the simplest thing that
 #: works the same way on Windows/macOS/Linux.
 SETTINGS_PATH = os.path.join(os.path.expanduser("~"), ".hlayout", "settings.json")
+_REAL_SETTINGS_PATH = SETTINGS_PATH
 
 COMPONENT_LIBRARY_DIR_KEY = "component_library_dir"
 
@@ -67,7 +68,17 @@ def save_app_settings(settings: dict, path: str = None) -> None:
 def get_component_library_dir(path: str = None):
     """The remembered FreeCAD component STEP library folder, or None
     if never set."""
-    return load_app_settings(path).get(COMPONENT_LIBRARY_DIR_KEY)
+    d = load_app_settings(path).get(COMPONENT_LIBRARY_DIR_KEY)
+    # A folder left behind by a test run (pytest's temp dirs) is never a
+    # real library -- one leaked in once and silently swapped every 3D
+    # export over to stale STEP models. Treat it as unset.
+    # (Only for the real settings file -- a test's own isolated settings
+    # legitimately point into its temp folder.)
+    real = path is None and os.path.normcase(os.path.abspath(SETTINGS_PATH)) == \
+        os.path.normcase(os.path.abspath(_REAL_SETTINGS_PATH))
+    if real and d and "pytest-of-" in d.replace("\\", "/"):
+        return None
+    return d
 
 
 def set_component_library_dir(folder: str, path: str = None) -> None:
@@ -77,3 +88,23 @@ def set_component_library_dir(folder: str, path: str = None) -> None:
     settings = load_app_settings(path)
     settings[COMPONENT_LIBRARY_DIR_KEY] = folder
     save_app_settings(settings, path)
+
+
+#: Freerouting launcher (.exe/app) or .jar, and an optional Java runtime
+#: to run a .jar with -- remembered per installation (Setup >
+#: Freerouting...), like the component library folder.
+FREEROUTING_PATH_KEY = "freerouting_path"
+JAVA_PATH_KEY = "java_path"
+
+
+def get_setting(key: str, path: str = None):
+    return load_app_settings(path).get(key)
+
+
+def set_setting(key: str, value, path: str = None) -> None:
+    data = load_app_settings(path)
+    if value in (None, ""):
+        data.pop(key, None)
+    else:
+        data[key] = value
+    save_app_settings(data, path)

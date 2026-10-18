@@ -370,3 +370,61 @@ def test_keepouts_not_exported_and_glaze_green_transparent(tmp_path):
     top.add_rectangle(8, -3000, -3000, 3000, 3000, datatype=1)    # generated fill
     write_freecad_macro(lib, "TOP", path)
     assert "# --- layer 8 (Dielectric)" in open(path).read()
+
+
+def test_export_freecad_places_a_model_at_its_origin_um_offset(tmp_path):
+    """A centred LCC/PLCC model's entry carries origin_um -- the pad ring
+    centre in cell-local um -- and the model lands there (through the
+    placement transform), not at the cell origin."""
+    lib = _design()
+    s = Session(lib)
+    s.use_cell("TOP")
+    step_path = str(tmp_path / "CHIP.step")
+    open(step_path, "w").close()
+    path = str(tmp_path / "offset.FCMacro")
+    s.export_freecad(path, component_models={
+        "CHIP": {"mode": "model", "model_path": step_path, "origin_um": [500, -250]}})
+    src = open(path).read()
+    compile(src, path, "exec")
+    assert "'CHIP_1', 0.50000, 2.75000," in src.replace('"', "'") or ", 0.50000, 2.75000," in src
+
+
+def test_component_models_round_trips_origin_um():
+    lib = Library("X")
+    save_component_models(lib, {"U1": {"mode": "model", "model_path": "LCC20.step",
+                                        "origin_um": [4445, 4445]},
+                                "U2": {"mode": "model", "model_path": "LCC20.step",
+                                        "origin_um": [0, 0]}})
+    got = load_component_models(lib)
+    assert got["U1"]["origin_um"] == [4445.0, 4445.0]
+    assert "origin_um" not in got["U2"]          # cell origin: nothing stored
+
+
+def test_default_layer_thickness_includes_an_outline_drawn_pad_layer():
+    """Package pads are often drawn outline-only (fill off) on screen;
+    a layer carrying numbered pads is still real metal, so the 3D view
+    must not drop it (LCC and 0805 pads were vanishing)."""
+    lib = Library("X")
+    lib.layers.set_style(1, name="Frontside Pad", fill=False, visible=True)
+    lib.layers.set_style(61, name="Doc", fill=False, visible=True)
+    c = lib.new_cell("CAP")
+    c.add_rectangle(1, -1000, -600, -300, 600, pin="1")
+    c.add_path(61, [(0, 0), (100, 0)], width=10)
+    t = default_layer_thickness(lib)
+    assert "1" in t
+    assert "61" not in t          # unpinned outline layer stays non-physical
+
+
+def test_pad_layers_take_the_second_conductor_colour(tmp_path):
+    """Pads (any layer with numbered shapes) are printed metal and are
+    shown in the 2nd routing conductor's colour in 3D."""
+    from hlayout.io.techfile import save_route_rules, load_route_rules
+    lib = _design()
+    lib.layers.set_style(7, name="Cond2", color="#ff0000", fill=True, visible=True)
+    lib.cells["TOP"].add_rectangle(7, 3000, 3000, 3500, 3500)
+    rr = load_route_rules(lib); rr["layer_b"] = 7; save_route_rules(lib, rr)
+    path = str(tmp_path / "pads.FCMacro")
+    write_freecad_macro(lib, "TOP", path)
+    src = open(path).read()
+    pad_line = next(l for l in src.splitlines() if l.startswith("_add(") and "_L5'" in l)
+    assert "(1.0000,0.0000,0.0000)" in pad_line

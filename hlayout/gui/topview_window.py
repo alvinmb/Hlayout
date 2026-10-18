@@ -364,16 +364,36 @@ class TopViewWindow(tk.Toplevel):
     # ---------------------------------------------------------------- run
 
     def build(self):
+        if getattr(self, "_building", False):
+            return
         if not self._save():
             return
         if self._result_layer() is None:
             self._say("Pick a Result layer.", error=True)
             return
-        try:
-            written = self.session.top_view_from_settings()
-        except LayoutError as e:
+        # a big routed board with hatching takes a while: build on a
+        # worker thread behind a progress box so the window never freezes
+        self._building = True
+        self._say("Building the top view...")
+        from .progress import run_with_progress
+        run_with_progress(self, self.session.top_view_from_settings,
+                          on_done=self._built, on_error=self._build_failed,
+                          title="Top View", text="Building the top view...",
+                          app=self.app)
+
+    def _build_failed(self, e):
+        self._building = False
+        if isinstance(e, LayoutError):
             self._say(str(e), error=True)
-            return
+        else:
+            self._say(f"Top View failed: {type(e).__name__}: {e}", error=True)
+        try:
+            self.app.status.set("TOPVIEW failed")
+        except Exception:
+            pass
+
+    def _built(self, written):
+        self._building = False
         st = load_topview_settings(self.session.library)
         total = sum(written.values())
         res = st["result_layer"]

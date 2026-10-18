@@ -191,3 +191,21 @@ def test_session_generate_component_library_delegates(tmp_path):
     path = s.generate_component_library(out_dir)
     assert os.path.isfile(path)
     assert path == os.path.join(out_dir, "build_component_library.FCMacro")
+
+
+def test_default_macro_builds_every_lcc_and_plcc(tmp_path):
+    from hlayout.io.component_library import DEFAULT_LCC_PACKAGES, DEFAULT_PLCC_PACKAGES
+    path = write_component_library_macro(str(tmp_path / "lib"))
+    text = open(path).read()
+    compile(text, path, "exec")
+    assert text.count("export(make_lcc(") == len(DEFAULT_LCC_PACKAGES) == 7
+    assert text.count("export(make_plcc(") == len(DEFAULT_PLCC_PACKAGES) == 7
+    for n in (20, 28, 32, 44, 52, 68, 84):
+        assert f"'LCC{n}', OUT_DIR)" in text and f"'PLCC{n}', OUT_DIR)" in text
+
+
+def test_chip_carrier_families_can_be_skipped(tmp_path):
+    path = write_component_library_macro(str(tmp_path / "lib"), lcc_packages=False,
+                                         plcc_packages={})
+    text = open(path).read()
+    assert "export(make_lcc(" not in text and "export(make_plcc(" not in text

@@ -226,6 +226,13 @@ class ComponentLibraryWindow(tk.Toplevel):
         self.wait_window(dlg)
         if dlg.result is None:
             return
+        # keep a centred LCC/PLCC model's footprint-centre offset when the
+        # path is pinned by hand (the dialog only edits path + rotation)
+        origin = existing.get("origin_um")
+        if origin is None and cn in self._matched_by_cell:
+            origin = self._matched_by_cell[cn].entry.get("origin_um")
+        if origin:
+            dlg.result["origin_um"] = origin
         manual[cn] = dlg.result
         save_component_models(self.library, manual)
         self._refresh()

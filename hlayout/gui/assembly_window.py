@@ -167,7 +167,10 @@ class AssemblyWindow(tk.Toplevel):
         self._entry(tbl, "table_text_mm", 0, 2, 6, "Text (mm):")
         ttk.Checkbutton(tbl, text="Resistor table (from the Resistor Designer)",
                         variable=self._var("resistor_table", tk.BooleanVar)).grid(
-            row=1, column=0, columnspan=4, sticky="w", padx=4, pady=3)
+            row=1, column=0, columnspan=2, sticky="w", padx=4, pady=3)
+        ttk.Checkbutton(tbl, text="Bond diagram table (routed hybrid)",
+                        variable=self._var("bond_table", tk.BooleanVar)).grid(
+            row=1, column=2, columnspan=2, sticky="w", padx=4, pady=3)
         ttk.Checkbutton(tbl, text="Pin function table", command=self._sync_pins,
                         variable=self._var("pin_table", tk.BooleanVar)).grid(
             row=2, column=0, columnspan=4, sticky="w", padx=4, pady=3)
@@ -265,8 +268,8 @@ class AssemblyWindow(tk.Toplevel):
             self._var(key).set(st[key] or "")
         for key in ("view_line_mm", "view_hatch_mm", "view_refdes_mm", "table_text_mm"):
             self._var(key).set(f"{float(st[key]):g}")
-        for key in ("view_label", "resistor_table", "pin_table"):
-            self._var(key, tk.BooleanVar).set(bool(st[key]))
+        for key in ("view_label", "resistor_table", "pin_table", "bond_table"):
+            self._var(key, tk.BooleanVar).set(bool(st.get(key, True)))
         self._var("scale").set(_scale_text(float(st["scale"])) if st["scale"] else _AUTO)
         self._var("pin_count").set(str(st["pin_count"] or ""))
         self._var("pins_per_group").set(str(st["pins_per_group"] or 10))
@@ -354,7 +357,7 @@ class AssemblyWindow(tk.Toplevel):
         p["view_hatch_mm"] = mm("view_hatch_mm", "Hatch pitch")
         p["view_refdes_mm"] = mm("view_refdes_mm", "Ref-des height")
         p["table_text_mm"] = mm("table_text_mm", "Table text")
-        for k in ("view_label", "resistor_table", "pin_table"):
+        for k in ("view_label", "resistor_table", "pin_table", "bond_table"):
             p[k] = flag(k)
         p["scale"] = scale
         p["pin_count"] = whole("pin_count", "Pins", None)

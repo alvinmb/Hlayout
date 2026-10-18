@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "name": "single-layer-crossing",
+  "substrate": {
+    "technology": "THICK_FILM",
+    "material": "96% alumina",
+    "widthUm": 6000,
+    "heightUm": 5000,
+    "thicknessUm": 635
+  },
+  "stack": {
+    "layers": [
+      { "name": "COND1", "kind": "CONDUCTOR", "thicknessUm": 12 },
+      { "name": "RES", "kind": "RESISTOR", "thicknessUm": 15 },
+      { "name": "GLAZE", "kind": "OVERGLAZE", "thicknessUm": 10 }
+    ]
+  },
+  "dies": [
+    {
+      "refdes": "U1",
+      "partName": "buffer-die",
+      "origin": { "x": 2250, "y": 1750 },
+      "rotation": "R0",
+      "widthUm": 1500,
+      "heightUm": 1500,
+      "thicknessUm": 250,
+      "attachKeepoutUm": 150,
+      "pads": [
+        { "id": "1", "net": "A", "position": { "x": 300, "y": 100 }, "widthUm": 100, "heightUm": 100 },
+        { "id": "2", "net": "B", "position": { "x": 1200, "y": 100 }, "widthUm": 100, "heightUm": 100 },
+        { "id": "3", "net": "VCC", "position": { "x": 1400, "y": 1200 }, "widthUm": 100, "heightUm": 100 },
+        { "id": "4", "net": "GND", "position": { "x": 100, "y": 1200 }, "widthUm": 100, "heightUm": 100 }
+      ]
+    }
+  ],
+  "substratePads": [
+    { "id": "F1", "net": "A", "role": "BOND_FINGER", "position": { "x": 2550, "y": 1200 }, "widthUm": 150, "heightUm": 200, "layer": "COND1" },
+    { "id": "F2", "net": "B", "role": "BOND_FINGER", "position": { "x": 3450, "y": 1200 }, "widthUm": 150, "heightUm": 200, "layer": "COND1" },
+    { "id": "F3", "net": "VCC", "role": "BOND_FINGER", "position": { "x": 4300, "y": 2950 }, "widthUm": 200, "heightUm": 150, "layer": "COND1" },
+    { "id": "F4", "net": "GND", "role": "BOND_FINGER", "position": { "x": 1700, "y": 2950 }, "widthUm": 200, "heightUm": 150, "layer": "COND1" },
+    { "id": "X1", "net": "B", "role": "EXTERNAL", "position": { "x": 800, "y": 600 }, "widthUm": 600, "heightUm": 600, "layer": "COND1" },
+    { "id": "X2", "net": "A", "role": "EXTERNAL", "position": { "x": 5200, "y": 600 }, "widthUm": 600, "heightUm": 600, "layer": "COND1" },
+    { "id": "X3", "net": "VCC", "role": "EXTERNAL", "position": { "x": 5200, "y": 4400 }, "widthUm": 600, "heightUm": 600, "layer": "COND1" },
+    { "id": "X4", "net": "GND", "role": "EXTERNAL", "position": { "x": 800, "y": 4400 }, "widthUm": 600, "heightUm": 600, "layer": "COND1" }
+  ],
+  "wires": [
+    { "id": "W1", "net": "A", "from": { "kind": "DIE_PAD", "die": "U1", "pad": "1" }, "to": { "kind": "SUBSTRATE_PAD", "pad": "F1" } },
+    { "id": "W2", "net": "B", "from": { "kind": "DIE_PAD", "die": "U1", "pad": "2" }, "to": { "kind": "SUBSTRATE_PAD", "pad": "F2" } },
+    { "id": "W3", "net": "VCC", "from": { "kind": "DIE_PAD", "die": "U1", "pad": "3" }, "to": { "kind": "SUBSTRATE_PAD", "pad": "F3" } },
+    { "id": "W4", "net": "GND", "from": { "kind": "DIE_PAD", "die": "U1", "pad": "4" }, "to": { "kind": "SUBSTRATE_PAD", "pad": "F4" } }
+  ],
+  "components": [
+    {
+      "refdes": "R1", "kind": "PRINTED_RESISTOR", "value": "10k",
+      "centre": { "x": 3000, "y": 4100 }, "rotation": "R0",
+      "bodyLengthUm": 600, "bodyWidthUm": 800, "keepoutUm": 250,
+      "obstacleLayers": ["COND1"],
+      "pinA": { "net": "B", "position": { "x": -300, "y": 0 }, "widthUm": 400, "heightUm": 1000, "layer": "COND1" },
+      "pinB": { "net": "VCC", "position": { "x": 300, "y": 0 }, "widthUm": 400, "heightUm": 1000, "layer": "COND1" }
+    }
+  ],
+  "routing": {
+    "routingLayers": ["COND1"],
+    "jumpersAllowed": true,
+    "jumperCost": 50.0,
+    "maxJumpers": 4
+  }
+}

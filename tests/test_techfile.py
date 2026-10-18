@@ -161,7 +161,11 @@ def test_resistor_list_defaults_empty_and_round_trips():
     assert load_resistor_list(lib) == rows
 
 
-def test_resistor_list_survives_a_full_techfile_save_and_load(tmp_path):
+def test_resistor_list_is_not_carried_by_a_technology_file(tmp_path):
+    # The resistor list belongs to ONE design: a technology file saved
+    # from a design with resistors must not hand them to a new design
+    # (they'd show up in its Resistor Designer and assembly drawing)
+    import json
     lib = Library("DEMO")
     save_resistor_list(lib, [
         {"ref_des": "R7", "value": 2200.0, "tolerance": "2%",
@@ -169,15 +173,36 @@ def test_resistor_list_survives_a_full_techfile_save_and_load(tmp_path):
     ])
     path = str(tmp_path / "tech.json")
     save_techfile(lib, path)
-
+    with open(path, encoding="utf-8") as f:
+        assert "resistor_list" not in json.load(f)["params"]
+    # and one still in an old file is ignored on load...
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    data["params"]["resistor_list"] = lib.tech_params["resistor_list"]
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f)
     lib2 = Library("OTHER")
     load_and_apply_techfile(lib2, path)
+    assert load_resistor_list(lib2) == []
+    # ...while a design keeps its own list when it loads a technology file
+    load_and_apply_techfile(lib, path)
+    back = load_resistor_list(lib)
+    assert len(back) == 1 and back[0]["ref_des"] == "R7"
+
+
+def test_resistor_list_survives_a_design_sidecar_round_trip():
+    from hlayout.io.techfile import techfile_data
+    lib = Library("DEMO")
+    save_resistor_list(lib, [
+        {"ref_des": "R7", "value": 2200.0, "tolerance": "2%",
+         "power_mw": 375.0, "body_width": 1000.0, "selected_ink": 1000.0},
+    ])
+    lib2 = Library("OTHER")
+    apply_techfile(lib2, techfile_data(lib))      # what the sidecar does
     back = load_resistor_list(lib2)
     assert len(back) == 1
-    assert back[0]["ref_des"] == "R7"
     assert back[0]["value"] == 2200.0
     assert back[0]["selected_ink"] == 1000.0
-
 
 def test_load_resistor_list_tolerates_malformed_entry():
     lib = Library("DEMO")

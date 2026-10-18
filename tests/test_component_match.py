@@ -436,3 +436,91 @@ def test_match_report_summary_lines_cover_all_three_buckets():
 
 def test_match_report_summary_lines_when_nothing_to_report():
     assert MatchReport().summary_lines() == ["No placed component cells found to match."]
+
+
+# --- LCC / PLCC chip carriers (name match, centred models) -------------------
+
+from hlayout.io.component_library import DEFAULT_LCC_PACKAGES, DEFAULT_PLCC_PACKAGES
+from hlayout.io.component_match import chip_carrier_placement, match_chip_carrier_by_name
+
+
+def test_match_chip_carrier_by_name():
+    assert match_chip_carrier_by_name("LCC_LCC20") == "LCC20"
+    assert match_chip_carrier_by_name("LCC_PLCC84") == "PLCC84"
+    assert match_chip_carrier_by_name("LCCC-28") == "LCC28"
+    assert match_chip_carrier_by_name("plcc_44") == "PLCC44"
+    assert match_chip_carrier_by_name("LCC_LIBRARY") is None
+    assert match_chip_carrier_by_name("LCC-12") is None          # not a built size
+    assert match_chip_carrier_by_name("CAP_0805") is None
+
+
+def _lcc_ring(cell, n_side, pitch, half, pin1_at="top"):
+    """A square pad ring centred on (half, half); pins numbered from the
+    top-edge centre counter-clockwise, or starting on the right edge."""
+    span = (n_side - 1) * pitch
+    xs = [-span / 2 + i * pitch for i in range(n_side)]
+    edges = [("top", [(-x, half) for x in xs]), ("left", [(-half, -x) for x in xs]),
+             ("bottom", [(x, -half) for x in xs]), ("right", [(half, x) for x in xs])]
+    order = [e for e in edges]
+    if pin1_at == "right":
+        order = edges[3:] + edges[:3]
+    pts = [p for _, ps in order for p in ps]
+    k = n_side // 2
+    pts = pts[k:] + pts[:k] if n_side % 2 else pts[n_side // 2:] + pts[:n_side // 2]
+    for i, (x, y) in enumerate(pts, start=1):
+        cell.add_rectangle(1, x + half - 300, y + half - 300, x + half + 300, y + half + 300,
+                           pin=str(i))
+
+
+def test_chip_carrier_placement_finds_ring_centre_and_pin1_rotation():
+    lib = Library("X")
+    c = lib.new_cell("LCC_LCC20")
+    _lcc_ring(c, 5, 1270, 4445)                       # bottom-left-origin style cell
+    (cx, cy), rot = chip_carrier_placement(c)
+    assert (round(cx), round(cy)) == (4445, 4445)
+    p1 = next(s for s in c.shapes if s.pin == "1").bbox()
+    assert (p1[0] + p1[2]) / 2 == 4445 and p1[3] > 8000   # pin 1 top centre
+    assert rot == 0.0
+    c2 = lib.new_cell("LCC_LCC28")
+    _lcc_ring(c2, 7, 1270, 5715, pin1_at="right")
+    assert chip_carrier_placement(c2)[1] == 270.0         # model's +Y pin 1 -> +X
+
+
+def test_build_match_report_matches_lcc_cells_with_origin(tmp_path):
+    lib = Library("LCCTEST")
+    top = lib.new_cell("TOP")
+    c = lib.new_cell("LCC_LCC20")
+    _lcc_ring(c, 5, 1270, 4445)
+    c.add_path(61, [(0, 0), (8890, 0)], width=100)        # body outline: not film
+    top.add_sref("LCC_LCC20", (0, 0))
+    save_layer_thickness(lib, {"1": 10})
+    report = build_match_report(lib, "TOP", _step_dir_with(tmp_path, "LCC20"))
+    m = next(m for m in report.matches if m.cell_name == "LCC_LCC20")
+    assert m.package == "LCC20" and m.category == "chip_carrier"
+    assert m.entry["origin_um"] == [4445.0, 4445.0]
+    assert "rotation_deg" not in m.entry
+
+
+def test_default_chip_carrier_tables_cover_the_full_range():
+    pins = (20, 28, 32, 44, 52, 68, 84)
+    assert sorted(DEFAULT_LCC_PACKAGES) == sorted(f"LCC{n}" for n in pins)
+    assert sorted(DEFAULT_PLCC_PACKAGES) == sorted(f"PLCC{n}" for n in pins)
+    # JEDEC MS-004 (TI FK) / MS-018 body sizes
+    assert DEFAULT_LCC_PACKAGES["LCC20"]["B"] == 8.89
+    assert DEFAULT_LCC_PACKAGES["LCC84"]["B"] == 29.21
+    assert DEFAULT_PLCC_PACKAGES["PLCC20"]["E"] == 9.91
+    assert DEFAULT_PLCC_PACKAGES["PLCC84"]["B"] == 29.29
+
+
+def test_passive_placement_centres_a_bottom_left_model_on_its_pads():
+    from hlayout.io.component_match import passive_placement
+    lib = Library("P")
+    c = lib.new_cell("CAP_0805")
+    c.add_rectangle(1, -1000, -600, -300, 600, pin="1")      # centred footprint, pads along X
+    c.add_rectangle(1, 300, -600, 1000, 600, pin="2")
+    assert passive_placement(c, "CAP_0805") == ((-1000.0, -625.0), 0.0)
+    v = lib.new_cell("CAP_0805_V")
+    v.add_rectangle(1, -600, -1000, 600, -300, pin="1")      # pads along Y
+    v.add_rectangle(1, -600, 300, 600, 1000, pin="2")
+    (ox, oy), rot = passive_placement(v, "CAP_0805")
+    assert rot == 90.0 and (round(ox), round(oy)) == (625, -1000)

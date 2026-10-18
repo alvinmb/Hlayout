@@ -199,6 +199,52 @@ Attached libraries:
                                        default to square/100. dielectric_layer/window (if
                                        both given) also cut a same-shape opening in the
                                        dielectric between the two conductor layers
+    VIA DELETE <x,y> [tol=<dbu>] [layers=<a,b,...>] [cell=<name>]
+                                       remove the via at <x,y> (pads on every layer +
+                                       dielectric window sharing that centre); tracks
+                                       ending on it stay. Also Edit > Delete Via and
+                                       Session.delete_via()
+    FREEROUTE EXPORT <file.dsn> | IMPORT <file.ses> | RUN [passes=<n>] [keep=0|1]
+              [fresh=0|1] [layers=auto|single|two] [finger=<um>]
+                                       Freerouting autorouter round trip: write a
+                                       Specctra DSN (route layers, pads, net names,
+                                       existing routing), read a session back (tracks,
+                                       vias + dielectric windows, fill regenerated), or
+                                       RUN both with Freerouting in between (blocks
+                                       until done -- Tools > Autoroute (Freerouting)...
+                                       runs it in the background). fresh=1 rips up
+                                       all tracks/vias first; layers= picks one or both
+                                       conductors; chip-and-wire: every wire bond's
+                                       substrate end becomes a bond finger (finger= um)
+    HYBRID IMPORT <file.routed.json> [cell=<name>] [fill=0|1] | HYBRID BONDS [<file.csv>]
+                                       chip-and-wire router result: IMPORT draws its
+                                       substrate, dies, parts, pads, traces, crossover
+                                       windows (+ dielectric fill) and wire bonds in a
+                                       new cell and keeps its bond diagram; BONDS lists
+                                       the bond diagram or writes it as CSV. Also
+                                       Session.import_routed_hybrid()
+    MOVEFINGER <pad|x,y> <x,y>         move a bond finger / jumper land of an imported
+                                       routed hybrid to a new centre; its wires follow
+                                       and are checked against the bond rules. Also
+                                       Edit > Move Bond Finger
+    RESIZE <refdes> [length=<um>] [width=<um>] [preview=1]
+                                       re-size an imported printed resistor; its value
+                                       follows R = Rs x L / W. Also Edit > Resize Resistor
+    BONDINFO <x,y>                     the wire bond nearest x,y: length, wire, loop
+                                       height, departure angles
+    BONDTABLE <cell_name> <layer> [origin=<x,y>] [rowheight=<dbu>] [textheight=<dbu>]
+                                       draw the stored bond diagram as a table cell
+                                       (SEQ, WIRE, NET, FIRST/SECOND BOND, LENGTH,
+                                       WIRE, LOOP); also in the assembly drawing
+    NETNAMES IMPORT <file.csv> [merge=1] | NETNAMES CLEAR | NETNAMES
+                                       the design net names Highlight Net reports: a CSV
+                                       with net + pad (or ref + pin) columns
+    HILITE <x,y> | <RefDes.Pin> | <net name> | OFF [layers=<a,b,...>] [cell=<name>]
+                                       highlight every pad and track on the net under
+                                       <x,y> or of pad RefDes.Pin (module I/O pads are
+                                       IO.<pin>); layers connect only through via
+                                       windows in the dielectric. OFF clears it. Also
+                                       Edit > Highlight Net and Session.highlight_net()
     PAD <name> <conductor_layer> <paste_layer> <length_mm> <width_mm> <margin_mm>
            [rows=1] [cols=1] [pitch_x=<mm>] [pitch_y=<mm>] [index=0|1] [overwrite=0|1]
                                        create a rectangular pad cell -- a conductor
@@ -677,6 +723,22 @@ def _tokenize(line: str):
     lex.escape = ""          # backslash is a literal character, not an escape
     lex.commenters = ""      # '#' is not a comment in a command line
     return list(lex)
+
+
+def net_summary(tr, limit=20):
+    """One-line-plus description of a Session.highlight_net() result:
+    net name first, then pads, fragments and what's still unconnected."""
+    shown = ", ".join(tr.pins[:limit]) + (f", ... (+{len(tr.pins) - limit})"
+                                          if len(tr.pins) > limit else "")
+    frag = getattr(tr, "fragments", 1)
+    miss = getattr(tr, "missing", [])
+    head = (f"net {tr.name}: {len(tr.pins)} pad(s) on layer(s) "
+            f"{', '.join(map(str, tr.layers))}")
+    if frag > 1:
+        head += f", in {frag} unjoined pieces"
+    if miss:
+        head += f"; not connected: {', '.join(miss)}"
+    return head + (f"\n  {shown}" if shown else "")
 
 
 class CommandInterpreter:
@@ -2173,7 +2235,29 @@ class CommandInterpreter:
     def _cmd_via(self, args):
         usage = ("usage: VIA <layer1> <layer2> [shape=square|round] [size=<dbu>] "
                  "[name=<cellname>] [dielectric_layer=<n>] [dielectric_window=<dbu>] "
-                 "[index=0|1] [overwrite=0|1]")
+                 "[index=0|1] [overwrite=0|1]\n"
+                 "       VIA DELETE <x,y> [tol=<dbu>] [layers=<a,b,...>] [cell=<name>]")
+        if args and args[0].upper() == "DELETE":
+            positional, kwargs = [], {}
+            for a in args[1:]:
+                if "=" in a:
+                    k, v = a.split("=", 1)
+                    k = k.lower()
+                    if k == "tol":
+                        kwargs["tol"] = float(v)
+                    elif k == "cell":
+                        kwargs["cell_name"] = v
+                    elif k == "layers":
+                        kwargs["layers"] = [int(x) if x.lstrip("-").isdigit() else x
+                                            for x in v.split(",") if x]
+                    else:
+                        raise CommandError(f"unknown VIA DELETE option {k!r}")
+                else:
+                    positional.append(a)
+            if len(positional) != 1:
+                raise CommandError(usage)
+            centre, layers = self.session.delete_via(_parse_point(positional[0]), **kwargs)
+            return f"via at {centre} removed (layers {', '.join(map(str, layers))})"
         if len(args) < 2:
             raise CommandError(usage)
         positional = []
@@ -2204,6 +2288,243 @@ class CommandInterpreter:
             raise CommandError(usage)
         name, path = self.session.create_via_cell(positional[0], positional[1], **kwargs)
         return f"created via cell {name!r}, saved to {path}"
+
+    def _cmd_freeroute(self, args):
+        usage = ("usage: FREEROUTE EXPORT <file.dsn> | FREEROUTE IMPORT <file.ses> [keep=0|1] | "
+                 "FREEROUTE RUN [passes=<n>] [keep=0|1] [fresh=0|1] [layers=auto|single|two] "
+                 "[finger=<um>]")
+        if not args:
+            raise CommandError(usage)
+        sub = args[0].upper()
+        opts = {}
+        pos = []
+        for a in args[1:]:
+            if "=" in a:
+                k, v = a.split("=", 1)
+                k = k.lower()
+                if k == "keep":
+                    opts["keep_existing"] = v.lower() not in ("0", "no", "false")
+                elif k == "passes":
+                    opts["passes"] = int(v)
+                elif k == "fresh":
+                    opts["remove_existing"] = v.lower() not in ("0", "no", "false")
+                elif k == "layers":
+                    if v.lower() not in ("auto", "single", "two"):
+                        raise CommandError("layers= must be auto, single or two")
+                    opts["layer_mode"] = v.lower()
+                elif k == "finger":
+                    opts["bond_finger"] = float(v)
+                else:
+                    raise CommandError(f"unknown FREEROUTE option {k!r}")
+            else:
+                pos.append(a)
+        if sub == "EXPORT" and len(pos) == 1:
+            sm = self.session.export_dsn(pos[0], **opts)
+            return (f"wrote {pos[0]}: {sm.components} part(s), {sm.pins} pad(s), {sm.nets} net(s), "
+                    f"{sm.wires} track(s), {sm.vias} via(s)")
+        if sub in ("IMPORT", "RUN"):
+            if sub == "IMPORT":
+                if len(pos) != 1:
+                    raise CommandError(usage)
+                st = self.session.import_ses(pos[0], **opts)
+            else:
+                st = self.session.freeroute(**opts)
+            msg = (f"{st['wires']} track(s) and {st['vias']} via(s) added "
+                   f"({st['skipped']} already there); nets complete {st['complete']}/{st['nets']}")
+            if st.get("fingers"):
+                msg += f"; {st['fingers']} bond finger(s) laid"
+            if st.get("widened"):
+                msg += f"; {st['widened']} necked track(s) widened back to the minimum width"
+            if st["unrouted"]:
+                msg += "\n  unrouted: " + ", ".join(st["unrouted"])
+            return msg
+        raise CommandError(usage)
+
+    def _cmd_hybrid(self, args):
+        usage = ("usage: HYBRID IMPORT <file.routed.json> [cell=<name>] [fill=0|1] | "
+                 "HYBRID BONDS [<file.csv>]")
+        if not args:
+            raise CommandError(usage)
+        sub = args[0].upper()
+        if sub == "IMPORT" and len(args) >= 2:
+            kw = {}
+            for a in args[2:]:
+                k, _, v = a.partition("=")
+                k = k.lower()
+                if k == "cell" and v:
+                    kw["cell_name"] = v
+                elif k == "fill":
+                    kw["dielectric_fill"] = v.lower() not in ("0", "no", "false")
+                else:
+                    raise CommandError(f"unknown HYBRID IMPORT option {a!r}")
+            st = self.session.import_routed_hybrid(args[1], **kw)
+            msg = (f"imported {st['cell']!r}: {st['dies']} die(s), {st['components']} part(s), "
+                   f"{st['pads']} pad(s) ({st['fingers']} fingers, {st['jumper_lands']} jumper "
+                   f"lands), {st['traces']} trace(s), {st['windows']} window(s), {st['wires']} "
+                   f"wire(s) ({st['jumpers']} jumpers)")
+            if st["unrouted"]:
+                msg += f"\n  router left {len(st['unrouted'])} connection(s) unrouted"
+            if st["issues"]:
+                msg += f"\n  router reported {st['issues']} post-route DRC issue(s)"
+            return msg
+        if sub == "BONDS":
+            if len(args) >= 2:
+                n = self.session.export_bond_diagram(args[1])
+                return f"wrote bond diagram ({n} wires) to {args[1]}"
+            rows = self.session.bond_diagram()
+            if not rows:
+                return "no bond diagram -- HYBRID IMPORT a routed result first"
+            lines = [f"{r['seq']:>3} {r['wire']:<6} {str(r.get('net') or ''):<10} "
+                     f"{r['first_bond']:<10} -> {r['second_bond']:<10} "
+                     f"{(r.get('length_um') or 0) / 1000.0:6.2f} mm  {r['purpose']}"
+                     for r in rows]
+            return "\n".join(lines)
+        raise CommandError(usage)
+
+    def _xy(self, s, usage):
+        try:
+            x, y = s.split(",")
+            return float(x), float(y)
+        except ValueError:
+            raise CommandError(usage)
+
+    def _cmd_movefinger(self, args):
+        usage = "usage: MOVEFINGER <pad|x,y> <x,y>"
+        if len(args) != 2:
+            raise CommandError(usage)
+        to = self._xy(args[1], usage)
+        if "," in args[0]:
+            at = self._xy(args[0], usage)
+        else:
+            cell = self.session.library.get_cell(self.session.current_cell_name)
+            from ..core.shapes import Rectangle
+            pad = next((sh for sh in cell.shapes if isinstance(sh, Rectangle)
+                        and getattr(sh, "pin", "") == args[0]), None)
+            if pad is None:
+                raise CommandError(f"no pad {args[0]!r} in this cell")
+            x0, y0, x1, y1 = pad.bbox()
+            at = ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
+        r = self.session.move_bond_finger(at, to)
+        msg = f"finger {r['pad']} moved {r['from']} -> {r['to']}"
+        for row in r["rows"]:
+            msg += f"\n  {row.get('wire')}: {row['length_um'] / 1000:.2f} mm"
+        for w in r["warnings"]:
+            msg += f"\n  WARNING {w}"
+        if not r["on_trace"]:
+            msg += "\n  off its trace: reroute the net"
+        return msg
+
+    def _cmd_resize(self, args):
+        usage = "usage: RESIZE <refdes> [length=<um>] [width=<um>] [preview=1]"
+        if not args:
+            raise CommandError(usage)
+        kw, dry = {}, False
+        for a in args[1:]:
+            k, _, v = a.partition("=")
+            k = k.lower()
+            try:
+                if k in ("length", "width"):
+                    kw[k] = float(v)
+                elif k == "preview":
+                    dry = v.lower() not in ("0", "no", "false")
+                else:
+                    raise CommandError(f"unknown RESIZE option {k!r}")
+            except ValueError:
+                raise CommandError(usage)
+        if not kw:
+            info = self.session.resistor_info(args[0])
+            from ..io.hybrid_routed import format_ohms
+            return (f"{args[0]}: L {info['length_um']} um, W {info['width_um']} um, "
+                    f"{info['squares']:.2f} sq, R {format_ohms(info['value_ohms'])}, "
+                    f"Rs {format_ohms(info['sheet_ohms'])}/sq")
+        r = self.session.resize_resistor(args[0], dry_run=dry, **kw)
+        return ("(preview) " if dry else "") + r["text"]
+
+    def _cmd_bondinfo(self, args):
+        usage = "usage: BONDINFO <x,y>"
+        if len(args) != 1:
+            raise CommandError(usage)
+        info = self.session.bond_wire_info(self._xy(args[0], usage), tol=200.0)
+        return info["text"] if info else "no wire bond there"
+
+    def _cmd_bondtable(self, args):
+        usage = ("usage: BONDTABLE <cell_name> <layer> [origin=<x,y>] [rowheight=<dbu>] "
+                 "[textheight=<dbu>]")
+        pos = [a for a in args if "=" not in a]
+        if len(pos) != 2:
+            raise CommandError(usage)
+        kw = {}
+        for a in args:
+            if "=" not in a:
+                continue
+            k, _, v = a.partition("=")
+            k = k.lower()
+            try:
+                if k == "origin":
+                    x, y = v.split(",")
+                    kw["origin"] = (float(x), float(y))
+                elif k == "rowheight":
+                    kw["row_height"] = float(v)
+                elif k == "textheight":
+                    kw["text_height"] = float(v)
+                else:
+                    raise CommandError(f"unknown BONDTABLE option {k!r}")
+            except ValueError:
+                raise CommandError(usage)
+        layer = int(pos[1]) if pos[1].lstrip("-").isdigit() else pos[1]
+        name = self.session.generate_bond_table(pos[0], layer, **kw)
+        return f"generated bond diagram table cell {name!r}"
+
+    def _cmd_netnames(self, args):
+        usage = "usage: NETNAMES IMPORT <file.csv> [merge=1] | NETNAMES CLEAR | NETNAMES"
+        from ..io.techfile import load_net_names, save_net_names
+        if not args:
+            names = load_net_names(self.session.library)
+            return f"{len(names)} named pad(s) in {len(set(names.values()))} net(s)"
+        sub = args[0].upper()
+        if sub == "CLEAR":
+            save_net_names(self.session.library, {})
+            return "net names cleared"
+        if sub == "IMPORT" and len(args) >= 2:
+            merge = any(a.lower() in ("merge=1", "merge=yes", "merge=true") for a in args[2:])
+            n = self.session.import_net_names(args[1], replace=not merge)
+            return f"{n} named pad(s) stored"
+        raise CommandError(usage)
+
+    def _cmd_hilite(self, args):
+        usage = ("usage: HILITE <x,y> | <RefDes.Pin> | OFF [layers=<a,b,...>] "
+                 "[cell=<name>]")
+        if not args:
+            raise CommandError(usage)
+        if args[0].upper() in ("OFF", "CLEAR", "NONE"):
+            self.session.clear_net_highlight()
+            return "net highlight cleared"
+        kwargs = {}
+        target = None
+        for a in args:
+            if "=" in a:
+                k, v = a.split("=", 1)
+                k = k.lower()
+                if k == "layers":
+                    kwargs["layers"] = [int(x) if x.lstrip("-").isdigit() else x
+                                        for x in v.split(",") if x]
+                elif k == "cell":
+                    kwargs["cell_name"] = v
+                else:
+                    raise CommandError(f"unknown HILITE option {k!r}")
+            elif target is None:
+                target = a
+            else:
+                raise CommandError(usage)
+        if target is None:
+            raise CommandError(usage)
+        if "," in target:                 # x,y -- else a pad name like U1.5
+            try:
+                target = _parse_point(target)
+            except Exception:
+                pass
+        tr = self.session.highlight_net(target, **kwargs)
+        return net_summary(tr)
 
     def _cmd_pad(self, args):
         usage = ("usage: PAD <name> <conductor_layer> <paste_layer> <length_mm> <width_mm> "

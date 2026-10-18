@@ -43,6 +43,7 @@ from .component_library_window import open_component_library_window
 from .drc_window import open_drc_window
 from .netlist_window import open_netlist_window
 from .topview_window import open_topview_window
+from .freerouting_window import open_freerouting_window
 from .assembly_window import open_assembly_window
 from .dxf_batch_window import open_dxf_batch_window
 from .gerber_batch_window import open_gerber_batch_window
@@ -473,6 +474,11 @@ class App(tk.Tk):
         editm.add_command(label="Auto-Route Two Pins", command=self._auto_route_two_pins)
         editm.add_command(label="Move Wire Bond", command=self._move_wire_bond_tool)
         editm.add_command(label="Delete Wire Bond", command=self._delete_wire_bond_tool)
+        editm.add_command(label="Delete Via", command=self._delete_via_tool)
+        editm.add_command(label="Move Bond Finger", command=self._move_finger_tool)
+        editm.add_command(label="Resize Resistor", command=self._resize_resistor_tool)
+        editm.add_command(label="Highlight Net", command=self._highlight_net_tool)
+        editm.add_command(label="Clear Net Highlight", command=self._clear_net_highlight)
         editm.add_separator()
         editm.add_command(label="Rotate 90°", command=self._rotate_selected, accelerator="R")
         editm.add_command(label="Copy...", command=self._copy_selected)
@@ -507,6 +513,8 @@ class App(tk.Tk):
         toolsm.add_command(label="Assembly Drawing...", command=lambda: open_assembly_window(self))
         toolsm.add_command(label="DRC...", command=lambda: open_drc_window(self))
         toolsm.add_command(label="Extract Netlist...", command=lambda: open_netlist_window(self))
+        toolsm.add_command(label="Autoroute (Freerouting)...",
+                           command=lambda: open_freerouting_window(self))
         toolsm.add_command(label="Thermal Analysis...", command=lambda: open_thermal_window(self))
         toolsm.add_command(label="Generate Dielectric Fill...", command=self.show_dielectric_dialog)
         toolsm.add_command(label="Remove Dielectric Fill", command=self.remove_dielectric_fill)
@@ -800,6 +808,8 @@ class App(tk.Tk):
         self._menu_bar_anchor = body
 
         self.canvas = LayoutCanvas(body, self.session.library, on_status=self.status.set)
+        from .hybrid_hooks import HybridHooks
+        self.canvas.hybrid_hooks = HybridHooks(self)
         # weight=1 on the canvas, weight=0 on the right panel: when the
         # window is resized, all the extra/lost space goes to the canvas
         # and the Layers/Console panel stays anchored at a fixed width on
@@ -2326,6 +2336,39 @@ class App(tk.Tk):
         exits. See _on_canvas_commit()/Session.delete_wire_bond()."""
         self.canvas.start_delete_bond()
 
+    def _highlight_net_tool(self):
+        """Edit > Highlight Net: click a pad or trace and every pad and
+        track on its net lights up (see Session.highlight_net()). Stays
+        armed; Esc stops; Edit > Clear Net Highlight removes it."""
+        self.canvas.start_highlight_net()
+
+    def _clear_net_highlight(self):
+        self.session.clear_net_highlight()
+        self.status.set("net highlight cleared")
+
+    def _net_summary(self, tr, limit=12):
+        from .commands import net_summary
+        return net_summary(tr, limit=limit).replace("\n  ", " -- ")
+
+    def _move_finger_tool(self):
+        """Edit > Move Bond Finger: click a bond finger or jumper land of an
+        imported routed hybrid, then its new spot -- its wires follow and
+        are checked against the bond rules live. See
+        Session.move_bond_finger()."""
+        self.canvas.start_move_finger()
+
+    def _resize_resistor_tool(self):
+        """Edit > Resize Resistor: click an imported printed resistor, then
+        move along its length with the value read out live; click to apply.
+        See Session.resize_resistor()."""
+        self.canvas.start_resize_resistor()
+
+    def _delete_via_tool(self):
+        """Edit > Delete Via: click a via to remove its pads and
+        dielectric window. Stays armed; Esc exits. See
+        _on_canvas_commit()/Session.delete_via()."""
+        self.canvas.start_delete_via()
+
     def _continue_path(self):
         """Edit > Continue Path...: re-enter Path drawing pre-seeded
         with the selected Path's own points, so more points can be
@@ -2372,6 +2415,17 @@ class App(tk.Tk):
                 self.status.set(
                     f"wire bond {e1} - {e2} removed -- click another, or Esc to stop"
                 )
+            elif mode == "hilite":
+                # a click a few pixels off a pad or a thin track still picks it
+                tol = 6.0 / max(self.canvas.scale, 1e-9)
+                tr = self.session.highlight_net(points[0], prefer_layer=layer, tol=tol)
+                self.status.set(self._net_summary(tr))
+            elif mode == "del_via":
+                centre, layers = self.session.delete_via(points[0])
+                self.status.set(
+                    f"via at {centre} removed (layers {', '.join(map(str, layers))}) "
+                    f"-- click another, or Esc to stop"
+                )
             elif mode == "move_bond":
                 near, to = points
                 fixed, moved = self.session.move_wire_bond(near, to)
@@ -2379,6 +2433,28 @@ class App(tk.Tk):
                     f"wire bond end moved to {moved} (other end {fixed}) "
                     f"-- move another, or Esc to stop"
                 )
+            elif mode == "move_finger":
+                grab, to = points
+                tol = 6.0 / max(self.canvas.scale, 1e-9)
+                r = self.session.move_bond_finger(grab, to, tol=tol)
+                msg = f"finger {r['pad']} moved to {r['to']}"
+                if r["warnings"]:
+                    msg += " -- " + "; ".join(r["warnings"])
+                if not r["on_trace"]:
+                    msg += " -- now off its trace: reroute the net"
+                self.status.set(msg + " -- move another, or Esc to stop")
+            elif mode == "resize_res":
+                from .hybrid_hooks import new_resistor_length
+                grab, to = points
+                pick = self.session.resistor_at(grab)
+                if pick is None:
+                    raise LayoutError("no printed resistor there")
+                r = self.session.resize_resistor(pick["refdes"],
+                                                 length=new_resistor_length(pick, to))
+                msg = r["text"]
+                if r["pins_moved_um"]:
+                    msg += f" -- pins moved {r['pins_moved_um']:.0f} um: reroute their nets"
+                self.status.set(msg)
             elif mode == "text":
                 self.session.text(layer, points[0], extra["text"], height=extra["height"],
                                    font=extra["font"])
@@ -2406,8 +2482,15 @@ class App(tk.Tk):
                     x_reflection=extra["x_reflection"],
                 )
         except LayoutError as e:
+            if mode == "hilite":
+                # a missed click while highlighting isn't worth a modal box
+                self.status.set(f"Highlight Net: {e}")
+                return
             title = {"del_bond": "Delete Wire Bond",
-                     "move_bond": "Move Wire Bond"}.get(mode, "Could not add shape")
+                     "move_bond": "Move Wire Bond",
+                     "del_via": "Delete Via",
+                     "move_finger": "Move Bond Finger",
+                     "resize_res": "Resize Resistor"}.get(mode, "Could not add shape")
             dialogs.show_error(title, str(e), parent=self)
 
     def _placeable_cell_names(self):
@@ -2938,7 +3021,8 @@ class App(tk.Tk):
         """File > Build FreeCAD Component Library...: write a .FCMacro
         that, run inside FreeCAD, builds a small library of generic 3D
         component bodies (ceramic chip capacitors, a 20-pin metal
-        package, and the SOT-23/323/89/223/14/16/18 package family)
+        package, the SOT-23/323/89/223/14/16/18 package family, and
+        the LCC/PLCC 20-84 pin chip carriers)
         and exports each as its own STEP file -- meant to be referenced
         from a placed cell's component_models tech-param (Setup >
         Technology Properties...) so export_freecad() can substitute a
@@ -4445,6 +4529,7 @@ class App(tk.Tk):
         self._update_properties_panel()
 
     def refresh_all(self):
+        self.canvas.net_highlight = getattr(self.session, "net_highlight", None)
         self.canvas.redraw()
         self._refresh_cell_list()
         self._refresh_layer_choices()

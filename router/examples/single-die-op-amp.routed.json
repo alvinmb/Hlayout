@@ -1,0 +1,876 @@
+{
+  "design": {
+    "schemaVersion": 1,
+    "name": "single-die-op-amp",
+    "substrate": {
+      "technology": "THICK_FILM",
+      "material": "96% alumina",
+      "widthUm": 10000,
+      "heightUm": 8000,
+      "thicknessUm": 635
+    },
+    "stack": {
+      "layers": [
+        {
+          "name": "COND1",
+          "kind": "CONDUCTOR",
+          "thicknessUm": 12
+        },
+        {
+          "name": "DIEL1",
+          "kind": "DIELECTRIC",
+          "thicknessUm": 40
+        },
+        {
+          "name": "COND2",
+          "kind": "CONDUCTOR",
+          "thicknessUm": 12
+        },
+        {
+          "name": "RES",
+          "kind": "RESISTOR",
+          "thicknessUm": 15
+        },
+        {
+          "name": "GLAZE",
+          "kind": "OVERGLAZE",
+          "thicknessUm": 10
+        }
+      ]
+    },
+    "dies": [
+      {
+        "refdes": "U1",
+        "partName": "opamp-die",
+        "origin": {
+          "x": 4000,
+          "y": 3000
+        },
+        "rotation": "R0",
+        "widthUm": 2000,
+        "heightUm": 2000,
+        "thicknessUm": 250,
+        "attachKeepoutUm": 150,
+        "pads": [
+          {
+            "id": "1",
+            "net": "GND",
+            "position": {
+              "x": 500,
+              "y": 150
+            },
+            "widthUm": 100,
+            "heightUm": 100
+          },
+          {
+            "id": "2",
+            "net": "IN",
+            "position": {
+              "x": 1500,
+              "y": 150
+            },
+            "widthUm": 100,
+            "heightUm": 100
+          },
+          {
+            "id": "3",
+            "net": "FB",
+            "position": {
+              "x": 1850,
+              "y": 500
+            },
+            "widthUm": 100,
+            "heightUm": 100
+          },
+          {
+            "id": "4",
+            "net": "OUT",
+            "position": {
+              "x": 1850,
+              "y": 1500
+            },
+            "widthUm": 100,
+            "heightUm": 100
+          },
+          {
+            "id": "5",
+            "net": "VCC",
+            "position": {
+              "x": 1500,
+              "y": 1850
+            },
+            "widthUm": 100,
+            "heightUm": 100
+          },
+          {
+            "id": "6",
+            "net": "BIAS",
+            "position": {
+              "x": 500,
+              "y": 1850
+            },
+            "widthUm": 100,
+            "heightUm": 100
+          },
+          {
+            "id": "7",
+            "net": "GND",
+            "position": {
+              "x": 150,
+              "y": 1500
+            },
+            "widthUm": 100,
+            "heightUm": 100
+          },
+          {
+            "id": "8",
+            "net": "",
+            "position": {
+              "x": 150,
+              "y": 500
+            },
+            "widthUm": 100,
+            "heightUm": 100
+          }
+        ]
+      }
+    ],
+    "substratePads": [
+      {
+        "id": "F1",
+        "net": "GND",
+        "role": "BOND_FINGER",
+        "position": {
+          "x": 4500,
+          "y": 2500
+        },
+        "widthUm": 150,
+        "heightUm": 200,
+        "layer": "COND1"
+      },
+      {
+        "id": "F2",
+        "net": "IN",
+        "role": "BOND_FINGER",
+        "position": {
+          "x": 5500,
+          "y": 2500
+        },
+        "widthUm": 150,
+        "heightUm": 200,
+        "layer": "COND1"
+      },
+      {
+        "id": "F3",
+        "net": "FB",
+        "role": "BOND_FINGER",
+        "position": {
+          "x": 6500,
+          "y": 3500
+        },
+        "widthUm": 200,
+        "heightUm": 150,
+        "layer": "COND1"
+      },
+      {
+        "id": "F4",
+        "net": "OUT",
+        "role": "BOND_FINGER",
+        "position": {
+          "x": 6500,
+          "y": 4500
+        },
+        "widthUm": 200,
+        "heightUm": 150,
+        "layer": "COND1"
+      },
+      {
+        "id": "F5",
+        "net": "VCC",
+        "role": "BOND_FINGER",
+        "position": {
+          "x": 5500,
+          "y": 5500
+        },
+        "widthUm": 150,
+        "heightUm": 200,
+        "layer": "COND1"
+      },
+      {
+        "id": "F6",
+        "net": "BIAS",
+        "role": "BOND_FINGER",
+        "position": {
+          "x": 4500,
+          "y": 5500
+        },
+        "widthUm": 150,
+        "heightUm": 200,
+        "layer": "COND1"
+      },
+      {
+        "id": "F7",
+        "net": "GND",
+        "role": "BOND_FINGER",
+        "position": {
+          "x": 3500,
+          "y": 4500
+        },
+        "widthUm": 200,
+        "heightUm": 150,
+        "layer": "COND1"
+      },
+      {
+        "id": "JA",
+        "net": "GND",
+        "role": "JUMPER_LAND",
+        "position": {
+          "x": 3500,
+          "y": 6500
+        },
+        "widthUm": 200,
+        "heightUm": 200,
+        "layer": "COND1"
+      },
+      {
+        "id": "JB",
+        "net": "GND",
+        "role": "JUMPER_LAND",
+        "position": {
+          "x": 3500,
+          "y": 7300
+        },
+        "widthUm": 200,
+        "heightUm": 200,
+        "layer": "COND1"
+      }
+    ],
+    "wires": [
+      {
+        "id": "W1",
+        "net": "GND",
+        "from": {
+          "kind": "DIE_PAD",
+          "die": "U1",
+          "pad": "1"
+        },
+        "to": {
+          "kind": "SUBSTRATE_PAD",
+          "pad": "F1"
+        },
+        "spec": {
+          "material": "GOLD",
+          "diameterUm": 25,
+          "bondType": "BALL_WEDGE",
+          "loopHeightUm": 150
+        },
+        "fixed": false
+      },
+      {
+        "id": "W2",
+        "net": "IN",
+        "from": {
+          "kind": "DIE_PAD",
+          "die": "U1",
+          "pad": "2"
+        },
+        "to": {
+          "kind": "SUBSTRATE_PAD",
+          "pad": "F2"
+        },
+        "spec": {
+          "material": "GOLD",
+          "diameterUm": 25,
+          "bondType": "BALL_WEDGE",
+          "loopHeightUm": 150
+        },
+        "fixed": false
+      },
+      {
+        "id": "W3",
+        "net": "FB",
+        "from": {
+          "kind": "DIE_PAD",
+          "die": "U1",
+          "pad": "3"
+        },
+        "to": {
+          "kind": "SUBSTRATE_PAD",
+          "pad": "F3"
+        },
+        "spec": {
+          "material": "GOLD",
+          "diameterUm": 25,
+          "bondType": "BALL_WEDGE",
+          "loopHeightUm": 150
+        },
+        "fixed": false
+      },
+      {
+        "id": "W4",
+        "net": "OUT",
+        "from": {
+          "kind": "DIE_PAD",
+          "die": "U1",
+          "pad": "4"
+        },
+        "to": {
+          "kind": "SUBSTRATE_PAD",
+          "pad": "F4"
+        },
+        "spec": {
+          "material": "GOLD",
+          "diameterUm": 25,
+          "bondType": "BALL_WEDGE",
+          "loopHeightUm": 150
+        },
+        "fixed": false
+      },
+      {
+        "id": "W5",
+        "net": "VCC",
+        "from": {
+          "kind": "DIE_PAD",
+          "die": "U1",
+          "pad": "5"
+        },
+        "to": {
+          "kind": "SUBSTRATE_PAD",
+          "pad": "F5"
+        },
+        "spec": {
+          "material": "GOLD",
+          "diameterUm": 25,
+          "bondType": "BALL_WEDGE",
+          "loopHeightUm": 150
+        },
+        "fixed": false
+      },
+      {
+        "id": "W6",
+        "net": "BIAS",
+        "from": {
+          "kind": "DIE_PAD",
+          "die": "U1",
+          "pad": "6"
+        },
+        "to": {
+          "kind": "SUBSTRATE_PAD",
+          "pad": "F6"
+        },
+        "spec": {
+          "material": "GOLD",
+          "diameterUm": 25,
+          "bondType": "BALL_WEDGE",
+          "loopHeightUm": 150
+        },
+        "fixed": false
+      },
+      {
+        "id": "W7",
+        "net": "GND",
+        "from": {
+          "kind": "DIE_PAD",
+          "die": "U1",
+          "pad": "7"
+        },
+        "to": {
+          "kind": "SUBSTRATE_PAD",
+          "pad": "F7"
+        },
+        "spec": {
+          "material": "GOLD",
+          "diameterUm": 25,
+          "bondType": "BALL_WEDGE",
+          "loopHeightUm": 150
+        },
+        "fixed": false
+      },
+      {
+        "id": "WJ1",
+        "net": "GND",
+        "from": {
+          "kind": "SUBSTRATE_PAD",
+          "pad": "JA"
+        },
+        "to": {
+          "kind": "SUBSTRATE_PAD",
+          "pad": "JB"
+        },
+        "spec": {
+          "material": "GOLD",
+          "diameterUm": 25,
+          "bondType": "BALL_WEDGE",
+          "loopHeightUm": 200
+        },
+        "fixed": true
+      }
+    ],
+    "components": [
+      {
+        "refdes": "R1",
+        "kind": "PRINTED_RESISTOR",
+        "centre": {
+          "x": 8000,
+          "y": 2500
+        },
+        "rotation": "R0",
+        "bodyLengthUm": 750,
+        "bodyWidthUm": 1000,
+        "keepoutUm": 250,
+        "obstacleLayers": [
+          "COND1"
+        ],
+        "pinA": {
+          "net": "IN",
+          "position": {
+            "x": -375,
+            "y": 0
+          },
+          "widthUm": 400,
+          "heightUm": 1200,
+          "layer": "COND1"
+        },
+        "pinB": {
+          "net": "FB",
+          "position": {
+            "x": 375,
+            "y": 0
+          },
+          "widthUm": 400,
+          "heightUm": 1200,
+          "layer": "COND1"
+        },
+        "value": "1k"
+      },
+      {
+        "refdes": "R2",
+        "kind": "PRINTED_RESISTOR",
+        "centre": {
+          "x": 8000,
+          "y": 4500
+        },
+        "rotation": "R0",
+        "bodyLengthUm": 600,
+        "bodyWidthUm": 800,
+        "keepoutUm": 250,
+        "obstacleLayers": [
+          "COND1"
+        ],
+        "pinA": {
+          "net": "FB",
+          "position": {
+            "x": -300,
+            "y": 0
+          },
+          "widthUm": 400,
+          "heightUm": 1000,
+          "layer": "COND1"
+        },
+        "pinB": {
+          "net": "OUT",
+          "position": {
+            "x": 300,
+            "y": 0
+          },
+          "widthUm": 400,
+          "heightUm": 1000,
+          "layer": "COND1"
+        },
+        "value": "10k"
+      },
+      {
+        "refdes": "R3",
+        "kind": "PRINTED_RESISTOR",
+        "centre": {
+          "x": 8000,
+          "y": 6500
+        },
+        "rotation": "R90",
+        "bodyLengthUm": 1200,
+        "bodyWidthUm": 1600,
+        "keepoutUm": 250,
+        "obstacleLayers": [
+          "COND1"
+        ],
+        "pinA": {
+          "net": "BIAS",
+          "position": {
+            "x": -600,
+            "y": 0
+          },
+          "widthUm": 400,
+          "heightUm": 1800,
+          "layer": "COND1"
+        },
+        "pinB": {
+          "net": "VCC",
+          "position": {
+            "x": 600,
+            "y": 0
+          },
+          "widthUm": 400,
+          "heightUm": 1800,
+          "layer": "COND1"
+        },
+        "value": "100R"
+      }
+    ],
+    "routing": {
+      "crossoverCost": 10.0,
+      "jumperCost": 50.0,
+      "jumpersAllowed": true,
+      "maxJumpers": 0,
+      "routingLayers": [],
+      "gridUm": 0
+    },
+    "rules": {
+      "conductor": {
+        "minLineUm": 150,
+        "minSpaceUm": 125,
+        "edgeClearanceUm": 250,
+        "windowMinUm": 250,
+        "windowEnclosureUm": 100
+      },
+      "bondWire": {
+        "minLengthUm": 500,
+        "maxLengthUm": 2500,
+        "maxAngleDeg": 45.0,
+        "spacingDiameters": 2.0,
+        "crossingsAllowed": false,
+        "minLoopSeparationUm": 100,
+        "fingerPitchUm": 175,
+        "capillaryClearanceUm": 250,
+        "dieToFingerMinUm": 250,
+        "dieToFingerMaxUm": 1500
+      },
+      "jumper": {
+        "minLengthUm": 500,
+        "maxLengthUm": 3000,
+        "minLoopHeightUm": 175
+      },
+      "pads": {
+        "fingerWidthUm": 150,
+        "fingerLengthUm": 200,
+        "jumperLandUm": 200
+      }
+    }
+  },
+  "traces": [
+    {
+      "net": "GND",
+      "layer": "COND1",
+      "points": [
+        {
+          "x": 4500,
+          "y": 2500
+        },
+        {
+          "x": 4500,
+          "y": 1850
+        }
+      ],
+      "widthUm": 150
+    },
+    {
+      "net": "IN",
+      "layer": "COND1",
+      "points": [
+        {
+          "x": 5500,
+          "y": 2500
+        },
+        {
+          "x": 5500,
+          "y": 1850
+        }
+      ],
+      "widthUm": 150
+    },
+    {
+      "net": "FB",
+      "layer": "COND1",
+      "points": [
+        {
+          "x": 6500,
+          "y": 3500
+        },
+        {
+          "x": 7150,
+          "y": 3500
+        }
+      ],
+      "widthUm": 150
+    },
+    {
+      "net": "OUT",
+      "layer": "COND1",
+      "points": [
+        {
+          "x": 6500,
+          "y": 4500
+        },
+        {
+          "x": 7150,
+          "y": 4500
+        }
+      ],
+      "widthUm": 150
+    },
+    {
+      "net": "VCC",
+      "layer": "COND1",
+      "points": [
+        {
+          "x": 5500,
+          "y": 5500
+        },
+        {
+          "x": 5500,
+          "y": 6150
+        }
+      ],
+      "widthUm": 150
+    },
+    {
+      "net": "BIAS",
+      "layer": "COND1",
+      "points": [
+        {
+          "x": 4500,
+          "y": 5500
+        },
+        {
+          "x": 4500,
+          "y": 6150
+        }
+      ],
+      "widthUm": 150
+    },
+    {
+      "net": "GND",
+      "layer": "COND1",
+      "points": [
+        {
+          "x": 3500,
+          "y": 4500
+        },
+        {
+          "x": 2850,
+          "y": 4500
+        }
+      ],
+      "widthUm": 150
+    },
+    {
+      "net": "OUT",
+      "layer": "COND1",
+      "points": [
+        {
+          "x": 7099,
+          "y": 4557
+        },
+        {
+          "x": 7099,
+          "y": 5115
+        },
+        {
+          "x": 7285,
+          "y": 5301
+        },
+        {
+          "x": 8153,
+          "y": 5301
+        },
+        {
+          "x": 8463,
+          "y": 4991
+        }
+      ],
+      "widthUm": 150
+    },
+    {
+      "net": "IN",
+      "layer": "COND1",
+      "points": [
+        {
+          "x": 5549,
+          "y": 1953
+        },
+        {
+          "x": 7471,
+          "y": 1953
+        }
+      ],
+      "widthUm": 150
+    },
+    {
+      "net": "BIAS",
+      "layer": "COND1",
+      "points": [
+        {
+          "x": 4557,
+          "y": 6107
+        },
+        {
+          "x": 4991,
+          "y": 6541
+        },
+        {
+          "x": 6355,
+          "y": 6541
+        },
+        {
+          "x": 7161,
+          "y": 5735
+        }
+      ],
+      "widthUm": 150
+    },
+    {
+      "net": "FB",
+      "layer": "COND1",
+      "points": [
+        {
+          "x": 7037,
+          "y": 3565
+        },
+        {
+          "x": 7533,
+          "y": 4061
+        }
+      ],
+      "widthUm": 150
+    },
+    {
+      "net": "FB",
+      "layer": "COND1",
+      "points": [
+        {
+          "x": 7533,
+          "y": 4061
+        },
+        {
+          "x": 8401,
+          "y": 3193
+        },
+        {
+          "x": 8463,
+          "y": 3193
+        },
+        {
+          "x": 8463,
+          "y": 3069
+        }
+      ],
+      "widthUm": 150
+    },
+    {
+      "net": "VCC",
+      "layer": "COND2",
+      "points": [
+        {
+          "x": 5549,
+          "y": 5921
+        },
+        {
+          "x": 6789,
+          "y": 7161
+        },
+        {
+          "x": 6851,
+          "y": 7161
+        }
+      ],
+      "widthUm": 150
+    },
+    {
+      "net": "VCC",
+      "layer": "COND1",
+      "points": [
+        {
+          "x": 6851,
+          "y": 7161
+        },
+        {
+          "x": 7161,
+          "y": 7161
+        }
+      ],
+      "widthUm": 150
+    },
+    {
+      "net": "GND",
+      "layer": "COND1",
+      "points": [
+        {
+          "x": 4433,
+          "y": 2573
+        },
+        {
+          "x": 3875,
+          "y": 2573
+        },
+        {
+          "x": 3565,
+          "y": 2883
+        },
+        {
+          "x": 3565,
+          "y": 4433
+        }
+      ],
+      "widthUm": 150
+    },
+    {
+      "net": "GND",
+      "layer": "COND1",
+      "points": [
+        {
+          "x": 3441,
+          "y": 4557
+        },
+        {
+          "x": 3441,
+          "y": 6417
+        }
+      ],
+      "widthUm": 150
+    }
+  ],
+  "windows": [
+    {
+      "net": "VCC",
+      "position": {
+        "x": 5549,
+        "y": 5921
+      },
+      "openingUm": 250,
+      "padUm": 450,
+      "fromLayer": "COND1",
+      "toLayer": "COND2"
+    },
+    {
+      "net": "VCC",
+      "position": {
+        "x": 6851,
+        "y": 7161
+      },
+      "openingUm": 250,
+      "padUm": 450,
+      "fromLayer": "COND1",
+      "toLayer": "COND2"
+    }
+  ],
+  "unrouted": [],
+  "stats": {
+    "connections": 8,
+    "routed": 8,
+    "traceLengthUm": 20364,
+    "windows": 2,
+    "jumpersAdded": 0,
+    "fingersAdded": 0,
+    "gridUm": 62
+  },
+  "issues": []
+}

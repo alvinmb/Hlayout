@@ -678,6 +678,44 @@ def test_drop_via_dielectric_window_respects_round_shape():
     assert len(s.cell.shapes) == 3
 
 
+
+def _via_demo():
+    s = Session.new("DEMO")
+    s.new_cell("TOP")
+    s.drop_via(0, 0, 3, 5, size=400, dielectric_layer=4, dielectric_window=600)
+    s.drop_via(5000, 0, 3, 5, size=400, shape="round", dielectric_layer=4,
+               dielectric_window=600)
+    s.path(3, [(0, 0), (5000, 0)], 300)          # track ending on both vias
+    s.rect(3, 9000, 0, 9400, 400)                # lone square pad: not a via
+    return s
+
+
+def test_delete_via_removes_pads_and_window_but_not_tracks():
+    s = _via_demo()
+    s.clear_undo_history()
+    centre, layers = s.delete_via((150, -100))
+    assert centre == (0, 0) and layers == [3, 4, 5]
+    kinds = sorted(type(x).__name__ for x in s.cell.shapes)
+    assert kinds.count("Path") == 1 and len(s.cell.shapes) == 5
+    assert s.undo() is True and len(s.cell.shapes) == 8
+
+
+def test_delete_via_finds_round_vias_and_ignores_single_layer_squares():
+    s = _via_demo()
+    assert s.delete_via((5000, 50))[0] == (5000, 0)
+    with pytest.raises(Exception, match="no via"):
+        s.delete_via((9200, 200))
+    with pytest.raises(Exception, match="no via"):
+        s.delete_via((2500, 0))
+
+
+def test_via_delete_command():
+    s = _via_demo()
+    out = CommandInterpreter(s, ScriptConsole(s)).run("VIA DELETE 0,0")
+    assert "removed" in out
+    assert s.find_via((0, 0)) is None
+
+
 def test_session_batch_groups_calls_into_one_undo_step():
     s = Session.new("DEMO")
     s.new_cell("TOP")

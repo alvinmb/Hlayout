@@ -21,7 +21,9 @@ Example
 """
 
 import copy
+import json
 import math
+import os
 from contextlib import contextmanager
 from typing import Callable, List, Optional, Union
 
@@ -94,7 +96,8 @@ def _segments_cross(p1, p2, p3, p4) -> bool:
 
 
 def _matched_component_footprint(library, cell_name, component_models, role_layers=frozenset(),
-                                  excluded_layers=frozenset(), split_packages=False):
+                                  excluded_layers=frozenset(), split_packages=False,
+                                  pad_layers=frozenset()):
     """The union, in world DBU coordinates, of every placed instance's
     OWN shapes (every layer -- pads included, not just an outline)
     whose cell is a recognized real component: an explicit
@@ -176,6 +179,7 @@ def _matched_component_footprint(library, cell_name, component_models, role_laye
         eia_size_tokens,
         footprint_pin_stats,
         gullwing_package_table,
+        match_chip_carrier_by_name,
         match_gullwing_by_footprint,
         match_passive_by_name,
     )
@@ -205,6 +209,11 @@ def _matched_component_footprint(library, cell_name, component_models, role_laye
         if cn in base_models:
             return True
         if match_passive_by_name(cn, tokens) is not None:
+            return True
+        if match_chip_carrier_by_name(cn) is not None:
+            # LCC/PLCC chip carriers (LCC20 only ever matched by luck,
+            # its pad ring resembling a 20-pin gull-wing; LCC28 matched
+            # nothing, so its body was never drawn in the top view)
             return True
         c = library.cells.get(cn)
         stats = footprint_pin_stats(c) if c is not None else None
@@ -262,9 +271,23 @@ def _matched_component_footprint(library, cell_name, component_models, role_laye
             if is_recognized(ref.cell_name):
                 target = library.cells.get(ref.cell_name)
                 if target is not None:
+                    # pad_layers: the part's own pads on a conductor layer
+                    # are NOT part of its occluding body -- they're left to
+                    # the conductor tier (drawn, and cross-hatched, as
+                    # conductor wherever the body doesn't cover them), and
+                    # so is any outline shape that just traces one of them
+                    pads = [shape_to_shapely(sh) for sh in target.shapes
+                            if sh.layer in pad_layers] if pad_layers else []
+                    pads = [g for g in pads if g is not None and not g.is_empty]
                     for shape in target.shapes:
+                        if shape.layer in pad_layers:
+                            continue
                         g = shape_to_shapely(shape)
                         if g is not None and not g.is_empty:
+                            if pads and any(
+                                    g.symmetric_difference(pg).area <= 1e-3 * max(pg.area, 1.0)
+                                    for pg in pads if pg.envelope.intersects(g.envelope)):
+                                continue
                             geoms.append((ref.cell_name, _transform_geom(g, child_transform)))
                     if split_packages:
                         deep(ref.cell_name, child_transform, ref.cell_name, 0)
@@ -560,7 +583,8 @@ class Session:
                                    component_models=load_component_models(self.library))
 
     def generate_component_library(self, out_dir: str, path: Optional[str] = None,
-                                     ceramic_caps=None, pkg20=None, sot_packages=None):
+                                     ceramic_caps=None, pkg20=None, sot_packages=None,
+                                     lcc_packages=None, plcc_packages=None):
         """Write a FreeCAD macro (``.FCMacro``) at ``path`` (default:
         ``<out_dir>/build_component_library.FCMacro``) that, run inside
         FreeCAD, builds a small library of generic 3D component
@@ -590,11 +614,17 @@ class Session:
         `sot_packages` overrides the default {name: kwargs} dict of SOT
         variants (see hlayout.io.component_library.DEFAULT_SOT_PACKAGES
         for the make_sot() kwargs shape) to add/replace variants (e.g.
-        a SOT-23-5), or pass {} to skip the family entirely. Returns
-        ``path``. See hlayout.io.component_library for details."""
+        a SOT-23-5), or pass {} to skip the family entirely.
+        `lcc_packages`/`plcc_packages` likewise override (or, with {},
+        skip) the ceramic LCCC and plastic PLCC chip-carrier families --
+        by default LCC20..LCC84 and PLCC20..PLCC84 at 20/28/32/44/52/68/84
+        pins. Returns ``path``. See hlayout.io.component_library for
+        details."""
         from ..io.component_library import write_component_library_macro
         return write_component_library_macro(out_dir, path=path, ceramic_caps=ceramic_caps,
-                                              pkg20=pkg20, sot_packages=sot_packages)
+                                              pkg20=pkg20, sot_packages=sot_packages,
+                                              lcc_packages=lcc_packages,
+                                              plcc_packages=plcc_packages)
 
     def print_cell(self, cell_name: Optional[str] = None, out_path: Optional[str] = None,
                     scale: Optional[float] = None, pin_label_layers=None) -> str:
@@ -2969,7 +2999,7 @@ class Session:
                 comp_geom, pkg_geom, pkg_names = _matched_component_footprint(
                     self.library, cell.name, load_component_models(self.library),
                     resistor_layers | conductor_layers | glaze_layers | bond_layers, excluded,
-                    split_packages=True)
+                    split_packages=True, pad_layers=conductor_layers | bond_layers)
                 if pkg_names:
                     # the layer tiers must not pick up an enclosing
                     # package's own pads/outline again (they'd sit above
@@ -2984,11 +3014,21 @@ class Session:
                 layer_geoms = [(comp_geom, True)]
                 for n in sorted(resistor_layers, reverse=True):
                     layer_geoms.append((gather(n), True))
+                # the dielectric counts as a conductor-tier film for
+                # stacking, but it is NOT hatched -- hatching it would
+                # cross-hatch the whole board (and, chopped up by every
+                # via window and track, run to hundreds of thousands of
+                # paths -- confirmed live, it froze the GUI)
+                try:
+                    from ..io.techfile import load_dielectric_rules
+                    _diel = int(load_dielectric_rules(self.library)["layer"])
+                except Exception:
+                    _diel = -1
                 for n in sorted(conductor_layers, reverse=True):
                     layer_geoms.append(
                         (gather(n), True,
                          (hatch_conductor_pitch, hatch_conductor_angles)
-                         if hatch_conductor_pitch else None))
+                         if hatch_conductor_pitch and n != _diel else None))
                 for n in sorted(other_layers, reverse=True):
                     layer_geoms.append((gather(n), True))
                 for n in sorted(substrate_layers, reverse=True):
@@ -3565,6 +3605,1348 @@ class Session:
             cell.shapes[:] = [s for s in cell.shapes if id(s) not in doomed]
         self._notify()
         return ends
+
+    # --- Freerouting autorouter (Specctra DSN/SES) ------------------------
+    def freerouting_rules(self) -> dict:
+        """The design's saved Freerouting rules (techfile
+        load_freerouting_rules; defaults: specctra.DEFAULT_RULES)."""
+        from ..io.techfile import load_freerouting_rules
+        return load_freerouting_rules(self.library)
+
+    def set_freerouting_rules(self, **rules) -> dict:
+        """Update and save some of the Freerouting rules (signal_width,
+        power_width, clearance, signal_via, signal_via_window, power_via,
+        power_via_window, power_nets, exclude_nets, passes, snap_90,
+        keep_existing, remove_existing, io_entry_depth, layer_mode,
+        bond_finger, die_keepout, keepout_bodies). Returns the full set."""
+        from ..io.techfile import load_freerouting_rules, save_freerouting_rules
+        cur = load_freerouting_rules(self.library)
+        cur.update(rules)
+        save_freerouting_rules(self.library, cur)
+        return load_freerouting_rules(self.library)
+
+    def _route_layers(self):
+        rr = load_route_rules(self.library)
+        la, lb = rr.get("layer_a"), rr.get("layer_b")
+        if not (isinstance(la, int) and la >= 0 and isinstance(lb, int) and lb >= 0):
+            raise LayoutError("set the two routing layers first (Setup > Route Layers...)")
+        return la, lb
+
+    def _boundary_layer(self):
+        rr = load_route_rules(self.library)
+        b = rr.get("boundary_layer")
+        if isinstance(b, int) and b >= 0:
+            return b
+        # a layer named like a substrate outline
+        for n, lay in enumerate(self.library.layers):
+            nm = (getattr(lay, "name", "") or "").lower()
+            if "substrate" in nm or "outline" in nm or "boundary" in nm:
+                cell = self.library.cells.get(self.current_cell_name)
+                if cell is not None and self._boundary_bbox(cell, n) is not None:
+                    return n
+        return None
+
+    def _rules_with_drc(self, R) -> dict:
+        """The Freerouting rules, tightened to the design's own DRC rules
+        on the routing layers: the clearance is at least the largest
+        MIN_SPACE / MIN_SPACE_BETWEEN, the track widths at least the
+        largest MIN_WIDTH -- so the router can't produce a layout the
+        design's own Tools > DRC then flags."""
+        R = dict(R)
+        try:
+            from ..io.techfile import load_drc_rules
+            drc = load_drc_rules(self.library)
+        except Exception:
+            return R
+        lays = set(self._route_layers())
+        space = width = 0.0
+        for r in drc:
+            d = r if isinstance(r, dict) else getattr(r, "__dict__", {})
+            kind = str(d.get("kind", "")).upper()
+            la_, lb_ = d.get("layer_a"), d.get("layer_b")
+            try:
+                v = float(d.get("value") or 0)
+            except (TypeError, ValueError):
+                continue
+            if kind == "MIN_WIDTH" and la_ in lays:
+                width = max(width, v)
+            elif kind == "MIN_SPACE" and la_ in lays:
+                space = max(space, v)
+            elif kind == "MIN_SPACE_BETWEEN" and la_ in lays and (lb_ in lays or lb_ is None):
+                space = max(space, v)
+        if space > float(R.get("clearance", 0)):
+            R["clearance"] = space
+        for k in ("signal_width", "power_width"):
+            if width > float(R.get(k, 0)):
+                R[k] = width
+        return R
+
+    # --- hybrid router (chip-and-wire) results -----------------------------
+    def _hybrid_layer_map(self, design: dict, layers: Optional[dict] = None) -> dict:
+        """{hybrid layer name or role: HLayout layer} for importing a routed
+        hybrid result. Conductors map in stack order onto Setup's two Route
+        Layers; DIELECTRIC onto the dielectric layer; RESISTOR onto the
+        resistor body layer. Roles: "substrate", "die", "die_pad", "bond",
+        "doc". ``layers`` overrides any entry (numbers or layer names)."""
+        from ..io.techfile import load_bond_rules, load_route_rules
+
+        lib = self.library
+
+        def named(*words, default):
+            for n in range(len(lib.layers)):
+                nm = (lib.layers[n].name or "").lower().replace("_", " ")
+                if any(w in nm for w in words):
+                    return n
+            return default
+
+        rr = load_route_rules(lib)
+        la = rr.get("layer_a") if isinstance(rr.get("layer_a"), int) and rr["layer_a"] >= 0 else 3
+        lb = rr.get("layer_b") if isinstance(rr.get("layer_b"), int) and rr["layer_b"] >= 0 else 5
+        try:
+            diel = int(load_dielectric_rules(lib)["layer"])
+        except Exception:
+            diel = -1
+        if diel < 0:
+            diel = named("dielectric", default=4)
+        try:
+            rg = load_resistor_geometry_rules(lib)
+            res = rg.get("resistor_layer")
+            if not (isinstance(res, int) and res >= 0):
+                inks = [v for v in (rg.get("ink_layers") or {}).values() if isinstance(v, int)]
+                res = inks[0] if inks else 30
+        except Exception:
+            res = 30
+        try:
+            br = load_bond_rules(lib)
+            bond = int(br.get("layer", -1))
+            die_pad = next((int(x) for x in (br.get("die_pad_layers") or []) if int(x) >= 0), -1)
+        except Exception:
+            bond, die_pad = -1, -1
+        if bond < 0:
+            bond = named("wire bond", "bond", default=59)
+        if die_pad < 0:
+            die_pad = named("chip pad", "die pad", default=58)
+
+        out = {
+            "substrate": named("substrate", "alumina", "ceramic", default=57),
+            "die": named("epoxy", "die attach", default=20),
+            "die_pad": die_pad,
+            "bond": bond,
+            "doc": named("document", "doc", default=61),
+        }
+        conductors = [ly.get("name") for ly in (design.get("stack") or {}).get("layers", [])
+                      if ly.get("kind") == "CONDUCTOR"]
+        for i, name in enumerate(conductors):
+            out[name] = la if i == 0 else lb
+        for ly in (design.get("stack") or {}).get("layers", []):
+            if ly.get("kind") == "DIELECTRIC":
+                out[ly.get("name")] = diel
+            elif ly.get("kind") == "RESISTOR":
+                out[ly.get("name")] = res
+        for k, v in (layers or {}).items():
+            out[k] = lib.layers.resolve(v)
+        return out
+
+    def import_routed_hybrid(self, path: str, cell_name: Optional[str] = None, *,
+                             layers: Optional[dict] = None, origin=(0, 0),
+                             overwrite: bool = True, dielectric_fill: bool = True) -> dict:
+        """Bring a chip-and-wire router result (``*.routed.json`` from
+        HybridRouterCli) into the design as one undo step, in its own cell
+        (default: the design's name). Router micrometres are DBU, offset by
+        ``origin``:
+
+        - the substrate outline;
+        - each die as a placed cell (body on the die/epoxy layer, numbered
+          pads on the die-pad layer), labelled with its refdes;
+        - each two-pin component as a placed cell (pins 1 and 2 = the
+          router's A and B on their conductor, body on the resistor layer
+          for a printed resistor, the documentation layer for a chip);
+        - every substrate pad (bond fingers, jumper lands, external pads) as
+          a numbered pad;
+        - routed traces as round-capped paths, each dielectric crossover as
+          a pad on both conductors plus its window on the dielectric, then
+          the dielectric fill (``dielectric_fill``);
+        - every wire bond, jumpers included, as a path on the bond layer at
+          the wire diameter.
+
+        Pad nets become the design's net names; the bond diagram is kept
+        with the design for generate_bond_table() and the assembly drawing.
+        ``layers`` overrides the layer mapping (see _hybrid_layer_map()).
+        Returns counts, the router's stats and its unrouted connections."""
+        from ..io import hybrid_routed as HR
+        from ..io.techfile import load_net_names
+
+        data = HR.load_routed(path)
+        design = data["design"]
+        L = self._hybrid_layer_map(design, layers)
+        lib = self.library
+        ox, oy = int(origin[0]), int(origin[1])
+        name = (cell_name or design.get("name") or "HYBRID").strip().replace(" ", "_")
+
+        def lay(layer_name):
+            if layer_name not in L:
+                raise LayoutError(f"no HLayout layer for hybrid layer {layer_name!r} -- "
+                                  f"pass layers={{'{layer_name}': <layer>}}")
+            return L[layer_name]
+
+        def rect(cell, layer, cx, cy, w, h, pin=""):
+            cell.add_rectangle(layer, round(cx - w / 2), round(cy - h / 2),
+                               round(cx + w / 2), round(cy + h / 2), pin=pin)
+
+        def fresh(cname):
+            if cname in lib.cells:
+                if not overwrite:
+                    raise LayoutError(f"cell {cname!r} already exists; pass overwrite=True")
+                lib.delete_cell(cname)
+            return lib.new_cell(cname)
+
+        stats = {"dies": 0, "components": 0, "pads": 0, "fingers": 0, "jumper_lands": 0,
+                 "traces": 0, "windows": 0, "wires": 0, "jumpers": 0}
+        nets = {}
+        with self._batch():
+            if name in lib.cells:
+                if not overwrite:
+                    raise LayoutError(f"cell {name!r} already exists; pass overwrite=True")
+                lib.delete_cell(name)
+            sub = design.get("substrate") or {}
+            sw, sh = int(sub.get("widthUm", 0)), int(sub.get("heightUm", 0))
+
+            # parts first, so the design cell can place them
+            die_cells = {}
+            for d in design.get("dies", []):
+                cname = "DIE_" + str(d.get("partName") or d.get("refdes")).replace(" ", "_")
+                if cname not in die_cells.values():
+                    c = fresh(cname)
+                    w, h = int(d.get("widthUm", 0)), int(d.get("heightUm", 0))
+                    c.add_rectangle(L["die"], 0, 0, w, h)
+                    for p in d.get("pads", []):
+                        px, py = HR._pt(p.get("position"))
+                        rect(c, L["die_pad"], px, py, int(p.get("widthUm", 0)),
+                             int(p.get("heightUm", 0)), pin=str(p.get("id")))
+                die_cells[d.get("refdes")] = cname
+            comp_cells = {}
+            for comp in design.get("components", []):
+                cname = "CMP_" + str(comp.get("refdes"))
+                c = fresh(cname)
+                bl, bw = int(comp.get("bodyLengthUm", 0)), int(comp.get("bodyWidthUm", 0))
+                body = lay(next((ly.get("name") for ly in design["stack"]["layers"]
+                                 if ly.get("kind") == "RESISTOR"), "doc")) \
+                    if comp.get("kind", "PRINTED_RESISTOR") == "PRINTED_RESISTOR" else L["doc"]
+                if bl > 0 and bw > 0:
+                    rect(c, body, 0, 0, bl, bw)
+                for pin_no, key in (("1", "pinA"), ("2", "pinB")):
+                    p = comp.get(key) or {}
+                    px, py = HR._pt(p.get("position"))
+                    rect(c, lay(p.get("layer")), px, py, int(p.get("widthUm", 0)),
+                         int(p.get("heightUm", 0)), pin=pin_no)
+                    if p.get("net"):
+                        nets[f"{comp.get('refdes')}.{pin_no}"] = p["net"]
+                comp_cells[comp.get("refdes")] = cname
+
+            cell = lib.new_cell(name)
+            if sw > 0 and sh > 0:
+                cell.add_rectangle(L["substrate"], ox, oy, ox + sw, oy + sh)
+            for d in design.get("dies", []):
+                dx, dy = HR._pt(d.get("origin"))
+                self._place_in(cell, die_cells[d.get("refdes")], (ox + dx, oy + dy),
+                               HR.rotation_degrees(d.get("rotation")), str(d.get("refdes")))
+                for p in d.get("pads", []):
+                    if p.get("net"):
+                        nets[f"{d.get('refdes')}.{p.get('id')}"] = p["net"]
+                stats["dies"] += 1
+            for comp in design.get("components", []):
+                cx, cy = HR._pt(comp.get("centre"))
+                self._place_in(cell, comp_cells[comp.get("refdes")], (ox + cx, oy + cy),
+                               HR.rotation_degrees(comp.get("rotation")), str(comp.get("refdes")))
+                stats["components"] += 1
+            for p in design.get("substratePads", []):
+                px, py = HR._pt(p.get("position"))
+                rect(cell, lay(p.get("layer")), ox + px, oy + py, int(p.get("widthUm", 0)),
+                     int(p.get("heightUm", 0)), pin=str(p.get("id")))
+                if p.get("net"):
+                    nets[f"IO.{p.get('id')}"] = p["net"]
+                stats["pads"] += 1
+                role = p.get("role", "BOND_FINGER")
+                if role == "BOND_FINGER":
+                    stats["fingers"] += 1
+                elif role == "JUMPER_LAND":
+                    stats["jumper_lands"] += 1
+            for t in data["traces"]:
+                pts = [(ox + x, oy + y) for x, y in (HR._pt(q) for q in t.get("points", []))]
+                pts = [q for i, q in enumerate(pts) if i == 0 or q != pts[i - 1]]
+                if len(pts) >= 2:
+                    cell.add_path(lay(t.get("layer")), pts, int(t.get("widthUm", 0)), cap="round")
+                    stats["traces"] += 1
+            diel_layers = {ly.get("name") for ly in (design.get("stack") or {}).get("layers", [])
+                           if ly.get("kind") == "DIELECTRIC"}
+            diel = L[next(iter(diel_layers))] if diel_layers else None
+            for wdw in data["windows"]:
+                px, py = HR._pt(wdw.get("position"))
+                pad = int(wdw.get("padUm", 0))
+                for key in ("fromLayer", "toLayer"):
+                    rect(cell, lay(wdw.get(key)), ox + px, oy + py, pad, pad)
+                if diel is not None:
+                    o = int(wdw.get("openingUm", 0))
+                    rect(cell, diel, ox + px, oy + py, o, o)
+                stats["windows"] += 1
+            if diel is not None and sw > 0 and sh > 0:
+                edge = int(((design.get("rules") or {}).get("conductor") or {})
+                           .get("edgeClearanceUm") or 250)
+                cell.add_rectangle(diel, ox + edge, oy + edge, ox + sw - edge, oy + sh - edge)
+            for w in design.get("wires", []):
+                a = HR.endpoint_position(design, w.get("from"))
+                b = HR.endpoint_position(design, w.get("to"))
+                if a is None or b is None or a == b:
+                    continue
+                dia = int((w.get("spec") or {}).get("diameterUm", 25))
+                cell.add_path(L["bond"], [(ox + a[0], oy + a[1]), (ox + b[0], oy + b[1])],
+                              dia, cap="round")
+                stats["wires"] += 1
+                if HR.wire_purpose(w) == "JUMPER":
+                    stats["jumpers"] += 1
+
+            rows = HR.bond_diagram(design)
+            lib.tech_params["bond_diagram"] = json.dumps(rows)
+            lib.tech_params["hybrid_design"] = json.dumps(
+                {"cell": name, "design": design, "layer_map": L, "origin": [ox, oy]})
+            self.current_cell_name = name
+            if nets:
+                merged = dict(load_net_names(lib))
+                merged.update(nets)
+                self.set_net_names(merged)
+            if diel is not None and dielectric_fill:
+                try:
+                    self.generate_dielectric(cell_name=name)
+                except Exception:
+                    pass
+        self._notify()
+        stats.update(cell=name, bond_rows=len(rows), router_stats=data.get("stats") or {},
+                     unrouted=data.get("unrouted") or [],
+                     issues=len(data.get("issues") or []), layer_map=L)
+        return stats
+
+    def _place_in(self, cell, child: str, origin, rotation: float, label: str):
+        """Place ``child`` in ``cell`` (not necessarily the current cell)."""
+        from ..core.shapes import SRef
+        cell.srefs.append(SRef(cell_name=child, origin=(int(origin[0]), int(origin[1])),
+                               rotation=float(rotation), label=label))
+
+    def bond_diagram(self) -> list:
+        """The bond diagram kept with the design by import_routed_hybrid():
+        one dict per wire (hybrid_routed.BOND_COLUMNS), in bonding order."""
+        raw = self.library.tech_params.get("bond_diagram")
+        if not raw:
+            return []
+        cached = getattr(self, "_bond_rows_cache", None)
+        if cached is not None and cached[0] is raw:
+            return cached[1]
+        try:
+            rows = json.loads(raw)
+        except (TypeError, ValueError):
+            return []
+        rows = rows if isinstance(rows, list) else []
+        self._bond_rows_cache = (raw, rows)
+        return rows
+
+    def export_bond_diagram(self, path: str) -> int:
+        """Write the stored bond diagram as CSV (the router's column layout).
+        Returns the number of wires."""
+        from ..io.hybrid_routed import write_bond_diagram_csv
+        rows = self.bond_diagram()
+        if not rows:
+            raise LayoutError("no bond diagram -- import a routed hybrid result first")
+        write_bond_diagram_csv(rows, path)
+        return len(rows)
+
+    def generate_bond_table(self, cell_name: str, layer, *, rows: Optional[list] = None,
+                            origin=(0, 0), row_height: float = 250.0,
+                            col_widths=(600.0, 900.0, 1500.0, 1500.0, 1500.0, 1100.0,
+                                        1000.0, 900.0),
+                            text_height: float = 150.0, line_layer=None,
+                            line_width: float = 20.0, title: Optional[str] = "BOND DIAGRAM",
+                            overwrite: bool = True) -> str:
+        """Draw the bond diagram (default: the stored one) as a table cell --
+        SEQ, WIRE, NET, FIRST BOND, SECOND BOND, LENGTH (MM), WIRE (metal and
+        diameter), LOOP (UM) -- laid out like generate_resistor_table()."""
+        rows = self.bond_diagram() if rows is None else rows
+        if not rows:
+            raise LayoutError("no bond diagram -- import a routed hybrid result first")
+        HEAD = ("SEQ", "WIRE", "NET", "FIRST BOND", "SECOND BOND", "LENGTH (MM)", "WIRE",
+                "LOOP (UM)")
+        if len(col_widths) != len(HEAD):
+            raise LayoutError(f"col_widths must have {len(HEAD)} entries")
+        if text_height * 1.2 >= row_height:
+            raise LayoutError("row_height must be bigger than text_height*1.2")
+        cell_name = (cell_name or "").strip()
+        if not cell_name:
+            raise LayoutError("a cell name is required")
+        if cell_name in self.library.cells:
+            if not overwrite:
+                raise LayoutError(f"{cell_name!r} already exists; pass overwrite=True")
+            self.library.delete_cell(cell_name)
+        t_layer = self.library.layers.resolve(layer)
+        g_layer = self.library.layers.resolve(line_layer) if line_layer is not None else t_layer
+        gw = int(round(line_width))
+        h = int(round(text_height))
+        metal = {"GOLD": "AU", "ALUMINIUM": "AL", "ALUMINUM": "AL", "COPPER": "CU"}
+        ox, oy = origin
+        col_x = [ox]
+        for w in col_widths[:-1]:
+            col_x.append(col_x[-1] + w)
+        top_pad = (row_height + text_height) / 2.0
+        with self._batch():
+            cell = self.library.new_cell(cell_name)
+
+            def put_row(y, texts):
+                for x, w, text in zip(col_x, col_widths, texts):
+                    if text:
+                        est = text_height * 0.6 * len(text)
+                        cell.add_text(t_layer, (round(x + max(0.0, (w - est) / 2.0)), round(y)),
+                                      text, height=h)
+
+            put_row(oy, HEAD)
+            for i, r in enumerate(rows, start=1):
+                mat = metal.get(str(r.get("material", "")).upper(), str(r.get("material", ""))[:2])
+                put_row(oy - i * row_height, (
+                    str(r.get("seq", i)), str(r.get("wire", "")), str(r.get("net") or ""),
+                    str(r.get("first_bond", "")), str(r.get("second_bond", "")),
+                    f"{(r.get('length_um') or 0) / 1000.0:.2f}",
+                    f"{mat} {r.get('diameter_um', '')}",
+                    str(r.get("loop_height_um", "")),
+                ))
+            tops = [oy + top_pad - i * row_height for i in range(len(rows) + 2)]
+            bounds = col_x + [col_x[-1] + col_widths[-1]]
+            left, right = bounds[0], bounds[-1]
+            header_top, bottom = tops[0], tops[-1]
+            top = header_top
+            lines = list(tops)
+            if title:
+                top = header_top + row_height
+                est = text_height * 0.6 * len(title)
+                cell.add_text(t_layer, (round(ox + max(0.0, (right - left - est) / 2.0)),
+                                        round(oy + row_height)), title, height=h)
+                lines = [top] + lines
+            for y in lines:
+                cell.add_path(g_layer, [(round(left), round(y)), (round(right), round(y))],
+                              gw, cap="flush")
+            for x in (left, right):
+                cell.add_path(g_layer, [(round(x), round(top)), (round(x), round(bottom))],
+                              gw, cap="flush")
+            for x in bounds[1:-1]:
+                cell.add_path(g_layer, [(round(x), round(header_top)), (round(x), round(bottom))],
+                              gw, cap="flush")
+        return cell_name
+
+    # --- hybrid editing (Phase 6): bond info, finger moves, resistor resize ----
+    def _hybrid_state(self) -> Optional[dict]:
+        """The routed hybrid kept by import_routed_hybrid(): {"cell", "design",
+        "layer_map", "origin"}; None when the design has none."""
+        raw = self.library.tech_params.get("hybrid_design")
+        if not raw:
+            return None
+        cached = getattr(self, "_hybrid_cache", None)
+        if cached is not None and cached[0] is raw:
+            return cached[1]
+        try:
+            st = json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+        st = st if isinstance(st, dict) and "design" in st else None
+        self._hybrid_cache = (raw, st)
+        return st
+
+    def _save_hybrid_state(self, st: dict) -> None:
+        from ..io import hybrid_routed as HR
+        self.library.tech_params["hybrid_design"] = json.dumps(st)
+        self.library.tech_params["bond_diagram"] = json.dumps(HR.bond_diagram(st["design"]))
+
+    def _hybrid_bond_rules(self) -> dict:
+        """min/max wire length and max departure angle: the routed design's
+        own rules when there is one, else Setup > Wire Bond Rules."""
+        from ..io.techfile import load_bond_rules
+        st = self._hybrid_state()
+        bw = (((st or {}).get("design") or {}).get("rules") or {}).get("bondWire") or {}
+        if bw:
+            return {"min": float(bw.get("minLengthUm") or 500),
+                    "max": float(bw.get("maxLengthUm") or 3000),
+                    "angle": float(bw.get("maxAngleDeg") or 45.0)}
+        br = load_bond_rules(self.library)
+        return {"min": float(br.get("min_length", 300)), "max": float(br.get("max_length", 5000)),
+                "angle": 45.0}
+
+    def _bond_layer(self) -> int:
+        from ..io.techfile import load_bond_rules
+        st = self._hybrid_state()
+        if st and "bond" in (st.get("layer_map") or {}):
+            return int(st["layer_map"]["bond"])
+        return int(load_bond_rules(self.library).get("layer", -1))
+
+    def bond_wire_info(self, point, tol: float = 50.0, cell_name: Optional[str] = None
+                       ) -> Optional[dict]:
+        """The wire bond nearest ``point`` (within ``tol`` DBU) as a dict --
+        ends, length, and, when the bond diagram knows the wire, its id, net,
+        material, diameter, bond type, loop height and departure angles --
+        plus a one-line ``text`` for the status bar. None if no bond is near."""
+        from ..core.shapes import Path as _Path
+        cell = self.library.get_cell(cell_name or self.current_cell_name)
+        layer = self._bond_layer()
+        if layer < 0:
+            return None
+        px, py = float(point[0]), float(point[1])
+        best, best_d = None, float(tol)
+        for sh in cell.shapes:
+            if not (isinstance(sh, _Path) and sh.layer == layer and len(sh.points) >= 2):
+                continue
+            (ax, ay), (bx, by) = sh.points[0], sh.points[-1]
+            vx, vy = bx - ax, by - ay
+            ll = vx * vx + vy * vy
+            t = 0.0 if ll == 0 else max(0.0, min(1.0, ((px - ax) * vx + (py - ay) * vy) / ll))
+            d = math.hypot(px - (ax + t * vx), py - (ay + t * vy))
+            if d <= best_d:
+                best, best_d = sh, d
+        if best is None:
+            return None
+        a, b = tuple(best.points[0]), tuple(best.points[-1])
+        info = {"a": a, "b": b, "length_um": round(math.hypot(b[0] - a[0], b[1] - a[1]))}
+        st = self._hybrid_state()
+        ox, oy = (st or {}).get("origin") or (0, 0)
+        for r in self.bond_diagram():
+            e1 = (r["first_x_um"] + ox, r["first_y_um"] + oy)
+            e2 = (r["second_x_um"] + ox, r["second_y_um"] + oy)
+            if {e1, e2} == {a, b}:
+                info.update(r)
+                break
+        mat = {"GOLD": "Au", "ALUMINIUM": "Al", "ALUMINUM": "Al", "COPPER": "Cu"}
+        parts = []
+        if info.get("wire"):
+            parts.append(f"{info['wire']} {info.get('net') or ''}".strip())
+            parts.append(f"{info['first_bond']} -> {info['second_bond']}")
+        parts.append(f"{info['length_um'] / 1000.0:.2f} mm")
+        if info.get("material"):
+            parts.append(f"{mat.get(str(info['material']).upper(), info['material'])} "
+                         f"{info.get('diameter_um')} um {str(info.get('bond_type', '')).lower()}")
+            parts.append(f"loop {info.get('loop_height_um')} um")
+        angles = [x for x in (info.get("first_angle_deg"), info.get("second_angle_deg"))
+                  if x is not None]
+        if angles:
+            parts.append("angle " + "/".join(f"{x:g}" for x in angles) + " deg")
+        info["text"] = "Bond " + " · ".join(parts)
+        return info
+
+    def _hybrid_pad_at(self, cell, point, tol=0.0):
+        """(shape, pad id) of the numbered substrate pad (a pin-labelled
+        rectangle drawn in ``cell`` itself) under ``point``."""
+        from ..core.shapes import Rectangle
+        px, py = point
+        best = None
+        for sh in cell.shapes:
+            if not (isinstance(sh, Rectangle) and getattr(sh, "pin", "")):
+                continue
+            x0, y0, x1, y1 = sh.bbox()
+            if x0 - tol <= px <= x1 + tol and y0 - tol <= py <= y1 + tol:
+                area = (x1 - x0) * (y1 - y0)
+                if best is None or area < best[2]:
+                    best = (sh, sh.pin, area)
+        return (best[0], best[1]) if best else (None, None)
+
+    def move_bond_finger(self, at, to, cell_name: Optional[str] = None,
+                         dry_run: bool = False, tol: float = 0.0) -> dict:
+        """Move the bond finger (or jumper land) under ``at`` so its centre
+        lands on ``to``, and re-bond: every wire ending on it follows. One
+        undo step. Each moved wire is checked against the bond rules (length
+        min/max, departure angle at the die); ``warnings`` lists what fails,
+        and ``on_trace`` says whether the finger still touches its own
+        printed trace (if not, the net needs re-routing). ``dry_run`` only
+        reports -- the live preview of Edit > Move Bond Finger."""
+        from shapely.geometry import LineString, box
+        from ..core.shapes import Path as _Path
+        from ..io import hybrid_routed as HR
+
+        name = cell_name or self.current_cell_name
+        cell = self.library.get_cell(name)
+        pad, pid = self._hybrid_pad_at(cell, at, tol)
+        if pad is None:
+            raise LayoutError(f"no bond finger at ({at[0]}, {at[1]})")
+        x0, y0, x1, y1 = pad.bbox()
+        cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+        nx, ny = round(float(to[0])), round(float(to[1]))
+        dx, dy = nx - cx, ny - cy
+        layer = self._bond_layer()
+        moved = []
+        for sh in cell.shapes:
+            if isinstance(sh, _Path) and sh.layer == layer and len(sh.points) == 2:
+                for k in (0, 1):
+                    ex, ey = sh.points[k]
+                    if abs(ex - cx) <= 1 and abs(ey - cy) <= 1:
+                        moved.append((sh, k))
+        rules = self._hybrid_bond_rules()
+        st = self._hybrid_state()
+        design = (st or {}).get("design")
+        ox, oy = (st or {}).get("origin") or (0, 0)
+        rows = []
+        if design is not None and st.get("cell") == name:
+            d2 = json.loads(json.dumps(design))
+            for p in d2.get("substratePads", []):
+                if str(p.get("id")) == str(pid):
+                    p["position"] = {"x": nx - ox, "y": ny - oy}
+            rows = [r for r in HR.bond_diagram(d2) if pid in (r["first_bond"], r["second_bond"])]
+        else:
+            d2 = None
+            for sh, k in moved:
+                other = sh.points[1 - k]
+                rows.append({"wire": None, "first_bond": "?", "second_bond": pid,
+                             "length_um": round(math.hypot(other[0] - nx, other[1] - ny)),
+                             "first_angle_deg": None, "second_angle_deg": None})
+        warnings = []
+        for r in rows:
+            label = r.get("wire") or "wire"
+            if r["length_um"] < rules["min"] or r["length_um"] > rules["max"]:
+                warnings.append(f"{label}: length {r['length_um'] / 1000:.2f} mm outside "
+                                f"{rules['min'] / 1000:g}-{rules['max'] / 1000:g} mm")
+            for ang in (r.get("first_angle_deg"), r.get("second_angle_deg")):
+                if ang is not None and ang > rules["angle"] + 1e-9:
+                    warnings.append(f"{label}: {ang:g} deg off the die-edge normal "
+                                    f"(max {rules['angle']:g})")
+        w, h = x1 - x0, y1 - y0
+        new_box = box(nx - w / 2.0, ny - h / 2.0, nx + w / 2.0, ny + h / 2.0)
+        on_trace = any(isinstance(sh, _Path) and sh.layer == pad.layer and len(sh.points) >= 2
+                       and LineString(sh.points).buffer(sh.width / 2.0).intersects(new_box)
+                       for sh in cell.shapes)
+        out = {"pad": pid, "from": (round(cx), round(cy)), "to": (nx, ny),
+               "box": (nx - w / 2.0, ny - h / 2.0, nx + w / 2.0, ny + h / 2.0),
+               "old_box": (x0, y0, x1, y1),
+               "wires": [{"a": tuple(sh.points[1 - k]), "b": (nx, ny)} for sh, k in moved],
+               "rows": rows, "warnings": warnings, "on_trace": on_trace}
+        if dry_run:
+            return out
+        with self._batch():
+            pad.points = [(p[0] + dx, p[1] + dy) for p in pad.points]
+            for sh, k in moved:
+                pts = list(sh.points)
+                pts[k] = (nx, ny)
+                sh.points = pts
+            if d2 is not None:
+                st = dict(st)              # never mutate the cached parse
+                st["design"] = d2
+                self._save_hybrid_state(st)
+        self._notify()
+        return out
+
+    def resistor_at(self, point, cell_name: Optional[str] = None) -> Optional[dict]:
+        """The imported printed resistor whose body or pins contain
+        ``point``: {"refdes", "centre", "rotation"} or None."""
+        st = self._hybrid_state()
+        if not st:
+            return None
+        name = cell_name or self.current_cell_name
+        if st.get("cell") != name:
+            return None
+        ox, oy = st.get("origin") or (0, 0)
+        from ..io import hybrid_routed as HR
+        px, py = point
+        for c in st["design"].get("components", []):
+            if c.get("kind", "PRINTED_RESISTOR") != "PRINTED_RESISTOR":
+                continue
+            cx, cy = HR._pt(c.get("centre"))
+            cx, cy = cx + ox, cy + oy
+            lx, ly = HR.rotate({"R90": "R270", "R270": "R90"}.get(c.get("rotation"), c.get("rotation")),
+                               px - cx, py - cy)
+            half_l = max(int(c.get("bodyLengthUm", 0)),
+                         2 * max(abs(HR._pt((c.get(k) or {}).get("position"))[0])
+                                 + int((c.get(k) or {}).get("widthUm", 0)) / 2.0
+                                 for k in ("pinA", "pinB"))) / 2.0
+            half_w = max(int(c.get("bodyWidthUm", 0)),
+                         max(int((c.get(k) or {}).get("heightUm", 0)) for k in ("pinA", "pinB"))) / 2.0
+            if abs(lx) <= half_l and abs(ly) <= half_w:
+                return {"refdes": c.get("refdes"), "centre": (cx, cy),
+                        "rotation": c.get("rotation", "R0")}
+        return None
+
+    def resistor_info(self, refdes: str) -> dict:
+        """An imported printed resistor: body length and width (um), its
+        squares (L/W), the value from the router file and the sheet
+        resistance that implies (value / squares)."""
+        from ..io.hybrid_routed import parse_ohms
+        st = self._hybrid_state()
+        comp = next((c for c in ((st or {}).get("design") or {}).get("components", [])
+                     if c.get("refdes") == refdes), None)
+        if comp is None:
+            raise LayoutError(f"no imported resistor {refdes!r}")
+        L, W = int(comp.get("bodyLengthUm", 0)), int(comp.get("bodyWidthUm", 0))
+        if L <= 0 or W <= 0:
+            raise LayoutError(f"{refdes} has no body size")
+        sheet = comp.get("sheetOhms")
+        value = parse_ohms(comp.get("value"))
+        if sheet is None and value is not None:
+            sheet = value / (L / W)
+        return {"refdes": refdes, "length_um": L, "width_um": W, "squares": L / W,
+                "value_ohms": value, "sheet_ohms": sheet}
+
+    def resize_resistor(self, refdes: str, length: Optional[float] = None,
+                        width: Optional[float] = None, dry_run: bool = False) -> dict:
+        """Re-size an imported printed resistor's body (um). Its value
+        follows the ink's sheet resistance: R = Rs x L / W, with Rs worked
+        out from the value the router file gave it, so the readout stays
+        consistent across repeated edits. The pins move with the body ends
+        (a length change moves each by half the difference -- the traces on
+        them then need re-routing; ``pins_moved_um`` says by how much). One
+        undo step; ``dry_run`` only reports (the live readout of Edit >
+        Resize Resistor)."""
+        from ..core.shapes import Rectangle
+        from ..io.hybrid_routed import format_ohms
+        info = self.resistor_info(refdes)
+        L0, W0 = info["length_um"], info["width_um"]
+        L = int(round(length)) if length is not None else L0
+        W = int(round(width)) if width is not None else W0
+        if L <= 0 or W <= 0:
+            raise LayoutError("length and width must be positive")
+        rs = info["sheet_ohms"]
+        r_new = rs * L / W if rs is not None else None
+        shift = (L - L0) / 2.0
+        out = {"refdes": refdes, "length_um": L, "width_um": W, "squares": L / W,
+               "sheet_ohms": rs, "value_ohms": r_new, "was_ohms": info["value_ohms"],
+               "pins_moved_um": abs(shift),
+               "text": (f"{refdes}: L {L0 / 1000:.3f}->{L / 1000:.3f} mm, W {W / 1000:.3f} mm, "
+                        f"{L / W:.2f} sq, R = {format_ohms(r_new)} "
+                        f"(was {format_ohms(info['value_ohms'])}, "
+                        f"Rs {format_ohms(rs)}/sq)")}
+        if dry_run:
+            return out
+        st = json.loads(json.dumps(self._hybrid_state()))   # a copy: the parse is cached
+        comp = next(c for c in st["design"]["components"] if c.get("refdes") == refdes)
+        cell = self.library.cells.get("CMP_" + str(refdes))
+        if cell is None:
+            raise LayoutError(f"part cell CMP_{refdes} not found")
+        res_layer = st["layer_map"].get(next((ly.get("name") for ly in
+                                              st["design"]["stack"]["layers"]
+                                              if ly.get("kind") == "RESISTOR"), ""), None)
+        with self._batch():
+            for sh in cell.shapes:
+                if not isinstance(sh, Rectangle):
+                    continue
+                if not getattr(sh, "pin", "") and (res_layer is None or sh.layer == res_layer):
+                    sh.points = [(-L / 2.0, -W / 2.0), (L / 2.0, -W / 2.0),
+                                 (L / 2.0, W / 2.0), (-L / 2.0, W / 2.0)]
+                    sh.points = [(round(x), round(y)) for x, y in sh.points]
+                elif getattr(sh, "pin", "") in ("1", "2") and shift:
+                    x0, _y0, x1, _y1 = sh.bbox()
+                    sgn = -1 if (x0 + x1) / 2.0 < 0 else 1
+                    sh.points = [(round(x + sgn * shift), y) for x, y in sh.points]
+            comp["bodyLengthUm"], comp["bodyWidthUm"] = L, W
+            comp["sheetOhms"] = rs
+            if r_new is not None:
+                comp["value"] = format_ohms(r_new).replace(" ", "")
+            for k, sgn in (("pinA", -1), ("pinB", 1)):
+                p = comp.get(k) or {}
+                pos = p.get("position") or {"x": 0, "y": 0}
+                if shift:
+                    s = -1 if pos.get("x", 0) < 0 else 1
+                    pos["x"] = round(pos.get("x", 0) + s * shift)
+                p["position"] = pos
+            self._save_hybrid_state(st)
+        self._notify()
+        return out
+
+    def _single_layer_route(self, R) -> bool:
+        """Route on the 1st conductor alone? rules layer_mode "single" /
+        "two", or "auto": yes when nothing anywhere is drawn on the 2nd
+        conductor (a one-conductor chip-and-wire hybrid)."""
+        mode = str(R.get("layer_mode", "auto")).lower()
+        if mode.startswith("s") or mode == "1":
+            return True
+        if mode.startswith("t") or mode == "2":
+            return False
+        _la, lb = self._route_layers()
+        return not any(sh.layer == lb for c in self.library.cells.values() for sh in c.shapes)
+
+    def bond_landings(self, cell_name: Optional[str] = None, tol: float = 50.0) -> list:
+        """Where the design's wire bonds land on the SUBSTRATE: one
+        [x, y, pads] per landing point (bonds stitched on the same spot
+        share it), ``pads`` the "REF.PIN" names of the die pads / header
+        pins at the bonds' other ends. A bond with both ends on pads
+        (die to header pin) has no landing; one with neither is a
+        substrate jumper and lands twice, unnamed. Uses Setup > Wire
+        Bond Rules (bond layer, die-pad layers)."""
+        from ..core.netlist import _Flat, _flatten
+        from ..io.techfile import load_bond_rules
+        name = cell_name or self.current_cell_name
+        cell = self.library.get_cell(name)
+        br = load_bond_rules(self.library)
+        try:
+            blay = int(br["layer"])
+        except Exception:
+            return []
+        if blay < 0:
+            return []
+        pad_layers = {int(l) for l in (br.get("die_pad_layers") or []) if int(l) >= 0}
+        flat = _Flat()
+        _flatten(self.library, cell, set(), pad_layers, blay, flat)
+        pads = flat.pads
+        geoms = [p[0] for p in pads]
+        # a pad-layer shape enclosing smaller ones is a die outline, not a pad
+        outline = [any(j != i and geoms[j].area < g.area and g.contains(geoms[j].centroid)
+                       for j in range(len(geoms))) for i, g in enumerate(geoms)]
+
+        def pad_at(land):
+            hit = [i for i, g in enumerate(geoms) if not outline[i] and g.intersects(land)]
+            if not hit:
+                return None
+            i = min(hit, key=lambda k: geoms[k].area)
+            names = [f"{p.ref_des}.{p.pin}" for p in pads[i][2] if p.ref_des and p.pin]
+            return names[0] if names else ""
+
+        out = []
+
+        def add(xy, pad):
+            for L in out:
+                if abs(L[0] - xy[0]) <= tol and abs(L[1] - xy[1]) <= tol:
+                    if pad and pad not in L[2]:
+                        L[2].append(pad)
+                    return
+            out.append([xy[0], xy[1], [pad] if pad else []])
+
+        for (ga, xa), (gb, xb) in flat.bonds:
+            pa, pb = pad_at(ga), pad_at(gb)
+            if pa is not None and pb is None:
+                add(xb, pa)
+            elif pb is not None and pa is None:
+                add(xa, pb)
+            elif pa is None and pb is None:
+                add(xa, "")
+                add(xb, "")
+        return out
+
+    def _bond_nets(self, landings, names) -> list:
+        """[(x, y, net)] for each landing whose pads have exactly one net."""
+        out = []
+        for x, y, pads in landings:
+            nets = {names[p] for p in pads if p in names}
+            if len(nets) == 1:
+                out.append((x, y, nets.pop()))
+        return out
+
+    def _route_keepouts(self, cell, layers, R) -> list:
+        """[(layer, [(x, y), ...])] areas no track may cross: every bare
+        die placed in ``cell`` (a part with shapes on a Wire Bond Rules
+        die-pad layer, grown by die_keepout -- an enclosing header
+        package spanning most of the board excepted) and, with
+        keepout_bodies, the body of every part with two or more pads on
+        the routing layers (the hull of its pads and any resistor ink /
+        glaze, less the pads grown by the clearance)."""
+        from shapely.geometry import MultiPolygon
+        from shapely.ops import unary_union
+        from ..core.maskops import (_compose_transforms, _sref_point_transform,
+                                    _transform_geom, shape_to_shapely)
+        from ..io.techfile import load_bond_rules
+        lib = self.library
+        try:
+            pad_layers = {int(l) for l in (load_bond_rules(lib).get("die_pad_layers") or [])}
+        except Exception:
+            pad_layers = set()
+        ink = set()
+        try:
+            rg = load_resistor_geometry_rules(lib)
+            ink |= {int(v) for v in (rg.get("ink_layers") or {}).values()}
+            for k in ("resistor_layer", "glaze_layer"):
+                if isinstance(rg.get(k), int) and rg[k] >= 0:
+                    ink.add(rg[k])
+        except Exception:
+            pass
+        route = set(int(l) for l in layers)
+        bx = lib.cell_bbox(cell.name)
+        board = max((bx[2] - bx[0]) * (bx[3] - bx[1]), 1) if bx else 1
+        gap = float(R.get("clearance", 100))
+        die_m = float(R.get("die_keepout", 200))
+        out = []
+
+        def collect(name, tr, acc, depth=0):
+            c = lib.cells.get(name)
+            if c is None or depth > 32:
+                return
+            for sh in c.shapes:
+                g = shape_to_shapely(sh)
+                if g is None or g.is_empty:
+                    continue
+                g = _transform_geom(g, tr) if tr is not None else g
+                acc.append((sh.layer, bool(getattr(sh, "pin", "")), g))
+            for r in c.srefs:
+                collect(r.cell_name, _compose_transforms(tr, _sref_point_transform(r)), acc, depth + 1)
+
+        def polys(g):
+            if g.is_empty:
+                return []
+            return list(g.geoms) if isinstance(g, MultiPolygon) else \
+                [p for p in getattr(g, "geoms", [g]) if p.geom_type == "Polygon"]
+
+        for r in cell.srefs:
+            acc = []
+            collect(r.cell_name, _sref_point_transform(r), acc)
+            if not acc:
+                continue
+            allg = unary_union([g for _l, _p, g in acc])
+            b = allg.bounds
+            if (b[2] - b[0]) * (b[3] - b[1]) > 0.4 * board:
+                continue                          # enclosing package / header
+            shapes = []
+            if any(l in pad_layers for l, _p, _g in acc) and not any(l in route for l, _p, _g in acc):
+                shapes = [allg.envelope.buffer(die_m, join_style=2)]
+            elif R.get("keepout_bodies", True):
+                pins = [g for l, p, g in acc if p and l in route]
+                if len(pins) >= 2:
+                    body = unary_union(pins + [g for l, _p, g in acc if l in ink]).convex_hull
+                    rest = body.difference(unary_union(pins).buffer(gap, join_style=2))
+                    shapes = [p for p in polys(rest) if p.area > 0.02 * body.area]
+            for g in shapes:
+                for p in polys(g):
+                    pts = [(round(x), round(y)) for x, y in list(p.exterior.coords)[:-1]]
+                    for lay in layers:
+                        out.append((lay, pts))
+        return out
+
+    def _boundary_bbox(self, cell, layer):
+        """Bounding box of ``layer``'s geometry in ``cell``, placed
+        instances included (a substrate drawn as its own placed cell), or
+        None."""
+        from ..core.maskops import layer_to_shapely_flattened
+        try:
+            g = layer_to_shapely_flattened(self.library, cell, layer)
+        except Exception:
+            return None
+        if g is None or g.is_empty:
+            return None
+        return tuple(float(v) for v in g.bounds)
+
+    def export_dsn(self, path: str, cell_name: Optional[str] = None, **rules):
+        """Write the current (or named) cell as a Specctra DSN for
+        Freerouting: the two Route Layers, every numbered pad, the
+        design's net names (set_net_names()/import_net_names()), the
+        saved Freerouting rules (overridden by ``rules``) and the
+        existing tracks/vias. Returns hlayout.io.specctra.DsnSummary."""
+        from ..io.specctra import export_dsn
+        from ..io.techfile import load_net_names
+        name = cell_name or self.current_cell_name
+        if name is None:
+            raise LayoutError("no current cell; call new_cell()/use_cell() first")
+        names = load_net_names(self.library)
+        if not names:
+            raise LayoutError("the design has no net names -- import them first "
+                              "(NETNAMES IMPORT <file.csv> / Session.import_net_names())")
+        R = self.freerouting_rules()
+        R.update(rules)
+        R = self._rules_with_drc(R)
+        try:
+            diel = int(load_dielectric_rules(self.library)["layer"])
+        except Exception:
+            diel = -1
+        band = None
+        if diel >= 0:
+            # Off the printed dielectric the two conductors aren't insulated
+            # (a crossing would short) and a via has nothing to be a window
+            # in: close the band outside the dielectric's boundary (its
+            # largest datatype-0 shape) to the 2nd conductor, leaving it to
+            # the 1st -- the layer the edge I/O pads are reached on.
+            ins = [sh for sh in self.library.get_cell(name).shapes
+                   if sh.layer == diel and getattr(sh, "datatype", 0) == 0 and hasattr(sh, "bbox")]
+            if ins:
+                b = max(ins, key=lambda sh: (sh.bbox()[2] - sh.bbox()[0]) * (sh.bbox()[3] - sh.bbox()[1]))
+                band = (b.bbox(), self._route_layers()[1])
+        la, lb = self._route_layers()
+        single = self._single_layer_route(R)
+        cell = self.library.get_cell(name)
+        # chip-and-wire: the substrate end of every wire bond is a bond
+        # finger the tracks must reach, on the net of the die pad /
+        # header pin at the bond's other end
+        names = dict(names)
+        finger = float(R.get("bond_finger", 400) or 0)
+        bond_pins = []
+        if finger > 0:
+            for k, (x, y, net) in enumerate(self._bond_nets(self.bond_landings(name), names), 1):
+                bond_pins.append((f"B{k}", x, y, finger))
+                names[f"BOND.B{k}"] = net
+        keepouts = self._route_keepouts(cell, (la,) if single else (la, lb), R)
+        return export_dsn(self.library, name, path, layers=(la, lb), rules=R,
+                          net_names=names, boundary_layer=self._boundary_layer(),
+                          boundary_bbox=(self._boundary_bbox(cell, self._boundary_layer())
+                                         if self._boundary_layer() is not None else None),
+                          dielectric_layer=diel if (diel >= 0 and not single) else None,
+                          edge_band=None if single else band,
+                          write_wiring=not R.get("remove_existing", False),
+                          bond_pins=bond_pins, keepouts=keepouts, single_layer=single)
+
+    def import_ses(self, path: str, cell_name: Optional[str] = None, **rules) -> dict:
+        """Bring a Freerouting session file's routing into the cell as one
+        undo step: each wire becomes a round-capped Path on its conductor
+        layer; each via a drop_via() with its dielectric window (signal or
+        power size from the rules); the dielectric fill is regenerated.
+
+        With rules keep_existing=True (the default) wires/vias that are
+        already in the design are skipped; with keep_existing=False every
+        existing track and via on the two routing layers is replaced by
+        the session's routing. Returns counts, plus the net-completion
+        check: {"wires", "vias", "skipped", "nets", "complete",
+        "unrouted": [net names]}."""
+        from shapely.geometry import LineString, Point
+        from shapely.ops import unary_union
+        from ..core.shapes import Path as _Path
+        from ..io.specctra import VIA_PWR, find_vias, layer_name, parse_ses
+        from ..io.techfile import load_net_names
+
+        name = cell_name or self.current_cell_name
+        if name is None:
+            raise LayoutError("no current cell; call new_cell()/use_cell() first")
+        cell = self.library.get_cell(name)
+        la, lb = self._route_layers()
+        R = self.freerouting_rules()
+        R.update(rules)
+        R = self._rules_with_drc(R)
+        power = {n.upper() for n in R.get("power_nets") or []}
+        ses = parse_ses(path)
+        lmap = {layer_name(la): la, layer_name(lb): lb}
+        try:
+            diel = int(load_dielectric_rules(self.library)["layer"])
+        except Exception:
+            diel = -1
+
+        keep = bool(R.get("keep_existing", True)) and not R.get("remove_existing", False)
+        stats = {"wires": 0, "vias": 0, "skipped": 0}
+        with self._batch():
+            if not keep:
+                # replace: drop existing routing paths and drop_via() vias
+                sites = {(x, y) for x, y, _w in find_vias(cell, (la, lb))}
+                def _is_via_part(s):
+                    if s.layer not in (la, lb, diel) or getattr(s, "pin", "") or not hasattr(s, "bbox"):
+                        return False
+                    x0, y0, x1, y1 = s.bbox()
+                    c = (round((x0 + x1) / 2), round((y0 + y1) / 2))
+                    return c in sites and (x1 - x0) < 5000 and getattr(s, "datatype", 0) == 0
+                cell.shapes[:] = [s for s in cell.shapes
+                                  if not ((isinstance(s, _Path) and s.layer in (la, lb))
+                                          or _is_via_part(s))]
+                # placed via-cell instances go too
+                from ..io.specctra import via_cell_sites
+                gone = {id(r) for _x, _y, _w, r in via_cell_sites(self.library, cell, (la, lb))}
+                cell.srefs[:] = [r for r in cell.srefs if id(r) not in gone]
+            existing = {}
+            for lay in (la, lb):
+                geoms = []
+                for s in cell.shapes:
+                    if s.layer != lay:
+                        continue
+                    if isinstance(s, _Path) and len(s.points) >= 2:
+                        geoms.append(LineString(s.points).buffer(s.width / 2.0))
+                existing[lay] = unary_union(geoms).buffer(2) if geoms else None
+            have_vias = {(x, y) for x, y, _w in find_vias(cell, (la, lb))}
+
+            for _net, lay_name, width, pts in ses.wires:
+                lay = lmap.get(lay_name)
+                if lay is None:
+                    stats["skipped"] += 1
+                    continue
+                pts = [(int(round(x)), int(round(y))) for x, y in pts]
+                pts = [p for i, p in enumerate(pts) if i == 0 or p != pts[i - 1]]
+                if len(pts) < 2:
+                    continue
+                w = int(round(width))
+                # Freerouting necks a track down where it squeezes into a
+                # pad; the design's minimum width still applies, so put it
+                # back (Tools > DRC then shows any clearance it costs)
+                cls_w = int(round(R["power_width"] if str(_net).upper() in power
+                                  else R["signal_width"]))
+                if w < cls_w:
+                    w = cls_w
+                    stats["widened"] = stats.get("widened", 0) + 1
+                if keep and existing[lay] is not None and \
+                        existing[lay].contains(LineString(pts).buffer(max(w / 2.0 - 3, 1))):
+                    stats["skipped"] += 1
+                    continue
+                cell.add_path(lay, pts, w, cap="round")
+                stats["wires"] += 1
+            for _net, ps, x, y in ses.vias:
+                x, y = int(round(x)), int(round(y))
+                if keep and any(abs(x - vx) <= 2 and abs(y - vy) <= 2 for vx, vy in have_vias):
+                    stats["skipped"] += 1
+                    continue
+                pwr = ps == VIA_PWR
+                size = R["power_via"] if pwr else R["signal_via"]
+                window = R["power_via_window"] if pwr else R["signal_via_window"]
+                h = size / 2.0
+                cell.add_rectangle(la, x - h, y - h, x + h, y + h)
+                cell.add_rectangle(lb, x - h, y - h, x + h, y + h)
+                if diel >= 0 and window:
+                    hw = window / 2.0
+                    cell.add_rectangle(diel, x - hw, y - hw, x + hw, y + hw)
+                have_vias.add((x, y))
+                stats["vias"] += 1
+            # chip-and-wire: lay a bond finger wherever a wire bond lands
+            # on the substrate and the copper doesn't already give it one
+            finger = float(R.get("bond_finger", 400) or 0)
+            stats["fingers"] = 0
+            if finger > 0:
+                from shapely.geometry import box as _box
+                from ..core.maskops import layer_to_shapely_flattened
+                cu = layer_to_shapely_flattened(self.library, cell, la)
+                h = finger / 2.0
+                for x, y, _net in self._bond_nets(self.bond_landings(name), load_net_names(self.library)):
+                    sq = _box(x - h, y - h, x + h, y + h)
+                    if cu is not None and not cu.is_empty and cu.buffer(1).contains(sq):
+                        continue
+                    cell.add_rectangle(la, round(x - h), round(y - h), round(x + h), round(y + h))
+                    stats["fingers"] += 1
+            if diel >= 0 and not self._single_layer_route(R) and \
+                    any(s.layer == diel and getattr(s, "datatype", 0) == 0 for s in cell.shapes):
+                try:
+                    self.generate_dielectric(cell_name=name)
+                except Exception:
+                    pass
+        self._notify()
+
+        # completion check, stack-aware (vias join the layers, nothing else)
+        names = load_net_names(self.library)
+        tracer = self.net_tracer(cell_name=name)
+        by_net, count = {}, {}
+        for pad, net in names.items():
+            if pad in tracer.pin_node:
+                by_net.setdefault(net, set()).add(tracer.dsu.find(tracer.pin_node[pad]))
+                count[net] = count.get(net, 0) + 1
+        # wire-bond landings count as pins of their net: a die pad is only
+        # reached through the copper under its bond's substrate end
+        for x, y, net in self._bond_nets(self.bond_landings(name), names):
+            node = tracer.node_at(x, y, prefer_layer=la, tol=float(R.get("bond_finger", 400)) / 2.0)
+            by_net.setdefault(net, set()).add(tracer.dsu.find(node) if node is not None
+                                              else ("open", x, y))
+            count[net] = count.get(net, 0) + 1
+        multi = {n: r for n, r in by_net.items() if count.get(n, 0) > 1}
+        unrouted = sorted(n for n, r in multi.items() if len(r) > 1)
+        stats.update(nets=len(multi), complete=len(multi) - len(unrouted), unrouted=unrouted)
+        return stats
+
+    def freeroute(self, work_dir: Optional[str] = None, cell_name: Optional[str] = None,
+                  router: Optional[str] = None, timeout: Optional[float] = None,
+                  on_line=None, cancel=None, **rules) -> dict:
+        """Export a DSN, run Freerouting headless on it, import the
+        result (import_ses()). ``router`` = the Freerouting launcher or
+        .jar (default: Setup > Freerouting..., else a standard install
+        location). Files go to ``work_dir`` (default: a ``freerouting``
+        folder next to the design, else the temp folder) as
+        <cell>.dsn/.ses. Blocks until done -- the GUI runs the router
+        itself on a worker thread (see run_freerouting()). Returns
+        import_ses()'s dict plus "dsn", "ses" and "log" (last output)."""
+        import tempfile
+        from ..io import app_settings
+        from ..io.specctra import (EXCLUDED_CLASS, find_freerouting, freerouting_command,
+                                   run_freerouting)
+        name = cell_name or self.current_cell_name
+        exe = find_freerouting(router or app_settings.get_setting(app_settings.FREEROUTING_PATH_KEY))
+        if not exe:
+            raise LayoutError("Freerouting not found -- install it (freerouting.app) and set "
+                              "its path in Setup > Freerouting...")
+        work_dir = work_dir or os.path.join(tempfile.gettempdir(), "hlayout_freerouting")
+        os.makedirs(work_dir, exist_ok=True)
+        dsn = os.path.join(work_dir, f"{name}.dsn")
+        ses = os.path.join(work_dir, f"{name}.ses")
+        R = self.freerouting_rules()
+        R.update(rules)
+        self.export_dsn(dsn, cell_name=name, **R)
+        cmd = freerouting_command(exe, dsn, ses, passes=int(R["passes"]),
+                                  exclude_classes=[EXCLUDED_CLASS] if R.get("exclude_nets") else [],
+                                  java=app_settings.get_setting(app_settings.JAVA_PATH_KEY))
+        code, tail = run_freerouting(cmd, ses, timeout=timeout, on_line=on_line, cancel=cancel)
+        if not os.path.exists(ses):
+            raise LayoutError("Freerouting produced no session file (exit code %s):\n%s"
+                              % (code, "\n".join(tail[-12:])))
+        out = self.import_ses(ses, cell_name=name, **R)
+        out.update(dsn=dsn, ses=ses, log=tail)
+        return out
+
+    def net_tracer(self, layers=None, cell_name: Optional[str] = None):
+        """A hlayout.core.nettrace.NetTracer for ``cell_name`` (default:
+        the current cell) over ``layers`` -- default: Setup > Route
+        Layers' two conductors (layer_a/layer_b), falling back to the
+        Tools > Extract Netlist... conductor selection -- with the
+        dielectric fill from Setup > Dielectric Fill Rules... deciding
+        where the two layers actually connect (via windows only)."""
+        from ..core.nettrace import NetTracer
+        name = cell_name or self.current_cell_name
+        if name is None:
+            raise LayoutError("no current cell; call new_cell()/use_cell() first")
+        resolve = self.library.layers.resolve
+        if layers is None:
+            rr = load_route_rules(self.library)
+            layers = [l for l in (rr.get("layer_a"), rr.get("layer_b"))
+                      if isinstance(l, int) and l >= 0]
+            if not layers:
+                layers = list(load_netlist_settings(self.library).get("conductor_layers") or [])
+        layers = [resolve(l) for l in layers]
+        if not layers:
+            raise LayoutError("no conductor layers -- pass layers=... or set Setup > Route Layers...")
+        try:
+            diel = int(load_dielectric_rules(self.library)["layer"])
+        except Exception:
+            diel = -1
+        if diel in layers:
+            diel = -1
+        return NetTracer(self.library, self.library.get_cell(name), layers,
+                         dielectric_layer=diel if diel >= 0 else None,
+                         fill_datatype=self.DIELECTRIC_FILL_DATATYPE)
+
+    def highlight_net(self, target, layers=None, cell_name: Optional[str] = None,
+                      prefer_layer=None, tol: float = 0.0):
+        """Trace the net of ``target`` -- an (x, y) DBU point on a pad or
+        trace, a pad name "RefDes.Pin" (a pad drawn directly in the cell
+        is "IO.<pin>"), or a design net name (see set_net_names() /
+        import_net_names(); every routed fragment of that net is
+        highlighted, joined or not) -- and make it the current highlight
+        (``self.net_highlight``; the GUI draws every piece of copper and
+        every pad on it). Returns the hlayout.core.nettrace.NetTrace,
+        with ``.name`` the design net name ("unnamed" if none is known,
+        "A + B (SHORT)" if pads of two named nets are connected),
+        ``.fragments`` the number of separate copper groups and
+        ``.missing`` the named net's pads not on this copper. Raises
+        LayoutError if there's no pad/track there or no such pad or net.
+        ``tol`` (DBU) lets a click just beside a pad or thin track still
+        pick it (the nearest piece within ``tol`` wins).
+        Highlighting never edits the design. See clear_net_highlight()."""
+        from ..io.techfile import load_net_names
+        tracer = self.net_tracer(layers=layers, cell_name=cell_name)
+        names = load_net_names(self.library)
+        tr = None
+        if isinstance(target, str):
+            key = target.strip()
+            tr = tracer.trace_pin(key)
+            if tr is None:
+                tr = tracer.trace_net_name(key, names)
+            if tr is None:
+                raise LayoutError(f"There is no pad or net called {key!r}. Use a pad name "
+                                  f"like U1.5 (I/O pads are IO.<pin>) or a net name.")
+        else:
+            x, y = target
+            tr = tracer.trace_point(x, y, prefer_layer=prefer_layer, tol=tol)
+            if tr is None:
+                lay = " or ".join(f"{n} ({self.library.layers[n].name})" for n in tracer.layers)
+                raise LayoutError(f"Nothing to highlight at ({x / 1000:.3f}, {y / 1000:.3f}) mm: "
+                                  f"click on a pad or track on layer {lay}.")
+        tr.name_from(names)
+        tr.fragments = len({tracer.dsu.find(tracer.pin_node[p]) for p in tr.pins
+                            if p in tracer.pin_node}) or 1
+        tr.missing = tr.missing_pads(names)
+        tr.cell_name = cell_name or self.current_cell_name
+        tr.pad_boxes = [tracer.pin_box(p) for p in tr.pins if tracer.pin_box(p)]
+        self.net_highlight = tr
+        self._notify()
+        return tr
+
+    def set_net_names(self, pad_nets: dict, replace: bool = True) -> int:
+        """Store the design's intended netlist as {"RefDes.Pin": net}
+        (module I/O pads are "IO.<pin>") -- what Highlight Net names a
+        traced net by. ``replace=False`` merges into the existing map.
+        Returns the number of named pads."""
+        from ..io.techfile import load_net_names, save_net_names
+        cur = {} if replace else load_net_names(self.library)
+        cur.update({str(k): str(v) for k, v in pad_nets.items()})
+        save_net_names(self.library, cur)
+        return len(cur)
+
+    def import_net_names(self, path: str, replace: bool = True) -> int:
+        """Read pad -> net names from a CSV with a header row: either a
+        ``pad`` column ("U1.5") or ``ref``/``refdes`` + ``pin`` columns,
+        plus a ``net`` (or ``net_name``/``signal``) column. Column names
+        are case-insensitive. Returns the number of named pads stored
+        (see set_net_names())."""
+        import csv
+        with open(path, newline="", encoding="utf-8-sig") as f:
+            rows = list(csv.DictReader(f))
+        if not rows:
+            raise LayoutError(f"{path}: no rows")
+        cols = {c.lower().strip(): c for c in rows[0].keys() if c}
+        net_c = next((cols[k] for k in ("net", "net_name", "netname", "signal") if k in cols), None)
+        pad_c = next((cols[k] for k in ("pad", "refdes.pin", "pin_name") if k in cols), None)
+        ref_c = next((cols[k] for k in ("ref", "refdes", "ref_des", "designator") if k in cols), None)
+        pin_c = next((cols[k] for k in ("pin", "pin_number", "pad_number") if k in cols), None)
+        if net_c is None or (pad_c is None and not (ref_c and pin_c)):
+            raise LayoutError(f"{path}: need a 'net' column and 'pad' or 'ref'+'pin' columns "
+                              f"(found {sorted(cols)})")
+        out = {}
+        for r in rows:
+            net = (r.get(net_c) or "").strip()
+            pad = (r.get(pad_c) or "").strip() if pad_c else \
+                f"{(r.get(ref_c) or '').strip()}.{(r.get(pin_c) or '').strip()}"
+            if net and pad and not pad.startswith(".") and not pad.endswith("."):
+                out[pad] = net
+        return self.set_net_names(out, replace=replace)
+
+    def clear_net_highlight(self) -> None:
+        """Remove the Highlight Net overlay."""
+        if getattr(self, "net_highlight", None) is not None:
+            self.net_highlight = None
+            self._notify()
+
+    def find_via(self, point, cell_name: Optional[str] = None,
+                 tol: Optional[float] = None, layers=None):
+        """Locate the via under/nearest ``point`` (an (x, y) DBU
+        coordinate) and return ``(centre, [shapes])``, or ``None``.
+
+        A via is what drop_via() draws: two or more square/round pads on
+        different layers sharing one centre, plus (optionally) the
+        dielectric window on a third layer at that same centre. Matched
+        here as every non-pin Rectangle/Polygon whose bbox is roughly
+        square, whose centre coincides (within 1 DBU) with the others',
+        and that spans at least two layers. ``point`` must lie inside
+        one of the via's shapes, or within ``tol`` (default 0) of its
+        centre. ``layers`` optionally restricts which layers count
+        (e.g. the two conductor layers + the dielectric)."""
+        name = cell_name or self.current_cell_name
+        if name is None:
+            raise LayoutError("no current cell; call new_cell()/use_cell() first")
+        cell = self.library.get_cell(name)
+        allowed = None
+        if layers is not None:
+            allowed = {self.library.layers.resolve(l) for l in layers}
+        px, py = float(point[0]), float(point[1])
+        reach = float(tol or 0)
+
+        groups = {}
+        for s in cell.shapes:
+            if not isinstance(s, (Rectangle, Polygon)) or getattr(s, "pin", ""):
+                continue
+            if allowed is not None and s.layer not in allowed:
+                continue
+            x1, y1, x2, y2 = s.bbox()
+            w, h = x2 - x1, y2 - y1
+            if w <= 0 or h <= 0 or abs(w - h) > max(2, 0.02 * max(w, h)):
+                continue
+            key = (round((x1 + x2) / 2), round((y1 + y2) / 2))
+            groups.setdefault(key, []).append(s)
+
+        best, best_d = None, None
+        for (cx, cy), shapes in groups.items():
+            if len({s.layer for s in shapes}) < 2:
+                continue
+            d = math.hypot(px - cx, py - cy)
+            inside = any(x1 <= px <= x2 and y1 <= py <= y2
+                         for x1, y1, x2, y2 in (s.bbox() for s in shapes))
+            if not inside and d > reach:
+                continue
+            if best is None or d < best_d:
+                best, best_d = ((cx, cy), shapes), d
+        return best
+
+    def delete_via(self, point, cell_name: Optional[str] = None,
+                   tol: Optional[float] = None, layers=None):
+        """Remove the via at/nearest ``point`` -- both conductor pads and
+        the dielectric window (see find_via()). Tracks that end on it are
+        left alone. Raises LayoutError if no via is there. One undo step;
+        returns ``(centre, [layers removed])``."""
+        name = cell_name or self.current_cell_name
+        found = self.find_via(point, cell_name=name, tol=tol, layers=layers)
+        if found is None:
+            raise LayoutError(f"no via at {tuple(point)}")
+        centre, shapes = found
+        doomed = {id(s) for s in shapes}
+        cell = self.library.get_cell(name)
+        with self._batch():
+            cell.shapes[:] = [s for s in cell.shapes if id(s) not in doomed]
+        self._notify()
+        return centre, sorted(s.layer for s in shapes)
 
     def auto_route(self, a, b, layer=None, grid: int = 100, width: int = 20,
                    clearance: Optional[float] = None, margin: Optional[float] = None,

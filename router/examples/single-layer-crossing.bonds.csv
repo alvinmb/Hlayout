@@ -1,0 +1,8 @@
+seq,wire,net,purpose,first_bond,first_x_um,first_y_um,second_bond,second_x_um,second_y_um,material,diameter_um,bond_type,loop_height_um,length_um,first_angle_deg,second_angle_deg,fixed
+1,W1,A,DIE_BOND,U1.1,2550,1850,F1,2550,1200,GOLD,25,BALL_WEDGE,150,650,0.0,,false
+2,W2,B,DIE_BOND,U1.2,3450,1850,F2,3450,1200,GOLD,25,BALL_WEDGE,150,650,0.0,,false
+3,W3,VCC,DIE_BOND,U1.3,3650,2950,F3,4300,2950,GOLD,25,BALL_WEDGE,150,650,0.0,,false
+4,W4,GND,DIE_BOND,U1.4,2350,2950,F4,1700,2950,GOLD,25,BALL_WEDGE,150,650,0.0,,false
+5,WJ_1,A,JUMPER,JL_1A,2962,562,JL_1B,3937,562,GOLD,25,BALL_WEDGE,150,975,,,false
+6,WJ_2,B,JUMPER,JL_2A,3412,637,JL_2B,2062,637,GOLD,25,BALL_WEDGE,150,1350,,,false
+7,WJ_3,B,JUMPER,JL_3A,937,2512,JL_3B,1837,3412,GOLD,25,BALL_WEDGE,150,1273,,,false

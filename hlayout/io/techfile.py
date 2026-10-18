@@ -63,10 +63,21 @@ def techfile_data(library: Library) -> dict:
     }
 
 
+#: tech_params entries that belong to ONE design, not to the process:
+#: kept in the design's own sidecar, but never written to a technology
+#: file, and never taken from one -- otherwise a technology file saved
+#: from a design with resistors hands those resistors (and a resistor
+#: table on its assembly drawing) to every new design started from it.
+DESIGN_ONLY_PARAM_KEYS = ("resistor_list",)
+
+
 def save_techfile(library: Library, path: str) -> None:
     """Write library's layer stack + tech_params to a technology file
-    (JSON) at path."""
+    (JSON) at path -- minus the design-only entries
+    (DESIGN_ONLY_PARAM_KEYS, e.g. the Resistor Designer's resistor list)."""
     data = techfile_data(library)
+    data["params"] = {k: v for k, v in data["params"].items()
+                      if k not in DESIGN_ONLY_PARAM_KEYS}
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, sort_keys=False)
         f.write("\n")
@@ -120,7 +131,17 @@ def load_and_apply_techfile(library: Library, path: str) -> dict:
     what File > Load Technology File.../TECH LOAD use. Returns the
     parsed payload in case a caller wants to report what was loaded."""
     data = load_techfile(path)
+    # the design keeps its OWN design-only entries (its resistor list):
+    # a technology file never supplies or replaces them
+    keep = {k: library.tech_params[k] for k in DESIGN_ONLY_PARAM_KEYS
+            if k in library.tech_params}
+    params = data.get("params")
+    if isinstance(params, dict):
+        data = dict(data)
+        data["params"] = {k: v for k, v in params.items()
+                          if k not in DESIGN_ONLY_PARAM_KEYS}
     apply_techfile(library, data)
+    library.tech_params.update(keep)
     return data
 
 
@@ -826,6 +847,92 @@ def save_netlist_settings(library: Library, settings: dict) -> None:
     })
 
 
+# --- net names --------------------------------------------------------------
+#
+# The design's intended netlist as a plain pad -> net-name map,
+# {"U1.5": "S2", "IO.37": "M", ...} -- what Highlight Net reports a traced
+# net as (and how it finds a net by name). Pad names are RefDes.Pin as
+# hlayout.core.nettrace names them (a pad drawn directly in the traced
+# cell, e.g. a module I/O pad, is IO.<pin>). Imported from a CSV with
+# Session.import_net_names() / NETNAMES IMPORT, or set from a script with
+# Session.set_net_names(). Persisted with the design like everything else
+# in tech_params.
+
+NET_NAMES_KEY = "net_names"
+
+
+def load_net_names(library: Library) -> dict:
+    raw = library.tech_params.get(NET_NAMES_KEY)
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(k): str(v) for k, v in data.items() if str(v).strip()}
+
+
+def save_net_names(library: Library, names: dict) -> None:
+    library.tech_params[NET_NAMES_KEY] = json.dumps(
+        {str(k): str(v) for k, v in (names or {}).items() if str(v).strip()},
+        sort_keys=True)
+
+
+# --- Freerouting (autorouter) rules ---------------------------------------
+#
+# What Tools > Autoroute (Freerouting)... / Session.freeroute() hand the
+# router, per design: track widths, clearance, via sizes and their
+# dielectric windows (all DBU/um), which nets are power, which to leave
+# alone, max passes, 90-degree routing, and whether existing tracks are
+# kept exactly as drawn. Defaults: hlayout.io.specctra.DEFAULT_RULES.
+
+FREEROUTING_RULES_KEY = "freerouting_rules"
+
+
+def load_freerouting_rules(library: Library) -> dict:
+    from .specctra import DEFAULT_RULES
+    out = {k: (list(v) if isinstance(v, list) else v) for k, v in DEFAULT_RULES.items()}
+    raw = library.tech_params.get(FREEROUTING_RULES_KEY)
+    if not raw:
+        return out
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return out
+    if isinstance(data, dict):
+        for k, v in data.items():
+            if k not in out:
+                continue
+            try:
+                if isinstance(out[k], bool):
+                    out[k] = bool(v)
+                elif isinstance(out[k], str):
+                    out[k] = str(v)
+                elif isinstance(out[k], list):
+                    out[k] = [str(x).strip() for x in (v if isinstance(v, list) else str(v).split(","))
+                              if str(x).strip()]
+                else:
+                    out[k] = type(out[k])(float(v)) if isinstance(out[k], int) else float(v)
+            except (TypeError, ValueError):
+                pass
+    return out
+
+
+def save_freerouting_rules(library: Library, rules: dict) -> None:
+    library.tech_params[FREEROUTING_RULES_KEY] = json.dumps(load_freerouting_rules_from(rules))
+
+
+def load_freerouting_rules_from(rules: dict) -> dict:
+    """``rules`` normalised onto DEFAULT_RULES' keys and types."""
+    from .specctra import DEFAULT_RULES
+    tmp = Library("_")
+    tmp.tech_params[FREEROUTING_RULES_KEY] = json.dumps(
+        {k: v for k, v in (rules or {}).items() if k in DEFAULT_RULES})
+    return load_freerouting_rules(tmp)
+
+
 # --- Design Rule Check (DRC) rules ------------------------------------------
 #
 # Unlike the fixed-shape dicts above, a set of DRC rules is a variable-
@@ -1187,13 +1294,21 @@ def default_layer_thickness(library: Library) -> dict:
 
     # every other layer that actually carries filled, visible geometry
     drawn = set()
+    pinned = set()
     for cell in library.cells.values():
         for sh in cell.shapes:
             drawn.add(sh.layer)
+            if getattr(sh, "pin", ""):
+                pinned.add(sh.layer)
+    # A layer carrying numbered pads (pin set) is real metal even when
+    # it's only drawn outline-style on screen -- e.g. a package
+    # footprint's "Frontside Pad" layer -- so it gets a film too, or the
+    # 3D view silently drops every component's pads.
     filmable = sorted(
         n for n in drawn
         if 0 <= n < len(library.layers)
-        and library.layers[n].visible and library.layers[n].fill
+        and library.layers[n].visible
+        and (library.layers[n].fill or n in pinned)
     )
     for n in filmable:
         out.setdefault(str(n), _GENERIC_FILM_UM)
@@ -1243,7 +1358,8 @@ def save_layer_thickness(library: Library, thickness: dict) -> None:
 # extrusion of a fixed body height ("extrude") or by substituting an
 # external STEP/IGES model FreeCAD imports and positions ("model").
 # {cell_name: {"mode","height_um","z_offset_um","model_path","rotation_deg",
-#  "z_ref"}} -- z_ref: see COMPONENT_Z_REFS below.
+#  "z_ref"[, "origin_um"]}} -- z_ref: see COMPONENT_Z_REFS below; origin_um
+#  (optional [x, y]) is where a "model"'s own origin sits in the cell.
 # rotation_deg (degrees, default 0.0) is an extra correction applied ON
 # TOP of the placement's own rotation in "model" mode -- see
 # hlayout.io.freecadio's model-substitution block and
@@ -1286,6 +1402,9 @@ def load_component_models(library: Library) -> dict:
                      "model_path": str(d.get("model_path", "") or ""),
                      "rotation_deg": float(d.get("rotation_deg", 0.0)),
                      "z_ref": _z_ref(d.get("z_ref"))}
+            org = _origin_um(d.get("origin_um"))
+            if org is not None:
+                entry["origin_um"] = org
             out[str(name)] = entry
     return out
 
@@ -1304,7 +1423,21 @@ def save_component_models(library: Library, models: dict) -> None:
             "rotation_deg": float(d.get("rotation_deg", 0.0)),
             "z_ref": _z_ref(d.get("z_ref")),
         }
+        org = _origin_um(d.get("origin_um"))
+        if org is not None:
+            payload[str(name)]["origin_um"] = org
     library.tech_params[COMPONENT_MODELS_KEY] = json.dumps(payload)
+
+
+def _origin_um(v):
+    """Optional "origin_um": [x, y] -- cell-local point (um) where a
+    "model" entry's own (0, 0) is placed (a centred LCC/PLCC model's pad
+    ring centre). None when absent/malformed or at the cell origin."""
+    try:
+        x, y = float(v[0]), float(v[1])
+    except (TypeError, ValueError, IndexError, KeyError):
+        return None
+    return [x, y] if (x or y) else None
 
 
 #: Where a component's z=0 goes in the 3D export: "surface" -- the top

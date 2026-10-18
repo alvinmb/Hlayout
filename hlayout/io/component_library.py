@@ -7,7 +7,9 @@ its own STEP file: a few standard EIA ceramic chip-capacitor case
 sizes, a 20-pin sealed metal/ceramic hybrid flatpack, and the common
 SOT (small-outline-transistor) gull-wing package family -- both the
 3-lead transistor/diode outlines (SOT-23/323/89/223) and the narrow-
-body SOIC-style ICs (SOT-14/16/18).
+body SOIC-style ICs (SOT-14/16/18) -- and the square chip-carrier
+families: ceramic leadless LCCC (LCC20..LCC84) and plastic J-lead PLCC
+(PLCC20..PLCC84), at 20/28/32/44/52/68/84 pins.
 
 The point is to hand File > Export to FreeCAD (3D Macro).../
 Session.export_freecad()'s per-cell ``component_models`` substitution
@@ -32,7 +34,10 @@ placed on) -- a capacitor's body rises from Z=0 to its height, and the
 20-pin package's leads have their feet AT Z=0 so it sits flat. A 2D GDS
 cell and a 3D STEP model sharing the same name therefore substitute
 correctly in File > Export to FreeCAD: the 3D body lands exactly on
-the real footprint instead of offset by the body size. Every
+the real footprint instead of offset by the body size. (Exception:
+the LCC/PLCC models are centred on (0, 0) -- see DEFAULT_LCC_PACKAGES
+-- and component_match supplies the footprint's own centre as an
+origin offset when it substitutes one.) Every
 part is exported as a Part compound of simple boxes (not a single
 boolean-fused solid) -- fusing dozens of coincident-face boxes is a
 common source of flaky FreeCAD boolean failures, and a coarse
@@ -156,6 +161,59 @@ DEFAULT_SOT_PACKAGES = {
                    leads_neg_y=_soic_leads(9, 1.27), leads_pos_y=_soic_leads(9, 1.27)),
 }
 
+#: JEDEC pin pitch shared by every LCC/PLCC below (0.050" BSC).
+LCC_PITCH_MM = 1.27
+
+
+def _lcc_body_mm(pins_per_side, end_margin_mm):
+    """Square LCC/PLCC body edge from its pins-per-side: the lead span
+    ((k - 1) * pitch) plus a fixed end margin. 3.81 mm reproduces the
+    JEDEC MS-004 / TI FK ceramic LCCC bodies (20: 8.89, 28: 11.43,
+    44: 16.51, 52: 19.05, 68: 24.13, 84: 29.21 mm); 3.89 mm reproduces
+    the JEDEC MS-018 plastic PLCC bodies (20: 8.97, 28: 11.51,
+    44: 16.59, 52: 19.13, 68: 24.21, 84: 29.29 mm)."""
+    return round((pins_per_side - 1) * LCC_PITCH_MM + end_margin_mm, 3)
+
+
+#: The pin counts both families are built in -- the same set as the
+#: shipped lIBRARYS/lcc_packages.gds footprints (LCC_LCC<n> /
+#: LCC_PLCC<n>). 32 is modelled square (8 per side) like those
+#: footprints, not as JEDEC's rectangular 7+9 outline.
+LCC_PIN_COUNTS = (20, 28, 32, 44, 52, 68, 84)
+
+
+def _lcc_height_mm(n):
+    return 1.9 if n <= 32 else (2.0 if n <= 52 else 2.3)
+
+
+#: Ceramic leadless chip carriers (LCCC, JEDEC MS-004 / TI "FK"):
+#: kwargs for the generated macro's make_lcc(). Bottom terminations with
+#: castellations up the body side, a gold seal-ring lid and a pin-1 dot.
+#: Pin 1 is at the centre of the +Y (top) edge, numbering counter-
+#: clockwise -- the TI FK convention lcc_packages.gds is numbered in.
+#: Unlike the caps/SOT parts, LCC models are CENTRED on (0, 0): the
+#: footprints they substitute for are centred square pad rings, and
+#: component_match passes the footprint's own ring centre as the
+#: placement offset, so either origin convention lands correctly.
+DEFAULT_LCC_PACKAGES = {
+    f"LCC{n}": dict(B=_lcc_body_mm(n // 4, 3.81), H=_lcc_height_mm(n),
+                    n_side=n // 4, pitch=LCC_PITCH_MM)
+    for n in LCC_PIN_COUNTS
+}
+
+#: Plastic J-lead chip carriers (PLCC, JEDEC MS-018): kwargs for
+#: make_plcc(). B = moulded body, E = overall across the J-leads
+#: (body + 0.94 mm, the JEDEC D - D1), H = seated height. Same pin-1 /
+#: numbering / centred-origin conventions as DEFAULT_LCC_PACKAGES.
+DEFAULT_PLCC_PACKAGES = {
+    f"PLCC{n}": dict(B=_lcc_body_mm(n // 4, 3.89),
+                     E=round(_lcc_body_mm(n // 4, 3.89) + 0.94, 3),
+                     H=4.37 if n <= 52 else 4.57,
+                     n_side=n // 4, pitch=LCC_PITCH_MM)
+    for n in LCC_PIN_COUNTS
+}
+
+
 _GEOMETRY_FUNCTIONS = '''\
 def make_ceramic_cap(L, W, H, term_len, over=0.02):
     """A rectangular ceramic chip capacitor body with two metallised end
@@ -270,6 +328,103 @@ def make_sot(L, W, H, lead_t, lead_out, lead_foot,
     return shape
 
 
+def _side_positions(n_side, pitch):
+    span = (n_side - 1) * pitch
+    return [-span / 2.0 + i * pitch for i in range(n_side)]
+
+
+def _four_sides(side_shapes):
+    """side_shapes: shapes built for the +Y edge; returns them plus
+    copies rotated 90/180/270 degrees about the Z axis through (0, 0)."""
+    out = list(side_shapes)
+    for ang in (90, 180, 270):
+        for s in side_shapes:
+            c = s.copy()
+            c.rotate(V(0, 0, 0), V(0, 0, 1), ang)
+            out.append(c)
+    return out
+
+
+def _pin1_x(n_side, pitch):
+    # pin 1 is the top-edge terminal at (or just left of) centre --
+    # counter-clockwise numbering starting from the top centre
+    return 0.0 if n_side % 2 else -pitch / 2.0
+
+
+def make_lcc(B, H, n_side, pitch=1.27, term_w=0.64, term_len=1.15,
+             term_t=0.05, lid_inset=1.27, lid_t=0.08, cast_r=0.3, plate_t=0.03):
+    """A ceramic leadless chip carrier (LCCC): a B x B body, H tall
+    (seated), n_side castellated terminals per edge at ``pitch``.
+    CENTRED on (0, 0) in X/Y, sitting on Z=0.
+
+    Every terminal is a castellation: a half-round notch of radius
+    ``cast_r`` cut into the body edge, full height of the ceramic,
+    lined with ``plate_t`` of metal, which joins a ``term_w`` x
+    ``term_len`` termination pad on the underside (Z=0..term_t, notched
+    the same way so the plating runs straight down into it)."""
+    zb = term_t
+    hb = H - term_t - lid_t                       # ceramic base height
+    xs = _side_positions(n_side, pitch)
+
+    def _side(make):
+        return _four_sides([make(x) for x in xs])
+
+    # ceramic body with every castellation notch cut out in one boolean
+    body = Part.makeBox(B, B, hb, V(-B / 2.0, -B / 2.0, zb))
+    notches = _side(lambda x: Part.makeCylinder(cast_r, hb + 0.2, V(x, B / 2.0, zb - 0.1)))
+    body = body.cut(Part.makeCompound(notches))
+    shapes = [body]
+
+    lid = B - 2 * lid_inset
+    if lid > 0:
+        shapes.append(Part.makeBox(lid, lid, lid_t, V(-lid / 2.0, -lid / 2.0, H - lid_t)))
+
+    def plating(x):
+        ring = Part.makeCylinder(cast_r + plate_t, hb, V(x, B / 2.0, zb)).cut(
+            Part.makeCylinder(cast_r, hb, V(x, B / 2.0, zb)))
+        inside = Part.makeBox(2 * (cast_r + plate_t), cast_r + plate_t, hb,
+                              V(x - cast_r - plate_t, B / 2.0 - cast_r - plate_t, zb))
+        return ring.common(inside)                # the half lining the notch
+
+    def pad(x):
+        p = Part.makeBox(term_w, term_len, term_t, V(x - term_w / 2.0, B / 2.0 - term_len, 0))
+        return p.cut(Part.makeCylinder(cast_r, term_t, V(x, B / 2.0, 0)))
+
+    shapes.extend(_side(plating))
+    shapes.extend(_side(pad))
+    rim = min(lid_inset, 1.0) / 2.0
+    shapes.append(Part.makeCylinder(min(0.3, rim), 0.03,
+                                    V(_pin1_x(n_side, pitch), B / 2.0 - rim, H - lid_t)))
+    return Part.makeCompound(shapes)
+
+
+def make_plcc(B, E, H, n_side, pitch=1.27, lead_w=0.43, lead_t=0.2,
+              standoff=0.6, tuck=0.5):
+    """A plastic J-lead chip carrier (PLCC): a B x B moulded body from
+    Z=standoff to H, n_side J-leads per edge whose outer faces lie on
+    the E x E overall outline and whose curled feet rest on Z=0 tucked
+    ``tuck`` under the body edge. CENTRED on (0, 0) in X/Y."""
+    shapes = [Part.makeBox(B, B, H - standoff, V(-B / 2.0, -B / 2.0, standoff))]
+    shoulder = standoff + (H - standoff) * 0.4
+    y_out = E / 2.0
+    side = []
+    for x in _side_positions(n_side, pitch):
+        x0 = x - lead_w / 2.0
+        # shoulder: out of the body wall to the overall outline
+        side.append(Part.makeBox(lead_w, y_out - B / 2.0, lead_t,
+                                 V(x0, B / 2.0, shoulder - lead_t)))
+        # outer vertical run down to the board
+        side.append(Part.makeBox(lead_w, lead_t, shoulder,
+                                 V(x0, y_out - lead_t, 0)))
+        # J foot curling back under the body
+        side.append(Part.makeBox(lead_w, y_out - (B / 2.0 - tuck), lead_t,
+                                 V(x0, B / 2.0 - tuck, 0)))
+    shapes.extend(_four_sides(side))
+    shapes.append(Part.makeCylinder(0.5, 0.03,
+                                    V(_pin1_x(n_side, pitch), B / 2.0 - 1.2, H)))
+    return Part.makeCompound(shapes)
+
+
 def export(shape, name, out_dir):
     path = os.path.join(out_dir, name + ".step")
     if os.path.isfile(path):
@@ -286,6 +441,8 @@ def write_component_library_macro(
     ceramic_caps: Optional[List[Tuple[str, float, float, float, float]]] = None,
     pkg20: Optional[dict] = None,
     sot_packages: Optional[dict] = None,
+    lcc_packages: Optional[dict] = None,
+    plcc_packages: Optional[dict] = None,
 ) -> str:
     """Write a ``.FCMacro`` at ``path`` (defaults to
     ``<out_dir>/build_component_library.FCMacro``) that, run inside
@@ -313,19 +470,29 @@ def write_component_library_macro(
     macro never overwrites a ``<name>.step`` that already exists in
     ``out_dir`` (see this module's own docstring) -- safe to re-run
     after adding a new package, or after hand-replacing one file with
-    a real vendor model."""
+    a real vendor model.
+
+    ``lcc_packages``/``plcc_packages`` are ``{name: kwargs}`` dicts of
+    make_lcc()/make_plcc() calls (defaults: DEFAULT_LCC_PACKAGES /
+    DEFAULT_PLCC_PACKAGES -- the ceramic LCCC and plastic PLCC families
+    at 20/28/32/44/52/68/84 pins); pass ``{}``/``False`` to skip one."""
     if path is None:
         path = os.path.join(out_dir, "build_component_library.FCMacro")
     caps = DEFAULT_CERAMIC_CAPS if ceramic_caps is None else ceramic_caps
     pkg = None if pkg20 is False else {**DEFAULT_PKG20, **(pkg20 or {})}
     sots = DEFAULT_SOT_PACKAGES if sot_packages is None else (
         {} if sot_packages is False else sot_packages)
+    lccs = DEFAULT_LCC_PACKAGES if lcc_packages is None else (
+        {} if lcc_packages is False else lcc_packages)
+    plccs = DEFAULT_PLCC_PACKAGES if plcc_packages is None else (
+        {} if plcc_packages is False else plcc_packages)
 
     lines = [
         '"""HLayout-generated FreeCAD macro: builds a small 3D component',
         "library (generic ceramic chip capacitors, a 20-pin sealed",
-        "metal/ceramic hybrid flatpack, and the SOT small-outline-",
-        "transistor gull-wing package family) and exports each as its",
+        "metal/ceramic hybrid flatpack, the SOT small-outline-",
+        "transistor gull-wing package family, and the ceramic LCC /",
+        "plastic PLCC chip-carrier families) and exports each as its",
         "own STEP file, ready to be referenced from Setup > Technology",
         'Properties..."s Resistors/component_models "model" mode -- see',
         'hlayout.io.component_library.write_component_library_macro().',
@@ -364,6 +531,14 @@ def write_component_library_macro(
     for name, kwargs in sots.items():
         args = ", ".join(f"{k}={v!r}" for k, v in kwargs.items())
         lines.append(f"export(make_sot({args}), {name!r}, OUT_DIR)")
+
+    for name, kwargs in lccs.items():
+        args = ", ".join(f"{k}={v!r}" for k, v in kwargs.items())
+        lines.append(f"export(make_lcc({args}), {name!r}, OUT_DIR)")
+
+    for name, kwargs in plccs.items():
+        args = ", ".join(f"{k}={v!r}" for k, v in kwargs.items())
+        lines.append(f"export(make_plcc({args}), {name!r}, OUT_DIR)")
 
     lines.append('App.Console.PrintMessage("HLayout: component library build complete.\\n")')
 

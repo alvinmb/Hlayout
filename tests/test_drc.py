@@ -392,3 +392,12 @@ def test_load_drc_rules_ignores_malformed_entries():
     s = _fresh_session()
     s.library.tech_params["drc_rules"] = '[{"kind": "MIN_WIDTH"}, "not a dict", 42]'
     assert load_drc_rules(s.library) == []
+
+
+def test_min_width_passes_tracks_at_the_limit_and_round_caps_but_flags_a_neck():
+    rule = DrcRule(kind="MIN_WIDTH", layer_a=3, value=300)
+    for width, bad in ((300, False), (302, False), (310, False), (224, True)):
+        s = _fresh_session()
+        s.cell.add_path(3, [(0, 0), (5000, 0), (5000, 5000), (9000, 9000)], width, cap="round")
+        v = check_rule(s.library, s.cell, rule)
+        assert bool(v) == bad, width

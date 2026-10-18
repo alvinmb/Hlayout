@@ -92,7 +92,7 @@ class LayoutCanvas(tk.Canvas):
         self._font_cache = {}
 
         # --- interactive drawing state ---------------------------------
-        self.draw_mode = "select"  # select | rect | poly | path | text | sref | aref | circle | zoomwin | route | measure | pin_number | cell_origin | auto_route | wire_bond | del_bond | move_bond | chip_pins
+        self.draw_mode = "select"  # select | rect | poly | path | text | sref | aref | circle | zoomwin | route | measure | pin_number | cell_origin | auto_route | wire_bond | del_bond | del_via | hilite | move_bond | chip_pins
         # Create Cell from Selection: after the name is entered the tool
         # enters "cell_origin" mode -- the next canvas click is the point
         # that becomes the new cell's local (0, 0). The selection is
@@ -528,7 +528,13 @@ class LayoutCanvas(tk.Canvas):
             "cell_origin": self._cell_origin_hint(),
             "wire_bond": self._wire_bond_hint(),
             "del_bond": self._del_bond_hint(),
+            "del_via": self._del_via_hint(),
+            "hilite": ("Highlight Net: click a pad or trace -- every pad and track "
+                       "on its net is highlighted (layers connect only through via "
+                       "windows). Click another to switch; Esc stops"),
             "move_bond": self._move_bond_hint(),
+            "move_finger": self._move_finger_hint(),
+            "resize_res": self._resize_res_hint(),
             "auto_route": self._auto_route_hint(),
             "chip_pins": self._chip_pins_hint(),
         }
@@ -553,6 +559,11 @@ class LayoutCanvas(tk.Canvas):
         return ("Delete Wire Bond: click on (or near) a bond wire to remove it "
                 "-- connector and both end discs. Stays armed; Esc stops")
 
+    def _del_via_hint(self):
+        return ("Delete Via: click on a via to remove it -- its pads on both "
+                "conductor layers and the dielectric window. Tracks are left. "
+                "Stays armed; Esc stops")
+
     def _move_bond_hint(self):
         if not self._pending_points:
             return ("Move Wire Bond: click near the END of a bond wire you want "
@@ -561,6 +572,20 @@ class LayoutCanvas(tk.Canvas):
         return ("Move Wire Bond: end grabbed -- now click its new position. The "
                 "new span must stay within min/max and the bond still can't "
                 "cross another. Esc stops")
+
+    def _move_finger_hint(self):
+        if not self._pending_points:
+            return ("Move Bond Finger: click the bond finger (or jumper land) to "
+                    "move -- hover a wire to see its length, loop and angle. Esc stops")
+        return ("Move Bond Finger: finger picked -- move to the new spot (its wires "
+                "follow, red = breaks a bond rule) and click. Esc stops")
+
+    def _resize_res_hint(self):
+        if not self._pending_points:
+            return ("Resize Resistor: click a printed resistor, then move along its "
+                    "length -- the value updates live -- and click. Esc stops")
+        return ("Resize Resistor: move to set the new body length (the value updates "
+                "live), click to apply. Esc stops")
 
     def _cell_origin_hint(self):
         return (f"Create Cell {self._pending_cell_name!r}: click the point to use as "
@@ -630,7 +655,8 @@ class LayoutCanvas(tk.Canvas):
             self.redraw()
             self.on_mode_status(self._mode_hint())
             self.on_draw_mode_changed("select")
-        if self.draw_mode in ("del_bond", "move_bond"):
+        if self.draw_mode in ("del_bond", "del_via", "hilite", "move_bond",
+                              "move_finger", "resize_res"):
             # Esc stops the guided Delete/Move Wire Bond tools and returns
             # to Select, same as auto_route above.
             self.draw_mode = "select"
@@ -749,11 +775,28 @@ class LayoutCanvas(tk.Canvas):
         on_commit("del_bond", ...). Stays armed; Esc exits to Select."""
         self.set_mode("del_bond")
 
+    def start_delete_via(self):
+        """Edit > Delete Via: one click on a via removes it via
+        on_commit("del_via", ...). Stays armed; Esc exits to Select."""
+        self.set_mode("del_via")
+
     def start_move_bond(self):
         """Edit > Move Wire Bond: click the bond wire to move, then click
         the destination point; the bond is translated by that delta via
         on_commit("move_bond", ...). Stays armed; Esc exits to Select."""
         self.set_mode("move_bond")
+
+    def start_move_finger(self):
+        """Edit > Move Bond Finger: click a finger, then its new centre --
+        the wires on it follow (on_commit("move_finger", ...)). Live
+        preview through hybrid_hooks.finger_preview(). Stays armed."""
+        self.set_mode("move_finger")
+
+    def start_resize_resistor(self):
+        """Edit > Resize Resistor: click an imported printed resistor, then
+        the point that sets its new body length (on_commit("resize_res",
+        ...)); the value is read out live through hybrid_hooks."""
+        self.set_mode("resize_res")
 
     def start_auto_route(self):
         """Edit > Auto-Route Two Pins: enter the two-click auto-router.
@@ -953,6 +996,27 @@ class LayoutCanvas(tk.Canvas):
         self.on_status(f"x={dbu_to_mm(sx):.3f} mm  y={dbu_to_mm(sy):.3f} mm")
         self._update_preview(sx, sy)
         self._draw_snap_cursor(sx, sy)
+        self._hover_bond(x, y)
+
+    def _hover_bond(self, x, y):
+        """Hovering a wire bond (Select, Move Bond Finger, Resize Resistor
+        before the first click) highlights it and puts its length, loop
+        height, wire and departure angle in the status bar."""
+        self.delete("hoverbond")
+        hooks = getattr(self, "hybrid_hooks", None)
+        if hooks is None or self.draw_mode not in ("select", "move_finger", "resize_res"):
+            return
+        if self.draw_mode != "select" and self._pending_points:
+            return
+        try:
+            info = hooks.bond_info((x, y), 6.0 / max(self.scale, 1e-9))
+        except Exception:
+            info = None
+        if not info:
+            return
+        q0, q1 = self.to_px(*info["a"]), self.to_px(*info["b"])
+        self.create_line(*q0, *q1, fill="#ffd400", width=3, tags="hoverbond")
+        self.on_status(info["text"])
 
     def _draw_snap_cursor(self, x, y):
         """A crosshair marker at the snapped grid point the next click
@@ -1033,6 +1097,14 @@ class LayoutCanvas(tk.Canvas):
         elif self.draw_mode == "del_bond":
             self._pending_points = [pt]
             self._commit_del_bond()
+        elif self.draw_mode == "hilite":
+            if self.on_commit:
+                self.on_commit("hilite", self.current_layer, [pt], {})
+        elif self.draw_mode == "del_via":
+            self.delete("preview")
+            if self.on_commit:
+                self.on_commit("del_via", self.current_layer, [pt], {})
+            self.on_mode_status(self._del_via_hint())
         elif self.draw_mode == "move_bond":
             self._pending_points.append(pt)
             if len(self._pending_points) == 2:
@@ -1040,6 +1112,27 @@ class LayoutCanvas(tk.Canvas):
             else:
                 self._update_preview(*pt)
                 self.on_mode_status(self._move_bond_hint())
+        elif self.draw_mode in ("move_finger", "resize_res"):
+            hooks = getattr(self, "hybrid_hooks", None)
+            if not self._pending_points:
+                ok = hooks is not None and (
+                    hooks.finger_at(pt) if self.draw_mode == "move_finger"
+                    else hooks.resistor_at(pt)) is not None
+                if not ok:
+                    what = "bond finger" if self.draw_mode == "move_finger" else \
+                        "printed resistor"
+                    self.on_mode_status(f"No {what} there -- click on one (Esc stops)")
+                    return
+                self._pending_points.append(pt)
+                self._update_preview(*pt)
+                self.on_mode_status(self._mode_hint())
+            else:
+                grab = self._pending_points[0]
+                self._pending_points = []
+                self.delete("preview")
+                if self.on_commit:
+                    self.on_commit(self.draw_mode, self.current_layer, [grab, pt], {})
+                self.on_mode_status(self._mode_hint())
 
     def _on_double_click(self, e):
         if self.draw_mode == "select":
@@ -2192,6 +2285,10 @@ class LayoutCanvas(tk.Canvas):
         elif self.draw_mode == "move_bond" and len(self._pending_points) == 1:
             self._draw_move_bond_overlay(self._pending_points[0], mouse_x, mouse_y,
                                           tag="preview")
+        elif self.draw_mode == "move_finger" and len(self._pending_points) == 1:
+            self._draw_move_finger_overlay(self._pending_points[0], mouse_x, mouse_y)
+        elif self.draw_mode == "resize_res" and len(self._pending_points) == 1:
+            self._draw_resize_res_overlay(self._pending_points[0], mouse_x, mouse_y)
         elif self.draw_mode in ("poly", "path", "route"):
             coords = []
             for p in self._pending_points:
@@ -2330,6 +2427,54 @@ class LayoutCanvas(tk.Canvas):
         for px, py in (q0, q1):
             self.create_oval(px - 4, py - 4, px + 4, py + 4, outline="#5a5a5a", tags=tag)
         self._draw_wire_bond_overlay(fixed[0], fixed[1], mx, my, tag)
+
+    def _draw_move_finger_overlay(self, grab, mx, my):
+        """Live Move Bond Finger preview: the finger at the cursor, each of
+        its wires rubber-banded from the far end -- green when it still
+        meets the bond rules, red when not -- and the check in the status."""
+        hooks = getattr(self, "hybrid_hooks", None)
+        if hooks is None:
+            return
+        try:
+            pv = hooks.finger_preview(grab, (mx, my))
+        except Exception as e:
+            self.on_mode_status(f"Move Bond Finger: {e}")
+            return
+        ok = not pv["warnings"]
+        colour = "#30e060" if ok else "#ff4040"
+        x0, y0, x1, y1 = pv["old_box"]
+        self.create_rectangle(*self.to_px(x0, y0), *self.to_px(x1, y1), outline="#808080",
+                              dash=(2, 3), tags="preview")
+        x0, y0, x1, y1 = pv["box"]
+        self.create_rectangle(*self.to_px(x0, y0), *self.to_px(x1, y1), outline=colour,
+                              width=2, tags="preview")
+        for w in pv["wires"]:
+            self.create_line(*self.to_px(*w["a"]), *self.to_px(*w["b"]), fill=colour,
+                             width=2, tags="preview")
+        parts = [f"{r.get('wire') or 'wire'} {r['length_um'] / 1000:.2f} mm" for r in pv["rows"]]
+        msg = f"Finger {pv['pad']}: " + (", ".join(parts) or "no wires")
+        msg += (" -- OK" if ok else " -- " + "; ".join(pv["warnings"]))
+        if not pv["on_trace"]:
+            msg += " -- off its trace: reroute the net"
+        self.on_mode_status(msg)
+
+    def _draw_resize_res_overlay(self, grab, mx, my):
+        """Live Resize Resistor preview: the new body outline and the value
+        it gives (R = Rs x L / W) in the status bar."""
+        hooks = getattr(self, "hybrid_hooks", None)
+        if hooks is None:
+            return
+        try:
+            pv = hooks.resistor_preview(grab, (mx, my))
+        except Exception as e:
+            self.on_mode_status(f"Resize Resistor: {e}")
+            return
+        if not pv:
+            return
+        pts = [self.to_px(*p) for p in pv["outline"]]
+        flat = [c for p in pts + [pts[0]] for c in p]
+        self.create_line(*flat, fill="#ff9020", width=2, tags="preview")
+        self.on_mode_status(pv["text"])
 
     def _commit_wire_bond(self):
         p0, p1 = self._pending_points
@@ -2549,7 +2694,47 @@ class LayoutCanvas(tk.Canvas):
         if self.cell_name and self.cell_name in self.library.cells:
             self._draw_cell(self.cell_name, ox=0, oy=0, rot=0, mag=1, mirror=False, depth=0)
         self._draw_selection_highlight()
+        self._draw_net_highlight()
         self._draw_issue_markers()
+
+    # --- Highlight Net overlay ----------------------------------------------
+    #: outline colour of a highlighted net's copper / pad boxes
+    NET_HIGHLIGHT_COLOR = "#00ff66"
+    NET_HIGHLIGHT_PAD_COLOR = "#ffffff"
+
+    def _draw_net_highlight(self):
+        """Draw Session.highlight_net()'s result (set as
+        self.net_highlight by App.refresh_all): every piece of the net's
+        copper outlined thick, stippled over, and every pad on it boxed --
+        on top of the layout, only while the traced cell is shown."""
+        tr = getattr(self, "net_highlight", None)
+        if tr is None or getattr(tr, "cell_name", self.cell_name) != self.cell_name:
+            return
+        tag = "net_highlight"
+        col = self.NET_HIGHLIGHT_COLOR
+        for _layer, poly in tr.pieces:
+            rings = [poly.exterior] + list(poly.interiors)
+            for k, ring in enumerate(rings):
+                pts = []
+                for x, y in ring.coords:
+                    pts.extend(self.to_px(x, y))
+                if len(pts) < 6:
+                    continue
+                if k == 0:
+                    self.create_polygon(*pts, fill=col, stipple="gray25", outline="",
+                                        tags=tag)
+                self.create_line(*pts, fill=col, width=3, tags=tag)
+        for (x0, y0, x1, y1) in getattr(tr, "pad_boxes", []):
+            p0, p1 = self.to_px(x0, y0), self.to_px(x1, y1)
+            self.create_rectangle(min(p0[0], p1[0]) - 3, min(p0[1], p1[1]) - 3,
+                                  max(p0[0], p1[0]) + 3, max(p0[1], p1[1]) + 3,
+                                  outline=self.NET_HIGHLIGHT_PAD_COLOR, width=2, tags=tag)
+
+    def start_highlight_net(self):
+        """Edit > Highlight Net: each click traces the net under the
+        cursor via on_commit("hilite", ...). Stays armed; Esc exits (the
+        highlight stays until Edit > Clear Net Highlight)."""
+        self.set_mode("hilite")
 
     # --- issue markers (Extract Netlist, ...) -----------------------------
     #: marker kind -> outline colour

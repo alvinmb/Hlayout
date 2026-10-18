@@ -1057,6 +1057,17 @@ def _tv_button(win, text):
     return next(b for b in _collect_widgets(win, ttk.Button) if b.cget("text").startswith(text))
 
 
+def _tv_build(win, timeout=30.0):
+    """Press Build and wait for the background build to finish."""
+    import time
+    _tv_button(win, "Build").invoke()
+    t0 = time.time()
+    while getattr(win, "_building", False) and time.time() - t0 < timeout:
+        win.update()
+        time.sleep(0.02)
+    win.update()
+
+
 def test_topview_window_writes_a_hidden_line_result_and_saves_settings():
     from hlayout.io.techfile import load_topview_settings
     app = _make_app()
@@ -1068,7 +1079,7 @@ def test_topview_window_writes_a_hidden_line_result_and_saves_settings():
         assert 0 in win._rows                       # the drawn layer is listed
         win.result_combo.set(win._layer_label(1))
         win._on_result()
-        _tv_button(win, "Build").invoke()
+        _tv_build(win)
         assert not any(sh.layer == 1 for sh in top.shapes)
         view = app.session.library.cells["TOPVIEW"]
         assert any(sh.layer == 1 for sh in view.shapes)
@@ -1088,7 +1099,7 @@ def test_topview_window_output_cell_can_be_renamed():
         win.result_combo.set(win._layer_label(1))
         win._on_result()
         win.out_cell_var.set("ASSY_VIEW")
-        _tv_button(win, "Build").invoke()
+        _tv_build(win)
         assert "ASSY_VIEW" in app.session.library.cells
         assert "TOPVIEW" not in app.session.library.cells
     finally:
@@ -1107,7 +1118,7 @@ def test_topview_window_always_views_the_main_design_cell():
         win = _tv(app)
         win.result_combo.set(win._layer_label(1))
         win._on_result()
-        _tv_button(win, "Build").invoke()
+        _tv_build(win)
         xs = [pt[0] for sh in lib.cells["TOPVIEW"].shapes for pt in getattr(sh, "points", [])]
         assert xs and max(xs) <= 1100              # TOP's square, not OTHER's
     finally:
@@ -1139,7 +1150,7 @@ def test_topview_window_requires_a_result_layer():
         app.show_topview_dialog()
         win = _tv(app)
         win.result_var.set("")
-        _tv_button(win, "Build").invoke()
+        _tv_build(win)
         assert "Result layer" in win.msg_var.get()
         assert "TOPVIEW" not in app.session.library.cells
     finally:
