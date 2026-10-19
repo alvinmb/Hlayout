@@ -128,6 +128,25 @@ def test_freerouting_command_shapes():
     assert cmd[cmd.index("-mp") + 1] == "1" and "-mt" in cmd    # native build: 1 pass only
 
 
+def test_freerouting_command_sets_route_and_optimize_passes():
+    cmd = freerouting_command("fr.exe", "a.dsn", "a.ses", passes=40, optimize_passes=6,
+                              optimize_threshold=1.5)
+    assert cmd[cmd.index("-mp") + 1] == "40"
+    assert "--router.optimizer.max_passes=6" in cmd
+    assert "--router.optimizer.improvement_threshold=1.5" in cmd
+    cmd = freerouting_command("fr.exe", "a.dsn", "a.ses", passes=0, optimize_passes=0,
+                              optimize_threshold=1.5)
+    assert cmd[cmd.index("-mp") + 1] == "0"                     # route until done
+    assert "--router.optimizer.enabled=false" in cmd
+    assert not any("improvement_threshold" in c or "max_passes" in c for c in cmd)
+
+
+def test_optimize_rules_round_trip():
+    s = _named()
+    r = s.set_freerouting_rules(passes=0, optimize_passes=12, optimize_threshold=0.5)
+    assert (r["passes"], r["optimize_passes"], r["optimize_threshold"]) == (0, 12, 0.5)
+
+
 def test_run_freerouting_streams_output(tmp_path):
     ses = str(tmp_path / "o.ses")
     code = ("import sys;print('pass 1');print('pass 2');"
@@ -280,3 +299,27 @@ def test_import_lays_bond_fingers_and_counts_landings_in_the_completion_check(tm
     out = s.import_ses(str(ses), cell_name="TOP")
     assert out["fingers"] == len(land) == 22
     assert out["complete"] < out["nets"]          # nothing routed: fingers alone don't join nets
+
+
+@pytest.mark.skipif(not os.path.exists(NOTCH), reason="notch filter example not present")
+def test_bond_fingers_on_the_2nd_conductor(tmp_path):
+    from hlayout.core.shapes import Rectangle
+    s, names = _notch_stripped()
+    s.set_freerouting_rules(finger_layer="second")
+    p = str(tmp_path / "n.dsn")
+    s.export_dsn(p, cell_name="TOP")
+    txt = open(p).read()
+    assert "(layer L5 (type signal)" in txt                     # fingers on L5 force two layers
+    assert txt.count("(pin PAD_L5_400x400 B") == 22
+    assert "(pin PAD_L3_400x400 B" not in txt
+    ses = tmp_path / "n.ses"
+    ses.write_text("(session n (routes (resolution um 1) (network_out)))\n")
+    top = s.library.cells["TOP"]
+    before = sum(isinstance(x, Rectangle) and x.layer == 5 for x in top.shapes)
+    out = s.import_ses(str(ses), cell_name="TOP")
+    assert out["fingers"] == 22
+    assert sum(isinstance(x, Rectangle) and x.layer == 5 for x in top.shapes) - before == 22
+    # an explicit one-layer route keeps them on the 1st conductor
+    s.set_freerouting_rules(layer_mode="single")
+    s.export_dsn(p, cell_name="TOP")
+    assert open(p).read().count("(pin PAD_L3_400x400 B") == 22

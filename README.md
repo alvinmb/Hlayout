@@ -638,7 +638,7 @@ Before writing the macro, hlayout also **auto-matches** any placed
 component cell that has no manual `component_models` entry against
 whatever STEP library already exists in the **remembered component
 library folder** (Setup > FreeCAD Component Library Folder..., see
-Build FreeCAD Component Library... below — a single folder shared
+Build 3D Component Library... below — a single folder shared
 across every design, not tied to whichever one is currently open,
 since a parts library only needs building once) — falling back to
 this design's own `freecad` subfolder for STEP files built there
@@ -690,7 +690,7 @@ and `session.match_freecad_components(cell_name=None, step_dir=None)`
 `component_models=`). See `hlayout/io/component_match.py` for the
 matching details.
 
-**File > Build FreeCAD Component Library...** writes a `.FCMacro` into
+**File > Build 3D Component Library...** writes a `.FCMacro` into
 the **remembered component library folder** — a single location shared
 by every design, not this design's own folder, since the library only
 ever needs building once. The first time this runs (nothing remembered

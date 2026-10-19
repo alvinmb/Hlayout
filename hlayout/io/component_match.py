@@ -520,7 +520,7 @@ def build_match_report(library: Library, cell_name: str, step_dir: str, *,
         if step_path is None:
             report.unmatched.append(Unmatched(
                 cn, f"matched {package} but {package}.step isn't in {step_dir} yet -- "
-                    f"run File > Build FreeCAD Component Library... first"))
+                    f"run File > Build 3D Component Library... first"))
             continue
 
         reason = "footprint" if category == "gullwing" else "name"

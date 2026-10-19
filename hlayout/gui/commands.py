@@ -205,7 +205,8 @@ Attached libraries:
                                        ending on it stay. Also Edit > Delete Via and
                                        Session.delete_via()
     FREEROUTE EXPORT <file.dsn> | IMPORT <file.ses> | RUN [passes=<n>] [keep=0|1]
-              [fresh=0|1] [layers=auto|single|two] [finger=<um>]
+              [fresh=0|1] [layers=auto|single|two] [finger=<um>] [fingerlayer=1|2]
+              [optpasses=<n>] [optstop=<%>]
                                        Freerouting autorouter round trip: write a
                                        Specctra DSN (route layers, pads, net names,
                                        existing routing), read a session back (tracks,
@@ -216,6 +217,16 @@ Attached libraries:
                                        all tracks/vias first; layers= picks one or both
                                        conductors; chip-and-wire: every wire bond's
                                        substrate end becomes a bond finger (finger= um)
+                                       on the 1st or 2nd conductor (fingerlayer=);
+                                       passes= routing passes (0 = until done),
+                                       optpasses= optimizer passes (0 = off),
+                                       optstop= stop optimizing below this % gain
+    SOLIDCRAFT [window=0|1] [export=<file.step|3mf|stl|obj>]
+                                       build the current cell as a 3D model in
+                                       SolidCraft through its MCP server (window=1:
+                                       open it and build in front of you); export=
+                                       also writes a 3D file. File > 3D View in
+                                       SolidCraft... does it in the background
     HYBRID IMPORT <file.routed.json> [cell=<name>] [fill=0|1] | HYBRID BONDS [<file.csv>]
                                        chip-and-wire router result: IMPORT draws its
                                        substrate, dies, parts, pads, traces, crossover
@@ -2289,10 +2300,32 @@ class CommandInterpreter:
         name, path = self.session.create_via_cell(positional[0], positional[1], **kwargs)
         return f"created via cell {name!r}, saved to {path}"
 
+    def _cmd_solidcraft(self, args):
+        usage = "usage: SOLIDCRAFT [window=0|1] [export=<file.step|3mf|stl|obj>]"
+        window, export = True, None
+        for a in args:
+            k, _, v = a.partition("=")
+            k = k.lower()
+            if k == "window":
+                window = v.lower() not in ("0", "no", "false")
+            elif k == "export" and v:
+                export = v
+            else:
+                raise CommandError(usage)
+        if not window and not export:
+            raise CommandError("nothing to do: window=0 and no export=")
+        r = self.session.send_to_solidcraft(window=window, export=export)
+        msg = f"SolidCraft: {r['bodies']} bodies built"
+        if r.get("export"):
+            msg += f", wrote {r['export']}"
+        if r["errors"]:
+            msg += "; problems: " + "; ".join(r["errors"])
+        return msg
+
     def _cmd_freeroute(self, args):
         usage = ("usage: FREEROUTE EXPORT <file.dsn> | FREEROUTE IMPORT <file.ses> [keep=0|1] | "
                  "FREEROUTE RUN [passes=<n>] [keep=0|1] [fresh=0|1] [layers=auto|single|two] "
-                 "[finger=<um>]")
+                 "[finger=<um>] [fingerlayer=1|2] [optpasses=<n>] [optstop=<%>]")
         if not args:
             raise CommandError(usage)
         sub = args[0].upper()
@@ -2306,6 +2339,10 @@ class CommandInterpreter:
                     opts["keep_existing"] = v.lower() not in ("0", "no", "false")
                 elif k == "passes":
                     opts["passes"] = int(v)
+                elif k in ("optpasses", "optimize"):
+                    opts["optimize_passes"] = int(v)
+                elif k == "optstop":
+                    opts["optimize_threshold"] = float(v)
                 elif k == "fresh":
                     opts["remove_existing"] = v.lower() not in ("0", "no", "false")
                 elif k == "layers":
@@ -2314,6 +2351,10 @@ class CommandInterpreter:
                     opts["layer_mode"] = v.lower()
                 elif k == "finger":
                     opts["bond_finger"] = float(v)
+                elif k == "fingerlayer":
+                    if v.lower() not in ("1", "2", "first", "second"):
+                        raise CommandError("fingerlayer= must be 1 or 2")
+                    opts["finger_layer"] = "second" if v.lower() in ("2", "second") else "first"
                 else:
                     raise CommandError(f"unknown FREEROUTE option {k!r}")
             else:

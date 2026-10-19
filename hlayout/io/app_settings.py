@@ -14,7 +14,7 @@ one exception: a single JSON file at a fixed, OS-user-level path,
 independent of any design.
 
 Currently holds just ``component_library_dir`` -- the folder File >
-Build FreeCAD Component Library... writes STEP files into, and
+Build 3D Component Library... writes STEP files into, and
 Export to FreeCAD's auto-matcher reads them back from (see
 hlayout.gui.app.App.component_library_dir()). Structured as a
 {key: value} dict from the start so a future app-level preference has

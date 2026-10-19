@@ -171,3 +171,47 @@ def test_dielectric_command_generate_and_clear():
     assert "removed" in out2
     assert _fill(s) == []
     assert len(_inputs(s)) == 3
+
+# --- no drawn boundary: the I/O pad ring and the substrate bound it ----
+
+def _module(pads=True):
+    """A 20 x 20 mm substrate (L57, the route boundary) with an I/O pad
+    on each edge (L3, pin-labelled, 1.6 mm deep, 0.5 mm from the edge),
+    a trace and a via window -- but no fill boundary on L4."""
+    from hlayout.io.techfile import load_route_rules, save_route_rules
+    s = Session.new("MOD")
+    s.new_cell("TOP")
+    s.rect(57, -10000, -10000, 10000, 10000)
+    rr = load_route_rules(s.library)
+    rr.update(layer_a=3, layer_b=5, boundary_layer=57)
+    save_route_rules(s.library, rr)
+    if pads:
+        for k, (x0, y0, x1, y1) in enumerate([(-800, 7900, 800, 9500), (-800, -9500, 800, -7900),
+                                              (-9500, -800, -7900, 800), (7900, -800, 9500, 800)], 1):
+            s.cell.add_rectangle(3, x0, y0, x1, y1).pin = str(k)
+    s.rect(3, -5000, -100, 5000, 100)
+    s.rect(DIE, -150, -150, 150, 150)       # via windows only
+    s.rect(DIE, 2000, -150, 2300, 150)
+    s.clear_undo_history()
+    return s
+
+
+def _extent(s):
+    bb = [p.bbox() for p in _fill(s)]
+    return (min(b[0] for b in bb), min(b[1] for b in bb), max(b[2] for b in bb), max(b[3] for b in bb))
+
+
+def test_fill_without_a_boundary_stops_at_the_io_pads_inner_strip():
+    s = _module()
+    s.set_freerouting_rules(io_entry_depth=300)
+    s.generate_dielectric(layer=DIE, margin=1000)
+    # pads' inner edges at +-7900, overlapped by the 300 um entry strip
+    assert _extent(s) == (-8200, -8200, 8200, 8200)
+
+
+def test_fill_without_a_boundary_or_pads_never_leaves_the_substrate():
+    s = _module(pads=False)
+    s.rect(3, -9900, 9000, 9900, 9900)      # copper near the edge: bbox + margin overshoots
+    s.generate_dielectric(layer=DIE, margin=1000)
+    x0, y0, x1, y1 = _extent(s)
+    assert x0 >= -10000 and y0 >= -10000 and x1 <= 10000 and y1 <= 10000

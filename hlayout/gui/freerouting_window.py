@@ -23,6 +23,13 @@ from ..io import app_settings
 from ..io.specctra import (EXCLUDED_CLASS, find_freerouting, find_java, freerouting_command,
                            run_freerouting)
 
+#: the run-length settings, in their own "Passes" box by the Route button
+_PASS_FIELDS = (
+    ("Route passes", "passes", "0 = until every net is routed"),
+    ("Optimize passes", "optimize_passes", "0 = don't optimize"),
+    ("Stop optimizing below (%)", "optimize_threshold", "gain per pass"),
+)
+
 _NUM_FIELDS = (
     ("Signal width (um)", "signal_width"),
     ("Power width (um)", "power_width"),
@@ -31,7 +38,6 @@ _NUM_FIELDS = (
     ("Signal via window (um)", "signal_via_window"),
     ("Power via (um)", "power_via"),
     ("Power via window (um)", "power_via_window"),
-    ("Max passes", "passes"),
     ("Bond finger (um)", "bond_finger"),
     ("Die keep-out (um)", "die_keepout"),
 )
@@ -40,6 +46,10 @@ _NUM_FIELDS = (
 _LAYER_MODES = (("Auto (one layer if nothing is on the 2nd conductor)", "auto"),
                 ("1st conductor only (no vias)", "single"),
                 ("Both conductors", "two"))
+
+#: finger_layer choices: (shown text, rule value)
+_FINGER_LAYERS = (("1st conductor", "first"),
+                  ("2nd conductor (top, no dielectric window; routes both layers)", "second"))
 
 
 class FreeroutingWindow(tk.Toplevel):
@@ -53,8 +63,10 @@ class FreeroutingWindow(tk.Toplevel):
         self.vars = {}
         self._cancel = False
         self._running = False
+        self._hide_when_done = False
         self._build()
         self.reload()
+        self._fit_screen()
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.bind("<Escape>", lambda e: self.close())
 
@@ -62,6 +74,18 @@ class FreeroutingWindow(tk.Toplevel):
     def _build(self):
         outer = ttk.Frame(self, padding=10)
         outer.pack(fill="both", expand=True)
+
+        # big, coloured result line (what the router is doing / how it
+        # ended) with a percent-complete bar under it while it runs
+        self.banner_box = ttk.Frame(outer)
+        self.banner = tk.Label(self.banner_box, text="", font=self._BANNER_FONT, anchor="w",
+                               padx=10, pady=6, justify="left", wraplength=900)
+        self.banner.pack(fill="x")
+        style = ttk.Style(self)
+        style.configure("Route.Horizontal.TProgressbar", thickness=24)
+        self.progress = ttk.Progressbar(self.banner_box, maximum=100, mode="determinate",
+                                        style="Route.Horizontal.TProgressbar")
+        self._prog = None
 
         rf = ttk.LabelFrame(outer, text="Freerouting", padding=8)
         rf.pack(fill="x")
@@ -116,12 +140,30 @@ class FreeroutingWindow(tk.Toplevel):
         ttk.Combobox(gf, textvariable=self.vars["layer_mode"], state="readonly", width=48,
                      values=[t for t, _v in _LAYER_MODES]).grid(
             row=row, column=1, columnspan=3, sticky="w")
+        row += 1
+        self.vars["finger_layer"] = tk.StringVar()
+        ttk.Label(gf, text="Bond fingers on:").grid(row=row, column=0, sticky="e", padx=4, pady=2)
+        ttk.Combobox(gf, textvariable=self.vars["finger_layer"], state="readonly", width=48,
+                     values=[t for t, _v in _FINGER_LAYERS]).grid(
+            row=row, column=1, columnspan=3, sticky="w")
 
         nf = ttk.Frame(outer)
         nf.pack(fill="x", pady=(8, 0))
         self.nets_label = ttk.Label(nf, text="")
         self.nets_label.pack(side="left")
         ttk.Button(nf, text="Import Net Names...", command=self._import_names).pack(side="right")
+
+        pf = ttk.LabelFrame(outer, text="Passes (saved with the design)", padding=8)
+        pf.pack(fill="x", pady=(8, 0))
+        for c, (label, key, hint) in enumerate(_PASS_FIELDS):
+            self.vars[key] = tk.StringVar()
+            ttk.Label(pf, text=label + ":").grid(row=0, column=c * 2, sticky="e", padx=(12 if c else 4, 4))
+            ttk.Spinbox(pf, textvariable=self.vars[key], width=7,
+                        from_=0, to=(100 if key == "optimize_threshold" else 9999),
+                        increment=(0.5 if key == "optimize_threshold" else 1)).grid(
+                row=0, column=c * 2 + 1, sticky="w")
+            ttk.Label(pf, text=hint, foreground="#666").grid(row=1, column=c * 2 + 1,
+                                                             sticky="w")
 
         bf = ttk.Frame(outer)
         bf.pack(fill="x", pady=(8, 0))
@@ -135,7 +177,7 @@ class FreeroutingWindow(tk.Toplevel):
 
         lf = ttk.LabelFrame(outer, text="Log", padding=4)
         lf.pack(fill="both", expand=True, pady=(8, 0))
-        self.log = tk.Text(lf, height=12, wrap="none", font=("Consolas", 9))
+        self.log = tk.Text(lf, height=8, wrap="none", font=self._LOG_FONT)
         sb = ttk.Scrollbar(lf, command=self.log.yview)
         self.log.configure(yscrollcommand=sb.set, state="disabled")
         self.log.pack(side="left", fill="both", expand=True)
@@ -146,7 +188,9 @@ class FreeroutingWindow(tk.Toplevel):
         from ..io.techfile import load_net_names
         rules = self.session.freerouting_rules()
         for _l, key in _NUM_FIELDS:
-            self.vars[key].set(str(int(rules[key])))
+            self.vars[key].set(f"{float(rules[key]):g}")
+        for _l, key, _h in _PASS_FIELDS:
+            self.vars[key].set(f"{float(rules[key]):g}")
         self.vars["power_nets"].set(", ".join(rules["power_nets"]))
         self.vars["exclude_nets"].set(", ".join(rules["exclude_nets"]))
         self.vars["snap_90"].set(bool(rules["snap_90"]))
@@ -156,6 +200,9 @@ class FreeroutingWindow(tk.Toplevel):
         mode = str(rules.get("layer_mode", "auto"))
         self.vars["layer_mode"].set(next((t for t, v in _LAYER_MODES if v == mode),
                                          _LAYER_MODES[0][0]))
+        fl = str(rules.get("finger_layer", "first"))
+        self.vars["finger_layer"].set(next((t for t, v in _FINGER_LAYERS if v == fl),
+                                           _FINGER_LAYERS[0][0]))
         self.vars["router"].set(app_settings.get_setting(app_settings.FREEROUTING_PATH_KEY)
                                 or find_freerouting() or "")
         self.vars["java"].set(app_settings.get_setting(app_settings.JAVA_PATH_KEY) or "")
@@ -182,12 +229,15 @@ class FreeroutingWindow(tk.Toplevel):
 
     def _rules(self):
         out = {}
-        for label, key in _NUM_FIELDS:
+        for label, key in list(_NUM_FIELDS) + [(l, k) for l, k, _h in _PASS_FIELDS]:
             try:
                 v = float(self.vars[key].get())
             except ValueError:
                 raise LayoutError(f"{label}: not a number")
-            if v <= 0:
+            if key in self._ZERO_OK:
+                if v < 0:
+                    raise LayoutError(f"{label}: must be 0 or more")
+            elif v <= 0:
                 raise LayoutError(f"{label}: must be > 0")
             out[key] = v
         out["power_nets"] = [x.strip() for x in self.vars["power_nets"].get().split(",") if x.strip()]
@@ -199,6 +249,8 @@ class FreeroutingWindow(tk.Toplevel):
         out["keepout_bodies"] = bool(self.vars["keepout_bodies"].get())
         shown = self.vars["layer_mode"].get()
         out["layer_mode"] = next((v for t, v in _LAYER_MODES if t == shown), "auto")
+        shown = self.vars["finger_layer"].get()
+        out["finger_layer"] = next((v for t, v in _FINGER_LAYERS if t == shown), "first")
         return out
 
     def _save(self):
@@ -208,7 +260,72 @@ class FreeroutingWindow(tk.Toplevel):
         app_settings.set_setting(app_settings.JAVA_PATH_KEY, self.vars["java"].get().strip() or None)
         return rules
 
+    #: number fields where 0 is meaningful (until done / off)
+    _ZERO_OK = ("passes", "optimize_passes")
+
+    _BANNER_FONT = ("Segoe UI", 16, "bold")
+    _LOG_FONT = ("Consolas", 12)
+    #: banner colours (background) per kind; white text on all of them
+    _BANNER_COLOURS = {"run": "#1f5fbf", "ok": "#1e8e3e", "warn": "#d56e00", "err": "#c5221f"}
+
+    def _banner(self, text, kind="run"):
+        """Show ``text`` in the big coloured line at the top (kind run /
+        ok / warn / err); empty text hides it."""
+        if not self._alive():
+            return
+        box = self.banner_box
+        if not text:
+            box.pack_forget()
+            return
+        self.banner.config(text=text, bg=self._BANNER_COLOURS.get(kind, "#1f5fbf"), fg="white")
+        self.banner.update_idletasks()
+        if kind == "run":
+            if not self.progress.winfo_ismapped():
+                self.progress.pack(fill="x", pady=(4, 0))
+        else:
+            self.progress.pack_forget()
+        if not box.winfo_ismapped():
+            first = box.master.winfo_children()[1]   # above the Freerouting frame
+            box.pack(fill="x", pady=(0, 8), before=first)
+
+    def _announce(self, text, kind):
+        """The run is over: say so loudly -- banner, title, status bar,
+        beep, and bring the window back up even if it was closed."""
+        self._banner(text, kind)
+        self.title("Autoroute (Freerouting) -- " + text.split(" ")[0])
+        self.app.status.set("Freerouting: " + text)
+        try:
+            self.deiconify()
+            self.lift()
+            self.attributes("-topmost", True)
+            self.after(1500, lambda: self._alive() and self.attributes("-topmost", False))
+            self.focus_force()
+            self.bell()
+        except tk.TclError:
+            pass
+
+    def _fit_screen(self):
+        """Never open taller than the screen (less the taskbar): the log
+        shrinks, the Passes box and the Route button stay in view."""
+        try:
+            self.update_idletasks()
+            h = min(self.winfo_reqheight(), self.winfo_screenheight() - 100)
+            self.geometry(f"{self.winfo_reqwidth()}x{h}")
+        except tk.TclError:
+            pass
+
+    def _took(self) -> str:
+        return self._prog.elapsed() if self._prog is not None else "?"
+
+    def _alive(self) -> bool:
+        try:
+            return bool(self.winfo_exists())
+        except tk.TclError:
+            return False
+
     def _say(self, text):
+        if not self._alive():
+            return
         self.log.configure(state="normal")
         self.log.insert("end", text.rstrip() + "\n")
         self.log.see("end")
@@ -220,15 +337,32 @@ class FreeroutingWindow(tk.Toplevel):
               "is deprecated; use")
 
     def _say_router(self, line):
-        if any(n in line for n in self._NOISE):
+        if not self._alive() or any(n in line for n in self._NOISE):
             return
         # drop the timestamp / job id prefix Freerouting puts on every line
         import re
         line = re.sub(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+\s+", "", line)
         line = re.sub(r"\[[0-9A-F]+\\[0-9A-F]+\]\s*", "", line)
         self._say(line)
-        if "pass #" in line or "stage" in line:
-            self.app.status.set("Freerouting: " + line[:160])
+        if self._prog is not None and self._prog.feed(line):
+            self._show_progress()
+
+    def _show_progress(self):
+        """Percent complete on the bar, the banner, the title and the
+        main window's status bar."""
+        p = self._prog
+        if p is None or not self._alive() or not self._running:
+            return
+        self.progress["value"] = p.percent
+        self._banner(p.text(), "run")
+        self.title(f"Autoroute (Freerouting) -- {int(round(p.percent))}%")
+        self.app.status.set("Freerouting: " + p.text())
+
+    def _tick(self):
+        """Once a second while routing: keep the elapsed time moving."""
+        if self._running and self._alive():
+            self._show_progress()
+            self.after(1000, self._tick)
 
     # ------------------------------------------------------------ actions
     def _browse_router(self):
@@ -295,7 +429,7 @@ class FreeroutingWindow(tk.Toplevel):
             st = self.session.import_ses(ses)
         except Exception as e:
             self._say(f"Import failed: {e}")
-            return
+            return None
         self._say(f"Imported {st['wires']} track(s) and {st['vias']} via(s) "
                   f"({st['skipped']} already there).")
         if st.get("fingers"):
@@ -308,6 +442,7 @@ class FreeroutingWindow(tk.Toplevel):
             self._say("Still unrouted: " + ", ".join(st["unrouted"]))
         self.app.status.set(f"Freerouting: {st['complete']}/{st['nets']} nets complete, "
                             f"{st['wires']} tracks + {st['vias']} vias added")
+        return st
 
     def route(self):
         if self._running:
@@ -324,6 +459,8 @@ class FreeroutingWindow(tk.Toplevel):
             ses = os.path.join(wd, f"{name}.ses")
             sm = self.session.export_dsn(dsn)
             cmd = freerouting_command(router, dsn, ses, passes=int(rules["passes"]),
+                                      optimize_passes=int(rules["optimize_passes"]),
+                                      optimize_threshold=float(rules["optimize_threshold"]),
                                       exclude_classes=[EXCLUDED_CLASS] if rules["exclude_nets"] else [],
                                       java=self.vars["java"].get().strip() or None)
         except Exception as e:
@@ -335,6 +472,14 @@ class FreeroutingWindow(tk.Toplevel):
         self._running, self._cancel = True, False
         self.route_btn.config(state="disabled")
         self.cancel_btn.config(state="normal")
+        from ..io.route_progress import RouteProgress
+        self._prog = RouteProgress(max_passes=rules["passes"],
+                                   opt_passes=rules["optimize_passes"])
+        self.progress["value"] = 0
+        self._banner(f"Routing 0% -- {sm.nets} nets  (you can close this window -- it comes "
+                     "back when the route finishes)", "run")
+        self.title("Autoroute (Freerouting) -- 0%")
+        self.after(1000, self._tick)
 
         def worker():
             try:
@@ -350,28 +495,49 @@ class FreeroutingWindow(tk.Toplevel):
 
     def _finished(self, ses, code, tail, err):
         self._running = False
+        if not self._alive():
+            return
         self.route_btn.config(state="normal")
         self.cancel_btn.config(state="disabled")
+        self._hide_when_done = False
         if err is not None:
             self._say(f"Freerouting failed to start: {err}")
-            return
-        if self._cancel:
-            self._say("Stopped.")
-        if not os.path.exists(ses):
+            self._announce(f"FAILED to start: {err}", "err")
+        elif self._cancel:
+            self._say("Stopped -- nothing imported.")
+            self._announce("Stopped -- nothing imported", "err")
+        elif not os.path.exists(ses):
             self._say(f"No session file was written (exit code {code}).")
-            return
-        self._do_import(ses)
+            self._announce(f"FAILED -- no session file written (exit code {code})", "err")
+        else:
+            st = self._do_import(ses)
+            if st is None:
+                self._announce("FAILED -- the result could not be imported (see the log)", "err")
+            elif st["unrouted"]:
+                self._announce(f"FINISHED in {self._took()} -- {st['complete']} of {st['nets']} "
+                               f"nets complete ({100 * st['complete'] // max(st['nets'], 1)}%); "
+                               f"unrouted: {', '.join(st['unrouted'])}", "warn")
+            else:
+                self._announce(f"FINISHED in {self._took()} -- all {st['nets']} nets complete (100%)  "
+                               f"({st['wires']} tracks, {st['vias']} vias)", "ok")
 
     def _stop(self):
         self._cancel = True
 
     def close(self):
-        if self._running:
-            self._cancel = True
         try:
             self._save()
         except Exception:
             pass
+        if self._running:
+            # keep routing in the background: hide the window, import the
+            # result when Freerouting finishes (progress on the status bar);
+            # Stop cancels instead
+            self._hide_when_done = True
+            self.withdraw()
+            self.app.status.set("Freerouting: still routing in the background -- "
+                                "its window pops back up when it finishes")
+            return
         self.destroy()
 
 
@@ -379,7 +545,10 @@ def open_freerouting_window(app):
     """Tools > Autoroute (Freerouting)... . One window per App."""
     win = getattr(app, "_freerouting_window", None)
     if win is not None and win.winfo_exists():
-        win.reload()
+        win._hide_when_done = False
+        win.deiconify()
+        if not win._running:
+            win.reload()
         win.lift()
         win.focus_set()
         return win

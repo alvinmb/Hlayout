@@ -394,8 +394,8 @@ def test_build_match_report_leaves_unmatched_when_step_file_missing(tmp_path):
 
     assert report.matches == []
     reasons = {u.cell_name: u.reason for u in report.unmatched}
-    assert "Build FreeCAD Component Library" in reasons["C1_0805"]
-    assert "Build FreeCAD Component Library" in reasons["Q1"]
+    assert "Build 3D Component Library" in reasons["C1_0805"]
+    assert "Build 3D Component Library" in reasons["Q1"]
 
 
 def test_build_match_report_raises_for_unknown_cell(tmp_path):

@@ -329,3 +329,36 @@ def test_chip_wizard_esc_leaves_the_half_built_cell_and_exports_nothing(tmp_path
         assert "CHIP2" not in load_gds(apath).cells
     finally:
         app.destroy()
+
+
+def test_create_chip_cell_can_lay_a_conductor_die_attach_pad_200_larger():
+    from hlayout.core.shapes import Rectangle
+    s = Session.new("D")
+    s.new_cell("TOP")
+    s.create_chip_cell("CHIP", 2000, 1000, graphics_layer=61, epoxy_length=1900,
+                       epoxy_width=900, epoxy_layer=20, attach_pad_layer=5)
+    pads = [sh for sh in s.library.cells["CHIP"].shapes
+            if isinstance(sh, Rectangle) and sh.layer == 5]
+    assert len(pads) == 1 and pads[0].bbox() == (-1200, -700, 1200, 700)   # 200 all round
+    s.create_chip_cell("CHIP2", 2000, 1000, graphics_layer=61, epoxy_length=1900,
+                       epoxy_width=900, epoxy_layer=20)
+    assert not any(sh.layer == 5 for sh in s.library.cells["CHIP2"].shapes)
+
+
+def test_a_die_with_an_attach_pad_is_still_a_routing_keepout():
+    from hlayout.io.techfile import save_bond_rules, load_bond_rules
+    s = Session.new("D")
+    s.new_cell("TOP")
+    s.create_chip_cell("CHIP", 2000, 2000, graphics_layer=61, epoxy_length=1900,
+                       epoxy_width=1900, epoxy_layer=20, attach_pad_layer=5)
+    s.library.cells["CHIP"].add_rectangle(58, -900, 800, -800, 900, pin="1")   # a die pad
+    br = load_bond_rules(s.library)
+    br["die_pad_layers"] = [58]
+    save_bond_rules(s.library, br)
+    s.use_cell("TOP")
+    s.rect(57, -50000, -50000, 50000, 50000)
+    s.sref("CHIP", (0, 0), label="U1")
+    ko = s._route_keepouts(s.library.cells["TOP"], (3, 5), {"die_keepout": 200, "clearance": 100})
+    assert ko, "the die (attach pad and all) must be kept out"
+    xs = [x for _l, pts in ko for x, _y in pts]
+    assert min(xs) <= -1400 and max(xs) >= 1400      # 1200 pad + 200 keep-out

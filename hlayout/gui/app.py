@@ -377,7 +377,10 @@ class App(tk.Tk):
         filem.add_command(label="Gerber Export Sets...", command=lambda: open_gerber_batch_window(self))
         filem.add_command(label="DXF Export Sets...", command=lambda: open_dxf_batch_window(self))
         filem.add_command(label="Export to FreeCAD (3D Macro)...", command=self.export_freecad_macro)
-        filem.add_command(label="Build FreeCAD Component Library...",
+        filem.add_command(label="3D View in SolidCraft...",
+                          command=lambda: __import__("hlayout.gui.solidcraft_window",
+                                                     fromlist=["x"]).open_solidcraft_window(self))
+        filem.add_command(label="Build 3D Component Library...",
                           command=self.build_component_library_macro)
         filem.add_command(label="Component Library Manager...",
                           command=lambda: open_component_library_window(self))
@@ -3018,7 +3021,7 @@ class App(tk.Tk):
             written)
 
     def build_component_library_macro(self):
-        """File > Build FreeCAD Component Library...: write a .FCMacro
+        """File > Build 3D Component Library...: write a .FCMacro
         that, run inside FreeCAD, builds a small library of generic 3D
         component bodies (ceramic chip capacitors, a 20-pin metal
         package, the SOT-23/323/89/223/14/16/18 package family, and
@@ -3038,7 +3041,7 @@ class App(tk.Tk):
         out_dir = self.component_library_dir()
         if out_dir is None:
             return
-        self.status.set(f"Build FreeCAD Component Library: writing to {out_dir}...")
+        self.status.set(f"Build 3D Component Library: writing to {out_dir}...")
         self.update_idletasks()
         try:
             written = self.session.generate_component_library(out_dir)
@@ -4068,6 +4071,31 @@ class App(tk.Tk):
                      values=choices).grid(row=row, column=1, sticky="w", padx=4, pady=4)
         row += 1
 
+        # conductor die-attach pad under the chip: on by default, on the 2nd
+        # conductor (Setup > Route Layers layer_b), 0.2 mm larger all round
+        try:
+            from ..io.techfile import load_route_rules
+            _lb = load_route_rules(self.session.library).get("layer_b")
+        except Exception:
+            _lb = None
+        _lb_ok = isinstance(_lb, int) and 0 <= _lb < len(choices)
+        attach_var = tk.BooleanVar(value=_lb_ok)
+        ttk.Checkbutton(form, text="Conductor die-attach pad under the chip",
+                        variable=attach_var).grid(row=row, column=0, columnspan=2,
+                                                  sticky="w", padx=4, pady=(8, 2))
+        row += 1
+        ttk.Label(form, text="Die-attach pad layer:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        attach_layer_var = tk.StringVar(value=choices[_lb] if _lb_ok else choices[0])
+        ttk.Combobox(form, textvariable=attach_layer_var, width=20, state="readonly",
+                     values=choices).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+        ttk.Label(form, text="Pad larger than chip by (mm, each side):").grid(
+            row=row, column=0, sticky="e", padx=4, pady=4)
+        attach_margin_var = tk.DoubleVar(value=0.2)
+        ttk.Spinbox(form, from_=0.0, to=10.0, increment=0.05, width=10,
+                    textvariable=attach_margin_var).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+
         ttk.Label(form, text="Pin 1 cell:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
         pin1_cell_var = tk.StringVar(value=_default("chip_pin1", "chip_pin_1"))
         ttk.Combobox(form, textvariable=pin1_cell_var, width=20, state="readonly",
@@ -4127,6 +4155,7 @@ class App(tk.Tk):
                 width = mm_to_dbu(float(width_var.get()))
                 epoxy_l = mm_to_dbu(float(epoxy_l_var.get()))
                 epoxy_w = mm_to_dbu(float(epoxy_w_var.get()))
+                a_margin = mm_to_dbu(float(attach_margin_var.get()))
             except (tk.TclError, ValueError):
                 error_var.set("Chip and epoxy-pad length/width must be numbers.")
                 return
@@ -4136,6 +4165,7 @@ class App(tk.Tk):
                 return
             g_layer = int(gfx_layer_var.get().split(" ", 1)[0])
             e_layer = int(epoxy_layer_var.get().split(" ", 1)[0])
+            a_layer = int(attach_layer_var.get().split(" ", 1)[0]) if attach_var.get() else None
             pin1_cell = pin1_cell_var.get()
             pin_cell = pin_cell_var.get()
             if self._chip_pin_cell_source(pin1_cell) is None:
@@ -4148,7 +4178,8 @@ class App(tk.Tk):
             def do_create(overwrite):
                 return self.session.create_chip_cell(
                     name, length, width, g_layer, epoxy_l, epoxy_w, e_layer,
-                    overwrite=overwrite)
+                    overwrite=overwrite, attach_pad_layer=a_layer,
+                    attach_pad_margin=a_margin)
 
             try:
                 do_create(overwrite=False)

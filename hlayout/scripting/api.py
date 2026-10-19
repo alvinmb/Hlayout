@@ -1025,7 +1025,8 @@ class Session:
     def create_chip_cell(self, name: str, length: float, width: float,
                          graphics_layer, epoxy_length: float, epoxy_width: float,
                          epoxy_layer, *, outline_width: Optional[float] = None,
-                         overwrite: bool = False):
+                         overwrite: bool = False, attach_pad_layer=None,
+                         attach_pad_margin: float = 200.0):
         """Start a bare-die / chip footprint cell in the CURRENT design:
 
           * a body outline -- a closed rectangular Path of ``length`` x
@@ -1034,6 +1035,12 @@ class Session:
           * an ``epoxy_length`` x ``epoxy_width`` DBU epoxy die-attach
             pad, centred on the origin, on ``epoxy_layer`` (forced
             visible) -- rectangular, since chips are.
+
+        ``attach_pad_layer`` (optional, a number or layer name) adds a
+        conductor die-attach pad under the chip on that layer -- e.g. the
+        2nd conductor -- ``attach_pad_margin`` DBU (default 200) larger
+        than the body on every side. The autorouter keeps tracks clear of
+        it (and of the die) by the die keep-out.
 
         The die *pins* are added afterwards as instances of the
         ``chip_pin`` / ``chip_pin1`` cells you provide (e.g. in the
@@ -1065,10 +1072,18 @@ class Session:
         hl, hw = length / 2.0, width / 2.0
         ow = int(outline_width) if outline_width else max(1, int(round(min(length, width) * 0.02)))
         el, ew = epoxy_length / 2.0, epoxy_width / 2.0
+        a_layer = self.library.layers.resolve(attach_pad_layer) \
+            if attach_pad_layer is not None else None
+        if attach_pad_layer is not None and (a_layer is None or a_layer < 0):
+            raise LayoutError(f"no layer {attach_pad_layer!r} for the die-attach pad")
+        am = float(attach_pad_margin or 0)
 
         with self._batch():
             cell = self.library.new_cell(name)
             self.current_cell_name = name
+            if a_layer is not None:
+                # conductor die-attach pad, `am` larger than the chip all round
+                cell.add_rectangle(a_layer, -hl - am, -hw - am, hl + am, hw + am)
             cell.add_rectangle(e_layer, -el, -ew, el, ew)   # epoxy die-attach pad
             cell.add_path(
                 g_layer,
@@ -3144,6 +3159,13 @@ class Session:
           fill BOUNDARY (draw one rectangle around your circuit). If no
           shape encloses the rest, the boundary falls back to the
           design's bounding box grown by ``margin``.
+          With no such shape the boundary is worked out instead: the
+          area inside the module's I/O pad ring (the pads' inner edges,
+          overlapped by the Freerouting io_entry_depth so the tracks'
+          entry strip stays insulated), else the design's bounding box
+          grown by ``margin``. Either way the fill is clipped to the
+          substrate outline (Setup > Route Layers boundary layer), so it
+          never runs off the substrate or over the I/O pads.
         * every OTHER datatype-0 shape inside it -- a via window stamped
           by drop_via(dielectric_layer=...), a resistor's
           between-terminals keep-out, a hand-drawn exclusion rectangle,
@@ -3218,11 +3240,16 @@ class Session:
         if boundary is not None:
             fill = boundary
         else:
-            bbox = self.library.cell_bbox(name)
-            if bbox is None:
-                raise LayoutError(f"cell {name!r} is empty -- nothing to cover")
-            x0, y0, x1, y1 = bbox
-            fill = _box(x0 - mrg, y0 - mrg, x1 + mrg, y1 + mrg)
+            fill = self._io_ring_box(cell)
+            if fill is None:
+                bbox = self.library.cell_bbox(name)
+                if bbox is None:
+                    raise LayoutError(f"cell {name!r} is empty -- nothing to cover")
+                x0, y0, x1, y1 = bbox
+                fill = _box(x0 - mrg, y0 - mrg, x1 + mrg, y1 + mrg)
+        sub = self._substrate_box(cell)
+        if sub is not None:
+            fill = fill.intersection(sub)
 
         opening_geoms = list(holes)
         for src in keepout_nums:
@@ -3618,7 +3645,9 @@ class Session:
         power_width, clearance, signal_via, signal_via_window, power_via,
         power_via_window, power_nets, exclude_nets, passes, snap_90,
         keep_existing, remove_existing, io_entry_depth, layer_mode,
-        bond_finger, die_keepout, keepout_bodies). Returns the full set."""
+        bond_finger, finger_layer, die_keepout, keepout_bodies,
+        optimize_passes, optimize_threshold). Returns
+        the full set."""
         from ..io.techfile import load_freerouting_rules, save_freerouting_rules
         cur = load_freerouting_rules(self.library)
         cur.update(rules)
@@ -3631,6 +3660,79 @@ class Session:
         if not (isinstance(la, int) and la >= 0 and isinstance(lb, int) and lb >= 0):
             raise LayoutError("set the two routing layers first (Setup > Route Layers...)")
         return la, lb
+
+    def send_to_solidcraft(self, cell_name: Optional[str] = None, window: bool = True,
+                           export: Optional[str] = None, app: Optional[str] = None,
+                           on_progress=None, cancel=None) -> dict:
+        """Build the current (or named) cell as a 3D model in SolidCraft
+        (github.com/bherbruck/solidcraft) through its MCP server -- the
+        FreeCAD-export stack: substrate, printed films at their Setup
+        thickness, parts, wire bonds. ``window`` opens SolidCraft and
+        builds in front of you; ``export`` also writes a .step / .3mf /
+        .stl / .obj. ``app`` = the folder holding solidcraft-cli (default:
+        File > 3D View in SolidCraft's saved folder, PATH, ~/.hlayout).
+        Returns {"bodies", "batches", "export", "errors", "port"}. See
+        hlayout.io.solidcraftio."""
+        from ..io.solidcraftio import send_to_solidcraft as _send
+        name = cell_name or self.current_cell_name
+        if name is None:
+            raise LayoutError("no current cell")
+        if app is None:
+            try:
+                from ..io import app_settings as _as
+                app = _as.get_setting("solidcraft_path") or None
+            except Exception:
+                app = None
+        return _send(self.library, name, app=app, window=window, export=export,
+                     on_progress=on_progress, cancel=cancel)
+
+    def _substrate_box(self, cell):
+        """The substrate outline (boundary layer) of ``cell`` as a shapely
+        box, or None."""
+        from shapely.geometry import box as _box
+        lay = self._boundary_layer()
+        bb = self._boundary_bbox(cell, lay) if lay is not None else None
+        return _box(*bb) if bb else None
+
+    def _io_ring_box(self, cell):
+        """The area inside the module I/O pad ring -- pin-labelled
+        rectangles drawn in ``cell`` itself -- bounded by the pads' inner
+        edges and grown by the Freerouting io_entry_depth (the strip the
+        tracks enter by, which stays under the dielectric). A side with no
+        pads takes the substrate edge. None without I/O pads."""
+        from shapely.geometry import box as _box
+        from ..core.shapes import Rectangle
+        pads = [sh.bbox() for sh in cell.shapes
+                if isinstance(sh, Rectangle) and getattr(sh, "pin", "")]
+        if len(pads) < 2:
+            return None
+        sub = self._substrate_box(cell)
+        if sub is not None:
+            sx0, sy0, sx1, sy1 = sub.bounds
+        else:
+            sx0 = min(b[0] for b in pads); sy0 = min(b[1] for b in pads)
+            sx1 = max(b[2] for b in pads); sy1 = max(b[3] for b in pads)
+        mx, my = (sx0 + sx1) / 2.0, (sy0 + sy1) / 2.0
+        hx, hy = max(sx1 - sx0, 1.0) / 2.0, max(sy1 - sy0, 1.0) / 2.0
+        left, right, bottom, top = [], [], [], []
+        for x0, y0, x1, y1 in pads:
+            dx, dy = ((x0 + x1) / 2.0 - mx) / hx, ((y0 + y1) / 2.0 - my) / hy
+            if abs(dx) >= abs(dy):
+                (right if dx > 0 else left).append((x0, x1))
+            else:
+                (top if dy > 0 else bottom).append((y0, y1))
+        try:
+            entry = float(self.freerouting_rules().get("io_entry_depth") or 0)
+        except Exception:
+            entry = 0.0
+        # each side: the pads' inner edge, moved OUT by the entry strip
+        x0 = max(b[1] for b in left) - entry if left else sx0
+        x1 = min(b[0] for b in right) + entry if right else sx1
+        y0 = max(b[1] for b in bottom) - entry if bottom else sy0
+        y1 = min(b[0] for b in top) + entry if top else sy1
+        if x1 <= x0 or y1 <= y0:
+            return None
+        return _box(x0, y0, x1, y1)
 
     def _boundary_layer(self):
         rr = load_route_rules(self.library)
@@ -4356,8 +4458,23 @@ class Session:
             return True
         if mode.startswith("t") or mode == "2":
             return False
+        if self._fingers_on_second(R):
+            return False            # bond fingers on the 2nd conductor need both
         _la, lb = self._route_layers()
         return not any(sh.layer == lb for c in self.library.cells.values() for sh in c.shapes)
+
+    @staticmethod
+    def _fingers_on_second(R) -> bool:
+        """Rules finger_layer asks for the bond fingers on the 2nd conductor?"""
+        v = str(R.get("finger_layer", "first")).strip().lower()
+        return v.startswith("s") or v in ("2", "b", "top", "layer_b")
+
+    def _finger_layer(self, R) -> int:
+        """The conductor the chip-and-wire bond fingers go on: the 2nd
+        (top) conductor when rules finger_layer is "second" and the route
+        uses both layers, else the 1st."""
+        la, lb = self._route_layers()
+        return lb if self._fingers_on_second(R) and not self._single_layer_route(R) else la
 
     def bond_landings(self, cell_name: Optional[str] = None, tol: float = 50.0) -> list:
         """Where the design's wire bonds land on the SUBSTRATE: one
@@ -4488,7 +4605,10 @@ class Session:
             if (b[2] - b[0]) * (b[3] - b[1]) > 0.4 * board:
                 continue                          # enclosing package / header
             shapes = []
-            if any(l in pad_layers for l, _p, _g in acc) and not any(l in route for l, _p, _g in acc):
+            # a bare die: pads on a die-pad layer and no PINS on the routing
+            # layers (plain copper there -- a die-attach pad -- is part of it)
+            if any(l in pad_layers for l, _p, _g in acc) and \
+                    not any(p and l in route for l, p, _g in acc):
                 shapes = [allg.envelope.buffer(die_m, join_style=2)]
             elif R.get("keepout_bodies", True):
                 pins = [g for l, p, g in acc if p and l in route]
@@ -4550,6 +4670,14 @@ class Session:
             if ins:
                 b = max(ins, key=lambda sh: (sh.bbox()[2] - sh.bbox()[0]) * (sh.bbox()[3] - sh.bbox()[1]))
                 band = (b.bbox(), self._route_layers()[1])
+            # no boundary drawn (the biggest datatype-0 shape is then just a
+            # via window): use the one generate_dielectric() works out
+            ring = self._io_ring_box(self.library.get_cell(name))
+            if ring is not None:
+                rb = ring.bounds
+                if band is None or (band[0][2] - band[0][0]) * (band[0][3] - band[0][1]) < \
+                        0.5 * (rb[2] - rb[0]) * (rb[3] - rb[1]):
+                    band = (rb, self._route_layers()[1])
         la, lb = self._route_layers()
         single = self._single_layer_route(R)
         cell = self.library.get_cell(name)
@@ -4558,10 +4686,11 @@ class Session:
         # header pin at the bond's other end
         names = dict(names)
         finger = float(R.get("bond_finger", 400) or 0)
+        flayer = self._finger_layer(R)
         bond_pins = []
         if finger > 0:
             for k, (x, y, net) in enumerate(self._bond_nets(self.bond_landings(name), names), 1):
-                bond_pins.append((f"B{k}", x, y, finger))
+                bond_pins.append((f"B{k}", x, y, finger, flayer))
                 names[f"BOND.B{k}"] = net
         keepouts = self._route_keepouts(cell, (la,) if single else (la, lb), R)
         return export_dsn(self.library, name, path, layers=(la, lb), rules=R,
@@ -4684,13 +4813,14 @@ class Session:
             if finger > 0:
                 from shapely.geometry import box as _box
                 from ..core.maskops import layer_to_shapely_flattened
-                cu = layer_to_shapely_flattened(self.library, cell, la)
+                flayer = self._finger_layer(R)
+                cu = layer_to_shapely_flattened(self.library, cell, flayer)
                 h = finger / 2.0
                 for x, y, _net in self._bond_nets(self.bond_landings(name), load_net_names(self.library)):
                     sq = _box(x - h, y - h, x + h, y + h)
                     if cu is not None and not cu.is_empty and cu.buffer(1).contains(sq):
                         continue
-                    cell.add_rectangle(la, round(x - h), round(y - h), round(x + h), round(y + h))
+                    cell.add_rectangle(flayer, round(x - h), round(y - h), round(x + h), round(y + h))
                     stats["fingers"] += 1
             if diel >= 0 and not self._single_layer_route(R) and \
                     any(s.layer == diel and getattr(s, "datatype", 0) == 0 for s in cell.shapes):
@@ -4711,7 +4841,8 @@ class Session:
         # wire-bond landings count as pins of their net: a die pad is only
         # reached through the copper under its bond's substrate end
         for x, y, net in self._bond_nets(self.bond_landings(name), names):
-            node = tracer.node_at(x, y, prefer_layer=la, tol=float(R.get("bond_finger", 400)) / 2.0)
+            node = tracer.node_at(x, y, prefer_layer=self._finger_layer(R),
+                                  tol=float(R.get("bond_finger", 400)) / 2.0)
             by_net.setdefault(net, set()).add(tracer.dsu.find(node) if node is not None
                                               else ("open", x, y))
             count[net] = count.get(net, 0) + 1
@@ -4748,6 +4879,8 @@ class Session:
         R.update(rules)
         self.export_dsn(dsn, cell_name=name, **R)
         cmd = freerouting_command(exe, dsn, ses, passes=int(R["passes"]),
+                                  optimize_passes=int(R.get("optimize_passes", 100)),
+                                  optimize_threshold=float(R.get("optimize_threshold", 2.5)),
                                   exclude_classes=[EXCLUDED_CLASS] if R.get("exclude_nets") else [],
                                   java=app_settings.get_setting(app_settings.JAVA_PATH_KEY))
         code, tail = run_freerouting(cmd, ses, timeout=timeout, on_line=on_line, cancel=cancel)

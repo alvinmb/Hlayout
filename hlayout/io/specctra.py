@@ -53,7 +53,13 @@ DEFAULT_RULES = {
     "power_via_window": 800,
     "power_nets": ["VCC", "GND"],
     "exclude_nets": [],
+    #: autorouter (routing) passes; 0 = until done
     "passes": 100,
+    #: optimizer passes after routing (shorter tracks, fewer vias);
+    #: 0 = don't optimize
+    "optimize_passes": 100,
+    #: stop optimizing once a pass improves the result by less than this (%)
+    "optimize_threshold": 2.5,
     "snap_90": True,
     "keep_existing": True,
     "remove_existing": False,
@@ -66,6 +72,10 @@ DEFAULT_RULES = {
     #: chip-and-wire: square bond finger (um) laid where a wire bond
     #: lands on the substrate; the tracks are routed to it
     "bond_finger": 400,
+    #: chip-and-wire: conductor the bond fingers go on -- "first" or
+    #: "second" (the top conductor, bonded without a dielectric window;
+    #: forces a two-layer route)
+    "finger_layer": "first",
     #: keep tracks this far (um) clear of a bare die / its attach epoxy
     "die_keepout": 200,
     #: no track between a part's own terminations (under a chip
@@ -212,7 +222,9 @@ def export_dsn(library, cell_name: str, path: str, *, layers: Tuple[int, int],
     Chip-and-wire: ``bond_pins`` = [(id, x, y, size)] are the substrate
     ends of the wire bonds -- the bond fingers the tracks must reach --
     written as square pins ``BOND.<id>`` of a component ``BOND`` (give
-    them nets in ``net_names`` as "BOND.<id>"). ``keepouts`` =
+    them nets in ``net_names`` as "BOND.<id>"); an optional fifth item
+    (id, x, y, size, layer) puts the finger on that conductor instead
+    of ``layers[0]``. ``keepouts`` =
     [(layer, [(x, y), ...])] are areas no track may cross (a die and its
     attach epoxy, the gap between a part's terminations, a resistor's
     ink), written as netless pads of a component ``HL_KEEP`` for the
@@ -288,10 +300,12 @@ def export_dsn(library, cell_name: str, path: str, *, layers: Tuple[int, int],
         comps.setdefault(ref, []).append((pin, ps, cx, cy))
 
     # wire-bond landing points: square bond-finger pins, BOND.<id>
-    for bid, bx, by, bsize in (bond_pins or []):
-        ps = f"PAD_{layer_name(la)}_{_fmt(bsize)}x{_fmt(bsize)}"
+    for bp in (bond_pins or []):
+        bid, bx, by, bsize = bp[:4]
+        blay = la if single_layer or len(bp) < 5 or bp[4] is None else int(bp[4])
+        ps = f"PAD_{layer_name(blay)}_{_fmt(bsize)}x{_fmt(bsize)}"
         h = bsize / 2.0
-        padstacks.setdefault(ps, f"(rect {layer_name(la)} {_fmt(-h)} {_fmt(-h)} {_fmt(h)} {_fmt(h)})")
+        padstacks.setdefault(ps, f"(rect {layer_name(blay)} {_fmt(-h)} {_fmt(-h)} {_fmt(h)} {_fmt(h)})")
         comps.setdefault("BOND", []).append((str(bid), ps, float(bx), float(by)))
 
     # Each component's image: its pins relative to the component's own
@@ -635,9 +649,13 @@ def find_java(saved: Optional[str] = None) -> Optional[str]:
 
 def freerouting_command(router: str, dsn: str, ses: str, passes: int = 100,
                         exclude_classes: Iterable[str] = (), java: Optional[str] = None,
-                        extra: Iterable[str] = ()) -> List[str]:
+                        extra: Iterable[str] = (), optimize_passes: Optional[int] = None,
+                        optimize_threshold: Optional[float] = None) -> List[str]:
     """The headless command line. ``router`` is a .jar (run with java)
-    or a native launcher."""
+    or a native launcher. ``passes`` = autorouter passes (0 = until done);
+    ``optimize_passes`` = optimizer passes after routing (0 = no
+    optimizing, None = Freerouting's default); ``optimize_threshold`` =
+    the % improvement a pass must make for optimizing to go on."""
     if router.lower().endswith(".jar"):
         j = find_java(java)
         if not j:
@@ -652,8 +670,16 @@ def freerouting_command(router: str, dsn: str, ses: str, passes: int = 100,
         # give it exactly one pass and no optimiser -- the step it reaches
         # safely. The Java build (.jar / installer) takes the full count.
         passes = 1
+        optimize_passes = 0
         extra = ["-mt", "0"] + list(extra)
     cmd += ["-de", dsn, "-do", ses, "-mp", str(int(passes)), "--gui.enabled=false", "-da"]
+    if optimize_passes is not None:
+        if int(optimize_passes) <= 0:
+            cmd += ["--router.optimizer.enabled=false"]
+        else:
+            cmd += [f"--router.optimizer.max_passes={int(optimize_passes)}"]
+    if optimize_threshold is not None and optimize_passes != 0:
+        cmd += [f"--router.optimizer.improvement_threshold={float(optimize_threshold):g}"]
     exc = [c for c in exclude_classes if c]
     if exc:
         cmd += ["-inc", ",".join(exc)]

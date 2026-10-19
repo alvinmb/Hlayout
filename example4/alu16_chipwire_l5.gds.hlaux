@@ -1,0 +1,537 @@
+{
+  "format": "hlayout-sidecar",
+  "version": 1,
+  "technology": {
+    "format": "hlayout-tech",
+    "version": 1,
+    "layers": [
+      {
+        "number": 0,
+        "name": "Backside Pad",
+        "color": "#e6194b",
+        "stipple": 0,
+        "fill": false,
+        "visible": true
+      },
+      {
+        "number": 1,
+        "name": "Frontsde Pad",
+        "color": "#3cb44b",
+        "stipple": 0,
+        "fill": false,
+        "visible": true
+      },
+      {
+        "number": 2,
+        "name": "Top Edge Pad",
+        "color": "#ffe119",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 3,
+        "name": "1st Routing Conductor",
+        "color": "#ff8040",
+        "stipple": 3,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 4,
+        "name": "Routing Dielectric",
+        "color": "#0080c0",
+        "stipple": 3,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 5,
+        "name": "2nd Routing Conductor",
+        "color": "#911eb4",
+        "stipple": 5,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 6,
+        "name": "L6",
+        "color": "#46f0f0",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 7,
+        "name": "Dielectric Keepout",
+        "color": "#f032e6",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 8,
+        "name": "10 Ohms RES",
+        "color": "#bcf60c",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 9,
+        "name": "30 Ohms RES",
+        "color": "#fabebe",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 10,
+        "name": "100 Ohms RES",
+        "color": "#008080",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 11,
+        "name": "300 Ohms RES",
+        "color": "#e6beff",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 12,
+        "name": "1K Ohms RES",
+        "color": "#9a6324",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 13,
+        "name": "3K Ohms RES",
+        "color": "#fffac8",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 14,
+        "name": "10K Ohms RES",
+        "color": "#800000",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 15,
+        "name": "30K Ohms RES",
+        "color": "#aaffc3",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 16,
+        "name": "100K Ohms RES",
+        "color": "#e6194b",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 17,
+        "name": "300K Ohms RES",
+        "color": "#3cb44b",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 18,
+        "name": "1M Ohms RES",
+        "color": "#ffe119",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 19,
+        "name": "Resister Glaze",
+        "color": "#4363d8",
+        "stipple": 3,
+        "fill": false,
+        "visible": true
+      },
+      {
+        "number": 20,
+        "name": "Epoxy",
+        "color": "#f58231",
+        "stipple": 2,
+        "fill": false,
+        "visible": true
+      },
+      {
+        "number": 21,
+        "name": "L21",
+        "color": "#911eb4",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 22,
+        "name": "L22",
+        "color": "#46f0f0",
+        "stipple": 4,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 23,
+        "name": "L23",
+        "color": "#f032e6",
+        "stipple": 5,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 24,
+        "name": "L24",
+        "color": "#bcf60c",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 25,
+        "name": "L25",
+        "color": "#fabebe",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 26,
+        "name": "L26",
+        "color": "#008080",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 27,
+        "name": "L27",
+        "color": "#e6beff",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 28,
+        "name": "L28",
+        "color": "#9a6324",
+        "stipple": 1,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 29,
+        "name": "L29",
+        "color": "#fffac8",
+        "stipple": 2,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 30,
+        "name": "L30",
+        "color": "#800000",
+        "stipple": 3,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 31,
+        "name": "L31",
+        "color": "#aaffc3",
+        "stipple": 4,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 32,
+        "name": "L32",
+        "color": "#e6194b",
+        "stipple": 5,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 33,
+        "name": "L33",
+        "color": "#3cb44b",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 34,
+        "name": "L34",
+        "color": "#ffe119",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 35,
+        "name": "L35",
+        "color": "#4363d8",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 36,
+        "name": "L36",
+        "color": "#f58231",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 37,
+        "name": "L37",
+        "color": "#911eb4",
+        "stipple": 1,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 38,
+        "name": "L38",
+        "color": "#46f0f0",
+        "stipple": 2,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 39,
+        "name": "L39",
+        "color": "#f032e6",
+        "stipple": 3,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 40,
+        "name": "L40",
+        "color": "#bcf60c",
+        "stipple": 4,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 41,
+        "name": "L41",
+        "color": "#fabebe",
+        "stipple": 5,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 42,
+        "name": "L42",
+        "color": "#008080",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 43,
+        "name": "L43",
+        "color": "#e6beff",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 44,
+        "name": "L44",
+        "color": "#9a6324",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 45,
+        "name": "L45",
+        "color": "#fffac8",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 46,
+        "name": "L46",
+        "color": "#800000",
+        "stipple": 1,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 47,
+        "name": "L47",
+        "color": "#aaffc3",
+        "stipple": 2,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 48,
+        "name": "L48",
+        "color": "#e6194b",
+        "stipple": 3,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 49,
+        "name": "L49",
+        "color": "#3cb44b",
+        "stipple": 4,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 50,
+        "name": "L50",
+        "color": "#ffe119",
+        "stipple": 5,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 51,
+        "name": "L51",
+        "color": "#4363d8",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 52,
+        "name": "L52",
+        "color": "#f58231",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 53,
+        "name": "L53",
+        "color": "#911eb4",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 54,
+        "name": "L54",
+        "color": "#46f0f0",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 55,
+        "name": "L55",
+        "color": "#f032e6",
+        "stipple": 1,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 56,
+        "name": "L56",
+        "color": "#bcf60c",
+        "stipple": 2,
+        "fill": true,
+        "visible": false
+      },
+      {
+        "number": 57,
+        "name": "substrate utie",
+        "color": "#fabebe",
+        "stipple": 3,
+        "fill": false,
+        "visible": true
+      },
+      {
+        "number": 58,
+        "name": "Chip_Pads",
+        "color": "#008080",
+        "stipple": 4,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 59,
+        "name": "Chip_wire_Bond",
+        "color": "#e6beff",
+        "stipple": 5,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 60,
+        "name": "Header_wire_Bond",
+        "color": "#9a6324",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 61,
+        "name": "Document 1",
+        "color": "#ffffff",
+        "stipple": 3,
+        "fill": false,
+        "visible": true
+      },
+      {
+        "number": 62,
+        "name": "RefDes",
+        "color": "#ffffff",
+        "stipple": 8,
+        "fill": false,
+        "visible": true
+      },
+      {
+        "number": 63,
+        "name": "Dimention  2",
+        "color": "#ffffff",
+        "stipple": 0,
+        "fill": false,
+        "visible": true
+      }
+    ],
+    "params": {
+      "route_rules": "{\"layer_a\": 3, \"layer_b\": 5, \"via_cell\": \"VIA_Layer3_to_Layer5\", \"boundary_layer\": -1}",
+      "resistor_geometry_rules": "{\"overlap_a\": 300, \"pad_b\": 500, \"space_c\": 300, \"glaze_oversize\": 300, \"keepout_oversize\": 1000, \"resistor_layer\": 30, \"conductor_layer\": 3, \"glaze_layer\": 19, \"doc_layer\": 62, \"keepout_layer\": 4, \"ink_layers\": {\"10\": 8, \"30\": 9, \"100\": 10, \"300\": 11, \"1000\": 12, \"3000\": 13, \"10000\": 14, \"30000\": 15, \"100000\": 16, \"300000\": 17, \"1000000\": 18}}",
+      "resistor_design_rules": "{\"aim_pct\": 75.0, \"ar_min\": 0.25, \"ar_max\": 4.0, \"available_inks\": [10, 30, 100, 300, 1000, 3000, 10000, 30000, 100000, 300000, 1000000]}",
+      "refdes_annotation_layer": "62",
+      "dielectric_rules": "{\"layer\": 4, \"margin\": 1000, \"clearance\": 0, \"keepout_layers\": [4]}",
+      "bond_rules": "{\"layer\": 59, \"width\": 25, \"pad\": 75, \"min_length\": 300, \"max_length\": 5000, \"die_pad_layers\": [58]}",
+      "drc_rules": "[{\"kind\": \"MIN_WIDTH\", \"layer_a\": 3, \"layer_b\": null, \"value\": 300.0, \"name\": \"1st con min_width\", \"color\": \"#e6194b\"}, {\"kind\": \"MIN_SPACE_BETWEEN\", \"layer_a\": 3, \"layer_b\": 3, \"value\": 300.0, \"name\": \"1st con metal_2_metal\", \"color\": \"#3cb44b\"}]",
+      "mask_op_steps": "[{\"kind\": \"XOR\", \"layer_a\": 3, \"result_layer\": 55, \"layer_b\": 3, \"amount\": 0.0, \"name\": \"\", \"flatten\": true, \"simplify\": 0}]",
+      "netlist_settings": "{\"conductor_layers\": [3, 4, 5], \"include_bonds\": false, \"used_only\": true}",
+      "net_names": "{\"C1.1\": \"VCC\", \"C1.2\": \"GND\", \"C10.1\": \"VCC\", \"C10.2\": \"GND\", \"C2.1\": \"VCC\", \"C2.2\": \"GND\", \"C3.1\": \"VCC\", \"C3.2\": \"GND\", \"C4.1\": \"VCC\", \"C4.2\": \"GND\", \"C5.1\": \"VCC\", \"C5.2\": \"GND\", \"C6.1\": \"VCC\", \"C6.2\": \"GND\", \"C7.1\": \"VCC\", \"C7.2\": \"GND\", \"C8.1\": \"VCC\", \"C8.2\": \"GND\", \"C9.1\": \"VCC\", \"C9.2\": \"GND\", \"IO.1\": \"GND\", \"IO.10\": \"B11\", \"IO.11\": \"F8\", \"IO.12\": \"F4\", \"IO.13\": \"A4\", \"IO.14\": \"B4\", \"IO.15\": \"A5\", \"IO.16\": \"B5\", \"IO.17\": \"S3\", \"IO.18\": \"A6\", \"IO.19\": \"B6\", \"IO.2\": \"VCC\", \"IO.20\": \"S2\", \"IO.21\": \"A7\", \"IO.22\": \"B7\", \"IO.23\": \"F6\", \"IO.24\": \"F7\", \"IO.25\": \"F5\", \"IO.26\": \"~GG\", \"IO.27\": \"CN\", \"IO.28\": \"~PG\", \"IO.29\": \"F0\", \"IO.3\": \"B8\", \"IO.30\": \"S1\", \"IO.31\": \"A0\", \"IO.32\": \"B0\", \"IO.33\": \"B1\", \"IO.34\": \"A1\", \"IO.35\": \"B2\", \"IO.36\": \"A2\", \"IO.37\": \"A3\", \"IO.38\": \"B3\", \"IO.39\": \"F3\", \"IO.4\": \"B9\", \"IO.40\": \"F1\", \"IO.41\": \"F2\", \"IO.42\": \"M\", \"IO.43\": \"S0\", \"IO.44\": \"A12\", \"IO.45\": \"B12\", \"IO.46\": \"B13\", \"IO.47\": \"A13\", \"IO.48\": \"A14\", \"IO.49\": \"C\", \"IO.5\": \"A10\", \"IO.50\": \"V\", \"IO.54\": \"B14\", \"IO.55\": \"A15\", \"IO.56\": \"B15\", \"IO.57\": \"F15\", \"IO.58\": \"Z\", \"IO.59\": \"SUB\", \"IO.6\": \"A8\", \"IO.60\": \"F15\", \"IO.61\": \"F14\", \"IO.62\": \"F13\", \"IO.63\": \"F12\", \"IO.64\": \"F9\", \"IO.65\": \"F10\", \"IO.66\": \"F11\", \"IO.67\": \"GND\", \"IO.68\": \"VCC\", \"IO.7\": \"A9\", \"IO.8\": \"B10\", \"IO.9\": \"A11\", \"U1.1\": \"B0\", \"U1.10\": \"F1\", \"U1.11\": \"F2\", \"U1.12\": \"GND\", \"U1.13\": \"F3\", \"U1.15\": \"P0N\", \"U1.17\": \"G0N\", \"U1.18\": \"B3\", \"U1.19\": \"A3\", \"U1.2\": \"A0\", \"U1.20\": \"B2\", \"U1.21\": \"A2\", \"U1.22\": \"B1\", \"U1.23\": \"A1\", \"U1.24\": \"VCC\", \"U1.3\": \"S3\", \"U1.4\": \"S2\", \"U1.5\": \"S1\", \"U1.6\": \"S0\", \"U1.7\": \"CN\", \"U1.8\": \"M\", \"U1.9\": \"F0\", \"U10.1\": \"VA\", \"U10.10\": \"CN4\", \"U10.12\": \"GND\", \"U10.13\": \"GND\", \"U10.14\": \"VCC\", \"U10.2\": \"VB\", \"U10.3\": \"VN\", \"U10.4\": \"VN\", \"U10.5\": \"VN\", \"U10.6\": \"V\", \"U10.7\": \"GND\", \"U10.8\": \"C\", \"U10.9\": \"CN4\", \"U2.1\": \"B4\", \"U2.10\": \"F5\", \"U2.11\": \"F6\", \"U2.12\": \"GND\", \"U2.13\": \"F7\", \"U2.15\": \"P1N\", \"U2.17\": \"G1N\", \"U2.18\": \"B7\", \"U2.19\": \"A7\", \"U2.2\": \"A4\", \"U2.20\": \"B6\", \"U2.21\": \"A6\", \"U2.22\": \"B5\", \"U2.23\": \"A5\", \"U2.24\": \"VCC\", \"U2.3\": \"S3\", \"U2.4\": \"S2\", \"U2.5\": \"S1\", \"U2.6\": \"S0\", \"U2.7\": \"C1\", \"U2.8\": \"M\", \"U2.9\": \"F4\", \"U3.1\": \"B8\", \"U3.10\": \"F9\", \"U3.11\": \"F10\", \"U3.12\": \"GND\", \"U3.13\": \"F11\", \"U3.15\": \"P2N\", \"U3.17\": \"G2N\", \"U3.18\": \"B11\", \"U3.19\": \"A11\", \"U3.2\": \"A8\", \"U3.20\": \"B10\", \"U3.21\": \"A10\", \"U3.22\": \"B9\", \"U3.23\": \"A9\", \"U3.24\": \"VCC\", \"U3.3\": \"S3\", \"U3.4\": \"S2\", \"U3.5\": \"S1\", \"U3.6\": \"S0\", \"U3.7\": \"C2\", \"U3.8\": \"M\", \"U3.9\": \"F8\", \"U4.1\": \"B12\", \"U4.10\": \"F13\", \"U4.11\": \"F14\", \"U4.12\": \"GND\", \"U4.13\": \"F15\", \"U4.15\": \"P3N\", \"U4.16\": \"CN4\", \"U4.17\": \"G3N\", \"U4.18\": \"B15\", \"U4.19\": \"A15\", \"U4.2\": \"A12\", \"U4.20\": \"B14\", \"U4.21\": \"A14\", \"U4.22\": \"B13\", \"U4.23\": \"A13\", \"U4.24\": \"VCC\", \"U4.3\": \"S3\", \"U4.4\": \"S2\", \"U4.5\": \"S1\", \"U4.6\": \"S0\", \"U4.7\": \"C3\", \"U4.8\": \"M\", \"U4.9\": \"F12\", \"U5.1\": \"G1N\", \"U5.10\": \"~GG\", \"U5.11\": \"C2\", \"U5.12\": \"C1\", \"U5.13\": \"CN\", \"U5.14\": \"G2N\", \"U5.15\": \"P2N\", \"U5.16\": \"VCC\", \"U5.2\": \"P1N\", \"U5.3\": \"G0N\", \"U5.4\": \"P0N\", \"U5.5\": \"G3N\", \"U5.6\": \"P3N\", \"U5.7\": \"~PG\", \"U5.8\": \"GND\", \"U5.9\": \"C3\", \"U6.1\": \"F0\", \"U6.10\": \"F7\", \"U6.11\": \"F8\", \"U6.12\": \"N0\", \"U6.13\": \"F2\", \"U6.14\": \"VCC\", \"U6.2\": \"F1\", \"U6.3\": \"F3\", \"U6.4\": \"F4\", \"U6.5\": \"F5\", \"U6.6\": \"N1\", \"U6.7\": \"GND\", \"U6.8\": \"N2\", \"U6.9\": \"F6\", \"U7.1\": \"F9\", \"U7.10\": \"GND\", \"U7.11\": \"GND\", \"U7.12\": \"N3\", \"U7.13\": \"F11\", \"U7.14\": \"VCC\", \"U7.2\": \"F10\", \"U7.3\": \"F12\", \"U7.4\": \"F13\", \"U7.5\": \"F14\", \"U7.6\": \"N4\", \"U7.7\": \"GND\", \"U7.8\": \"N5\", \"U7.9\": \"F15\", \"U8.1\": \"N0\", \"U8.11\": \"VCC\", \"U8.12\": \"VCC\", \"U8.14\": \"VCC\", \"U8.2\": \"N1\", \"U8.3\": \"N2\", \"U8.4\": \"N3\", \"U8.5\": \"N4\", \"U8.6\": \"N5\", \"U8.7\": \"GND\", \"U8.8\": \"ZN\", \"U9.1\": \"B15\", \"U9.10\": \"F15\", \"U9.11\": \"Z\", \"U9.12\": \"ZN\", \"U9.13\": \"VCC\", \"U9.14\": \"VCC\", \"U9.2\": \"SUB\", \"U9.3\": \"B15X\", \"U9.4\": \"A15\", \"U9.5\": \"F15\", \"U9.6\": \"VA\", \"U9.7\": \"GND\", \"U9.8\": \"VB\", \"U9.9\": \"B15X\"}",
+      "freerouting_rules": "{\"signal_width\": 200, \"power_width\": 400, \"clearance\": 200, \"signal_via\": 400, \"signal_via_window\": 200, \"power_via\": 700, \"power_via_window\": 800, \"power_nets\": [\"VCC\", \"GND\"], \"exclude_nets\": [], \"passes\": 200, \"optimize_passes\": 100, \"optimize_threshold\": 2.0, \"snap_90\": true, \"keep_existing\": true, \"remove_existing\": true, \"io_entry_depth\": 300, \"layer_mode\": \"two\", \"bond_finger\": 500, \"finger_layer\": \"second\", \"die_keepout\": 200, \"keepout_bodies\": true}",
+      "thermal": "{\"materials\": {}, \"powers\": {\"U1\": 90.0, \"U10\": 70.0, \"U2\": 60.0, \"U3\": 100.0, \"U4\": 100.0, \"U5\": 80.0, \"U6\": 80.0, \"U7\": 120.0, \"U8\": 40.0, \"U9\": 40.0}, \"parts\": {}, \"boundary\": {\"substrate_layer\": -1, \"substrate_material\": \"alumina_96\", \"substrate_um\": 635.0, \"base_mode\": \"fixed\", \"base_temp_c\": 25.0, \"ambient_c\": 25.0, \"base_htc\": 0.0, \"top_htc\": 10.0, \"mount_material\": \"\", \"mount_um\": 0.0, \"grid_um\": 0.0}, \"limits\": {\"resistor_max_c\": 150.0, \"die_max_c\": 125.0, \"component_max_c\": 125.0, \"resistor_max_w_mm2\": 0.08}, \"display\": {\"style\": \"banded\", \"bands\": 10, \"quantity\": \"temperature\", \"spacing\": \"even\"}}"
+    }
+  },
+  "attached_libraries": []
+}
