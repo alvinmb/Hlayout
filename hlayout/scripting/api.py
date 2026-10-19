@@ -3661,6 +3661,62 @@ class Session:
             raise LayoutError("set the two routing layers first (Setup > Route Layers...)")
         return la, lb
 
+    # --- Auto Place -----------------------------------------------------------
+    def autoplace_settings(self) -> dict:
+        """The design's saved Auto Place settings (grid, clearance, edge,
+        bond_reach, thermal, effort, seed, resistor_layer, footprint_map,
+        weights, class_weights, two_pin_weight, die_net_weight,
+        family_power_mw). See hlayout.scripting.autoplace_session."""
+        from .autoplace_session import load_settings
+        return load_settings(self.library)
+
+    def set_autoplace_settings(self, **settings) -> dict:
+        """Update and save some Auto Place settings; returns them all."""
+        from .autoplace_session import save_settings
+        return save_settings(self.library, settings)
+
+    def auto_place(self, netlist, overrides: Optional[str] = None, cell_name: Optional[str] = None,
+                   improve: bool = False, only=None, on_progress=None, cancel=None,
+                   **settings) -> dict:
+        """Place the netlist's parts in the current (or named) cell for the
+        shortest weighted straight-line net length, with hot parts kept
+        apart and nothing overlapping, on the placement grid -- one undo
+        step. ``netlist`` = a KiCad .net (or CSV / Tango) path or a parsed
+        hlayout.io.kicad_netlist.Netlist; ``overrides`` = an optional CSV
+        (ref, x, y, rotation, locked, weight, power_mw, layer, family, cell).
+        Parts already placed (an instance labelled with the ref) start
+        where they are; ``improve`` keeps that start for every part and
+        only refines it; ``only`` = the refs allowed to move. Extra
+        keyword ``settings`` override the saved ones for this run (grid,
+        thermal, effort, seed, weights, ...). The netlist's pad nets are
+        merged into the design's net names.
+        Returns {"placed", "fixed", "generated", "skipped", "unmapped",
+        "missing_pins", "length_before", "length_after", "overlaps",
+        "outside"}."""
+        from .autoplace_session import apply, build_job
+        placer, info = build_job(self, netlist, cell_name=cell_name, overrides=overrides,
+                                 settings=settings, only=set(only) if only else None)
+        before = placer.wirelength() if all(p.placed for p in placer.parts) else None
+        placer.run(effort=float(info["settings"]["effort"]), improve=improve,
+                   on_progress=on_progress, cancel=cancel)
+        bad, out = placer.overlaps()
+        with self._batch():
+            apply(self, placer, info)
+        self._notify()
+        return {"placed": sum(1 for p in placer.parts if not p.fixed),
+                "fixed": sum(1 for p in placer.parts if p.fixed),
+                "generated": info["generated"], "skipped": info["skipped"],
+                "unmapped": info["unmapped"], "missing_pins": info["missing_pins"],
+                "length_before": before, "length_after": placer.wirelength(),
+                "overlaps": bad, "outside": out}
+
+    def sli(self, cell_name: Optional[str] = None, nets=None) -> dict:
+        """Straight-line interconnects (SLIs) of the design as placed: for
+        every named net, the minimum spanning tree over its pads.
+        -> {"nets": [{"net", "length", "segments"}], "total"} (um)."""
+        from .autoplace_session import sli as _sli
+        return _sli(self, cell_name=cell_name, nets=nets)
+
     def send_to_solidcraft(self, cell_name: Optional[str] = None, window: bool = True,
                            export: Optional[str] = None, app: Optional[str] = None,
                            on_progress=None, cancel=None) -> dict:

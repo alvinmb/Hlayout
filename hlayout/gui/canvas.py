@@ -2695,7 +2695,52 @@ class LayoutCanvas(tk.Canvas):
             self._draw_cell(self.cell_name, ox=0, oy=0, rot=0, mag=1, mirror=False, depth=0)
         self._draw_selection_highlight()
         self._draw_net_highlight()
+        self._draw_sli()
         self._draw_issue_markers()
+
+    # --- Straight-line interconnects (Auto Place) ----------------------------
+    #: net class -> SLI colour; a connection longer than SLI_LONG_UM is red
+    SLI_COLORS = {"signal": "#ffe14d", "power": "#ff8a65", "ground": "#64b5f6"}
+    SLI_LONG_COLOR = "#ff3b30"
+    SLI_LONG_UM = 15000
+    #: View > Straight-Line Interconnects; App sets sli_provider (a callable
+    #: returning Session.sli()'s dict) and the tick-box state below
+    show_sli = False
+    sli_provider = None
+    sli_show_power = True
+    sli_last = None
+
+    @staticmethod
+    def sli_class(net):
+        n = (net or "").upper()
+        if n in ("GND", "AGND", "DGND", "VSS", "0V") or n.endswith("GND"):
+            return "ground"
+        if n.startswith(("VCC", "VDD", "VEE", "+", "V+", "V-")):
+            return "power"
+        return "signal"
+
+    def _draw_sli(self):
+        """Every named net as straight lines along its minimum spanning
+        tree, pad to pad -- redrawn with the layout, so they follow a part
+        while it is dragged. Nothing is added to the design."""
+        if not self.show_sli or self.sli_provider is None:
+            return
+        try:
+            data = self.sli_provider()
+        except Exception:
+            return
+        self.sli_last = data
+        tag = "sli"
+        for n in data.get("nets", []):
+            cls = self.sli_class(n["net"])
+            if cls != "signal" and not self.sli_show_power:
+                continue
+            col = self.SLI_COLORS.get(cls, "#ffe14d")
+            for (x0, y0, x1, y1) in n["segments"]:
+                long_ = ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5 > self.SLI_LONG_UM
+                p0, p1 = self.to_px(x0, y0), self.to_px(x1, y1)
+                self.create_line(p0[0], p0[1], p1[0], p1[1], fill=self.SLI_LONG_COLOR if long_ else col,
+                                 width=1, dash=(4, 3) if long_ else None, tags=tag)
 
     # --- Highlight Net overlay ----------------------------------------------
     #: outline colour of a highlighted net's copper / pad boxes

@@ -423,6 +423,9 @@ class App(tk.Tk):
         self.show_pins_var = tk.BooleanVar(value=self.canvas.show_pin_numbers)
         viewm.add_checkbutton(label="Show Pin Numbers", variable=self.show_pins_var,
                                command=self._on_show_pins_change)
+        self.show_sli_var = tk.BooleanVar(value=False)
+        viewm.add_checkbutton(label="Straight-Line Interconnects", variable=self.show_sli_var,
+                               command=self._on_show_sli_change)
         viewm.add_separator()
         viewm.add_radiobutton(label="Zoom Window", value="zoomwin", variable=self.mode_var,
                                command=self._on_mode_change, accelerator="W")
@@ -516,6 +519,9 @@ class App(tk.Tk):
         toolsm.add_command(label="Assembly Drawing...", command=lambda: open_assembly_window(self))
         toolsm.add_command(label="DRC...", command=lambda: open_drc_window(self))
         toolsm.add_command(label="Extract Netlist...", command=lambda: open_netlist_window(self))
+        toolsm.add_command(label="Auto Place...",
+                           command=lambda: __import__("hlayout.gui.autoplace_window",
+                                                      fromlist=["x"]).open_autoplace_window(self))
         toolsm.add_command(label="Autoroute (Freerouting)...",
                            command=lambda: open_freerouting_window(self))
         toolsm.add_command(label="Thermal Analysis...", command=lambda: open_thermal_window(self))
@@ -811,6 +817,7 @@ class App(tk.Tk):
         self._menu_bar_anchor = body
 
         self.canvas = LayoutCanvas(body, self.session.library, on_status=self.status.set)
+        self.canvas.sli_provider = lambda: self.session.sli(cell_name=self.canvas.cell_name)
         from .hybrid_hooks import HybridHooks
         self.canvas.hybrid_hooks = HybridHooks(self)
         # weight=1 on the canvas, weight=0 on the right panel: when the
@@ -2103,6 +2110,25 @@ class App(tk.Tk):
     def _on_show_pins_change(self):
         self.canvas.show_pin_numbers = self.show_pins_var.get()
         self.canvas.redraw()
+
+    def _on_show_sli_change(self):
+        """View > Straight-Line Interconnects: every named net drawn pad to
+        pad along its shortest tree; total length on the status bar."""
+        self.set_sli(self.show_sli_var.get())
+
+    def set_sli(self, on: bool):
+        self.canvas.show_sli = bool(on)
+        if hasattr(self, "show_sli_var") and self.show_sli_var.get() != bool(on):
+            self.show_sli_var.set(bool(on))
+        self.canvas.redraw()
+        if on:
+            d = self.canvas.sli_last or self.session.sli(cell_name=self.canvas.cell_name)
+            if not d["nets"]:
+                self.status.set("Straight-line interconnects: no named nets -- import net "
+                                "names or run Tools > Auto Place...")
+            else:
+                self.status.set(f"Straight-line interconnects: {len(d['nets'])} nets, "
+                                f"total {d['total'] / 1000:.1f} mm")
 
     def _on_snap_change(self):
         self.canvas.snap_enabled = self.snap_var.get()

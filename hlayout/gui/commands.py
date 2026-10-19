@@ -221,6 +221,16 @@ Attached libraries:
                                        passes= routing passes (0 = until done),
                                        optpasses= optimizer passes (0 = off),
                                        optstop= stop optimizing below this % gain
+    AUTOPLACE RUN|IMPROVE <netlist> [overrides=<csv>] [effort=] [seed=] [thermal=] [grid=]
+                                       place the netlist's parts (KiCad .net, CSV or
+                                       Tango) for the shortest weighted net length;
+                                       IMPROVE refines the current placement.
+                                       AUTOPLACE WEIGHT <net> <w> sets a net weight.
+                                       Also Tools > Auto Place... and
+                                       Session.auto_place()
+    SLI [ON|OFF]                       straight-line interconnects: total and longest
+                                       nets; ON/OFF shows them (View > Straight-Line
+                                       Interconnects). Session.sli()
     SOLIDCRAFT [window=0|1] [export=<file.step|3mf|stl|obj>]
                                        build the current cell as a 3D model in
                                        SolidCraft through its MCP server (window=1:
@@ -2299,6 +2309,56 @@ class CommandInterpreter:
             raise CommandError(usage)
         name, path = self.session.create_via_cell(positional[0], positional[1], **kwargs)
         return f"created via cell {name!r}, saved to {path}"
+
+    def _cmd_autoplace(self, args):
+        usage = ("usage: AUTOPLACE RUN <netlist> [overrides=<csv>] [effort=<n>] [seed=<n>] "
+                 "[thermal=<x>] [grid=<um>] | AUTOPLACE IMPROVE <netlist> [...] | "
+                 "AUTOPLACE WEIGHT <net> <w>")
+        if not args:
+            raise CommandError(usage)
+        sub = args[0].upper()
+        if sub == "WEIGHT":
+            if len(args) != 3:
+                raise CommandError(usage)
+            ws = dict(self.session.autoplace_settings()["weights"])
+            ws[args[1]] = float(args[2])
+            self.session.set_autoplace_settings(weights=ws)
+            return f"net {args[1]} weight {float(args[2]):g}"
+        if sub not in ("RUN", "IMPROVE") or len(args) < 2:
+            raise CommandError(usage)
+        opts, ov = {}, None
+        for a in args[2:]:
+            k, _, v = a.partition("=")
+            k = k.lower()
+            if k == "overrides":
+                ov = v
+            elif k in ("effort", "thermal", "grid"):
+                opts[k] = float(v)
+            elif k == "seed":
+                opts[k] = int(v)
+            else:
+                raise CommandError(usage)
+        r = self.session.auto_place(args[1], overrides=ov, improve=(sub == "IMPROVE"), **opts)
+        d = self.session.sli()
+        msg = f"placed {r['placed']} part(s); SLI total {d['total'] / 1000:.1f} mm"
+        if r["skipped"]:
+            msg += "; not placed: " + ", ".join(r["skipped"])
+        if r["unmapped"]:
+            msg += "; no cell for: " + ", ".join(r["unmapped"])
+        if r["overlaps"] or r["outside"]:
+            msg += f"; {len(r['overlaps'])} overlap(s), {len(r['outside'])} outside"
+        return msg
+
+    def _cmd_sli(self, args):
+        """SLI [ON|OFF] -- straight-line interconnects; no argument: report."""
+        d = self.session.sli()
+        if args and args[0].upper() in ("ON", "OFF"):
+            if self.view is not None:
+                self.view.show_sli = args[0].upper() == "ON"
+                self.view.redraw()
+        top = ", ".join(f"{n['net']} {n['length'] / 1000:.1f}" for n in d["nets"][:5])
+        return (f"{len(d['nets'])} net(s), total {d['total'] / 1000:.1f} mm"
+                + (f"; longest: {top}" if top else ""))
 
     def _cmd_solidcraft(self, args):
         usage = "usage: SOLIDCRAFT [window=0|1] [export=<file.step|3mf|stl|obj>]"
