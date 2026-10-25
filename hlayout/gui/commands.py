@@ -544,7 +544,15 @@ requires the shapely package; also available as Tools > DRC...):
                                        kind: MIN_WIDTH/MIN_AREA/MIN_SPACE (one layer,
                                        omit layer_b) or MIN_SPACE_BETWEEN/MIN_ENCLOSURE
                                        (two layers, layer_b required) -- see Tools >
-                                       DRC... for what each kind checks
+                                       DRC... for what each kind checks;
+                                       EDGE_CLEARANCE <conductor> <substrate> value=<dbu>
+                                       keeps a conductor that far in from the substrate
+                                       edge; wire bonds: BOND_MIN_LENGTH/BOND_MAX_LENGTH
+                                       <bond_layer> value=<dbu>, BOND_MAX_ANGLE
+                                       <bond_layer> <die_pad_layer> value=<degrees>
+    DRCRULE BONDS [angle=<deg>]       add the wire-bond rules from Setup > Wire Bond
+                                       Rules (bond layer, min/max length, each die-pad
+                                       layer) with a max departure angle (default 45)
     DRCRULE LIST                      list saved rules, numbered
     DRCRULE REMOVE <index>            remove one saved rule by its LIST number
     DRCRULE CLEAR                     remove every saved rule
@@ -613,6 +621,19 @@ Edit > Auto-Route Two Pins tool):
                                        Path in one undo step; errors if the two points
                                        can't be joined at this grid/width. Also
                                        Session.auto_route()
+
+Pick and Place (centroid file; also File > Export Pick and Place...):
+    PNP LIST [cell=<name>] [origin=substrate|design|<x,y>] [printed=0|1] [dies=0|1]
+                                       list every placed part with a ref-des: centroid
+                                       (pad-pattern centre; body centre for a bare die)
+                                       in mm from the origin (default the substrate's
+                                       lower-left corner) and placement angle (deg CCW)
+    PNP EXPORT <path> [cell=<name>] [origin=...] [format=csv|kicad] [printed=0|1]
+               [dies=0|1]              write the pick-and-place file: .pos = KiCad
+                                       footprint positions, else CSV (Designator,
+                                       Comment, Footprint, Kind, Mid X, Mid Y, Rotation,
+                                       Side, Mirrored); printed resistors are left out
+                                       unless printed=1. Session.export_pick_and_place()
 
 Netlist Extraction (requires the shapely package; also available as
 Tools > Extract Netlist...):
@@ -1886,6 +1907,7 @@ class CommandInterpreter:
 
         usage = (
             "usage: DRCRULE ADD <kind> <layer_a> [layer_b] value=<n> [name=<name>]\n"
+            "       DRCRULE BONDS [angle=<deg>]\n"
             "       DRCRULE LIST\n"
             "       DRCRULE REMOVE <index>\n"
             "       DRCRULE CLEAR\n"
@@ -1906,6 +1928,33 @@ class CommandInterpreter:
         if sub == "CLEAR":
             save_drc_rules(self.session.library, [])
             return f"cleared {len(rules)} DRC rule(s)"
+
+        if sub == "BONDS":
+            from ..core.drc import DEFAULT_BOND_MAX_ANGLE, bond_rules_from_settings
+            from ..core.errors import LayoutError
+            from ..io.techfile import load_bond_rules
+            angle = DEFAULT_BOND_MAX_ANGLE
+            for a in args[1:]:
+                if a.lower().startswith("angle="):
+                    try:
+                        angle = float(a.split("=", 1)[1])
+                    except ValueError:
+                        raise CommandError("usage: DRCRULE BONDS [angle=<deg>]")
+                else:
+                    raise CommandError("usage: DRCRULE BONDS [angle=<deg>]")
+            existing = [DrcRule.from_dict(r) for r in rules]
+            try:
+                new = bond_rules_from_settings(load_bond_rules(self.session.library), existing,
+                                               angle=angle)
+            except LayoutError as e:
+                raise CommandError(str(e))
+            for r in new:
+                rules.append(r.to_dict())
+            save_drc_rules(self.session.library, rules)
+            if not new:
+                return "the wire-bond rules are already saved"
+            return "\n".join(f"added rule #{len(rules) - len(new) + i + 1}: {r.label}"
+                             for i, r in enumerate(new))
 
         if sub == "REMOVE":
             if len(args) != 2:
@@ -1957,6 +2006,62 @@ class CommandInterpreter:
             return f"added rule #{len(rules)}: {rule.label}"
 
         raise CommandError(usage)
+
+    def _cmd_pnp(self, args):
+        usage = ("usage: PNP LIST [cell=<name>] [origin=substrate|design|<x,y>] "
+                 "[printed=0|1] [dies=0|1]\n"
+                 "       PNP EXPORT <path> [cell=<name>] [origin=...] [format=csv|kicad] "
+                 "[printed=0|1] [dies=0|1]")
+        if not args or args[0].upper() not in ("LIST", "EXPORT"):
+            raise CommandError(usage)
+        sub = args[0].upper()
+        kw = {"origin": "substrate"}
+        path, fmt = None, None
+        for a in args[1:]:
+            if "=" not in a:
+                if sub == "EXPORT" and path is None:
+                    path = a
+                    continue
+                raise CommandError(usage)
+            k, v = a.split("=", 1)
+            k = k.lower()
+            if k == "cell":
+                kw["cell_name"] = v
+            elif k == "origin":
+                if v.lower() in ("substrate", "design"):
+                    kw["origin"] = v.lower()
+                else:
+                    try:
+                        x, y = (float(t) for t in v.split(","))
+                    except ValueError:
+                        raise CommandError(f"{usage}\n(origin=<x,y> is two DBU numbers)")
+                    kw["origin"] = (x, y)
+            elif k == "format" and sub == "EXPORT":
+                fmt = v.lower()
+            elif k in ("printed", "dies"):
+                kw["include_" + k] = v.lower() not in ("0", "false", "no")
+            else:
+                raise CommandError(f"unknown PNP option {k!r}")
+        if sub == "EXPORT":
+            if not path:
+                raise CommandError(usage)
+            try:
+                t = self.session.export_pick_and_place(path, fmt=fmt, **kw)
+            except ValueError as e:
+                raise CommandError(str(e))
+        else:
+            t = self.session.pick_and_place(**kw)
+        ox, oy = t["origin"]
+        lines = [f"{len(t['rows'])} part(s); origin {t['origin_kind']} "
+                 f"({dbu_to_mm(ox):g}, {dbu_to_mm(oy):g}) mm"]
+        if sub == "EXPORT":
+            lines[0] += f"; wrote {t['format']} to {path}"
+        else:
+            for r in t["rows"]:
+                lines.append(f"  {r['designator']:<8} {r['footprint']:<20} {r['kind']:<9} "
+                             f"x {r['x_mm']:9.4f}  y {r['y_mm']:9.4f}  rot {r['rotation']:7.2f}"
+                             f"{'  mirrored' if r['mirrored'] else ''}")
+        return "\n".join(lines)
 
     def _cmd_netlist(self, args):
         usage = ("usage: NETLIST RUN [layer1 layer2 ...] [cell=<name>] "
@@ -2036,6 +2141,15 @@ class CommandInterpreter:
         lines = [f"DRC: {len(violations)} violation(s) found"]
         for label, count in by_rule.items():
             lines.append(f"  {count} x {label}")
+        from ..core.drc import BOND_KINDS
+        edge = [v.message for v in violations if v.rule.kind == "EDGE_CLEARANCE"]
+        if edge:
+            lines.append("substrate edge:")
+            lines.extend(f"  {m}" for m in edge)
+        bonds = [v.message for v in violations if v.rule.kind in BOND_KINDS]
+        if bonds:
+            lines.append("wire bonds:")
+            lines.extend(f"  {m}" for m in bonds)
         return "\n".join(lines)
 
     def _cmd_pin(self, args):

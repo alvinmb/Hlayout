@@ -29,10 +29,11 @@ from tkinter import colorchooser, ttk
 
 from . import dialogs
 from .fonts import section_header_font
-from ..core.drc import DRC_RULE_KINDS, TWO_LAYER_KINDS, DrcRule
+from ..core.drc import (ANGLE_KINDS, BOND_KINDS, DEFAULT_BOND_MAX_ANGLE, DRC_RULE_KINDS, MAX_KINDS,
+                        TWO_LAYER_KINDS, DrcRule, bond_rules_from_settings)
 from ..core.errors import LayoutError
 from ..io import toolsets
-from ..io.techfile import DRC_RULES_KEY, load_drc_rules, save_drc_rules
+from ..io.techfile import DRC_RULES_KEY, load_bond_rules, load_drc_rules, save_drc_rules
 from ..core.units import DBU_MM, dbu_to_mm, mm_to_dbu
 
 # Default palette a new rule's colour is picked from (cycling), so
@@ -73,15 +74,31 @@ def _value_to_display(kind, value):
     the mm-based units shown in the dialog/table. Area scales as the
     square of the linear DBU->mm factor, so MIN_AREA needs its own
     conversion rather than dbu_to_mm()."""
+    if kind in ANGLE_KINDS:
+        return value                    # degrees, stored as is
     if kind == "MIN_AREA":
         return value * DBU_MM * DBU_MM
     return dbu_to_mm(value)
 
 
 def _display_to_value(kind, display_value):
+    if kind in ANGLE_KINDS:
+        return float(display_value)
     if kind == "MIN_AREA":
         return display_value / (DBU_MM * DBU_MM)
     return float(mm_to_dbu(display_value))
+
+
+def _unit(kind):
+    if kind in ANGLE_KINDS:
+        return "deg"
+    return "mm²" if kind == "MIN_AREA" else "mm"
+
+
+def bond_rules_from_setup(library, existing=()):
+    """The wire-bond DRC rules from Setup > Wire Bond Rules... (see
+    hlayout.core.drc.bond_rules_from_settings)."""
+    return bond_rules_from_settings(load_bond_rules(library), existing)
 
 
 def _layer_choices(library):
@@ -192,6 +209,16 @@ class RuleDialog(tk.Toplevel):
                               "non-overlapping shape on Layer B.",
         "MIN_ENCLOSURE": "Every shape on Layer B must be enclosed by Layer A by >= Value "
                           "mm on all sides (e.g. metal enclosing a via).",
+        "EDGE_CLEARANCE": "Layer A is a conductor, Layer B the substrate. Every shape on Layer A "
+                           "must be on the substrate and at least Value mm in from its edge "
+                           "(a closed outline path counts as the area it encloses).",
+        "BOND_MIN_LENGTH": "Layer A is the bond layer. Every wire bond must span at least "
+                            "Value mm end to end.",
+        "BOND_MAX_LENGTH": "Layer A is the bond layer. Every wire bond must span at most "
+                            "Value mm end to end.",
+        "BOND_MAX_ANGLE": "Layer A is the bond layer, Layer B a die-pad layer. Where a wire "
+                           "lands on a bare-die pad it must leave within Value degrees of the "
+                           "outward normal of the nearest die edge.",
     }
 
     def _sync(self):
@@ -204,14 +231,17 @@ class RuleDialog(tk.Toplevel):
         # rather than leaving a stale number that now means something
         # else.
         prev_kind = getattr(self, "_last_kind", kind)
-        if prev_kind != kind:
+        if prev_kind != kind and (prev_kind in ANGLE_KINDS) != (kind in ANGLE_KINDS):
+            # an angle and a length don't convert: start from a sensible value
+            self.value_var.set(DEFAULT_BOND_MAX_ANGLE if kind in ANGLE_KINDS else 0.3)
+        elif prev_kind != kind:
             try:
                 current_dbu = _display_to_value(prev_kind, self.value_var.get())
                 self.value_var.set(_value_to_display(kind, current_dbu))
             except tk.TclError:
                 pass
         self._last_kind = kind
-        self.value_label_var.set("Value (mm²):" if kind == "MIN_AREA" else "Value (mm):")
+        self.value_label_var.set(f"Value ({_unit(kind)}):")
 
     def _pick_color(self):
         rgb, hexcolor = colorchooser.askcolor(color=self.color, title="Rule colour",
@@ -287,6 +317,7 @@ class DrcWindow(tk.Toplevel):
         ttk.Button(toolbar, text="Add Rule...", command=self._add_rule).pack(side="left", padx=2)
         ttk.Button(toolbar, text="Edit Rule...", command=self._edit_rule).pack(side="left", padx=2)
         ttk.Button(toolbar, text="Delete Rule", command=self._delete_rule).pack(side="left", padx=2)
+        ttk.Button(toolbar, text="Add Bond Rules", command=self._add_bond_rules).pack(side="left", padx=2)
         ttk.Separator(toolbar, orient="vertical").pack(side="left", fill="y", padx=8)
         ttk.Button(toolbar, text="Run DRC", command=self._run_drc).pack(side="left", padx=2)
 
@@ -318,7 +349,7 @@ class DrcWindow(tk.Toplevel):
         self.rule_table = ttk.Treeview(top, columns=rule_cols, show="headings", height=8)
         for col, heading, width in [
             ("name", "Name", 120), ("kind", "Kind", 140), ("layer_a", "Layer A", 100),
-            ("layer_b", "Layer B", 100), ("value", "Value (mm)", 100),
+            ("layer_b", "Layer B", 100), ("value", "Value", 100),
         ]:
             self.rule_table.heading(col, text=heading)
             self.rule_table.column(col, width=width, anchor="center")
@@ -362,11 +393,11 @@ class DrcWindow(tk.Toplevel):
         self.rule_table.delete(*self.rule_table.get_children())
         for i, rule in enumerate(self.rules):
             display_value = _value_to_display(rule.kind, rule.value)
-            unit = "mm²" if rule.kind == "MIN_AREA" else "mm"
+            op = "≤ " if rule.kind in MAX_KINDS else ""
             self.rule_table.insert("", "end", iid=str(i), values=(
                 rule.name, rule.kind, _layer_label(self.library, rule.layer_a),
                 _layer_label(self.library, rule.layer_b) if rule.layer_b is not None else "",
-                f"{display_value:g} {unit}",
+                f"{op}{display_value:g} {_unit(rule.kind)}",
             ), tags=self._row_tag(self.rule_table, rule.color))
         self.status_var.set(f"{len(self.rules)} rule(s) saved to the technology file")
 
@@ -399,6 +430,30 @@ class DrcWindow(tk.Toplevel):
             self.rules[row] = dlg.result
             self._persist()
             self._refresh_rules()
+
+    def _add_bond_rules(self):
+        """Wire-bond length and departure-angle rules, filled in from
+        Setup > Wire Bond Rules... (bond layer, min/max length, die-pad
+        layers) with a 45-degree max angle; rules already in the table
+        are not added twice."""
+        try:
+            new = bond_rules_from_setup(self.library, self.rules)
+        except LayoutError as e:
+            dialogs.show_info("Add Bond Rules", str(e), parent=self)
+            return
+        if not new:
+            dialogs.show_info("Add Bond Rules", "The bond rules are already in the table.",
+                              parent=self)
+            return
+        for rule in new:
+            rule.color = _next_default_color(len(self.rules))
+            self.rules.append(rule)
+        self._persist()
+        self._refresh_rules()
+        note = "" if any(r.kind == "BOND_MAX_ANGLE" for r in self.rules) else \
+            "\n\nNo die-pad layer is set in Setup > Wire Bond Rules..., so no angle rule was added."
+        dialogs.show_info("Add Bond Rules", f"Added {len(new)} rule(s). Edit a rule to change "
+                          f"its limit.{note}", parent=self)
 
     def _delete_rule(self):
         row = self._current_rule_row()
@@ -451,8 +506,10 @@ class DrcWindow(tk.Toplevel):
         shows every size in mm -- so rebuild the same message here with
         the value converted rather than changing the shared core label."""
         rule = v.rule
+        if rule.kind in BOND_KINDS or rule.kind == "EDGE_CLEARANCE":
+            return v.message            # already in mm / degrees, with the measured value
         display_value = _value_to_display(rule.kind, rule.value)
-        unit = "mm²" if rule.kind == "MIN_AREA" else "mm"
+        unit = _unit(rule.kind)
         if rule.kind in TWO_LAYER_KINDS:
             base = f"{rule.kind}(layer {rule.layer_a}, layer {rule.layer_b}) >= {display_value:g} {unit}"
         else:
@@ -464,7 +521,13 @@ class DrcWindow(tk.Toplevel):
             "About",
             "Design Rule Check (DRC)\n\n"
             "MIN_WIDTH / MIN_AREA / MIN_SPACE -- single-layer checks.\n"
-            "MIN_SPACE_BETWEEN / MIN_ENCLOSURE -- between two layers.\n\n"
+            "MIN_SPACE_BETWEEN / MIN_ENCLOSURE -- between two layers.\n"
+            "EDGE_CLEARANCE -- a conductor (Layer A) at least Value mm in from "
+            "the substrate (Layer B) edge.\n"
+            "BOND_MIN_LENGTH / BOND_MAX_LENGTH -- wire-bond span on the bond layer.\n"
+            "BOND_MAX_ANGLE -- how far a wire leaves a die pad off the die-edge "
+            "normal (degrees). Add Bond Rules fills these in from Setup > Wire "
+            "Bond Rules....\n\n"
             "Every check descends into placed cell instances (Srefs), so "
             "a design built out of placed cells (resistors, vias, ...) "
             "is checked, not just the current cell's own directly-drawn "

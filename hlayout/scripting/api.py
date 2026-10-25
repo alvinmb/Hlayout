@@ -3323,7 +3323,14 @@ class Session:
                 error_layer=None) -> List["DrcViolation"]:
         """Run Design Rule Check (DRC) rules -- MIN_WIDTH, MIN_AREA,
         MIN_SPACE (single-layer), MIN_SPACE_BETWEEN, MIN_ENCLOSURE
-        (between two layers) -- against the design. See hlayout.core.drc
+        (between two layers), EDGE_CLEARANCE (layer_a = conductor,
+        layer_b = substrate: every conductor shape on the substrate and
+        at least value DBU in from its edge), and the wire-bond rules BOND_MIN_LENGTH /
+        BOND_MAX_LENGTH (layer_a = bond layer, value in DBU) and
+        BOND_MAX_ANGLE (layer_a = bond layer, layer_b = die-pad layer,
+        value in degrees off the die-edge normal) -- against the
+        design. add_bond_drc_rules() saves the bond rules from Setup >
+        Wire Bond Rules.... See hlayout.core.drc
         for what each rule kind checks and how a violation's marker
         geometry is computed; like mask ops, every check descends into
         placed cell instances (Srefs) so a design built mostly out of
@@ -3387,6 +3394,40 @@ class Session:
                     cell.add_polygon(e_layer, v.points)
         self._notify()
         return violations
+
+    def add_bond_drc_rules(self, angle: float = 45.0) -> list:
+        """Save the wire-bond DRC rules made from Setup > Wire Bond
+        Rules... into the technology file: BOND_MIN_LENGTH and
+        BOND_MAX_LENGTH on the bond layer, and BOND_MAX_ANGLE (``angle``
+        degrees) for each die-pad layer. Rules already saved are not
+        added twice. Returns the DrcRule list added (Tools > DRC... >
+        Add Bond Rules; DRCRULE BONDS)."""
+        from ..core.drc import DrcRule, bond_rules_from_settings
+        from ..io.techfile import load_bond_rules, save_drc_rules
+        saved = load_drc_rules(self.library)
+        new = bond_rules_from_settings(load_bond_rules(self.library),
+                                       [DrcRule.from_dict(r) for r in saved], angle=angle)
+        save_drc_rules(self.library, saved + [r.to_dict() for r in new])
+        return new
+
+    def bond_departures(self, cell_name: Optional[str] = None, pad_layer=None) -> list:
+        """Every wire-bond end that lands on a bare-die pad, with the angle
+        it leaves at: [{"a", "b", "end", "die", "angle_deg"}], ``a``/``b``
+        the wire's ends and ``end`` (0 or 1) the one on the die.
+        ``pad_layer`` defaults to each Setup > Wire Bond Rules die-pad
+        layer. The angle is measured from the outward normal of the die
+        edge nearest the pad (see BOND_MAX_ANGLE in hlayout.core.drc)."""
+        from ..core.drc import bond_departures
+        from ..io.techfile import load_bond_rules
+        br = load_bond_rules(self.library)
+        cell = self.library.get_cell(cell_name or self.current_cell_name)
+        layers = ([self.library.layers.resolve(pad_layer)] if pad_layer is not None
+                  else list(br.get("die_pad_layers") or []))
+        out = []
+        for pl in layers:
+            for (a, b), k, die, ang in bond_departures(self.library, cell, int(br["layer"]), pl):
+                out.append({"a": a, "b": b, "end": k, "die": die, "angle_deg": round(ang, 1)})
+        return out
 
     def wire_bond(self, points, layer=None, width=None, pad=None,
                   min_length=None, max_length=None,
@@ -5489,6 +5530,46 @@ class Session:
         return _extract_netlist(self.library, cell, resolved,
                                 bond_layer=b_layer if b_layer >= 0 else None,
                                 die_pad_layers=die_pads)
+
+    def pick_and_place(self, cell_name: Optional[str] = None, origin="substrate",
+                       include_printed: bool = False, include_dies: bool = True) -> dict:
+        """The pick-and-place (centroid) table of the current (or named)
+        cell: one row per placed part with a reference designator --
+        {"designator", "comment", "footprint", "kind" (smd / die /
+        connector / printed), "x_mm", "y_mm", "rotation" (deg CCW, 0-360),
+        "side", "mirrored", "x_dbu", "y_dbu"} -- in ref-des order.
+
+        The centroid is the centre of the part's pad pattern (its body for
+        a bare die, or a part with no numbered pads); the rotation is the
+        placement angle composed through every enclosing instance.
+        ``origin`` is "substrate" (lower-left corner of the substrate --
+        the default; the design origin when there is no substrate),
+        "design" (0, 0) or an (x, y) DBU point. Printed thick-film
+        resistors are left out unless ``include_printed``. Returns {"rows",
+        "origin", "origin_kind"}. See hlayout.io.pnpio."""
+        from ..io.pnpio import pick_and_place_rows
+        name = cell_name or self.current_cell_name
+        if name is None:
+            raise LayoutError("no current cell; call new_cell()/use_cell() first")
+        return pick_and_place_rows(self.library, name, origin=origin,
+                                   include_printed=include_printed, include_dies=include_dies)
+
+    def export_pick_and_place(self, path: str, cell_name: Optional[str] = None,
+                              fmt: Optional[str] = None, origin="substrate",
+                              include_printed: bool = False, include_dies: bool = True) -> dict:
+        """Write the pick-and-place file of the current (or named) cell
+        (see pick_and_place()). ``fmt`` is "csv" (Designator, Comment,
+        Footprint, Kind, Mid X, Mid Y, Rotation, Side, Mirrored) or
+        "kicad" (.pos footprint positions); None picks it from the
+        extension (.pos = KiCad, else CSV). Returns the table, with
+        "format" and "path" added."""
+        from ..io.pnpio import write_pick_and_place
+        table = self.pick_and_place(cell_name, origin=origin, include_printed=include_printed,
+                                    include_dies=include_dies)
+        table["format"] = write_pick_and_place(table, path, fmt=fmt,
+                                               design_name=self.library.name or "")
+        table["path"] = path
+        return table
 
     def export_netlist(self, nets: List["Net"], path: str, fmt: Optional[str] = None,
                        cell_name: Optional[str] = None) -> str:

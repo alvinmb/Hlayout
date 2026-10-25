@@ -376,6 +376,7 @@ class App(tk.Tk):
         filem.add_separator()
         filem.add_command(label="Gerber Export Sets...", command=lambda: open_gerber_batch_window(self))
         filem.add_command(label="DXF Export Sets...", command=lambda: open_dxf_batch_window(self))
+        filem.add_command(label="Export Pick and Place...", command=self.export_pick_and_place)
         filem.add_command(label="Export to FreeCAD (3D Macro)...", command=self.export_freecad_macro)
         filem.add_command(label="3D View in SolidCraft...",
                           command=lambda: __import__("hlayout.gui.solidcraft_window",
@@ -2956,6 +2957,43 @@ class App(tk.Tk):
         os.makedirs(chosen, exist_ok=True)
         set_component_library_dir(chosen)
         return chosen
+
+    def export_pick_and_place(self):
+        """File > Export Pick and Place...: write the centroid file of the
+        current cell -- every placed part with a ref-des, its centroid
+        (pad-pattern centre; body centre for a bare die) in mm from the
+        substrate's lower-left corner, and its placement angle. .pos
+        writes KiCad footprint positions, anything else CSV. Printed
+        thick-film resistors are left out (they're printed, not placed)."""
+        name = self.session.current_cell_name
+        if not name:
+            dialogs.show_info("Export Pick and Place", "Open or create a cell first.", parent=self)
+            return
+        out_dir = self.default_export_dir("assembly")
+        path = filedialog.asksaveasfilename(
+            parent=self, title="Export Pick and Place",
+            initialdir=out_dir or None,
+            initialfile=f"{self.session.library.name}_{name}_pnp.csv",
+            defaultextension=".csv",
+            filetypes=[("Pick and place CSV", "*.csv"), ("KiCad footprint positions", "*.pos"),
+                       ("All files", "*.*")])
+        if not path:
+            return
+        try:
+            t = self.session.export_pick_and_place(path)
+        except (LayoutError, OSError, ValueError) as e:
+            dialogs.show_error("Export Pick and Place", str(e), parent=self)
+            return
+        ox, oy = t["origin"]
+        lines = [f"Wrote {len(t['rows'])} part(s) to {path} ({t['format']}).",
+                 f"Origin: {t['origin_kind']} ({dbu_to_mm(ox):g}, {dbu_to_mm(oy):g}) mm",
+                 "", f"{'Ref':<8}{'Footprint':<22}{'Kind':<10}{'X mm':>10}{'Y mm':>10}{'Rot':>8}"]
+        for r in t["rows"]:
+            lines.append(f"{r['designator']:<8}{r['footprint'][:21]:<22}{r['kind']:<10}"
+                         f"{r['x_mm']:>10.3f}{r['y_mm']:>10.3f}{r['rotation']:>8.1f}"
+                         f"{'  mirrored' if r['mirrored'] else ''}")
+        dialogs.show_scrollable_text("Export Pick and Place", lines, parent=self, ok_label="OK")
+        self.status.set(f"Pick and place: {len(t['rows'])} part(s) written to {path}")
 
     def export_freecad_macro(self):
         """File > Export to FreeCAD (3D Macro)...: write a .FCMacro that

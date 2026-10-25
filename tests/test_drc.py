@@ -7,7 +7,7 @@ import pytest
 
 shapely = pytest.importorskip("shapely")
 
-from hlayout.core.drc import DRC_RULE_KINDS, DrcRule, DrcViolation, check_rule, run_drc
+from hlayout.core.drc import DRC_RULE_KINDS, TWO_LAYER_KINDS, DrcRule, DrcViolation, check_rule, run_drc
 from hlayout.core.errors import GeometryError, LayoutError
 from hlayout.io.techfile import load_drc_rules, save_drc_rules
 from hlayout.scripting import Session
@@ -59,7 +59,7 @@ def test_drc_rule_label_formats_one_and_two_layer_rules():
 
 def test_all_kinds_are_constructible_with_appropriate_layers():
     for kind in DRC_RULE_KINDS:
-        if kind in ("MIN_SPACE_BETWEEN", "MIN_ENCLOSURE"):
+        if kind in TWO_LAYER_KINDS:
             DrcRule(kind=kind, layer_a=0, layer_b=1, value=1)
         else:
             DrcRule(kind=kind, layer_a=0, value=1)
