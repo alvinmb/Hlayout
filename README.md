@@ -637,7 +637,7 @@ touching the design's own geometry.
 Before writing the macro, hlayout also **auto-matches** any placed
 component cell that has no manual `component_models` entry against
 whatever STEP library already exists in the **remembered component
-library folder** (Setup > FreeCAD Component Library Folder..., see
+library folder** (Setup > 3D Component Library Folder..., see
 Build 3D Component Library... below — a single folder shared
 across every design, not tied to whichever one is currently open,
 since a parts library only needs building once) — falling back to
@@ -695,7 +695,7 @@ the **remembered component library folder** — a single location shared
 by every design, not this design's own folder, since the library only
 ever needs building once. The first time this runs (nothing remembered
 yet) it asks where to put the library and remembers the answer for
-every design from then on; **Setup > FreeCAD Component Library
+every design from then on; **Setup > 3D Component Library
 Folder...** views or changes that folder later (e.g. to point every
 design at a library already built elsewhere, without rebuilding it).
 Run inside FreeCAD, the macro builds a small set of generic 3D

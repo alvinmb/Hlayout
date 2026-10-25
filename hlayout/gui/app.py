@@ -409,7 +409,7 @@ class App(tk.Tk):
         setupm.add_separator()
         setupm.add_command(label="Remap Layers...", command=self.show_remap_layers_dialog)
         setupm.add_separator()
-        setupm.add_command(label="FreeCAD Component Library Folder...",
+        setupm.add_command(label="3D Component Library Folder...",
                            command=self.change_component_library_dir)
         setupm.add_separator()
         setupm.add_command(label="Load Technology File...", command=self.load_technology_file)
@@ -827,7 +827,20 @@ class App(tk.Tk):
         # the right edge instead of stretching with it.
         body.add(self.canvas, weight=1)
 
-        right = ttk.Notebook(body, width=self.RIGHT_PANEL_WIDTH)
+        # The side-panel tabs get their own style so they read as proper
+        # tabs at the app's UI font size rather than the small cramped
+        # theme default: roomier padding, the selected tab lifted a
+        # little (expand) and drawn in the accent colour, unselected
+        # tabs a softer grey. Bold-on-select is avoided on purpose --
+        # it changes the tab's width and makes the row jump on click.
+        side_style = ttk.Style(self)
+        side_style.configure("Side.TNotebook", tabmargins=(4, 6, 4, 0), padding=(0, 2, 0, 0))
+        side_style.configure("Side.TNotebook.Tab", padding=(20, 7), font=self._menu_font)
+        side_style.map("Side.TNotebook.Tab",
+                       foreground=[("selected", "#1f5fbf"), ("active", "#1f1f1f"),
+                                   ("!selected", "#555555")],
+                       expand=[("selected", (3, 4, 3, 0))])
+        right = ttk.Notebook(body, width=self.RIGHT_PANEL_WIDTH, style="Side.TNotebook")
         body.add(right, weight=0)
         self.right_notebook = right  # so menu items (Setup > Layers..., Tools > Script Console) can switch tabs
 
@@ -852,7 +865,7 @@ class App(tk.Tk):
 
         console_frame = ttk.Frame(right)
         self.console_frame = console_frame  # so Tools > Script Console can select this tab
-        right.add(console_frame, text="Script Console")
+        right.add(console_frame, text="Console")
         hint = ttk.Frame(console_frame)
         hint.pack(fill="x")
         ttk.Label(
@@ -2950,7 +2963,7 @@ class App(tk.Tk):
         if not ask_if_unset:
             return None
         chosen = filedialog.askdirectory(
-            title="Choose a Folder for the FreeCAD Component Library "
+            title="Choose a Folder for the 3D Component Library "
                   "(remembered for every design from now on)")
         if not chosen:
             return None
@@ -3162,19 +3175,19 @@ class App(tk.Tk):
         dialogs.show_file_written(title, message, path, parent=self, extra_buttons=extra)
 
     def change_component_library_dir(self):
-        """Setup > FreeCAD Component Library Folder...: view/change the
+        """Setup > 3D Component Library Folder...: view/change the
         remembered STEP library folder (component_library_dir()) --
         e.g. to point every design at a library already built
         elsewhere, without rebuilding it."""
         from ..io.app_settings import get_component_library_dir, set_component_library_dir
         current = get_component_library_dir()
         chosen = filedialog.askdirectory(
-            title="FreeCAD Component Library Folder",
+            title="3D Component Library Folder",
             initialdir=current or None)
         if not chosen:
             return
         set_component_library_dir(chosen)
-        self.status.set(f"FreeCAD component library folder set to {chosen}")
+        self.status.set(f"3D component library folder set to {chosen}")
 
     def print_current_view(self):
         """File > Print... (Ctrl+P): render the current cell as a
