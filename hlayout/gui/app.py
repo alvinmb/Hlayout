@@ -2980,12 +2980,14 @@ class App(tk.Tk):
         if not path:
             return
         try:
-            t = self.session.export_pick_and_place(path)
+            t = self.session.export_pick_and_place(
+                path, design_name=os.path.basename(self.current_path) if self.current_path else None)
         except (LayoutError, OSError, ValueError) as e:
             dialogs.show_error("Export Pick and Place", str(e), parent=self)
             return
         ox, oy = t["origin"]
-        lines = [f"Wrote {len(t['rows'])} part(s) to {path} ({t['format']}).",
+        lines = [f"Wrote {len(t['rows'])} part(s) to {path} ({t['format']}), "
+                 f"created {t['created']}.",
                  f"Origin: {t['origin_kind']} ({dbu_to_mm(ox):g}, {dbu_to_mm(oy):g}) mm",
                  "", f"{'Ref':<8}{'Footprint':<22}{'Kind':<10}{'X mm':>10}{'Y mm':>10}{'Rot':>8}"]
         for r in t["rows"]:

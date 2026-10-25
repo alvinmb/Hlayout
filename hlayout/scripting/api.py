@@ -399,6 +399,7 @@ class Session:
         session._attached_paths = loaded.attached_paths
         session.attach_errors = loaded.attach_errors
         session.had_sidecar = loaded.had_sidecar
+        session.design_path = path
         return session
 
     def save(self, path: str, library_name: Optional[str] = None) -> None:
@@ -420,7 +421,9 @@ class Session:
         Save GDS... uses; plain save() (used by Save As Library... and
         scripts publishing a reusable library) still writes just the
         bare .gds, unchanged. Returns the sidecar's path."""
-        return save_design(self.library, self.attached_libraries, self._attached_paths, path)
+        out = save_design(self.library, self.attached_libraries, self._attached_paths, path)
+        self.design_path = path
+        return out
 
     def export_gerber(self, out_prefix: str, cell_name: Optional[str] = None,
                        layers: Optional[List[int]] = None, scale: float = 1.0):
@@ -5556,18 +5559,27 @@ class Session:
 
     def export_pick_and_place(self, path: str, cell_name: Optional[str] = None,
                               fmt: Optional[str] = None, origin="substrate",
-                              include_printed: bool = False, include_dies: bool = True) -> dict:
+                              include_printed: bool = False, include_dies: bool = True,
+                              header: bool = True, design_name: Optional[str] = None) -> dict:
         """Write the pick-and-place file of the current (or named) cell
         (see pick_and_place()). ``fmt`` is "csv" (Designator, Comment,
         Footprint, Kind, Mid X, Mid Y, Rotation, Side, Mirrored) or
         "kicad" (.pos footprint positions); None picks it from the
-        extension (.pos = KiCad, else CSV). Returns the table, with
-        "format" and "path" added."""
+        extension (.pos = KiCad, else CSV). Both are stamped with the
+        date and time they were created; a CSV carries it in "#" comment
+        lines above the column row, which ``header=False`` leaves out.
+        ``design_name`` (the header's design) defaults to the file name
+        of the design opened or saved with open_design()/save_design(),
+        else the library name. Returns the table, with "format", "path"
+        and "created" added."""
         from ..io.pnpio import write_pick_and_place
         table = self.pick_and_place(cell_name, origin=origin, include_printed=include_printed,
                                     include_dies=include_dies)
-        table["format"] = write_pick_and_place(table, path, fmt=fmt,
-                                               design_name=self.library.name or "")
+        if design_name is None:
+            dp = getattr(self, "design_path", None)
+            design_name = os.path.basename(dp) if dp else (self.library.name or "")
+        table["format"] = write_pick_and_place(table, path, fmt=fmt, design_name=design_name,
+                                               header=header)
         table["path"] = path
         return table
 

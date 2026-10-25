@@ -34,7 +34,9 @@ Kinds
 Formats
     "csv": Designator, Comment, Footprint, Kind, Mid X, Mid Y, Rotation,
     Side, Mirrored (mm, degrees) -- the common centroid layout most
-    assembly houses accept. "kicad": the KiCad footprint-position (.pos)
+    assembly houses accept -- after a few "#" comment lines giving the
+    design, the date and time the file was created, the units and the
+    origin (header=False leaves them out). "kicad": the KiCad footprint-position (.pos)
     text layout (Ref Val Package PosX PosY Rot Side).
 """
 
@@ -266,7 +268,7 @@ def pick_and_place_rows(library, cell_name: str, origin="substrate", include_pri
         r["x_mm"] = round((r["x_dbu"] - ox) * DBU_MM, 4)
         r["y_mm"] = round((r["y_dbu"] - oy) * DBU_MM, 4)
     rows.sort(key=lambda r: _natural(r["designator"]))
-    return {"rows": rows, "origin": (ox, oy), "origin_kind": okind}
+    return {"rows": rows, "origin": (ox, oy), "origin_kind": okind, "cell": cell_name}
 
 
 def _fmt(v, nd=4):
@@ -275,21 +277,31 @@ def _fmt(v, nd=4):
 
 
 def write_pick_and_place(table: dict, path: str, fmt: Optional[str] = None,
-                         design_name: str = "") -> str:
+                         design_name: str = "", header: bool = True,
+                         when: Optional[datetime.datetime] = None) -> str:
     """Write pick_and_place_rows()'s table to ``path``. ``fmt`` is "csv" or
     "kicad"; by default .pos is KiCad and anything else CSV. Returns the
-    format written."""
+    format written.
+
+    Both formats are stamped with the date and time the file was made
+    (``when``, default now, local time; also stored in ``table["created"]``).
+    A CSV starts with ``#`` comment lines -- design and cell, created
+    date/time, units and origin -- before the column row; ``header=False``
+    leaves them out for a machine that wants the column row first."""
     fmt = (fmt or ("kicad" if path.lower().endswith(".pos") else "csv")).lower()
     rows = table["rows"]
+    stamp = (when or datetime.datetime.now()).strftime("%Y-%m-%d %H:%M:%S")
+    table["created"] = stamp
+    ox, oy = table["origin"]
+    origin_text = f"{table['origin_kind']} ({_fmt(ox * DBU_MM)}, {_fmt(oy * DBU_MM)}) mm"
     if fmt == "kicad":
-        when = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        ox, oy = table["origin"]
+        when = stamp
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(f"### Footprint positions - created on {when} ###\n")
             f.write(f"### Printed by HLayout{(' - ' + design_name) if design_name else ''}\n")
             f.write("## Unit = mm, Angle = deg.\n")
             f.write("## Side : top\n")
-            f.write(f"## Origin : {table['origin_kind']} ({_fmt(ox * DBU_MM)}, {_fmt(oy * DBU_MM)}) mm\n")
+            f.write(f"## Origin : {origin_text}\n")
             f.write(f"{'# Ref':<12}{'Val':<24}{'Package':<24}{'PosX':>12}{'PosY':>12}{'Rot':>10}  Side\n")
             for r in rows:
                 f.write(f"{r['designator']:<12}{r['comment']:<24}{r['footprint']:<24}"
@@ -300,6 +312,13 @@ def write_pick_and_place(table: dict, path: str, fmt: Optional[str] = None,
     if fmt != "csv":
         raise ValueError(f"unknown pick-and-place format {fmt!r} (csv or kicad)")
     with open(path, "w", encoding="utf-8", newline="") as f:
+        if header:
+            cell = table.get("cell") or ""
+            what = " / ".join(s for s in (design_name, cell) if s)
+            f.write(f"# Pick and place - HLayout{(' - ' + what) if what else ''}\r\n")
+            f.write(f"# Created: {stamp}\r\n")
+            f.write(f"# Units: mm, rotation deg counter-clockwise; origin: {origin_text}\r\n")
+            f.write(f"# Parts: {len(rows)}\r\n")
         w = csv.writer(f)
         w.writerow(CSV_COLUMNS)
         for r in rows:

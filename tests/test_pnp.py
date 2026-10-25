@@ -1,6 +1,7 @@
 """Pick-and-place (centroid) output: hlayout.io.pnpio / Session.export_pick_and_place."""
 import csv
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -139,9 +140,43 @@ def test_csv_file(tmp_path):
     out = s.export_pick_and_place(str(tmp_path / "board_pnp.csv"))
     assert out["format"] == "csv"
     with open(out["path"], newline="", encoding="utf-8") as f:
-        rows = list(csv.reader(f))
+        lines = f.read().splitlines()
+    head = [ln for ln in lines if ln.startswith("#")]
+    assert head[0] == "# Pick and place - HLayout - PNP / TOP"
+    assert head[1] == f"# Created: {out['created']}"
+    assert re.fullmatch(r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d", out["created"])
+    assert "origin: substrate (1, 1) mm" in head[2] and head[3] == "# Parts: 1"
+    rows = list(csv.reader(ln for ln in lines if not ln.startswith("#")))
     assert rows[0] == CSV_COLUMNS
     assert rows[1] == ["U2", "SO4", "SO4", "smd", "9", "5.635", "90", "Top", "No"]
+
+
+def test_csv_without_header_starts_with_the_column_row(tmp_path):
+    s = _design()
+    s.sref("SO4", (12000, 6000), label="U2")
+    out = s.export_pick_and_place(str(tmp_path / "p.csv"), header=False)
+    with open(out["path"], newline="", encoding="utf-8") as f:
+        assert next(csv.reader(f)) == CSV_COLUMNS
+    assert out["created"]
+
+
+def test_header_names_the_design_file(tmp_path):
+    s = _design()
+    s.sref("SO4", (12000, 6000), label="U2")
+    s.save_design(str(tmp_path / "board.gds"))
+    out = s.export_pick_and_place(str(tmp_path / "p.csv"))
+    assert open(out["path"], encoding="utf-8").readline().strip() == \
+        "# Pick and place - HLayout - board.gds / TOP"
+
+
+def test_the_timestamp_can_be_given(tmp_path):
+    import datetime
+    s = _design()
+    t = s.pick_and_place()
+    write_pick_and_place(t, str(tmp_path / "a.pos"), when=datetime.datetime(2026, 10, 25, 11, 29, 3))
+    first = open(tmp_path / "a.pos", encoding="utf-8").readline()
+    assert first == "### Footprint positions - created on 2026-10-25 11:29:03 ###\n"
+    assert t["created"] == "2026-10-25 11:29:03"
 
 
 def test_kicad_pos_file(tmp_path):

@@ -632,8 +632,11 @@ Pick and Place (centroid file; also File > Export Pick and Place...):
                [dies=0|1]              write the pick-and-place file: .pos = KiCad
                                        footprint positions, else CSV (Designator,
                                        Comment, Footprint, Kind, Mid X, Mid Y, Rotation,
-                                       Side, Mirrored); printed resistors are left out
-                                       unless printed=1. Session.export_pick_and_place()
+                                       Side, Mirrored) after "#" lines with the design,
+                                       created date/time, units and origin (header=0
+                                       leaves them out; .pos files carry the date too);
+                                       printed resistors are left out unless printed=1.
+                                       Session.export_pick_and_place()
 
 Netlist Extraction (requires the shapely package; also available as
 Tools > Extract Netlist...):
@@ -2011,12 +2014,12 @@ class CommandInterpreter:
         usage = ("usage: PNP LIST [cell=<name>] [origin=substrate|design|<x,y>] "
                  "[printed=0|1] [dies=0|1]\n"
                  "       PNP EXPORT <path> [cell=<name>] [origin=...] [format=csv|kicad] "
-                 "[printed=0|1] [dies=0|1]")
+                 "[printed=0|1] [dies=0|1] [header=0|1]")
         if not args or args[0].upper() not in ("LIST", "EXPORT"):
             raise CommandError(usage)
         sub = args[0].upper()
         kw = {"origin": "substrate"}
-        path, fmt = None, None
+        path, fmt, header = None, None, True
         for a in args[1:]:
             if "=" not in a:
                 if sub == "EXPORT" and path is None:
@@ -2040,13 +2043,15 @@ class CommandInterpreter:
                 fmt = v.lower()
             elif k in ("printed", "dies"):
                 kw["include_" + k] = v.lower() not in ("0", "false", "no")
+            elif k == "header" and sub == "EXPORT":
+                header = v.lower() not in ("0", "false", "no")
             else:
                 raise CommandError(f"unknown PNP option {k!r}")
         if sub == "EXPORT":
             if not path:
                 raise CommandError(usage)
             try:
-                t = self.session.export_pick_and_place(path, fmt=fmt, **kw)
+                t = self.session.export_pick_and_place(path, fmt=fmt, header=header, **kw)
             except ValueError as e:
                 raise CommandError(str(e))
         else:
@@ -2055,7 +2060,7 @@ class CommandInterpreter:
         lines = [f"{len(t['rows'])} part(s); origin {t['origin_kind']} "
                  f"({dbu_to_mm(ox):g}, {dbu_to_mm(oy):g}) mm"]
         if sub == "EXPORT":
-            lines[0] += f"; wrote {t['format']} to {path}"
+            lines[0] += f"; wrote {t['format']} to {path} (created {t['created']})"
         else:
             for r in t["rows"]:
                 lines.append(f"  {r['designator']:<8} {r['footprint']:<20} {r['kind']:<9} "
