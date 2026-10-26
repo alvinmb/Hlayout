@@ -29,7 +29,7 @@ Thick-film mapping (the parts a PCB router doesn't know about):
   Session.set_net_names()); a pad with no name is still exported as an
   obstacle pin, just not connected to anything.
 * Existing tracks and vias are exported as ``protect`` wiring (kept
-  exactly as drawn) or, with ``keep_existing=False``, as ``route``
+  exactly as drawn) or, with ``keep_existing=False``, as ``normal``
   wiring Freerouting is free to rip up and replace.
 
 All coordinates are written in um at resolution 1 (HLayout's DBU), so
@@ -76,6 +76,21 @@ DEFAULT_RULES = {
     #: "second" (the top conductor, bonded without a dielectric window;
     #: forces a two-layer route)
     "finger_layer": "first",
+    #: two-layer routing: each conductor's preferred track direction --
+    #: "hv" = 1st conductor horizontal, 2nd vertical; "vh" = the other
+    #: way round; "off" = no preference (Freerouting decides)
+    "layer_directions": "hv",
+    #: cost of a track running against its layer's preferred direction
+    #: (1 = no penalty; higher keeps each layer to its own direction)
+    "against_direction_cost": 3.0,
+    #: Freerouting's cost of one via while routing (its own default is 50)
+    "via_cost": 50,
+    #: after routing, take out every via that can safely go
+    #: (Session.optimize_vias(); two-layer routes only)
+    "via_optimize": True,
+    #: ...moving at most this much track (um) onto the other conductor
+    #: per via; 0 = any length
+    "via_optimize_max_flip": 0,
     #: keep tracks this far (um) clear of a bare die / its attach epoxy
     "die_keepout": 200,
     #: no track between a part's own terminations (under a chip
@@ -367,7 +382,10 @@ def export_dsn(library, cell_name: str, path: str, *, layers: Tuple[int, int],
                 return next(iter(names)) if len(names) == 1 else None
         return None
 
-    wire_type = "protect" if R.get("keep_existing", True) else "route"
+    # Freerouting reads any type but normal / fix / shove_fixed as
+    # user-FIXED -- "(type route)" included -- so wiring it may rip up is
+    # "normal"
+    wire_type = "protect" if R.get("keep_existing", True) else "normal"
     wiring = []
     for sh in cell.shapes:
         if isinstance(sh, Path) and sh.layer in (la, lb) and len(sh.points) >= 2:
@@ -470,6 +488,7 @@ def export_dsn(library, cell_name: str, path: str, *, layers: Tuple[int, int],
                       f"{_fmt(bx1)} {_fmt(by1)}))")
     if R.get("snap_90", True):
         w("    (snap_angle ninety_degree)")
+    L.extend(autoroute_settings_lines(R, la, lb, single_layer))
     w("  )")
     w("  (placement")
     for ref, (ox, oy) in places.items():
@@ -512,6 +531,35 @@ def export_dsn(library, cell_name: str, path: str, *, layers: Tuple[int, int],
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(L) + "\n")
     return summ
+
+
+def autoroute_settings_lines(R: dict, la: int, lb: int, single_layer: bool = False) -> List[str]:
+    """The DSN ``(autoroute_settings ...)`` scope (inside ``structure``)
+    Freerouting reads its per-run router settings from: preferred track
+    direction per layer (``layer_directions``, ``against_direction_cost``)
+    and via cost (``via_cost``); routing on, optimising when
+    optimize_passes > 0 (the command line decides those too). Nothing is
+    written when there's nothing to say (directions off, the default via
+    cost), so Freerouting's own defaults apply exactly as before."""
+    dirs = str(R.get("layer_directions", "off") or "off").lower()
+    if single_layer or dirs not in ("hv", "vh"):
+        dirs = "off"
+    via_cost = int(round(float(R.get("via_cost", 50) or 50)))
+    if dirs == "off" and via_cost == 50:
+        return []
+    postroute = int(R.get("optimize_passes", 100) or 0) > 0
+    out = [f"    (autoroute_settings (autoroute on) "
+           f"(postroute {'on' if postroute else 'off'}) "
+           f"(vias {'off' if single_layer else 'on'}) (via_costs {via_cost})"]
+    if dirs != "off":
+        against = max(1.0, float(R.get("against_direction_cost", 3.0) or 1.0))
+        first, second = ("horizontal", "vertical") if dirs == "hv" else ("vertical", "horizontal")
+        for lay, d in ((la, first), (lb, second)):
+            out.append(f"      (layer_rule {layer_name(lay)} (active on) (preferred_direction {d})"
+                       f" (preferred_direction_trace_costs 1.0)"
+                       f" (against_preferred_direction_trace_costs {against:g}))")
+    out[-1] += ")"
+    return out
 
 
 # ---------------------------------------------------------------------------

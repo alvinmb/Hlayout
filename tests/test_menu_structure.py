@@ -9,7 +9,7 @@ import pytest
 tk = pytest.importorskip("tkinter")
 from tkinter import ttk
 
-EXPECTED_TOP_LEVEL = ["File", "Setup", "View", "Create", "Edit", "Tools", "Help", "About"]
+EXPECTED_TOP_LEVEL = ["File", "Setup", "View", "Create", "Edit", "Tools", "Help"]
 
 
 def _make_app():
@@ -117,7 +117,7 @@ def test_file_menu_no_longer_has_library_items():
         assert "Attach Library..." not in labels
         assert "Find && Place Cell..." not in labels
         for expected in ("New", "Open GDS...", "Save GDS...", "Save As Library...",
-                          "Export Gerber...", "Exit"):
+                          "Gerber Export Sets...", "DXF Export Sets...", "Exit"):
             assert expected in labels
     finally:
         app.destroy()
@@ -216,15 +216,11 @@ def test_show_user_manual_reports_when_nothing_can_open_it(monkeypatch):
         app.destroy()
 
 
-def test_about_is_a_direct_command_not_a_submenu():
+def test_about_is_on_the_help_menu():
     app = _make_app()
     try:
-        for label, sub in app._top_menus:
-            if label == "About":
-                assert sub is None  # a direct ttk.Button, not a dropdown
-                assert isinstance(app._menu_buttons["About"], ttk.Button)
-                return
-        raise AssertionError("About not found")
+        assert "About" not in [label for label, _ in app._top_menus]
+        assert "About HLayout" in _submenu_labels(app, "Help")
     finally:
         app.destroy()
 
@@ -377,13 +373,16 @@ def test_tools_menu_has_via_wizard_item():
         app.destroy()
 
 
-def test_tools_menu_also_has_export_gerber_item():
-    # Export Gerber lives in both File (pure file I/O) and Tools
-    # (utilities) -- same self.export_gerber() handler either way.
+def test_export_sets_are_on_the_file_menu_only():
+    # Gerber / DXF Export Sets are file output: File menu only (they were
+    # dropped from Tools); About is the last Help item, not a menu button.
     app = _make_app()
     try:
-        labels = _submenu_labels(app, "Tools")
-        assert "Export Gerber..." in labels
+        tools = _submenu_labels(app, "Tools")
+        assert "Gerber Export Sets..." not in tools and "DXF Export Sets..." not in tools
+        assert "Remove Unused Bonds..." in tools
+        assert "Unrouted Nets..." in _submenu_labels(app, "View")
+        assert _submenu_labels(app, "Help")[-1] == "About HLayout"
     finally:
         app.destroy()
 
@@ -776,8 +775,8 @@ def test_top_level_menu_bar_has_explicit_font_matching_ui_font_size():
     # every platform, including Windows -- see App._build_menu for
     # why a native system menu bar can't be relied on for this. ttk
     # widgets have no -font resource of their own, so the size is set
-    # via a named ttk.Style (self._menu_button_style /
-    # self._menu_about_style) instead of widget.cget("font").
+    # via a named ttk.Style (self._menu_button_style) instead of
+    # widget.cget("font"). (About is a Help menu item, not a button.)
     import tkinter.font as tkfont
 
     app = _make_app()
@@ -785,8 +784,6 @@ def test_top_level_menu_bar_has_explicit_font_matching_ui_font_size():
         style = ttk.Style(app)
         button_actual = tkfont.Font(app, font=style.lookup(app._menu_button_style, "font")).actual()
         assert button_actual["size"] == app.UI_FONT_SIZE
-        about_actual = tkfont.Font(app, font=style.lookup(app._menu_about_style, "font")).actual()
-        assert about_actual["size"] == app.UI_FONT_SIZE
 
         for label, sub in app._top_menus:
             if sub is not None:

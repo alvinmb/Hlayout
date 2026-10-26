@@ -80,7 +80,7 @@ Substrate edge:
 Wire bonds (chip and wire):
     BOND_MIN_LENGTH(bond_layer, value)
                                   -- every wire bond (a Path on the bond
-                                     layer, Setup > Wire Bond Rules...)
+                                     layer, Setup > Technology Properties (Wire Bonds tab))
                                      must span at least `value` DBU,
                                      measured end to end -- the shortest
                                      loop a bonder can form.
@@ -372,14 +372,17 @@ def _collect_geoms(library, name, transform, acc, depth=0):
                        acc, depth + 1)
 
 
-def _die_parts(library, cell, pad_layer) -> list:
+def _die_parts(library, cell, pad_layer, bond_layer=None) -> list:
     """The bare dice placed in ``cell``: [{"name", "bbox", "pads"}], one per
     placed instance (at any depth) with two or more shapes on ``pad_layer``,
     ``pads`` being those shapes. When instances nest (a die built from
     placed pin cells), the innermost instance that still holds two or
     more pads is the die; an instance holding dice further in (a sub-
     module) is not itself a die. A part covering most of the cell (an
-    enclosing header) is left out."""
+    enclosing header) is left out. Wire bonds drawn inside the die part
+    (on ``bond_layer``) and the numbered bond fingers it may carry (pin
+    shapes off ``pad_layer``) aren't its body: they're left out of its
+    bbox."""
     cb = library.cell_bbox(cell.name)
     cell_area = max((cb[2] - cb[0]) * (cb[3] - cb[1]), 1) if cb else 1
     found = []
@@ -401,7 +404,11 @@ def _die_parts(library, cell, pad_layer) -> list:
                 continue
             if len(found) > before:
                 continue                       # the die (or dice) is a placed part further in
-            x0, y0, x1, y1 = unary_union([g for _l, g in acc]).bounds
+            fingers = []
+            _finger_geoms(library, ref.cell_name, tr, pad_layer, fingers)
+
+            body = [g for lay, g in acc if lay != bond_layer and not _same_as_any(g, fingers)]
+            x0, y0, x1, y1 = unary_union(body or [g for _l, g in acc]).bounds
             if (x1 - x0) * (y1 - y0) > _ENCLOSING_FRACTION * cell_area:
                 continue
             found.append({"name": getattr(ref, "label", "") or ref.cell_name,
@@ -409,6 +416,26 @@ def _die_parts(library, cell, pad_layer) -> list:
 
     walk(cell, None, 0)
     return found
+
+
+def _finger_geoms(library, name, transform, pad_layer, acc, depth=0):
+    """Numbered (pin) shapes off ``pad_layer`` under placed cell ``name``
+    -- the bond fingers a die part may carry."""
+    c = library.cells.get(name)
+    if c is None or depth > 64:
+        return
+    for sh in c.shapes:
+        if getattr(sh, "pin", "") and sh.layer != pad_layer:
+            g = shape_to_shapely(sh)
+            if g is not None and not g.is_empty:
+                acc.append(_transform_geom(g, transform))
+    for ref in c.srefs + expand_arefs_to_srefs(c.arefs):
+        _finger_geoms(library, ref.cell_name,
+                      _compose_transforms(transform, _sref_point_transform(ref)), pad_layer, acc, depth + 1)
+
+
+def _same_as_any(g, others) -> bool:
+    return any(abs(g.area - o.area) < 1e-6 and g.equals_exact(o, 1e-6) for o in others)
 
 
 def _outward_normals(bbox, pt, slack=0.0):
@@ -432,7 +459,7 @@ def bond_departures(library, cell, bond_layer, pad_layer) -> list:
     (end_a, end_b) pair, ``end`` 0 or 1."""
     from shapely.geometry import Point
     _require_shapely()
-    dies = _die_parts(library, cell, pad_layer)
+    dies = _die_parts(library, cell, pad_layer, bond_layer)
     out = []
     for wire in _bond_wires(library, cell, bond_layer):
         for k in (0, 1):
@@ -578,7 +605,7 @@ def bond_rules_from_settings(bond_rules: dict, existing=(), angle: float = DEFAU
     Raises GeometryError when no bond layer is set."""
     layer = int(bond_rules.get("layer", -1))
     if layer < 0:
-        raise GeometryError("no bond layer set: pick one in Setup > Wire Bond Rules... first")
+        raise GeometryError("no bond layer set: pick one in Setup > Technology Properties (Wire Bonds tab) first")
     have = {(r.kind, r.layer_a, r.layer_b) for r in existing}
     out = []
     for kind, value, name in (("BOND_MIN_LENGTH", bond_rules.get("min_length", 300), "BOND.L.MIN"),

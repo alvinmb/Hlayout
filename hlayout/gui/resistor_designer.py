@@ -537,7 +537,7 @@ class PlaceResistorDialog(tk.Toplevel):
 
         # Conductor pad layer: user-selected from this technology's named
         # layers (not tied to a specific ink the way the resistor ink
-        # layer is), defaulting to Setup > Resistor Geometry Rules...'s
+        # layer is), defaulting to Setup > Technology Properties (Resistors tab)'s
         # configured conductor layer but overridable per placement.
         ttk.Label(form, text="Conductor pad layer:").grid(row=3, column=0, sticky="e", padx=4, pady=4)
         default_label = (
@@ -685,7 +685,7 @@ class DesignRulesDialog(tk.Toplevel):
                 layer_box,
                 text="A resistor's actual layer (Place in Layout.../RESGEN) is looked "
                      "up here by its chosen ink's sheet resistance; unset falls back "
-                     "to Setup > Resistor Geometry Rules... 's default ink layer.",
+                     "to Setup > Technology Properties (Resistors tab)'s default ink layer.",
                 foreground=MUTED, wraplength=520, justify="left",
             ).pack(anchor="w", pady=(0, 6))
             layer_grid = ttk.Frame(layer_box)

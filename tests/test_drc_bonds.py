@@ -280,3 +280,75 @@ def test_command_bar_bonds_and_run():
     assert "1 x BOND.ANGLE: BOND_MAX_ANGLE" in out and "wire bonds:" in out and "U1" in out
     out = ci.run(f"DRCRULE ADD BOND_MAX_ANGLE {BOND} {PAD} value=60 name=A60")
     assert "<= 60 deg" in out
+
+
+def test_bonds_carried_inside_the_die_part_are_checked_and_dont_widen_its_keepout():
+    """A library die can carry its own wire bonds (they move with it): the
+    angle check still sees them, and the router's die keep-out stays the
+    die's own size, clear of the bond landings."""
+    from hlayout.io.techfile import load_route_rules, save_route_rules
+    from shapely.geometry import Point, Polygon as SPoly
+    s = Session.new("PARTBONDS")
+    _die(s)
+    save_bond_rules(s.library, {"layer": BOND, "width": 25, "pad": 75, "min_length": 300,
+                                "max_length": 5000, "die_pad_layers": [PAD]})
+    s.wire_bond([LEFT, (-900, 500)], cell_name="DIE")            # straight out: 0 degrees
+    s.wire_bond([TOP, (900, 1900)], cell_name="DIE")             # 400 across, 1000 out
+    s.new_cell("TOP")
+    rr = load_route_rules(s.library); rr["layer_a"] = 3; rr["layer_b"] = 5
+    save_route_rules(s.library, rr)
+    s.rect(SUB, -10000, -10000, 10000, 10000)
+    s.sref("DIE", (0, 0), label="U1")
+    angles = sorted(round(d[3], 1) for d in bond_departures(s.library, s.library.cells["TOP"], BOND, PAD))
+    assert angles == [0.0, round(math.degrees(math.atan2(400, 1000)), 1)]
+    ko = [SPoly(p) for lay, p in s._route_keepouts(s.library.cells["TOP"], (3, 5),
+                                                   s.freerouting_rules()) if lay == 3]
+    assert ko and not any(k.contains(Point(-900, 500)) or k.contains(Point(900, 1900)) for k in ko)
+
+
+def test_a_die_part_with_its_own_numbered_bond_fingers(tmp_path):
+    """Bond fingers carried in the die part, numbered like the die pads:
+    the router gets them as the die's pads (no extra BOND pins), the die
+    keep-out leaves them clear, the angle check still runs, and Auto
+    Place takes them as where the die's nets reach the substrate."""
+    from hlayout.io.techfile import load_route_rules, save_route_rules
+    from hlayout.scripting.autoplace_session import build_job
+    from hlayout.io.kicad_netlist import read_kicad_netlist
+    from shapely.geometry import Polygon as SPoly
+    s = Session.new("FINGERS")
+    _die(s)
+    save_bond_rules(s.library, {"layer": BOND, "width": 25, "pad": 75, "min_length": 300,
+                                "max_length": 5000, "die_pad_layers": [PAD]})
+    die = s.library.cells["DIE"]
+    for sh in die.shapes:
+        if sh.layer == PAD:
+            sh.pin = {LEFT: "1", RIGHT: "2", TOP: "3"}[((sh.bbox()[0] + sh.bbox()[2]) / 2,
+                                                       (sh.bbox()[1] + sh.bbox()[3]) / 2)]
+    for pin, a, b in (("1", LEFT, (-900, 500)), ("2", RIGHT, (1900, 500))):
+        s.wire_bond([a, b], cell_name="DIE")
+        s.rect(5, b[0] - 150, b[1] - 150, b[0] + 150, b[1] + 150, pin=pin)
+    s.use_cell("DIE")
+    s.new_cell("TOP")
+    rr = load_route_rules(s.library); rr["layer_a"] = 3; rr["layer_b"] = 5
+    save_route_rules(s.library, rr)
+    s.rect(SUB, -10000, -10000, 10000, 10000)
+    s.rect(3, -8000, 300, -7000, 700, pin="1")
+    s.rect(3, 8000, 300, 9000, 700, pin="2")
+    s.sref("DIE", (0, 0), label="U1")
+    s.set_net_names({"U1.1": "A", "IO.1": "A", "U1.2": "B", "IO.2": "B"})
+    txt_path = str(tmp_path / "fingers.dsn")
+    sm = s.export_dsn(txt_path, layer_mode="two", finger_layer="second")
+    txt = open(txt_path).read()
+    assert "BOND-B" not in txt and sm.unknown_pads == []
+    assert "(net A (pins IO-1 U1-1))" in txt and "(net B (pins IO-2 U1-2))" in txt
+    ko = [SPoly(p) for lay, p in s._route_keepouts(s.library.cells["TOP"], (3, 5),
+                                                   s.freerouting_rules()) if lay == 5]
+    fingers = [SPoly([(-1050, 350), (-750, 350), (-750, 650), (-1050, 650)])]
+    assert ko and not any(k.intersects(f) for k in ko for f in fingers)
+    assert len(bond_departures(s.library, s.library.cells["TOP"], BOND, PAD)) == 2
+    nl = read_kicad_netlist('(export (version "E") (components (comp (ref "U1") (footprint "X:DIE")))'
+                            ' (nets (net (code "1") (name "A") (node (ref "U1") (pin "1")))'
+                            ' (net (code "2") (name "B") (node (ref "U1") (pin "2")))))')
+    placer, _info = build_job(s, nl, cell_name="TOP")
+    u1 = placer.parts[0]
+    assert u1.pins["1"] == (-900.0, 500.0) and u1.pins["2"] == (1900.0, 500.0)

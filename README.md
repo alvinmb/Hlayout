@@ -549,7 +549,7 @@ cell) or `session.export_gerber(prefix, cell_name=None, layers=None)`,
 the latter also accepting an optional list of layer numbers to restrict
 the export to.
 
-Tools > Gerber Export Sets... "Quick Export..." and its per-job Browse
+File > Gerber Export Sets... "Quick Export..." and its per-job Browse
 dialog default to a `gerber` subfolder next to the open design's own
 `.gds` file (e.g. `C:/jobs/board1/gerber` for a design opened from
 `C:/jobs/board1/board1.gds`), created automatically the first time it's
@@ -558,7 +558,7 @@ the dialog opens to.
 
 ### Export DXF
 
-**File > DXF Export Sets...** (also under Tools) writes the current
+**File > DXF Export Sets...** writes the current
 design out as a single **AutoCAD R12 (AC1009)** file — one DXF layer
 per hlayout layer, rather than one file per layer like Gerber, since
 DXF has its own native LAYER table. R12 is deliberately the oldest
@@ -602,7 +602,7 @@ optionally restricts the export to a subset of layer numbers, same as
 `export_gerber()`. (There's no command-bar `DXF` command yet — use
 `export_dxf()` directly, or the File menu.)
 
-Like Gerber, Tools > DXF Export Sets... "Quick Export..." and its
+Like Gerber, File > DXF Export Sets... "Quick Export..." and its
 per-job Browse dialog default to a `dxf` subfolder next to the open
 design's `.gds` file, created automatically the first time it's
 needed.

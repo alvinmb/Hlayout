@@ -332,7 +332,7 @@ def save_resistor_list(library: Library, rows) -> None:
 # (or when generating without an ink_rsh at all). See
 # resistor_ink_layer() below. The conductor pad layer stays a single
 # process-wide layer (still user-selectable from the technology file's
-# named layers -- see Setup > Resistor Geometry Rules... and "Place in
+# named layers -- see Setup > Technology Properties (Resistors tab) and "Place in
 # Layout..."'s own per-placement override); "glaze_layer" is the single
 # layer the protective resistor-glaze overprint is drawn on; "doc_layer"
 # is the DOCUMENTATION layer -- not a fab/silkscreen output -- that the

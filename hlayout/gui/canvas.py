@@ -1274,6 +1274,10 @@ class LayoutCanvas(tk.Canvas):
             self._group_drag = False
             self._drag_start_mouse = self.to_dbu(e.x, e.y)
             self._drag_snapshot = list(shape.points)
+            # a routed track's segment ending on a via drags the via with
+            # it -- its pads on both conductors (or its via cell), its
+            # dielectric window -- and the tracks meeting it there
+            self._edge_attached = self._via_attachments(shape, (i, j))
             self.redraw()
             return
 
@@ -1334,6 +1338,93 @@ class LayoutCanvas(tk.Canvas):
         self._drag_start_mouse = self.to_dbu(e.x, e.y)
         self._drag_snapshot = _geom_snapshot(kind, shape)
         self.redraw()
+
+    #: App sets this: called (debounced) after a segment drag / arrow nudge
+    #: has moved a via, to redo the dielectric fill round its new window
+    on_vias_moved = None
+    VIA_FILL_DELAY_MS = 600
+
+    def _vias_moved(self):
+        """A via moved: once editing pauses, have the dielectric redone --
+        until then the old fill still covers the via's new spot, and the
+        via joins nothing. Debounced, so a run of arrow presses costs one
+        regeneration."""
+        if self.on_vias_moved is None:
+            return
+        job = getattr(self, "_via_fill_job", None)
+        if job is not None:
+            try:
+                self.after_cancel(job)
+            except tk.TclError:
+                pass
+        self._via_fill_job = self.after(self.VIA_FILL_DELAY_MS, self._run_vias_moved)
+
+    def _run_vias_moved(self):
+        self._via_fill_job = None
+        try:
+            self.on_vias_moved()
+        except Exception:
+            pass
+        self.redraw()
+
+    def _via_attachments(self, path, ends) -> list:
+        """What moves with a dragged segment of a routed track: at each of
+        the segment's two vertices that sits on a via (pads on both Route
+        Layers' conductors, or a placed via cell), the via's pads, its
+        dielectric window and via-cell instance, and every other track on
+        either conductor with an end there. [] for anything else."""
+        if not isinstance(path, Path):
+            return []
+        try:
+            from ..io.techfile import load_route_rules
+            rr = load_route_rules(self.library)
+            la, lb = int(rr.get("layer_a", -1)), int(rr.get("layer_b", -1))
+        except Exception:
+            return []
+        if la < 0 or lb < 0 or path.layer not in (la, lb):
+            return []
+        try:
+            diel = int(load_dielectric_rules(self.library).get("layer", -1))
+        except Exception:
+            diel = -1
+        via_cell = rr.get("via_cell") or ""
+        cell = self.library.cells.get(self.cell_name)
+        if cell is None:
+            return []
+        out, seen = [], set()
+        for idx in ends:
+            px, py = path.points[idx]
+            pads = []
+            for s in cell.shapes:
+                if s.layer not in (la, lb, diel) or getattr(s, "pin", "") or \
+                        not isinstance(s, (Rectangle, Polygon)) or getattr(s, "datatype", 0) != 0:
+                    continue
+                x0, y0, x1, y1 = s.bbox()
+                w, h = x1 - x0, y1 - y0
+                if 0 < w < 5000 and abs(w - h) <= max(2, 0.02 * w) and \
+                        abs((x0 + x1) / 2 - px) <= 2 and abs((y0 + y1) / 2 - py) <= 2:
+                    pads.append(s)
+            refs = [r for r in cell.srefs if via_cell and r.cell_name == via_cell
+                    and abs(r.origin[0] - px) <= 2 and abs(r.origin[1] - py) <= 2]
+            if not refs and not {la, lb} <= {s.layer for s in pads}:
+                continue                          # not a via: a bend, a pad, a bond finger
+            for s in pads:
+                if id(s) not in seen:
+                    seen.add(id(s))
+                    out.append(("shape", s, ("points", list(s.points)), None))
+            for r in refs:
+                if id(r) not in seen:
+                    seen.add(id(r))
+                    out.append(("shape", r, ("origin", r.origin), None))
+            for p in cell.shapes:
+                if p is path or not isinstance(p, Path) or p.layer not in (la, lb) or len(p.points) < 2:
+                    continue
+                for k in (0, len(p.points) - 1):
+                    qx, qy = p.points[k]
+                    if abs(qx - px) <= 2 and abs(qy - py) <= 2 and (id(p), k) not in seen:
+                        seen.add((id(p), k))
+                        out.append(("end", p, list(p.points), k))
+        return out
 
     def _on_drag_motion(self, e):
         if self.draw_mode == "pan":
@@ -1424,6 +1515,7 @@ class LayoutCanvas(tk.Canvas):
             pts[i] = (int(round(oxi + edx)), int(round(oyi + edy)))
             pts[j] = (int(round(oxj + edx)), int(round(oyj + edy)))
             shape.points = pts
+            _apply_attachments(getattr(self, "_edge_attached", None), edx, edy)
         else:
             _, shape = self.selected
             _apply_translate(shape, self._drag_snapshot, dx, dy)
@@ -1496,6 +1588,9 @@ class LayoutCanvas(tk.Canvas):
         moved = self._drag_start_mouse is not None
         self._drag_start_mouse = None
         self._drag_snapshot = None
+        if moved and any(a[0] == "shape" for a in (getattr(self, "_edge_attached", None) or [])):
+            self._vias_moved()
+        self._edge_attached = None
         if moved and self.draw_mode == "select" and self.selected is not None:
             self._after_edit()
 
@@ -2170,6 +2265,7 @@ class LayoutCanvas(tk.Canvas):
             if isinstance(shape, Rectangle):     # becomes a free quad, same as a drag
                 shape = self._promote_rect_to_polygon(shape)
                 self.selected = ("edge", shape, (i, j))
+            attached = self._via_attachments(shape, (i, j))   # the via goes too, as in a drag
             pts = list(shape.points)
             oxi, oyi = pts[i]
             oxj, oyj = pts[j]
@@ -2184,6 +2280,9 @@ class LayoutCanvas(tk.Canvas):
             pts[i] = (int(round(oxi + edx)), int(round(oyi + edy)))
             pts[j] = (int(round(oxj + edx)), int(round(oyj + edy)))
             shape.points = pts
+            _apply_attachments(attached, int(round(edx)), int(round(edy)))
+            if any(a[0] == "shape" for a in attached):
+                self._vias_moved()
         else:
             _, shape = self.selected
             _apply_translate(shape, _geom_snapshot(kind, shape), ddx, ddy)
@@ -2709,6 +2808,45 @@ class LayoutCanvas(tk.Canvas):
     sli_provider = None
     sli_show_power = True
     sli_last = None
+    #: what the last SLI was worked out from (see _sli_signature) and how
+    #: long it took; above SLI_LIVE_DRAG_S it isn't redone during a drag
+    _sli_sig = None
+    _sli_cost = 0.0
+    SLI_LIVE_DRAG_S = 0.15
+    #: View > Unrouted Nets: the one net picked from the list -- drawn
+    #: thick in SLI_FOCUS_COLOR with a ring round each loose end so even a
+    #: short gap shows; sli_focus_only hides every other net's lines
+    sli_focus = None
+    sli_focus_only = False
+    SLI_FOCUS_COLOR = "#ff00ff"
+    SLI_FOCUS_RING_PX = 9
+    #: smallest area (um) Focus zooms to, so a short gap has context round it
+    SLI_FOCUS_MIN_UM = 3000
+
+    def _sli_signature(self):
+        """A cheap fingerprint of everything the SLIs depend on: the shown
+        cell's shapes and placed parts, the cells those parts use, and the
+        design's net names. Same fingerprint, same SLIs."""
+        lib = self.library
+        cell = lib.cells.get(self.cell_name)
+        if cell is None:
+            return None
+        h = 0
+        for sh in cell.shapes:
+            pts = getattr(sh, "points", None)
+            h = hash((h, sh.layer, tuple(pts) if pts is not None else id(sh),
+                      getattr(sh, "pin", ""), getattr(sh, "width", 0)))
+        used = set()
+        for r in cell.srefs:
+            h = hash((h, r.cell_name, tuple(r.origin), r.rotation, r.x_reflection, r.label))
+            used.add(r.cell_name)
+        for name in sorted(used):
+            c = lib.cells.get(name)
+            if c is not None:
+                h = hash((h, name, len(c.shapes), len(c.srefs),
+                          sum(len(getattr(s, "points", ()) or ()) for s in c.shapes)))
+        return (self.cell_name, id(cell), len(cell.shapes), len(cell.srefs), h,
+                lib.tech_params.get("net_names"), lib.tech_params.get("route_rules"))
 
     @staticmethod
     def sli_class(net):
@@ -2725,13 +2863,32 @@ class LayoutCanvas(tk.Canvas):
         while it is dragged. Nothing is added to the design."""
         if not self.show_sli or self.sli_provider is None:
             return
-        try:
-            data = self.sli_provider()
-        except Exception:
-            return
+        # Working the SLIs out can be slow on a routed board (it traces the
+        # copper): only redo it when the design has actually changed, and
+        # -- if it IS slow -- not on every frame of a drag; the drag shows
+        # the last lines and they're redone once on release.
+        sig = self._sli_signature()
+        dragging = self._drag_start_mouse is not None or self._group_drag
+        if self.sli_last is not None and (
+                sig == self._sli_sig or (dragging and self._sli_cost > self.SLI_LIVE_DRAG_S)):
+            data = self.sli_last
+        else:
+            import time as _time
+            t0 = _time.perf_counter()
+            try:
+                data = self.sli_provider()
+            except Exception:
+                return
+            self._sli_cost = _time.perf_counter() - t0
+            self._sli_sig = sig
         self.sli_last = data
         tag = "sli"
+        focus = self.sli_focus
         for n in data.get("nets", []):
+            if focus is not None and n["net"] == focus:
+                continue                       # drawn last, on top
+            if focus is not None and self.sli_focus_only:
+                continue
             cls = self.sli_class(n["net"])
             if cls != "signal" and not self.sli_show_power:
                 continue
@@ -2741,6 +2898,51 @@ class LayoutCanvas(tk.Canvas):
                 p0, p1 = self.to_px(x0, y0), self.to_px(x1, y1)
                 self.create_line(p0[0], p0[1], p1[0], p1[1], fill=self.SLI_LONG_COLOR if long_ else col,
                                  width=1, dash=(4, 3) if long_ else None, tags=tag)
+        if focus is not None:
+            fc, r = self.SLI_FOCUS_COLOR, self.SLI_FOCUS_RING_PX
+            for n in data.get("nets", []):
+                if n["net"] != focus:
+                    continue
+                for (x0, y0, x1, y1) in n["segments"]:
+                    p0, p1 = self.to_px(x0, y0), self.to_px(x1, y1)
+                    self.create_line(p0[0], p0[1], p1[0], p1[1], fill=fc, width=3, tags=tag)
+                    for px, py in (p0, p1):
+                        self.create_oval(px - r, py - r, px + r, py + r, outline=fc, width=2,
+                                         tags=tag)
+
+    def sli_unrouted(self):
+        """The SLI data as it stands (worked out now if it isn't cached)."""
+        if self.sli_provider is None:
+            return {"nets": [], "total": 0.0}
+        if self.sli_last is None or self._sli_signature() != self._sli_sig:
+            self.sli_last = self.sli_provider()
+            self._sli_sig = self._sli_signature()
+        return self.sli_last
+
+    def focus_sli_net(self, net, zoom=True):
+        """Pick ``net`` out of the SLIs (None clears it) and, with
+        ``zoom``, Zoom Window round its unrouted connections. Turns the
+        SLI on. Returns that net's SLI entry, or None."""
+        self.sli_focus = net
+        if net is None:
+            self.redraw()
+            return None
+        self.show_sli = True
+        entry = next((n for n in self.sli_unrouted().get("nets", []) if n["net"] == net), None)
+        if entry is None or not entry["segments"]:
+            self.redraw()
+            return entry
+        if zoom:
+            xs = [v for s in entry["segments"] for v in (s[0], s[2])]
+            ys = [v for s in entry["segments"] for v in (s[1], s[3])]
+            x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+            m = self.SLI_FOCUS_MIN_UM
+            cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+            hw, hh = max((x1 - x0) / 2.0, m / 2.0), max((y1 - y0) / 2.0, m / 2.0)
+            self.zoom_to_window(cx - hw, cy - hh, cx + hw, cy + hh, padding=0.25)
+        else:
+            self.redraw()
+        return entry
 
     # --- Highlight Net overlay ----------------------------------------------
     #: outline colour of a highlighted net's copper / pad boxes
@@ -3798,6 +4000,40 @@ def _geom_snapshot(kind, shape):
     if kind in ("sref", "aref") or isinstance(shape, (SRef, ARef, Text)):
         return ("origin", shape.origin)
     return ("points", list(shape.points))
+
+
+def _apply_attachments(attached, dx, dy):
+    """Move what a dragged track segment carries (see
+    LayoutCanvas._via_attachments) by (dx, dy), relative to the snapshots
+    taken when the drag began. A track meeting the via has its end moved;
+    if its last leg runs ACROSS the move direction (parallel to the
+    dragged segment) that leg slides with it, so the track stays square
+    -- unless it's the track's only leg, which would tear it off its
+    other end."""
+    if not attached or (dx == 0 and dy == 0):
+        if attached:
+            for kind, obj, snap, k in attached:
+                if kind == "shape":
+                    _apply_translate(obj, snap, 0, 0)
+                else:
+                    obj.points = list(snap)
+        return
+    dl = math.hypot(dx, dy)
+    for kind, obj, snap, k in attached:
+        if kind == "shape":
+            _apply_translate(obj, snap, dx, dy)
+            continue
+        pts = list(snap)
+        ex, ey = pts[k]
+        pts[k] = (int(round(ex + dx)), int(round(ey + dy)))
+        nb = k + 1 if k == 0 else k - 1
+        if len(pts) > 2:
+            sx, sy = ex - snap[nb][0], ey - snap[nb][1]
+            sl = math.hypot(sx, sy)
+            if sl > 0 and abs(sx * dx + sy * dy) <= 0.01 * sl * dl:
+                nx, ny = snap[nb]
+                pts[nb] = (int(round(nx + dx)), int(round(ny + dy)))
+        obj.points = pts
 
 
 def _apply_translate(shape, snapshot, dx, dy):

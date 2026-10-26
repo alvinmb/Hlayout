@@ -13,7 +13,7 @@ COPPER.
 That proxy is wrong for two things that live ABOVE the substrate, and
 they are handled separately:
 
-* WIRE BONDS (`bond_layer`, Setup > Wire Bond Rules...). A bond wire is
+* WIRE BONDS (`bond_layer`, Setup > Technology Properties (Wire Bonds tab)). A bond wire is
   in the air; it only touches anything at its two ends (ball and
   stitch). Unioning the drawn O------O figure with the copper would
   short it to every trace it flies over, and -- worse -- short every

@@ -17,7 +17,7 @@ from ..core.maskops import MASK_OPS
 from ..core.shapes import CIRCLE_SEGMENT_CHOICES
 from ..core.units import dbu_to_mm, mm_to_dbu
 from ..io.printio import hidden_layers_with_data, send_to_system_printer
-from ..io.sidecar import load_design, sidecar_path
+from ..io.sidecar import backup_path as _backup_path, load_design, sidecar_path
 from ..io.techfile import (
     default_layer_thickness,
     load_bond_rules,
@@ -44,6 +44,7 @@ from .drc_window import open_drc_window
 from .netlist_window import open_netlist_window
 from .topview_window import open_topview_window
 from .freerouting_window import open_freerouting_window
+from .unrouted_window import open_unrouted_window
 from .assembly_window import open_assembly_window
 from .dxf_batch_window import open_dxf_batch_window
 from .gerber_batch_window import open_gerber_batch_window
@@ -427,6 +428,7 @@ class App(tk.Tk):
         self.show_sli_var = tk.BooleanVar(value=False)
         viewm.add_checkbutton(label="Straight-Line Interconnects", variable=self.show_sli_var,
                                command=self._on_show_sli_change)
+        viewm.add_command(label="Unrouted Nets...", command=lambda: open_unrouted_window(self))
         viewm.add_separator()
         viewm.add_radiobutton(label="Zoom Window", value="zoomwin", variable=self.mode_var,
                                command=self._on_mode_change, accelerator="W")
@@ -528,9 +530,7 @@ class App(tk.Tk):
         toolsm.add_command(label="Thermal Analysis...", command=lambda: open_thermal_window(self))
         toolsm.add_command(label="Generate Dielectric Fill...", command=self.show_dielectric_dialog)
         toolsm.add_command(label="Remove Dielectric Fill", command=self.remove_dielectric_fill)
-        toolsm.add_separator()
-        toolsm.add_command(label="Gerber Export Sets...", command=lambda: open_gerber_batch_window(self))
-        toolsm.add_command(label="DXF Export Sets...", command=lambda: open_dxf_batch_window(self))
+        toolsm.add_command(label="Remove Unused Bonds...", command=self.remove_unused_bonds)
 
         # --- Help ----------------------------------------------------------
         helpm = add_menu("Help")
@@ -819,6 +819,7 @@ class App(tk.Tk):
 
         self.canvas = LayoutCanvas(body, self.session.library, on_status=self.status.set)
         self.canvas.sli_provider = lambda: self.session.sli(cell_name=self.canvas.cell_name)
+        self.canvas.on_vias_moved = self._refill_dielectric_after_via_move
         from .hybrid_hooks import HybridHooks
         self.canvas.hybrid_hooks = HybridHooks(self)
         # weight=1 on the canvas, weight=0 on the right panel: when the
@@ -1877,7 +1878,7 @@ class App(tk.Tk):
         return win
 
     def show_wire_bond_rules_dialog(self):
-        """Setup > Wire Bond Rules...: the layer and defaults the BOND
+        """Setup > Technology Properties (Wire Bonds tab): the layer and defaults the BOND
         command / Session.wire_bond() use to draw a chip-and-wire
         assembly wire bond (an O------O ball-to-ball figure), and the
         min/max span it enforces. This layer is also folded into
@@ -2635,7 +2636,7 @@ class App(tk.Tk):
                      "_drc_window", "_netlist_window", "_topview_window",
                      "_maskop_batch_window",
                      "_gerber_batch_window", "_dxf_batch_window",
-                     "_thermal_window"):
+                     "_thermal_window", "_unrouted_window"):
             win = getattr(self, attr, None)
             if win is not None:
                 try:
@@ -2720,13 +2721,83 @@ class App(tk.Tk):
             defaultextension=".gds", filetypes=[("GDSII", "*.gds")])
         if not path:
             return
+        if not self._ok_to_overwrite(path):
+            return
         try:
             self.session.save_design(path)
         except LayoutError as e:
             dialogs.show_error("Save failed", str(e), parent=self)
             return
         self.current_path = path
-        self.status.set(f"saved {path} (+ technology/attached-libraries sidecar)")
+        self.status.set(f"saved {path} (+ technology/attached-libraries sidecar; "
+                        f"the previous version kept as {os.path.basename(_backup_path(path, 1))})")
+
+    def remove_unused_bonds(self):
+        """Tools > Remove Unused Bonds...: list the die pads the design
+        doesn't use, then (on OK) take their wire bonds and bond fingers
+        off -- each affected die gets its own copy of its part (see
+        Session.remove_unused_bonds)."""
+        try:
+            plan = self.session.remove_unused_bonds(cell_name=self.canvas.cell_name, dry_run=True)
+        except LayoutError as e:
+            dialogs.show_error("Remove Unused Bonds", str(e), parent=self)
+            return
+        if not plan["dies"]:
+            dialogs.show_info("Remove Unused Bonds", "Every bonded die pad is on a net -- "
+                              "nothing to remove.", parent=self)
+            return
+        lines = "\n".join(f"  {ref}: pad(s) {', '.join(p)}" for ref, p in sorted(plan["dies"].items()))
+        if not dialogs.ask_yes_no(
+                "Remove Unused Bonds",
+                f"{plan['bonds']} bond(s) and finger(s) on pads no net uses:\n\n{lines}\n\n"
+                "Each of these dies gets its own copy of its part without them (the library "
+                "part and other dies are untouched). Remove them?", parent=self):
+            return
+        r = self.session.remove_unused_bonds(cell_name=self.canvas.cell_name)
+        self.status.set(f"removed {r['bonds']} unused bond(s) and finger(s) from "
+                        f"{len(r['dies'])} die(s)")
+        self.refresh_all() if hasattr(self, "refresh_all") else self.canvas.redraw()
+
+    def _refill_dielectric_after_via_move(self):
+        """A via moved with its track (segment drag / arrow nudge): redo the
+        dielectric fill, if the cell has one, so the via's window is open
+        where the via now is."""
+        from ..io.techfile import load_dielectric_rules
+        name = self.canvas.cell_name
+        cell = self.session.library.cells.get(name)
+        try:
+            diel = int(load_dielectric_rules(self.session.library)["layer"])
+        except Exception:
+            return
+        if cell is None or diel < 0 or not any(
+                s.layer == diel and getattr(s, "datatype", 0) == self.session.DIELECTRIC_FILL_DATATYPE
+                for s in cell.shapes):
+            return
+        self.status.set("via moved -- regenerating the dielectric...")
+        self.update_idletasks()
+        try:
+            self.session.generate_dielectric(cell_name=name)
+            self.status.set("via moved -- dielectric regenerated round its new window")
+        except Exception as e:
+            self.status.set(f"via moved -- dielectric NOT regenerated: {e}")
+
+    def _ok_to_overwrite(self, path) -> bool:
+        """Saving an EMPTY design over a file that has a design in it is
+        almost always a mistake (a fresh window saved over yesterday's
+        work): ask first."""
+        from ..io.sidecar import design_is_empty
+        try:
+            if not design_is_empty(self.session.library) or not os.path.isfile(path) \
+                    or os.path.getsize(path) < 300:
+                return True
+        except OSError:
+            return True
+        return dialogs.ask_yes_no(
+            "Save an empty design?",
+            f"This design is empty, and {os.path.basename(path)} already holds a design.\n\n"
+            f"Overwrite it with the empty design? (The current file would still be kept as "
+            f"{os.path.basename(_backup_path(path, 1))}.)",
+            parent=self)
 
     #: Milliseconds between auto-saves while the top toolbar's
     #: Auto-save switch is on -- see _on_autosave_toggle().
@@ -2776,7 +2847,12 @@ class App(tk.Tk):
         an auto-save writes to is defined from, same as Save GDS...,
         and there's nothing to silently prompt a location for here."""
         self._autosave_job = None
-        if self.current_path:
+        from ..io.sidecar import design_is_empty
+        if self.current_path and design_is_empty(self.session.library) and \
+                os.path.isfile(self.current_path) and os.path.getsize(self.current_path) >= 300:
+            self.status.set("auto-save skipped -- the design is empty and "
+                            f"{os.path.basename(self.current_path)} isn't")
+        elif self.current_path:
             try:
                 self.session.save_design(self.current_path)
                 self.status.set(f"auto-saved {self.current_path} "
@@ -2805,6 +2881,8 @@ class App(tk.Tk):
             defaultextension=".gds", filetypes=[("GDSII", "*.gds")],
             initialdir=initial_dir, initialfile=initial_file)
         if not path:
+            return
+        if not self._ok_to_overwrite(path):
             return
         try:
             self.session.save_design(path)

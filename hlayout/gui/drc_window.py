@@ -12,7 +12,7 @@ hlayout.core.maskops/hlayout.core.drc) and lists what it finds.
 Each rule is persisted the moment it's added/edited/deleted (there's
 no separate "Save Rules" step to forget), since a DRC rule set is
 process configuration, not per-session scratch state -- the same
-reasoning Setup > Resistor Geometry Rules... uses.
+reasoning Setup > Technology Properties (Resistors tab) uses.
 
 Each rule carries its own display colour (DrcRule.color, a "" default
 meaning "not picked yet"), settable per rule in the Add/Edit Rule
@@ -96,7 +96,7 @@ def _unit(kind):
 
 
 def bond_rules_from_setup(library, existing=()):
-    """The wire-bond DRC rules from Setup > Wire Bond Rules... (see
+    """The wire-bond DRC rules from Setup > Technology Properties (Wire Bonds tab) (see
     hlayout.core.drc.bond_rules_from_settings)."""
     return bond_rules_from_settings(load_bond_rules(library), existing)
 
@@ -433,7 +433,7 @@ class DrcWindow(tk.Toplevel):
 
     def _add_bond_rules(self):
         """Wire-bond length and departure-angle rules, filled in from
-        Setup > Wire Bond Rules... (bond layer, min/max length, die-pad
+        Setup > Technology Properties (Wire Bonds tab) (bond layer, min/max length, die-pad
         layers) with a 45-degree max angle; rules already in the table
         are not added twice."""
         try:
@@ -451,7 +451,7 @@ class DrcWindow(tk.Toplevel):
         self._persist()
         self._refresh_rules()
         note = "" if any(r.kind == "BOND_MAX_ANGLE" for r in self.rules) else \
-            "\n\nNo die-pad layer is set in Setup > Wire Bond Rules..., so no angle rule was added."
+            "\n\nNo die-pad layer is set in Setup > Technology Properties (Wire Bonds tab), so no angle rule was added."
         dialogs.show_info("Add Bond Rules", f"Added {len(new)} rule(s). Edit a rule to change "
                           f"its limit.{note}", parent=self)
 

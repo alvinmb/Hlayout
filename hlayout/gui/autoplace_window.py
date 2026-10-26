@@ -118,12 +118,14 @@ class AutoPlaceWindow(tk.Toplevel):
         sf = ttk.LabelFrame(f, text="Settings (saved with the design)", padding=8)
         sf.pack(fill="x", pady=(8, 0))
         items = (("Grid (um)", "grid"), ("Clearance (um)", "clearance"), ("Bond reach (um)", "bond_reach"),
-                 ("Thermal (0 = off)", "thermal"), ("Effort", "effort"), ("Seed", "seed"),
-                 ("Resistor conductor layer", "res_layer"))
+                 ("Thermal (0 = off)", "thermal"), ("Effort", "effort"), ("Seed", "seed"))
         for k, (label, key) in enumerate(items):
             r, c = divmod(k, 4)
             ttk.Label(sf, text=label + ":").grid(row=r, column=c * 2, sticky="e", padx=4, pady=2)
             ttk.Entry(sf, textvariable=self.v[key], width=8).grid(row=r, column=c * 2 + 1, sticky="w")
+        ttk.Label(sf, text="Resistor conductor:").grid(row=2, column=0, sticky="e", padx=4, pady=2)
+        self.res_box = ttk.Combobox(sf, textvariable=self.v["res_layer"], width=40, state="readonly")
+        self.res_box.grid(row=2, column=1, columnspan=5, sticky="w")
 
         bf = ttk.Frame(f)
         bf.pack(fill="x", pady=(8, 0))
@@ -149,7 +151,7 @@ class AutoPlaceWindow(tk.Toplevel):
         for key, sk in (("grid", "grid"), ("clearance", "clearance"), ("bond_reach", "bond_reach"),
                         ("thermal", "thermal"), ("effort", "effort"), ("seed", "seed")):
             self.v[key].set(f"{float(S[sk]):g}")
-        self.v["res_layer"].set("" if S.get("resistor_layer") in (None, "") else str(S["resistor_layer"]))
+        self._fill_res_layers(S)
         for cls, var in self.cw.items():
             var.set(f"{float(S['class_weights'].get(cls, 1.0)):g}")
         self.cell_box["values"] = sorted(self.session.library.cells)
@@ -158,6 +160,30 @@ class AutoPlaceWindow(tk.Toplevel):
             self.v["netlist"].set(last)
         if self.v["netlist"].get():
             self._load_netlist()
+
+    def _layer_name(self, n):
+        try:
+            return f"{n}: {self.session.library.layers[n].name}"
+        except Exception:
+            return str(n)
+
+    def _fill_res_layers(self, S):
+        """Resistor conductor choices from the tech file: its default (the
+        Resistor Geometry conductor pad layer) first, then every layer the
+        tech file gives the conductor role."""
+        from ..scripting.autoplace_session import conductor_layers, resistor_conductor_default
+        lib = self.session.library
+        d = resistor_conductor_default(lib)
+        first = "Tech file default" + (f" ({self._layer_name(d)})" if d is not None else " (none set)")
+        self._res_map = {first: None}
+        layers = conductor_layers(lib)
+        cur = S.get("resistor_layer")
+        if cur not in (None, "") and int(cur) not in layers:
+            layers = sorted(set(layers) | {int(cur)})
+        for n in layers:
+            self._res_map[self._layer_name(n)] = n
+        self.res_box["values"] = list(self._res_map)
+        self.v["res_layer"].set(first if cur in (None, "") else self._layer_name(int(cur)))
 
     def _settings(self):
         out = {}
@@ -168,8 +194,7 @@ class AutoPlaceWindow(tk.Toplevel):
                 out[sk] = typ(float(self.v[key].get()))
             except ValueError:
                 raise LayoutError(f"{key}: not a number")
-        rl = self.v["res_layer"].get().strip()
-        out["resistor_layer"] = int(rl) if rl else None
+        out["resistor_layer"] = self._res_map.get(self.v["res_layer"].get())
         S = self.session.autoplace_settings()
         cw = dict(S["class_weights"])
         for cls, var in self.cw.items():

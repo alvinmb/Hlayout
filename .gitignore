@@ -28,3 +28,8 @@ hlayout_project.zip
 *.bak
 *.bak[0-9]
 *.bak_*
+
+# Save backups kept by File > Save (NAME.bak1..3.gds + sidecars) and routing scratch
+*.bak[0-9].gds
+*.bak[0-9].gds.hlaux
+example5/_frtest/

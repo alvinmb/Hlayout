@@ -40,7 +40,14 @@ _NUM_FIELDS = (
     ("Power via window (um)", "power_via_window"),
     ("Bond finger (um)", "bond_finger"),
     ("Die keep-out (um)", "die_keepout"),
+    ("Via cost", "via_cost"),
+    ("Against-direction cost", "against_direction_cost"),
 )
+
+#: layer_directions choices: (shown text, rule value)
+_DIRECTIONS = (("1st conductor horizontal, 2nd conductor vertical", "hv"),
+               ("1st conductor vertical, 2nd conductor horizontal", "vh"),
+               ("No preferred direction", "off"))
 
 #: layer_mode choices: (shown text, rule value)
 _LAYER_MODES = (("Auto (one layer if nothing is on the 2nd conductor)", "auto"),
@@ -146,6 +153,22 @@ class FreeroutingWindow(tk.Toplevel):
         ttk.Combobox(gf, textvariable=self.vars["finger_layer"], state="readonly", width=48,
                      values=[t for t, _v in _FINGER_LAYERS]).grid(
             row=row, column=1, columnspan=3, sticky="w")
+        row += 1
+        self.vars["layer_directions"] = tk.StringVar()
+        ttk.Label(gf, text="Track directions:").grid(row=row, column=0, sticky="e", padx=4, pady=2)
+        ttk.Combobox(gf, textvariable=self.vars["layer_directions"], state="readonly", width=48,
+                     values=[t for t, _v in _DIRECTIONS]).grid(
+            row=row, column=1, columnspan=3, sticky="w")
+        row += 1
+        self.vars["via_optimize"] = tk.BooleanVar()
+        ttk.Checkbutton(gf, text="Via optimisation at the end (take out every via that can go)",
+                        variable=self.vars["via_optimize"]).grid(
+            row=row, column=0, columnspan=2, sticky="w", padx=4)
+        self.vars["via_optimize_max_flip"] = tk.StringVar()
+        ttk.Label(gf, text="Max track moved per via (um, 0 = any):").grid(
+            row=row, column=2, sticky="e", padx=4)
+        ttk.Entry(gf, textvariable=self.vars["via_optimize_max_flip"], width=9).grid(
+            row=row, column=3, sticky="w")
 
         nf = ttk.Frame(outer)
         nf.pack(fill="x", pady=(8, 0))
@@ -203,6 +226,11 @@ class FreeroutingWindow(tk.Toplevel):
         fl = str(rules.get("finger_layer", "first"))
         self.vars["finger_layer"].set(next((t for t, v in _FINGER_LAYERS if v == fl),
                                            _FINGER_LAYERS[0][0]))
+        ld = str(rules.get("layer_directions", "hv"))
+        self.vars["layer_directions"].set(next((t for t, v in _DIRECTIONS if v == ld),
+                                               _DIRECTIONS[0][0]))
+        self.vars["via_optimize"].set(bool(rules.get("via_optimize", True)))
+        self.vars["via_optimize_max_flip"].set(f"{float(rules.get('via_optimize_max_flip', 0)):g}")
         self.vars["router"].set(app_settings.get_setting(app_settings.FREEROUTING_PATH_KEY)
                                 or find_freerouting() or "")
         self.vars["java"].set(app_settings.get_setting(app_settings.JAVA_PATH_KEY) or "")
@@ -251,6 +279,17 @@ class FreeroutingWindow(tk.Toplevel):
         out["layer_mode"] = next((v for t, v in _LAYER_MODES if t == shown), "auto")
         shown = self.vars["finger_layer"].get()
         out["finger_layer"] = next((v for t, v in _FINGER_LAYERS if t == shown), "first")
+        shown = self.vars["layer_directions"].get()
+        out["layer_directions"] = next((v for t, v in _DIRECTIONS if t == shown), "hv")
+        out["via_optimize"] = bool(self.vars["via_optimize"].get())
+        try:
+            out["via_optimize_max_flip"] = float(self.vars["via_optimize_max_flip"].get() or 0)
+        except ValueError:
+            raise LayoutError("Max track moved per via: not a number")
+        if out["via_optimize_max_flip"] < 0:
+            raise LayoutError("Max track moved per via: must be 0 or more")
+        if out["against_direction_cost"] < 1:
+            raise LayoutError("Against-direction cost: must be 1 or more (1 = no penalty)")
         return out
 
     def _save(self):
@@ -458,11 +497,8 @@ class FreeroutingWindow(tk.Toplevel):
             dsn = os.path.join(wd, f"{name}.dsn")
             ses = os.path.join(wd, f"{name}.ses")
             sm = self.session.export_dsn(dsn)
-            cmd = freerouting_command(router, dsn, ses, passes=int(rules["passes"]),
-                                      optimize_passes=int(rules["optimize_passes"]),
-                                      optimize_threshold=float(rules["optimize_threshold"]),
-                                      exclude_classes=[EXCLUDED_CLASS] if rules["exclude_nets"] else [],
-                                      java=self.vars["java"].get().strip() or None)
+            cmd = self.session.freeroute_command(router, dsn, ses, rules,
+                                                 java=self.vars["java"].get().strip() or None)
         except Exception as e:
             self._say(f"Can't start: {e}")
             return
@@ -511,15 +547,36 @@ class FreeroutingWindow(tk.Toplevel):
             self._announce(f"FAILED -- no session file written (exit code {code})", "err")
         else:
             st = self._do_import(ses)
+            vias = ""
+            if st is not None:
+                vo = self._optimize_vias()
+                if vo is not None:
+                    vias = f"; via optimisation {vo['before']} -> {vo['after']} vias"
             if st is None:
                 self._announce("FAILED -- the result could not be imported (see the log)", "err")
             elif st["unrouted"]:
                 self._announce(f"FINISHED in {self._took()} -- {st['complete']} of {st['nets']} "
                                f"nets complete ({100 * st['complete'] // max(st['nets'], 1)}%); "
-                               f"unrouted: {', '.join(st['unrouted'])}", "warn")
+                               f"unrouted: {', '.join(st['unrouted'])}{vias}", "warn")
             else:
                 self._announce(f"FINISHED in {self._took()} -- all {st['nets']} nets complete (100%)  "
-                               f"({st['wires']} tracks, {st['vias']} vias)", "ok")
+                               f"({st['wires']} tracks, {st['vias']} vias{vias})", "ok")
+
+    def _optimize_vias(self):
+        """With "Via optimisation at the end" on a two-layer route: take
+        out the vias that can go (Session.optimize_vias). None if off."""
+        try:
+            rules = self.session.freerouting_rules()
+            if not rules.get("via_optimize") or self.session._single_layer_route(rules):
+                return None
+            self._say("Via optimisation: looking for vias that can go...")
+            vo = self.session.optimize_vias()
+        except Exception as e:
+            self._say(f"Via optimisation failed: {e}")
+            return None
+        self._say(f"Via optimisation: {vo['before']} -> {vo['after']} vias "
+                  f"({vo['moved']} track(s) moved to the other conductor)")
+        return vo
 
     def _stop(self):
         self._cancel = True

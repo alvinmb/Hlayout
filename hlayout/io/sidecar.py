@@ -183,11 +183,56 @@ def load_design(gds_path: str) -> LoadedDesign:
     )
 
 
+#: how many earlier versions save_design() keeps: NAME.bak1.gds (the one
+#: just overwritten) ... NAME.bak<KEEP_BACKUPS>.gds, each with its sidecar
+KEEP_BACKUPS = 3
+
+
+def backup_path(gds_path: str, n: int) -> str:
+    """NAME.gds -> NAME.bak<n>.gds (opens like any design; sidecar alongside)."""
+    root, ext = os.path.splitext(gds_path)
+    return f"{root}.bak{n}{ext or '.gds'}"
+
+
+def keep_backup(gds_path: str, keep: int = KEEP_BACKUPS) -> Optional[str]:
+    """Before ``gds_path`` is overwritten: shift NAME.bak1..bak<keep-1>
+    up one and copy the current NAME.gds (+ sidecar) to NAME.bak1.gds.
+    Returns that path, or None when there was nothing to keep. Never
+    raises -- a backup that can't be made mustn't stop the save."""
+    import shutil
+    if keep <= 0 or not os.path.isfile(gds_path) or os.path.getsize(gds_path) == 0:
+        return None
+    try:
+        for n in range(keep - 1, 0, -1):
+            src, dst = backup_path(gds_path, n), backup_path(gds_path, n + 1)
+            for a, b in ((src, dst), (sidecar_path(src), sidecar_path(dst))):
+                if os.path.exists(a):
+                    shutil.copy2(a, b)
+        dst = backup_path(gds_path, 1)
+        shutil.copy2(gds_path, dst)
+        if os.path.exists(sidecar_path(gds_path)):
+            shutil.copy2(sidecar_path(gds_path), sidecar_path(dst))
+        elif os.path.exists(sidecar_path(dst)):
+            open(sidecar_path(dst), "w").close()       # don't pair it with a stale sidecar
+        return dst
+    except OSError:
+        return None
+
+
+def design_is_empty(library: Library) -> bool:
+    """No shapes and no placed instances in any cell."""
+    return not any(c.shapes or c.srefs or getattr(c, "arefs", None) for c in library.cells.values())
+
+
 def save_design(library: Library, attached_libraries: List[Library],
-                 attached_paths: List[str], gds_path: str) -> str:
+                 attached_paths: List[str], gds_path: str,
+                 keep: int = KEEP_BACKUPS) -> str:
     """Save a design's .gds file plus its sidecar. Returns the sidecar
     path (the .gds itself is written at gds_path, unchanged in format
-    from a plain save_gds() call)."""
+    from a plain save_gds() call). The file being overwritten is kept
+    first as NAME.bak1.gds (older ones shift to bak2, bak3 -- see
+    keep_backup()); ``keep=0`` skips that."""
     library.check_bounds()
+    keep_backup(gds_path, keep)
     save_gds(library, gds_path)
     return write_sidecar(library, attached_libraries, attached_paths, gds_path)

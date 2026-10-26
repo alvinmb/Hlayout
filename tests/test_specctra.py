@@ -58,7 +58,8 @@ def test_route_mode_marks_wiring_route(tmp_path):
     p = str(tmp_path / "b.dsn")
     s.export_dsn(p, keep_existing=False, exclude_nets=["LONE"], power_nets=["SIG"])
     txt = open(p).read()
-    assert "(type route)" in txt and "(type protect)" not in txt
+    # Freerouting reads "(type route)" as user-fixed; rip-up-able wiring is "normal"
+    assert "(type normal)" in txt and "(type protect)" not in txt and "(type route)" not in txt
     assert "(class HL_POWER SIG" in txt and "(class HL_EXCLUDED LONE" in txt
 
 
@@ -323,3 +324,72 @@ def test_bond_fingers_on_the_2nd_conductor(tmp_path):
     s.set_freerouting_rules(layer_mode="single")
     s.export_dsn(p, cell_name="TOP")
     assert open(p).read().count("(pin PAD_L3_400x400 B") == 22
+
+
+# --- track directions per layer + the via-optimisation pass -----------------
+
+def _autoroute_scope(txt):
+    i = txt.index("(autoroute_settings")
+    depth = 0
+    for j in range(i, len(txt)):
+        depth += {"(": 1, ")": -1}.get(txt[j], 0)
+        if depth == 0:
+            return txt[i:j + 1]
+    raise AssertionError("unbalanced autoroute_settings")
+
+
+def test_dsn_sets_a_preferred_direction_per_layer(tmp_path):
+    s = _named()
+    p = str(tmp_path / "d.dsn")
+    s.export_dsn(p, layer_mode="two")                   # default: 1st conductor horizontal
+    sc = _autoroute_scope(open(p).read())
+    assert "(autoroute on)" in sc and "(vias on)" in sc and "(via_costs 50)" in sc
+    assert "(layer_rule L3 (active on) (preferred_direction horizontal)" in sc
+    assert "(layer_rule L5 (active on) (preferred_direction vertical)" in sc
+    assert "(against_preferred_direction_trace_costs 3)" in sc
+    s.export_dsn(p, layer_mode="two", layer_directions="vh", against_direction_cost=5,
+                 via_cost=80)
+    sc = _autoroute_scope(open(p).read())
+    assert "(layer_rule L3 (active on) (preferred_direction vertical)" in sc
+    assert "(layer_rule L5 (active on) (preferred_direction horizontal)" in sc
+    assert "(against_preferred_direction_trace_costs 5)" in sc and "(via_costs 80)" in sc
+    assert open(p).read().count("(") == open(p).read().count(")")
+
+
+def test_no_autoroute_settings_when_directions_are_off(tmp_path):
+    s = _named()
+    p = str(tmp_path / "o.dsn")
+    s.export_dsn(p, layer_mode="two", layer_directions="off")
+    assert "autoroute_settings" not in open(p).read()      # Freerouting's own defaults
+
+
+def test_single_layer_route_has_no_directions(tmp_path):
+    s = _named()
+    p = str(tmp_path / "s.dsn")
+    s.export_dsn(p, layer_mode="single")
+    assert "layer_rule" not in open(p).read()
+
+
+
+def test_freeroute_command_comes_from_the_rules():
+    s = _named()
+    R = s.freerouting_rules()
+    R.update(passes=7, optimize_passes=0)
+    cmd = s.freeroute_command("freerouting.exe", "a.dsn", "a.ses", R)
+    assert cmd[cmd.index("-mp") + 1] == "7" and "--router.optimizer.enabled=false" in cmd
+
+
+def test_rerouting_clears_half_vias_left_on_one_layer(tmp_path):
+    """A via pad whose other half has gone no longer pairs up as a via; a
+    re-route (replace mode) must still clear it, not leave it as stray metal."""
+    s = _named()
+    R = s.freerouting_rules()
+    w = R["signal_via"]
+    s.rect(5, 30000 - w / 2, 9000 - w / 2, 30000 + w / 2, 9000 + w / 2)     # orphan via pad, 2nd conductor
+    s.rect(5, 30000 - 100, 12000 - 100, 30000 + 100, 12000 + 100)          # some other small pad: not routing
+    p = tmp_path / "a.ses"
+    p.write_text(SES)
+    s.import_ses(str(p), keep_existing=False)
+    boxes = [x.bbox() for x in s.cell.shapes if x.layer == 5 and not isinstance(x, Path)]
+    assert (30000 - w / 2, 9000 - w / 2, 30000 + w / 2, 9000 + w / 2) not in boxes
+    assert (29900, 11900, 30100, 12100) in boxes

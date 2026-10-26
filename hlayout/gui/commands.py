@@ -206,7 +206,8 @@ Attached libraries:
                                        Session.delete_via()
     FREEROUTE EXPORT <file.dsn> | IMPORT <file.ses> | RUN [passes=<n>] [keep=0|1]
               [fresh=0|1] [layers=auto|single|two] [finger=<um>] [fingerlayer=1|2]
-              [optpasses=<n>] [optstop=<%>]
+              [optpasses=<n>] [optstop=<%>] [directions=hv|vh|off] [viaopt=0|1]
+              [viacost=<n>] [viaflip=<um>]   |   FREEROUTE VIAOPT [viaflip=<um>]
                                        Freerouting autorouter round trip: write a
                                        Specctra DSN (route layers, pads, net names,
                                        existing routing), read a session back (tracks,
@@ -220,7 +221,13 @@ Attached libraries:
                                        on the 1st or 2nd conductor (fingerlayer=);
                                        passes= routing passes (0 = until done),
                                        optpasses= optimizer passes (0 = off),
-                                       optstop= stop optimizing below this % gain
+                                       optstop= stop optimizing below this % gain;
+                                       directions= one track direction per conductor
+                                       (hv: 1st horizontal, 2nd vertical; off = none),
+                                       viaopt=1 takes out every via it can after the
+                                       route (viaflip= caps the track moved per via),
+                                       viacost= the router's cost of a via.
+                                       FREEROUTE VIAOPT runs just the via pass
     AUTOPLACE RUN|IMPROVE <netlist> [overrides=<csv>] [effort=] [seed=] [thermal=] [grid=]
                                        place the netlist's parts (KiCad .net, CSV or
                                        Tango) for the shortest weighted net length;
@@ -231,6 +238,8 @@ Attached libraries:
     SLI [ON|OFF]                       straight-line interconnects: total and longest
                                        nets; ON/OFF shows them (View > Straight-Line
                                        Interconnects). Session.sli()
+    UNUSEDBONDS [LIST|REMOVE]          bonds/fingers on die pads no net uses: list / take off
+    UNROUTED [<net>|NEXT|PREV|CLEAR]   list unrouted nets / zoom to one and show its SLI
     SOLIDCRAFT [window=0|1] [export=<file.step|3mf|stl|obj>]
                                        build the current cell as a 3D model in
                                        SolidCraft through its MCP server (window=1:
@@ -305,7 +314,7 @@ a resistor; this draws it):
                                        floats it at the instance centre, draggable,
                                        same as any other part (no baked Text);
                                        a/b/c/d/clayer/glayer default to Setup >
-                                       Resistor Geometry Rules... (the technology
+                                       Technology Properties, Resistors tab (the technology
                                        file) when omitted -- see that dialog for what
                                        A (overlap), B (pad length), C (side space),
                                        and D (glaze oversize, on all 4 sides) mean.
@@ -579,7 +588,7 @@ Dielectric Fill (Tools > Generate Dielectric Fill...; requires shapely):
                                        inputs included; also Session.generate_dielectric()
                                        / clear_dielectric()
 
-Wire bonds (Setup > Wire Bond Rules...; chip-and-wire assembly jumpers):
+Wire bonds (Setup > Technology Properties (Wire Bonds tab); chip-and-wire assembly jumpers):
     BOND <x1,y1> <x2,y2> [layer=<n|name>] [width=<dbu>] [pad=<dbu>] [min=<dbu>]
         [max=<dbu>] [cell=<name>]       draw a wire bond -- an O------O figure (a ball
                                        of diameter pad at each end joined by a
@@ -2259,7 +2268,7 @@ class CommandInterpreter:
             "  a new/moved span must be within min/max and must not cross another.\n"
             "  MOVE picks the bond nearest <near>, then moves the end closer to\n"
             "  <near> to <to> (the other end stays). DELETE picks the bond nearest\n"
-            "  <x,y>. Bond layer/defaults come from Setup > Wire Bond Rules..."
+            "  <x,y>. Bond layer/defaults come from Setup > Technology Properties (Wire Bonds tab)"
         )
         if not args:
             raise CommandError(usage)
@@ -2468,6 +2477,53 @@ class CommandInterpreter:
             msg += f"; {len(r['overlaps'])} overlap(s), {len(r['outside'])} outside"
         return msg
 
+    def _cmd_unusedbonds(self, args):
+        """UNUSEDBONDS [LIST|REMOVE] -- wire bonds and fingers on die pads no
+        net uses: list them (default), or take them off."""
+        sub = (args[0].upper() if args else "LIST")
+        if sub not in ("LIST", "REMOVE"):
+            raise CommandError("usage: UNUSEDBONDS [LIST|REMOVE]")
+        r = self.session.remove_unused_bonds(dry_run=(sub == "LIST"))
+        if not r["dies"]:
+            return "no unused bonds"
+        detail = "; ".join(f"{ref}: {','.join(p)}" for ref, p in sorted(r["dies"].items()))
+        verb = "unused" if sub == "LIST" else "removed"
+        return f"{r['bonds']} {verb} bond(s): {detail}"
+
+    def _cmd_unrouted(self, args):
+        """UNROUTED [<net>|NEXT|PREV|CLEAR] -- no argument: list the nets
+        still to route; a net (or NEXT/PREV through the list): show its SLI
+        thick and zoom to it; CLEAR: drop the pick."""
+        d = self.session.sli()
+        names = [n["net"] for n in d["nets"]]
+        if not args:
+            if not names:
+                return f"no unrouted nets ({d.get('complete', 0)} complete)"
+            return f"{len(names)} unrouted: " + ", ".join(
+                f"{n['net']} ({len(n['segments'])})" for n in d["nets"])
+        a = args[0]
+        view = self.view
+        if a.upper() == "CLEAR":
+            if view is not None:
+                view.focus_sli_net(None)
+            return "unrouted net pick cleared"
+        if a.upper() in ("NEXT", "PREV"):
+            if not names:
+                return "no unrouted nets"
+            cur = getattr(view, "sli_focus", None)
+            step = 1 if a.upper() == "NEXT" else -1
+            i = names.index(cur) + step if cur in names else (0 if step > 0 else -1)
+            net = names[i % len(names)]
+        else:
+            net = next((n for n in names if n.upper() == a.upper()), None)
+            if net is None:
+                raise CommandError(f"{a} is not an unrouted net" + (
+                    f" (unrouted: {', '.join(names)})" if names else ""))
+        entry = next(n for n in d["nets"] if n["net"] == net)
+        if view is not None:
+            view.focus_sli_net(net)
+        return f"{net}: {len(entry['segments'])} gap(s), {entry['length'] / 1000:.2f} mm unrouted"
+
     def _cmd_sli(self, args):
         """SLI [ON|OFF] -- straight-line interconnects; no argument: report."""
         d = self.session.sli()
@@ -2504,7 +2560,9 @@ class CommandInterpreter:
     def _cmd_freeroute(self, args):
         usage = ("usage: FREEROUTE EXPORT <file.dsn> | FREEROUTE IMPORT <file.ses> [keep=0|1] | "
                  "FREEROUTE RUN [passes=<n>] [keep=0|1] [fresh=0|1] [layers=auto|single|two] "
-                 "[finger=<um>] [fingerlayer=1|2] [optpasses=<n>] [optstop=<%>]")
+                 "[finger=<um>] [fingerlayer=1|2] [optpasses=<n>] [optstop=<%>] "
+                 "[directions=hv|vh|off] [viaopt=0|1] [viacost=<n>] [viaflip=<um>] | "
+                 "FREEROUTE VIAOPT [viaflip=<um>]")
         if not args:
             raise CommandError(usage)
         sub = args[0].upper()
@@ -2534,10 +2592,25 @@ class CommandInterpreter:
                     if v.lower() not in ("1", "2", "first", "second"):
                         raise CommandError("fingerlayer= must be 1 or 2")
                     opts["finger_layer"] = "second" if v.lower() in ("2", "second") else "first"
+                elif k == "directions":
+                    if v.lower() not in ("hv", "vh", "off"):
+                        raise CommandError("directions= must be hv (1st conductor horizontal), "
+                                           "vh or off")
+                    opts["layer_directions"] = v.lower()
+                elif k == "viaopt":
+                    opts["via_optimize"] = v.lower() not in ("0", "no", "false")
+                elif k == "viacost":
+                    opts["via_cost"] = int(v)
+                elif k == "viaflip":
+                    opts["via_optimize_max_flip"] = float(v)
                 else:
                     raise CommandError(f"unknown FREEROUTE option {k!r}")
             else:
                 pos.append(a)
+        if sub == "VIAOPT" and not pos:
+            r = self.session.optimize_vias(**opts)
+            return (f"via optimisation: {r['before']} -> {r['after']} via(s), "
+                    f"{r['moved']} track(s) moved to the other conductor")
         if sub == "EXPORT" and len(pos) == 1:
             sm = self.session.export_dsn(pos[0], **opts)
             return (f"wrote {pos[0]}: {sm.components} part(s), {sm.pins} pad(s), {sm.nets} net(s), "
@@ -2555,6 +2628,8 @@ class CommandInterpreter:
                 msg += f"; {st['fingers']} bond finger(s) laid"
             if st.get("widened"):
                 msg += f"; {st['widened']} necked track(s) widened back to the minimum width"
+            if "vias_before" in st:
+                msg += f"; via optimisation {st['vias_before']} -> {st['vias_after']} via(s)"
             if st["unrouted"]:
                 msg += "\n  unrouted: " + ", ".join(st["unrouted"])
             return msg

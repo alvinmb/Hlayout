@@ -234,6 +234,28 @@ def test_printed_resistor_is_generated_from_its_value(tmp_path):
     assert "R1" in refs and not r["overlaps"]
 
 
+def test_resistor_conductor_comes_from_the_tech_file(tmp_path):
+    from hlayout.io.techfile import load_resistor_geometry_rules, save_resistor_geometry_rules
+    from hlayout.scripting.autoplace_session import conductor_layers, resistor_conductor
+    s = _design()
+    rg = load_resistor_geometry_rules(s.library)
+    rg["conductor_layer"] = 7
+    save_resistor_geometry_rules(s.library, rg)
+    assert resistor_conductor(s.library) == 7 and 7 in conductor_layers(s.library)
+    net = NET.replace('(comp (ref "U2") (value "x") (footprint "Lib:PART")))',
+                      '(comp (ref "U2") (value "x") (footprint "Lib:PART")) (comp (ref "R1") (value "4.7k")))')
+    net = net.replace('(node (ref "U2") (pin "2")))))', '(node (ref "U2") (pin "2")) (node (ref "R1") (pin "1")))))')
+    p = tmp_path / "r.net"
+    p.write_text(net)
+    s.auto_place(str(p), effort=0.3, seed=1)
+    rc = next(x.cell_name for x in s.library.cells["TOP"].srefs if x.label == "R1")
+    assert {sh.layer for sh in s.library.cells[rc].shapes if getattr(sh, "pin", None)} == {7}
+    s.set_autoplace_settings(resistor_layer="5")                # job override, by number or name
+    assert resistor_conductor(s.library) == 5
+    s.set_autoplace_settings(resistor_layer=None)
+    assert resistor_conductor(s.library) == 7
+
+
 def test_overrides_force_a_cell_and_lock_a_part(tmp_path):
     s = _design()
     s.new_cell("PART2")
@@ -248,3 +270,74 @@ def test_overrides_force_a_cell_and_lock_a_part(tmp_path):
     s.auto_place(str(p), overrides=str(ov), effort=0.3)
     refs = {x.label: x for x in s.library.cells["TOP"].srefs if x.label}
     assert refs["U2"].cell_name == "PART2" and tuple(refs["U2"].origin) == (5000, 5000)
+
+
+def test_sli_starts_at_the_bond_landing_of_a_bonded_die_pad():
+    from hlayout.io import techfile as T
+    s = Session.new("SLI")
+    s.new_cell("DIE")
+    s.rect(61, -500, -500, 500, 500)                 # die body
+    s.rect(58, 350, -50, 450, 50, pin="1")           # die pad, right edge
+    s.new_cell("TOP")
+    s.rect(57, -10000, -10000, 10000, 10000)          # substrate
+    s.rect(3, 8000, -500, 9000, 500, pin="1")         # I/O pad 1
+    s.sref("DIE", (0, 0), label="U1")
+    T.save_bond_rules(s.library, {"layer": 59, "width": 25, "pad": 75, "min_length": 300,
+                                  "max_length": 5000, "die_pad_layers": [58]})
+    s.set_net_names({"U1.1": "N1", "IO.1": "N1"})
+    seg = s.sli()["nets"][0]["segments"][0]
+    assert {(seg[0], seg[1]), (seg[2], seg[3])} == {(400.0, 0.0), (8500.0, 0.0)}   # from the die pad
+    s.wire_bond([(400, 0), (1600, 0)], cell_name="TOP")
+    seg = s.sli()["nets"][0]["segments"][0]
+    assert {(seg[0], seg[1]), (seg[2], seg[3])} == {(1600.0, 0.0), (8500.0, 0.0)}  # from the landing
+
+
+def test_sli_leaves_out_connections_the_copper_already_makes():
+    from hlayout.io.techfile import load_route_rules, save_route_rules
+    s = Session.new("RATS")
+    s.new_cell("TOP")
+    rr = load_route_rules(s.library); rr["layer_a"] = 3; rr["layer_b"] = 5
+    save_route_rules(s.library, rr)
+    for i, x in enumerate((0, 5000, 10000), start=1):
+        s.rect(3, x - 300, -300, x + 300, 300, pin=str(i))
+    s.set_net_names({"IO.1": "N", "IO.2": "N", "IO.3": "N"})
+    assert len(s.sli()["nets"][0]["segments"]) == 2           # nothing routed: the full tree
+    s.path(3, [(0, 0), (5000, 0)], 300)                       # IO.1 - IO.2 routed
+    d = s.sli()                                               # copper edge to copper edge
+    assert sorted(d["nets"][0]["segments"][0][::2]) == [5300.0, 9700.0]
+    assert len(s.sli(unrouted_only=False)["nets"][0]["segments"]) == 2
+    s.path(3, [(5000, 0), (10000, 0)], 300)                   # all routed: no SLI left
+    d = s.sli()
+    assert d["nets"] == [] and d["complete"] == 1
+
+
+def test_auto_place_replaces_the_placed_parts_old_pad_names():
+    s = Session.new("NAMES")
+    s.new_cell("SO4")
+    for i, (x, y) in enumerate([(0, 0), (1270, 0), (1270, 4000), (0, 4000)], start=1):
+        s.rect(3, x - 200, y - 300, x + 200, y + 300, pin=str(i))
+    s.new_cell("TOP")
+    s.rect(57, 0, 0, 20000, 20000)
+    s.rect(3, 1000, 1000, 1600, 1600, pin="1")
+    s.set_net_names({"U1.4": "OLD", "U1.9": "STALE", "IO.1": "A"})
+    nl = read_kicad_netlist('(export (version "E") (components (comp (ref "U1") (footprint "X:SO4")))'
+                            ' (nets (net (code "1") (name "A") (node (ref "U1") (pin "1")))))')
+    s.auto_place(nl)
+    from hlayout.io.techfile import load_net_names
+    assert load_net_names(s.library) == {"IO.1": "A", "U1.1": "A"}
+
+
+def test_sli_runs_from_the_end_of_a_partly_routed_trace():
+    from hlayout.io.techfile import load_route_rules, save_route_rules
+    s = Session.new("RATS2")
+    s.new_cell("TOP")
+    rr = load_route_rules(s.library); rr["layer_a"] = 3; rr["layer_b"] = 5
+    save_route_rules(s.library, rr)
+    s.rect(3, -300, -300, 300, 300, pin="1")
+    s.rect(3, 9700, 4700, 10300, 5300, pin="2")
+    s.set_net_names({"IO.1": "N", "IO.2": "N"})
+    s.path(3, [(0, 0), (6000, 0), (6000, 3000)], 300)     # half way there
+    (seg,) = s.sli()["nets"][0]["segments"]
+    ends = {(round(seg[0]), round(seg[1])), (round(seg[2]), round(seg[3]))}
+    assert (6000, 3150) in ends or any(abs(x - 6000) <= 150 and abs(y - 3150) <= 150 for x, y in ends)
+    assert s.sli()["total"] < 6000                           # not the 11 mm pad-to-pad line

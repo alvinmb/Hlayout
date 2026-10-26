@@ -88,7 +88,8 @@ def test_highlight_reports_the_design_net_name_and_whats_missing():
     assert tr.name == "OTHER"
     s.set_net_names({"IO.1": "SIG", "U1.2": "SIG", "U1.1": "SIG"})
     tr = s.highlight_net("U1.1")
-    assert tr.missing == ["IO.1", "U1.2"]
+    assert tr.missing == ["IO.1", "U1.2"]          # not joined to the piece picked ...
+    assert tr.pins == ["IO.1", "U1.1", "U1.2"] and tr.fragments == 2   # ... but all shown
     # by net name: every fragment of the net, joined or not
     tr = s.highlight_net("SIG")
     assert tr.pins == ["IO.1", "U1.1", "U1.2"] and tr.fragments == 2
@@ -104,14 +105,14 @@ def test_connected_pads_of_two_named_nets_report_a_short():
 
 def test_import_net_names_csv_and_command(tmp_path):
     p = tmp_path / "nets.csv"
-    p.write_text("Ref,Pin,Net\nU1,2,SIG\n,1,X\n")
+    p.write_text("Ref,Pin,Net\r\nU1,2,SIG\r\n,1,X\r\n")
     s = _board()
     assert s.import_net_names(str(p)) == 1
     ci = CommandInterpreter(s, ScriptConsole(s))
     out = ci.run("HILITE U1.2")
     assert out.startswith("net SIG:")
     q = tmp_path / "pads.csv"
-    q.write_text("pad,net\nIO.1,SIG\n")
+    q.write_text("pad,net\r\nIO.1,SIG\r\n")
     assert "2 named" in ci.run(f"NETNAMES IMPORT {q} merge=1")
     assert "net SIG" in ci.run("HILITE SIG")
 

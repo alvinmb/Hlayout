@@ -39,7 +39,7 @@ DEFAULTS = {
     "thermal": 1.0,            # strength of the thermal term (0 = off)
     "effort": 1.0,
     "seed": 0,
-    "resistor_layer": None,    # conductor for generated resistors (None: route layer_a)
+    "resistor_layer": None,    # conductor for generated resistors (None: tech file)
     "footprint_map": {},       # KiCad "Lib:Name" -> cell
     "weights": {},             # net name -> weight
     "class_weights": {"signal": 1.0, "power": 1.0, "ground": 1.0, "clock": 1.0, "analog": 1.0},
@@ -48,6 +48,33 @@ DEFAULTS = {
     "family_power_mw": {"die": 100.0, "lcc": 100.0, "smd": 0.0, "resistor": 50.0},
     "last_netlist": "",
 }
+
+
+def resistor_conductor_default(library) -> Optional[int]:
+    """The tech file's resistor termination conductor (Setup > Resistor
+    Geometry "Conductor pad layer"), else the 1st route layer."""
+    from ..io.techfile import load_resistor_geometry_rules, load_route_rules
+    n = load_resistor_geometry_rules(library).get("conductor_layer")
+    if isinstance(n, int) and not isinstance(n, bool) and n >= 0:
+        return n
+    n = load_route_rules(library).get("layer_a")
+    return int(n) if n is not None else None
+
+
+def conductor_layers(library) -> list:
+    """Every layer the tech file gives the conductor role (resistor rules'
+    conductor pad layer, the route layers, thermal materials), sorted."""
+    from ..core.thermal_build import layer_roles
+    return sorted(n for n, r in layer_roles(library).items() if r == "conductor")
+
+
+def resistor_conductor(library, settings=None) -> Optional[int]:
+    """The job's resistor conductor: the setting if given, else the tech file."""
+    S = settings if settings is not None else load_settings(library)
+    v = S.get("resistor_layer")
+    if v not in (None, ""):
+        return int(v)
+    return resistor_conductor_default(library)
 
 
 def load_settings(library) -> dict:
@@ -70,6 +97,8 @@ def save_settings(library, settings: dict) -> dict:
     cur = load_settings(library)
     for k, v in (settings or {}).items():
         if k in cur:
+            if k == "resistor_layer":
+                v = None if v in (None, "") else library.layers.resolve(v)
             cur[k] = v
     library.tech_params[SETTINGS_KEY] = json.dumps(cur)
     return cur
@@ -120,13 +149,15 @@ def cell_pins(library, cell_name, _depth=0, _xform=None) -> Dict[str, tuple]:
     return out
 
 
-def _body_bbox(library, cell_name, skip_layers=()):
+def _body_bbox(library, cell_name, skip_layers=(), skip_pinned_layers=()):
     cell = library.cells.get(cell_name)
     if cell is None:
         return None
     xs, ys = [], []
     for sh in cell.shapes:
         if sh.layer in skip_layers:
+            continue
+        if getattr(sh, "pin", "") and sh.layer in skip_pinned_layers:
             continue
         b = sh.bbox()
         xs += [b[0], b[2]]
@@ -248,6 +279,10 @@ def build_job(session, netlist, cell_name=None, overrides=None, settings=None, o
         die_layers = {int(x) for x in load_bond_rules(lib).get("die_pad_layers") or []}
     except Exception:
         die_layers = set()
+    try:
+        bond_layers = {int(load_bond_rules(lib)["layer"])}
+    except Exception:
+        bond_layers = set()
     placed = {r.label: r for r in cell.srefs if r.label}
     clr = float(S["clearance"])
     reach = float(S["bond_reach"])
@@ -271,20 +306,41 @@ def build_job(session, netlist, cell_name=None, overrides=None, settings=None, o
             (info["unmapped"] if comp.footprint else info["skipped"]).append(ref)
             continue
         pins = cell_pins(lib, cellname)
-        body = _body_bbox(lib, cellname) or (-500, -500, 500, 500)
+        # wire bonds a die part carries are not its body (bond_reach
+        # already leaves room for them, below)
+        body = _body_bbox(lib, cellname, skip_layers=bond_layers) or (-500, -500, 500, 500)
         if fam == "die":
-            core = _body_bbox(lib, cellname, skip_layers=die_layers) or body
+            # a die part may carry its own numbered bond fingers: they ARE
+            # where its nets reach the substrate
+            fingers = {}
+            dcell = lib.cells.get(cellname)
+            for sh in (dcell.shapes if dcell is not None else []):
+                if getattr(sh, "pin", "") and sh.layer not in die_layers and \
+                        isinstance(sh, (Rectangle, Polygon)):
+                    b = sh.bbox()
+                    fingers.setdefault(str(sh.pin), ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0, b))
+            core = _body_bbox(lib, cellname, skip_layers=die_layers | bond_layers,
+                              skip_pinned_layers=set(range(256))) or body
             cx, cy = (core[0] + core[2]) / 2.0, (core[1] + core[3]) / 2.0
             hx, hy = (core[2] - core[0]) / 2.0, (core[3] - core[1]) / 2.0
             out = {}
             for p, (x, y) in pins.items():
+                if p in fingers:
+                    out[p] = fingers[p][:2]
+                    continue
                 dx, dy = x - cx, y - cy
                 if abs(dx) / max(hx, 1) >= abs(dy) / max(hy, 1):
                     out[p] = (x + math.copysign(reach, dx or 1), y)
                 else:
                     out[p] = (x, y + math.copysign(reach, dy or 1))
             pins = out
-            body = (body[0] - reach - 300, body[1] - reach - 300, body[2] + reach + 300, body[3] + reach + 300)
+            if fingers:
+                fb = [f[2] for f in fingers.values()]
+                body = (min(core[0], *(b[0] for b in fb)) - 300, min(core[1], *(b[1] for b in fb)) - 300,
+                        max(core[2], *(b[2] for b in fb)) + 300, max(core[3], *(b[3] for b in fb)) + 300)
+            else:
+                body = (body[0] - reach - 300, body[1] - reach - 300,
+                        body[2] + reach + 300, body[3] + reach + 300)
         bb = (body[0] - clr / 2, body[1] - clr / 2, body[2] + clr / 2, body[3] + clr / 2)
         power = _f(o.get("power_mw") or comp.fields.get("HL_Power_mW"),
                    S["family_power_mw"].get(fam, 0.0))
@@ -394,7 +450,6 @@ def _make_resistor(session, comp, o, S, info):
     generated as a cell + one instance (moved later)."""
     from ..gui.resistor_designer import DesignRules, Resistor, width_for_power
     from ..io.hybrid_routed import parse_ohms
-    from ..io.techfile import load_route_rules
     try:
         value = parse_ohms(comp.value)
     except Exception:
@@ -411,9 +466,13 @@ def _make_resistor(session, comp, o, S, info):
     if sol is None:
         info["skipped"].append(comp.ref)
         return None
-    layer = o.get("layer") or comp.fields.get("HL_Layer") or S.get("resistor_layer")
-    if layer in (None, ""):
-        layer = load_route_rules(session.library).get("layer_a")
+    layer = o.get("layer") or comp.fields.get("HL_Layer")
+    if layer not in (None, ""):
+        layer = session.library.layers.resolve(layer)
+    else:
+        layer = resistor_conductor(session.library, S)
+    if layer is None:
+        raise LayoutError(f"{comp.ref}: no resistor conductor layer in the tech file or the job settings")
     cn = session.generate_resistor(0, 0, sol.body_width, sol.body_length, ink_rsh=sol.ink_rsh,
                                    ref_des=comp.ref, conductor_layer=int(layer))
     for ref in session.library.cells[session.current_cell_name].srefs:
@@ -436,18 +495,36 @@ def apply(session, placer, info):
         else:
             r.origin = (int(round(p.x)), int(round(p.y)))
             r.rotation = float(p.rot)
-    pads = {k: v for k, v in info["netlist"].pad_nets().items()
-            if k.split(".")[0] in {p.ref for p in placer.parts}}
-    session.set_net_names(pads, replace=False)
+    refs = {p.ref for p in placer.parts}
+    pads = {k: v for k, v in info["netlist"].pad_nets().items() if k.split(".")[0] in refs}
+    # the netlist is the truth for the parts it places: their old pad names
+    # go (a netlist numbered another way -- LCC terminals vs die pads --
+    # would otherwise leave stale names on pads that now mean something
+    # else), everything else (I/O pads, parts it doesn't list) stays
+    from ..io.techfile import load_net_names
+    keep = {k: v for k, v in load_net_names(session.library).items()
+            if k.split(".")[0] not in refs}
+    keep.update(pads)
+    session.set_net_names(keep, replace=True)
 
 
 # --- straight-line interconnects -----------------------------------------------
 
-def sli(session, cell_name=None, nets=None):
+def sli(session, cell_name=None, nets=None, unrouted_only=True):
     """Straight-line interconnects of the design as it stands: for every
     named net, the minimum spanning tree over its pads.
+
+    Once there's routing, pads already joined by copper (tracks, vias,
+    a bond finger's own track) count as one: the tree only spans what is
+    still to connect -- a ratsnest -- and a fully routed net has no SLI
+    at all. ``unrouted_only=False`` gives the full pad-to-pad tree.
+
+    Chip-and-wire: a die pad that is already wire-bonded connects to the
+    substrate at its bond's LANDING (where the bond finger / track has to
+    be), not at the die pad itself, so the SLI runs from the landing. An
+    unbonded die pad (before bonding) still uses the pad.
     -> {"nets": [{"net", "length", "segments": [(x0, y0, x1, y1)], "class"}],
-        "total": um}"""
+        "total": um, "complete": nets fully routed}"""
     from ..io.techfile import load_net_names
     lib = session.library
     name = cell_name or session.current_cell_name
@@ -465,6 +542,14 @@ def sli(session, cell_name=None, nets=None):
             if net:
                 b = sh.bbox()
                 pts.setdefault(net, []).append(((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0))
+    # "REF.PIN" -> where its wire bond lands on the substrate
+    landing = {}
+    try:
+        for x, y, pads in session.bond_landings(name):
+            for rp in pads:
+                landing.setdefault(rp, (float(x), float(y)))
+    except Exception:
+        landing = {}
     cache = {}
     for r in cell.srefs:
         if not r.label:
@@ -473,18 +558,99 @@ def sli(session, cell_name=None, nets=None):
             cache[r.cell_name] = cell_pins(lib, r.cell_name)
         f = _xf(r)
         for pin, xy in cache[r.cell_name].items():
-            net = names.get(f"{r.label}.{pin}")
+            key = f"{r.label}.{pin}"
+            net = names.get(key)
             if net:
-                pts.setdefault(net, []).append(f(xy))
-    out, total = [], 0.0
+                pts.setdefault(net, []).append(landing.get(key) or f(xy))
+    tracer = _routed_tracer(session, cell, name) if unrouted_only else None
+    out, total, complete = [], 0.0, 0
     for net, p in pts.items():
         if nets and net not in nets:
             continue
         if len(p) < 2:
             continue
-        length, edges = mst(p)
-        out.append({"net": net, "length": length,
-                    "segments": [(p[a][0], p[a][1], p[b][0], p[b][1]) for a, b in edges]})
+        if tracer is None:
+            length, edges = mst(p)
+            segs = [(p[a][0], p[a][1], p[b][0], p[b][1]) for a, b in edges]
+        else:
+            length, segs = _unrouted_tree(tracer, p)
+            if not segs:
+                complete += 1
+                continue
+        out.append({"net": net, "length": length, "segments": segs})
         total += length
     out.sort(key=lambda d: -d["length"])
-    return {"nets": out, "total": total}
+    return {"nets": out, "total": total, "complete": complete}
+
+
+def _routed_tracer(session, cell, name):
+    """The design's net tracer when the cell has any routing (a track on a
+    routing layer), else None -- before routing every pad is its own."""
+    try:
+        la, lb = session._route_layers()
+    except Exception:
+        return None
+    if not any(isinstance(sh, Path) and sh.layer in (la, lb) for sh in cell.shapes):
+        return None
+    try:
+        return session.net_tracer(cell_name=name)
+    except Exception:
+        return None
+
+
+def _unrouted_tree(tracer, pts):
+    """(length, segments) of the minimum tree joining the copper islands
+    ``pts`` sit on: points on the same routed copper are one island, and
+    each pair of islands is joined between the nearest points of their
+    COPPER -- so once part of a net is routed, its SLI runs from the end
+    of that trace, not from the pad it started at."""
+    from shapely.geometry import Point
+    from shapely.ops import nearest_points, unary_union
+    groups, alone = {}, []
+    for x, y in pts:
+        node = tracer.node_at(x, y, tol=50.0)
+        if node is None:
+            alone.append(Point(x, y))
+        else:
+            groups.setdefault(tracer.dsu.find(node), None)
+    roots = list(groups)
+    if roots:
+        members = {}
+        for k in range(len(tracer.nodes)):
+            r = tracer.dsu.find(k)
+            if r in groups:
+                members.setdefault(r, []).append(tracer._geoms[k])
+        isl = [unary_union(members[r]) for r in roots]
+    else:
+        isl = []
+    isl += alone
+    n = len(isl)
+    if n < 2:
+        return 0.0, []
+    cache = {}
+
+    def link(i, j):
+        lo, hi = min(i, j), max(i, j)
+        if (lo, hi) not in cache:
+            a, b = nearest_points(isl[lo], isl[hi])
+            cache[(lo, hi)] = (a.distance(b), (a.x, a.y), (b.x, b.y))
+        d, pa, pb = cache[(lo, hi)]
+        return (d, pa, pb) if i == lo else (d, pb, pa)
+
+    inf = float("inf")
+    dist, via, used = [inf] * n, [None] * n, [False] * n
+    dist[0] = 0.0
+    length, segs = 0.0, []
+    for _ in range(n):
+        u = min((v for v in range(n) if not used[v]), key=lambda v: dist[v])
+        used[u] = True
+        if via[u] is not None:
+            d, a, b = via[u]
+            length += d
+            segs.append((a[0], a[1], b[0], b[1]))
+        for v in range(n):
+            if not used[v]:
+                lk = link(u, v)
+                if lk[0] < dist[v]:
+                    dist[v], via[v] = lk[0], lk
+    return length, segs

@@ -123,3 +123,18 @@ def test_pass_fields_accept_zero_and_decimals(root):
     with pytest.raises(Exception):
         win._rules()
     win.destroy()
+
+
+
+def test_a_finished_route_runs_via_optimisation_and_reports_it(root, tmp_path):
+    win, app = _window(root)
+    ses = tmp_path / "TOP.ses"
+    ses.write_text("x")
+    win._do_import = lambda s: {"wires": 300, "vias": 60, "skipped": 0, "nets": 46,
+                                "complete": 46, "unrouted": []}
+    win._optimize_vias = lambda: {"before": 60, "after": 38, "moved": 22, "removed": []}
+    win._running = True
+    win._finished(str(ses), 0, [], None)
+    text = win.banner.cget("text")
+    assert "all 46 nets complete" in text and "via optimisation 60 -> 38 vias" in text
+    win.destroy()
