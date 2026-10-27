@@ -102,6 +102,11 @@ def main():
             app.start_mcp_bridge()
         except Exception as e:  # the app is still fully usable without it
             print(f"warning: MCP bridge failed to start: {e}", file=sys.stderr)
+    try:
+        from hlayout.gui import hangwatch
+        hangwatch.start(app)          # writes hang_traceback.txt if the window freezes
+    except Exception:
+        pass
     app.mainloop()
 
 

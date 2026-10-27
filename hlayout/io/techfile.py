@@ -585,8 +585,14 @@ DIELECTRIC_RULES_KEY = "dielectric_rules"
 DEFAULT_DIELECTRIC_RULES = {
     "layer": -1,
     "margin": 1000,
+    # keep-outs (resistors, hand-drawn exclusions) are grown by this; via
+    # windows are not -- a via window is drawn at its printed size
     "clearance": 150,
     "keepout_layers": [],
+    # every via's dielectric window is its conductor pad grown by this on
+    # each side (the window is LARGER than the pad), for every via in the
+    # design: routed, dropped by the Route tool, built by the Via Wizard
+    "via_window_margin": 100,
 }
 
 
@@ -604,7 +610,7 @@ def load_dielectric_rules(library: Library) -> dict:
     except (json.JSONDecodeError, TypeError):
         return rules
     if isinstance(data, dict):
-        for k in ("layer", "margin", "clearance"):
+        for k in ("layer", "margin", "clearance", "via_window_margin"):
             if k in data:
                 try:
                     rules[k] = int(data[k])
@@ -631,6 +637,8 @@ def save_dielectric_rules(library: Library, rules: dict) -> None:
         "margin": int(rules.get("margin", DEFAULT_DIELECTRIC_RULES["margin"])),
         "clearance": int(rules.get("clearance", DEFAULT_DIELECTRIC_RULES["clearance"])),
         "keepout_layers": [int(v) for v in rules.get("keepout_layers", [])],
+        "via_window_margin": int(rules.get("via_window_margin",
+                                           DEFAULT_DIELECTRIC_RULES["via_window_margin"])),
     }
     library.tech_params[DIELECTRIC_RULES_KEY] = json.dumps(payload)
 
@@ -721,6 +729,48 @@ def save_bond_rules(library: Library, rules: dict) -> None:
         pads = rules["die_pad_layer"]
     out["die_pad_layers"] = _layer_list(pads)
     library.tech_params[BOND_RULES_KEY] = json.dumps(out)
+
+
+# --- I/O pad rules (Tools > Assign I/O Pads..., IOPADS) ------------------------
+#
+# The module I/O pads Session.assign_io_pads() draws where the header bonds
+# land: "width" across the substrate edge, "length" pointing in from the
+# header, and the header bond landing "bond_inset" in from the pad's outer
+# end (um). Saved with the design like the rest.
+
+IO_PAD_RULES_KEY = "io_pad_rules"
+
+DEFAULT_IO_PAD_RULES = {
+    "width": 300,
+    "length": 600,
+    "bond_inset": 150,
+}
+
+
+def load_io_pad_rules(library: Library) -> dict:
+    """The I/O pad size rules; always complete (defaults key by key)."""
+    rules = dict(DEFAULT_IO_PAD_RULES)
+    raw = library.tech_params.get(IO_PAD_RULES_KEY)
+    if not raw:
+        return rules
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return rules
+    if isinstance(data, dict):
+        for k in DEFAULT_IO_PAD_RULES:
+            if k in data:
+                try:
+                    rules[k] = int(round(float(data[k])))
+                except (TypeError, ValueError):
+                    pass
+    return rules
+
+
+def save_io_pad_rules(library: Library, rules: dict) -> None:
+    """Store the I/O pad size rules (um) in library.tech_params."""
+    out = {k: int(round(float(rules.get(k, v)))) for k, v in DEFAULT_IO_PAD_RULES.items()}
+    library.tech_params[IO_PAD_RULES_KEY] = json.dumps(out)
 
 
 # --- Top View settings (Tools > Top View...) ---------------------------------

@@ -91,6 +91,9 @@ DEFAULT_RULES = {
     #: ...moving at most this much track (um) onto the other conductor
     #: per via; 0 = any length
     "via_optimize_max_flip": 0,
+    #: after routing (and the via optimisation), straighten detours and
+    #: pull corners tight track by track (Session.shorten_tracks())
+    "shorten_tracks": True,
     #: keep tracks this far (um) clear of a bare die / its attach epoxy
     "die_keepout": 200,
     #: no track between a part's own terminations (under a chip
@@ -501,7 +504,8 @@ def export_dsn(library, cell_name: str, path: str, *, layers: Tuple[int, int],
         w("    )")
     for ps, shape in padstacks.items():
         w(f"    (padstack {_q(ps)} (shape {shape}) (attach off))")
-    for ps, size in ((VIA_SIG, R["signal_via"]), (VIA_PWR, R["power_via"])):
+    for ps, size in ((VIA_SIG, R.get("signal_via_keep", R["signal_via"])),
+                     (VIA_PWR, R.get("power_via_keep", R["power_via"]))):
         h = size / 2.0
         w(f"    (padstack {ps}")
         for lay in route_layers:

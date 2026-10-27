@@ -42,9 +42,9 @@ def test_technology_properties_has_the_rule_tabs_and_a_more_tab():
         win = app.show_technology_properties_dialog()
         nb = next(w for w in _walk(win) if isinstance(w, ttk.Notebook))
         tabs = [nb.tab(t, "text") for t in nb.tabs()]
-        assert tabs[:6] == ["Route", "Resistors", "Ref-Des", "Wire Bonds",
+        assert tabs[:7] == ["Route", "Resistors", "Ref-Des", "Wire Bonds", "I/O Pads",
                             "Dielectric", "Thicknesses"]
-        assert len(tabs) == 7  # + "More..."
+        assert len(tabs) == 8  # + "More..."
         win.destroy()
     finally:
         app.destroy()

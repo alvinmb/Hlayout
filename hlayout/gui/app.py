@@ -486,6 +486,7 @@ class App(tk.Tk):
         editm.add_command(label="Delete Via", command=self._delete_via_tool)
         editm.add_command(label="Move Bond Finger", command=self._move_finger_tool)
         editm.add_command(label="Resize Resistor", command=self._resize_resistor_tool)
+        editm.add_command(label="Rip Up and Reroute", command=lambda: self.canvas.set_mode("ripup"))
         editm.add_command(label="Highlight Net", command=self._highlight_net_tool)
         editm.add_command(label="Clear Net Highlight", command=self._clear_net_highlight)
         editm.add_separator()
@@ -531,6 +532,8 @@ class App(tk.Tk):
         toolsm.add_command(label="Generate Dielectric Fill...", command=self.show_dielectric_dialog)
         toolsm.add_command(label="Remove Dielectric Fill", command=self.remove_dielectric_fill)
         toolsm.add_command(label="Remove Unused Bonds...", command=self.remove_unused_bonds)
+        toolsm.add_command(label="Assign I/O Pads...", command=self.assign_io_pads)
+        toolsm.add_command(label="Fix Vias...", command=self.fix_vias)
 
         # --- Help ----------------------------------------------------------
         helpm = add_menu("Help")
@@ -1556,6 +1559,11 @@ class App(tk.Tk):
                 self.session.place_cell(via_cell, (x, y))
         except LayoutError as e:
             dialogs.show_error("Route", f"Could not place via: {e}", parent=self)
+            return
+        # open the dielectric fill at the new via once routing pauses
+        vm = getattr(self.canvas, "_vias_moved", None)
+        if vm is not None:
+            vm()
 
     def show_resistor_geometry_dialog(self):
         """Setup > Technology Properties... > Resistors tab (and still
@@ -1819,6 +1827,7 @@ class App(tk.Tk):
             ("Resistors", self._build_resistor_geometry_form),
             ("Ref-Des", self._build_refdes_form),
             ("Wire Bonds", self._build_wire_bond_form),
+            ("I/O Pads", self._build_io_pad_form),
             ("Dielectric", self._build_dielectric_form),
             ("Thicknesses", self._build_layer_thickness_form),
         ):
@@ -1969,6 +1978,47 @@ class App(tk.Tk):
 
         return apply
 
+    def _build_io_pad_form(self, parent):
+        """Technology Properties, I/O Pads tab: the size of the module I/O
+        pads Tools > Assign I/O Pads... (IOPADS) draws where the header
+        bonds land, and where on the pad the bond lands."""
+        from ..io.techfile import load_io_pad_rules, save_io_pad_rules
+        rules = load_io_pad_rules(self.session.library)
+        ttk.Label(
+            parent,
+            text="Module I/O pads, drawn by Tools > Assign I/O Pads... where each\n"
+                 "header bond lands on the substrate. Width runs along the\n"
+                 "substrate edge, length points in from the header; the bond\n"
+                 "lands the inset in from the pad's outer end, so the track\n"
+                 "leaves from the inner end.",
+            justify="left", foreground="#555",
+        ).pack(anchor="w", padx=12, pady=(12, 8))
+        form = ttk.Frame(parent)
+        form.pack(padx=12, fill="x")
+        fields = []
+        for row, (label, key) in enumerate((("Pad width (mm):", "width"),
+                                            ("Pad length (mm):", "length"),
+                                            ("Bond inset from outer end (mm):", "bond_inset"))):
+            ttk.Label(form, text=label).grid(row=row, column=0, sticky="e", padx=4, pady=4)
+            var = tk.DoubleVar(value=dbu_to_mm(rules[key]))
+            ttk.Spinbox(form, from_=0.0, to=20.0, increment=0.05, width=10,
+                        textvariable=var).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+            fields.append((key, var))
+
+        def apply():
+            try:
+                vals = {k: mm_to_dbu(v.get()) for k, v in fields}
+            except tk.TclError:
+                return "Pad width, length and bond inset must be numbers."
+            if vals["width"] <= 0 or vals["length"] <= 0:
+                return "Pad width and length must be more than 0."
+            if vals["bond_inset"] < 0 or vals["bond_inset"] > vals["length"]:
+                return "The bond inset must be between 0 and the pad length."
+            save_io_pad_rules(self.session.library, vals)
+            return None
+
+        return apply
+
     def _build_dielectric_form(self, parent):
         """The Dielectric Fill *rules* form (layer / margin / clearance /
         extra keep-out layers). apply() only SAVES the rules -- the
@@ -1982,9 +2032,13 @@ class App(tk.Tk):
                  "the shape that encloses all the others is the fill boundary\n"
                  "(or the design bbox + margin if none), and every other shape\n"
                  "inside it -- a via window, a resistor keep-out, a hand-drawn\n"
-                 "exclusion rect -- becomes a hole, grown by the clearance.\n"
-                 "The fill is written at datatype 1; re-running replaces just\n"
-                 "that, never the inputs.",
+                 "exclusion rect -- becomes a hole. Keep-outs are grown by the\n"
+                 "clearance; a via window is printed at its drawn size.\n"
+                 "Every via's window is its pad grown by the via window margin\n"
+                 "on each side -- one rule for routed vias, the Route tool's\n"
+                 "via cell and the Via Wizard (Tools > Fix Vias redraws\n"
+                 "existing ones). The fill is written at datatype 1;\n"
+                 "re-running replaces just that, never the inputs.",
             justify="left", foreground="#555",
         ).pack(anchor="w", padx=12, pady=(12, 8))
 
@@ -2002,7 +2056,7 @@ class App(tk.Tk):
         ttk.Spinbox(form, from_=0, to=1000.0, increment=0.05, width=10,
                     textvariable=margin_var).grid(row=1, column=1, sticky="w", padx=4, pady=4)
 
-        ttk.Label(form, text="Clearance (mm):").grid(row=2, column=0, sticky="e", padx=4, pady=4)
+        ttk.Label(form, text="Keep-out clearance (mm):").grid(row=2, column=0, sticky="e", padx=4, pady=4)
         clr_var = tk.DoubleVar(value=dbu_to_mm(rules["clearance"]))
         ttk.Spinbox(form, from_=0, to=1000.0, increment=0.01, width=10,
                     textvariable=clr_var).grid(row=2, column=1, sticky="w", padx=4, pady=4)
@@ -2013,6 +2067,13 @@ class App(tk.Tk):
             row=3, column=1, sticky="w", padx=4, pady=4)
         ttk.Label(form, text="(optional, comma-separated layer numbers or names)",
                   foreground="#888").grid(row=4, column=1, sticky="w", padx=4)
+
+        ttk.Label(form, text="Via window margin (mm):").grid(row=5, column=0, sticky="e", padx=4, pady=4)
+        vwm_var = tk.DoubleVar(value=dbu_to_mm(rules.get("via_window_margin", 100)))
+        ttk.Spinbox(form, from_=0, to=10.0, increment=0.01, width=10,
+                    textvariable=vwm_var).grid(row=5, column=1, sticky="w", padx=4, pady=4)
+        ttk.Label(form, text="(window = via pad + 2 x margin)",
+                  foreground="#888").grid(row=6, column=1, sticky="w", padx=4)
 
         def parse():
             """Return (rules_dict, None) or (None, error_message).
@@ -2030,10 +2091,11 @@ class App(tk.Tk):
             try:
                 margin = mm_to_dbu(margin_var.get())
                 clearance = mm_to_dbu(clr_var.get())
+                vwm = mm_to_dbu(vwm_var.get())
             except tk.TclError:
-                return None, "Margin and clearance must be numbers."
-            if margin < 0 or clearance < 0:
-                return None, "Margin and clearance must not be negative."
+                return None, "Margin, clearance and via window margin must be numbers."
+            if margin < 0 or clearance < 0 or vwm < 0:
+                return None, "Margin, clearance and via window margin must not be negative."
             ko_nums = []
             for tok in ko_var.get().replace(",", " ").split():
                 try:
@@ -2041,7 +2103,7 @@ class App(tk.Tk):
                 except LayoutError as exc:
                     return None, str(exc)
             return {"layer": r_layer, "margin": margin, "clearance": clearance,
-                    "keepout_layers": ko_nums}, None
+                    "keepout_layers": ko_nums, "via_window_margin": vwm}, None
 
         def apply():
             new_rules, msg = parse()
@@ -2420,10 +2482,11 @@ class App(tk.Tk):
         from scratch. Finish the same way as any other path
         (double-click/Enter); Esc cancels back to the unchanged
         original. See LayoutCanvas.continue_path()/_commit_path()."""
-        if self.canvas.selected is None or self.canvas.selected[0] != "shape":
+        if self.canvas.selected is None or \
+                self.canvas.selected[0] not in ("shape", "edge", "vertex"):
             dialogs.show_info(
                 "Continue Path", "Nothing suitable is selected. Switch to Select "
-                "mode and click a whole path first (not a vertex/edge of one).",
+                "mode and click the path (near the end you want to carry on from).",
                 parent=self,
             )
             return
@@ -2459,6 +2522,16 @@ class App(tk.Tk):
                 self.status.set(
                     f"wire bond {e1} - {e2} removed -- click another, or Esc to stop"
                 )
+            elif mode == "ripup":
+                tol = 6.0 / max(self.canvas.scale, 1e-9)
+                r = self.session.rip_up_between(points[0], points[1],
+                                                cell_name=self.canvas.cell_name, tol=tol)
+                self.canvas.start_reroute(r["a"][:2], r["b"][:2], r["a"][2], net=r.get("net"))
+                self.status.set(
+                    f"ripped up {r['length'] / 1000:.2f} mm of "
+                    f"{('net ' + r['net']) if r.get('net') else 'track'}"
+                    f"{', ' + str(len(r['vias'])) + ' via(s)' if r['vias'] else ''} -- "
+                    f"route from here to the ringed end (Ctrl+Z puts it back)")
             elif mode == "hilite":
                 # a click a few pixels off a pad or a thin track still picks it
                 tol = 6.0 / max(self.canvas.scale, 1e-9)
@@ -2533,6 +2606,7 @@ class App(tk.Tk):
             title = {"del_bond": "Delete Wire Bond",
                      "move_bond": "Move Wire Bond",
                      "del_via": "Delete Via",
+                     "ripup": "Rip Up and Reroute",
                      "move_finger": "Move Bond Finger",
                      "resize_res": "Resize Resistor"}.get(mode, "Could not add shape")
             dialogs.show_error(title, str(e), parent=self)
@@ -2731,6 +2805,55 @@ class App(tk.Tk):
         self.current_path = path
         self.status.set(f"saved {path} (+ technology/attached-libraries sidecar; "
                         f"the previous version kept as {os.path.basename(_backup_path(path, 1))})")
+
+    def fix_vias(self):
+        """Tools > Fix Vias...: redraw every via to the design's one via
+        definition (Session.fix_vias)."""
+        R = self.session.freerouting_rules()
+        sig, pwr = self.session.via_spec(False, R), self.session.via_spec(True, R)
+        if not dialogs.ask_yes_no(
+                "Fix Vias",
+                f"Redraw every via to the design's via definition?\n\n"
+                f"  signal via: pad {sig['pad'] / 1000:.2f} mm, window {sig['window'] / 1000:.2f} mm\n"
+                f"  power via:  pad {pwr['pad'] / 1000:.2f} mm, window {pwr['window'] / 1000:.2f} mm\n\n"
+                "(pads from the Autoroute rules, windows = pad + 2 x the Dielectric tab's via "
+                "window margin). The Route tool's via cell is rebuilt the same way and the "
+                "dielectric fill is redone.", parent=self):
+            return
+        r = self.session.fix_vias(cell_name=self.canvas.cell_name)
+        self.status.set(f"vias redrawn: {r['vias']} via(s), {r['via_cells']} via cell(s)")
+        self.refresh_all()
+
+    def assign_io_pads(self):
+        """Tools > Assign I/O Pads...: optimise the module pinout -- each
+        I/O net onto the header pin / I/O pad giving the shortest,
+        uncrossed connection to its dice -- then (on Yes) draw the pads at
+        the header-bond landings, rename the nets and write io_pinout.csv
+        next to the design (see Session.assign_io_pads)."""
+        try:
+            p = self.session.assign_io_pads(cell_name=self.canvas.cell_name, apply=False)
+        except Exception as e:
+            dialogs.show_error("Assign I/O Pads", str(e), parent=self)
+            return
+        moved = [st for st in p["sites"] if st["net"] != st.get("was")]
+        lines = "\n".join(f"  pin {st['pin']}: {st.get('was') or '-'} -> {st['net'] or '-'}"
+                          for st in moved[:24])
+        more = f"\n  ... and {len(moved) - 24} more" if len(moved) > 24 else ""
+        if not dialogs.ask_yes_no(
+                "Assign I/O Pads",
+                f"Pad-to-die distance: {p['before'] / 1000:.0f} mm now, "
+                f"{p['after'] / 1000:.0f} mm optimised.\n\n{len(moved)} pin(s) change net:\n"
+                f"{lines}{more}\n\nThis changes the module pinout (update the schematic's "
+                "header pin numbers from io_pinout.csv). Draw the pads and apply it?",
+                parent=self):
+            return
+        path = getattr(self, "current_path", None)
+        csv_path = os.path.join(os.path.dirname(path), "io_pinout.csv") if path else None
+        r = self.session.assign_io_pads(cell_name=self.canvas.cell_name, csv_path=csv_path)
+        self.status.set(f"I/O pads assigned: {len(r['sites'])} pads, pad-to-die "
+                        f"{r['before'] / 1000:.0f} -> {r['after'] / 1000:.0f} mm"
+                        + (f"; pinout written to {r['csv']}" if r.get("csv") else ""))
+        self.refresh_all()
 
     def remove_unused_bonds(self):
         """Tools > Remove Unused Bonds...: list the die pads the design
@@ -3740,21 +3863,33 @@ class App(tk.Tk):
         ttk.Radiobutton(shape_row, text="Round", value="round", variable=shape_var).pack(side="left", padx=(8, 0))
         row += 1
 
+        # start from the design's one via definition (Autoroute signal via,
+        # Dielectric tab layer + window margin) so a cell built here matches
+        # the routed vias
+        try:
+            _spec = self.session.via_spec(False)
+            _rr = load_route_rules(self.session.library)
+        except Exception:
+            _spec, _rr = {"pad": 100.0, "window": 0.0, "layer": -1}, None
         ttk.Label(form, text="Size (mm):").grid(row=row, column=0, sticky="e", padx=4, pady=4)
-        size_var = tk.DoubleVar(value=dbu_to_mm(100))
+        size_var = tk.DoubleVar(value=dbu_to_mm(_spec["pad"]))
         ttk.Spinbox(form, from_=0.001, to=100.0, increment=0.001, width=10, textvariable=size_var).grid(
             row=row, column=1, sticky="w", padx=4, pady=4)
         row += 1
 
         choices = layer_choices()
+
+        def _choice(n, fallback):
+            return choices[n] if isinstance(n, int) and 0 <= n < len(choices) else fallback
         ttk.Label(form, text="Layer 1:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
-        layer1_var = tk.StringVar(value=choices[0])
+        layer1_var = tk.StringVar(value=_choice(_rr and _rr.get("layer_a"), choices[0]))
         ttk.Combobox(form, textvariable=layer1_var, width=20, state="readonly",
                      values=choices).grid(row=row, column=1, sticky="w", padx=4, pady=4)
         row += 1
 
         ttk.Label(form, text="Layer 2:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
-        layer2_var = tk.StringVar(value=choices[1] if len(choices) > 1 else choices[0])
+        layer2_var = tk.StringVar(value=_choice(_rr and _rr.get("layer_b"),
+                                                choices[1] if len(choices) > 1 else choices[0]))
         ttk.Combobox(form, textvariable=layer2_var, width=20, state="readonly",
                      values=choices).grid(row=row, column=1, sticky="w", padx=4, pady=4)
         row += 1
@@ -3808,32 +3943,45 @@ class App(tk.Tk):
             row=row, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4))
         row += 1
 
-        dielectric_var = tk.BooleanVar(value=False)
+        dielectric_var = tk.BooleanVar(value=_spec["layer"] >= 0)
         dielectric_check = ttk.Checkbutton(form, text="Add dielectric via window",
                                             variable=dielectric_var)
         dielectric_check.grid(row=row, column=0, columnspan=2, sticky="w", padx=4, pady=4)
         row += 1
 
         ttk.Label(form, text="Dielectric layer:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
-        dielectric_layer_var = tk.StringVar(value=choices[2] if len(choices) > 2 else choices[0])
+        dielectric_layer_var = tk.StringVar(
+            value=_choice(_spec["layer"], choices[2] if len(choices) > 2 else choices[0]))
         dielectric_layer_combo = ttk.Combobox(form, textvariable=dielectric_layer_var, width=20,
-                                               state="disabled", values=choices)
+                                               state="readonly" if _spec["layer"] >= 0 else "disabled",
+                                               values=choices)
         dielectric_layer_combo.grid(row=row, column=1, sticky="w", padx=4, pady=4)
         row += 1
 
         ttk.Label(form, text="Dielectric window size (mm):").grid(
             row=row, column=0, sticky="e", padx=4, pady=4)
-        dielectric_window_var = tk.DoubleVar(value=dbu_to_mm(140))
+        _margin = (_spec["window"] - _spec["pad"]) / 2.0 if _spec["window"] else 20.0
+        dielectric_window_var = tk.DoubleVar(
+            value=dbu_to_mm(_spec["window"] if _spec["window"] else 140))
         dielectric_window_spin = ttk.Spinbox(form, from_=0.001, to=100.0, increment=0.001,
                                               width=10, textvariable=dielectric_window_var,
-                                              state="disabled")
+                                              state="normal" if _spec["layer"] >= 0 else "disabled")
+
+        def _follow_size(*_):
+            # the window tracks the pad: pad + 2 x the design's margin
+            try:
+                dielectric_window_var.set(round(float(size_var.get()) + 2 * dbu_to_mm(_margin), 4))
+            except (tk.TclError, ValueError):
+                pass
+        size_var.trace_add("write", _follow_size)
         dielectric_window_spin.grid(row=row, column=1, sticky="w", padx=4, pady=4)
         row += 1
         ttk.Label(
             form,
             text="Opening cut in the dielectric between Layer 1 and Layer 2,\n"
-                 "normally sized AT OR ABOVE the pad size (the pad lands\n"
-                 "within/over the opening).",
+                 "larger than the pad: pad + 2 x the via window margin of\n"
+                 "Setup > Technology Properties, Dielectric -- the same rule\n"
+                 "every routed via uses.",
             foreground="#555", justify="left",
         ).grid(row=row, column=0, columnspan=2, sticky="w", padx=4)
         row += 1

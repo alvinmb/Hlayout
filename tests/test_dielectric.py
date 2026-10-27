@@ -63,6 +63,7 @@ def test_dielectric_rules_round_trip_and_survive_full_techfile(tmp_path):
                                 "keepout_layers": [7, 19]})
     assert load_dielectric_rules(lib) == {
         "layer": 4, "margin": 800, "clearance": 120, "keepout_layers": [7, 19],
+        "via_window_margin": 100,
     }
     path = str(tmp_path / "t.json")
     save_techfile(lib, path)

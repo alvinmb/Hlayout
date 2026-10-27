@@ -34,6 +34,7 @@ from typing import Dict, List, Optional, Tuple
 from shapely.geometry import LineString, Point, box
 from shapely.geometry import Polygon as _SPoly
 from shapely.ops import unary_union
+from shapely.strtree import STRtree
 
 from .drc import _collect_geoms, _sref_point_transform
 from .nettrace import NetTracer, _DSU
@@ -84,17 +85,42 @@ def _connected(geoms) -> bool:
 def optimize_vias(library, cell, layers: Tuple[int, int], clearance: float,
                   dielectric_layer: Optional[int] = None, dielectric_area=None,
                   fill_datatype: int = 1, max_flip: float = 0.0,
-                  max_rounds: int = 1000) -> Dict:
+                  max_rounds: int = 1000, progress=None) -> Dict:
     """Take out every via of ``cell`` that can go (see the module doc).
     ``layers`` = (1st conductor, 2nd conductor); ``dielectric_area`` = a
     shapely geometry the 2nd conductor must stay on (None = anywhere).
     Edits ``cell`` in place. Returns {"before", "after", "removed":
-    [(x, y)], "moved": tracks moved to the other layer}."""
+    [(x, y)], "moved": tracks moved to the other layer}. ``progress``, if
+    given, is called as progress(vias looked at this round, vias this
+    round, removed so far) -- e.g. to keep a window painting."""
     from ..io.specctra import find_vias
     la, lb = int(layers[0]), int(layers[1])
     before = len(find_vias(cell, (la, lb)))
     removed: List[Tuple[float, float]] = []
     moved = 0
+    # copper inside placed parts (a die part's own bond fingers, a chip's
+    # pads): a moved track must not leave any of it behind either. Parts
+    # don't change here, so this is collected once.
+    inst = {la: [], lb: []}
+    for ref in cell.srefs:
+        acc = []
+        _collect_geoms(library, ref.cell_name, _sref_point_transform(ref), acc)
+        for lay, g in acc:
+            if lay in inst:
+                inst[lay].append(g)
+    inst_tree = {lay: (STRtree(gs) if gs else None) for lay, gs in inst.items()}
+
+    def inst_hits(lay, g):
+        tr = inst_tree.get(lay)
+        if tr is None:
+            return False
+        return any(inst[lay][int(i)].intersects(g) for i in tr.query(g))
+
+    # Each round traces the copper ONCE and then looks at every via. A via
+    # whose surroundings were changed earlier in the same round (a via
+    # taken out, tracks moved -- the "dirty" areas) waits for the next
+    # round, when the trace is fresh; everywhere else the trace is still
+    # true, so one round can take out many vias.
     for _round in range(max_rounds):
         tracer = NetTracer(library, cell, [la, lb], dielectric_layer=dielectric_layer,
                            fill_datatype=fill_datatype)
@@ -104,41 +130,75 @@ def optimize_vias(library, cell, layers: Tuple[int, int], clearance: float,
         # rule -- any overlap not covered by dielectric -- would join
         # every crossing in a design with no dielectric layer, and then
         # nothing would look like another net.)
+        vias_now = sorted(find_vias(cell, (la, lb)))
         dsu = _DSU(len(nodes))
-        for vx, vy, vw in find_vias(cell, (la, lb)):
+        for vx, vy, vw in vias_now:
             vb = box(vx - vw / 2.0, vy - vw / 2.0, vx + vw / 2.0, vy + vw / 2.0)
             hit = [j for j in tracer._query(vb) if geoms[j].intersects(vb)]
             for j in hit[1:]:
                 dsu.union(hit[0], j)
         tracer.dsu = dsu
-        sites = {(vx, vy) for vx, vy, _vw in find_vias(cell, (la, lb))}
-        # copper inside placed parts (a die part's own bond fingers, a
-        # chip's pads): a moved track must not leave any of it behind either
-        inst = {la: [], lb: []}
-        for ref in cell.srefs:
-            acc = []
-            _collect_geoms(library, ref.cell_name, _sref_point_transform(ref), acc)
-            for lay, g in acc:
-                if lay in inst:
-                    inst[lay].append(g)
-        done = False
-        for x, y, w in sorted(find_vias(cell, (la, lb))):
+        sites = {(vx, vy) for vx, vy, _vw in vias_now}
+        # this round's index of the cell's own copper and via shapes
+        cu = []
+        for sh in cell.shapes:
+            if sh.layer in (la, lb):
+                g = _geom(sh)
+                if g is not None:
+                    cu.append((sh, g))
+        cu_tree = STRtree([g for _sh, g in cu]) if cu else None
+        vlays = {la, lb} | ({dielectric_layer} if dielectric_layer is not None else set())
+        vshapes: Dict[Tuple[int, int], list] = {}
+        for s in cell.shapes:
+            if s.layer not in vlays or getattr(s, "pin", "") or \
+                    not isinstance(s, (Rectangle, Polygon)) or getattr(s, "datatype", 0) != 0:
+                continue
+            x0, y0, x1, y1 = s.bbox()
+            w, h = x1 - x0, y1 - y0
+            if w <= 0 or w > 5000 or abs(w - h) > max(2, 0.02 * w):
+                continue
+            vshapes.setdefault((round((x0 + x1) / 2), round((y0 + y1) / 2)), []).append(s)
+
+        def cu_near(g):
+            if cu_tree is None:
+                return []
+            return [cu[int(i)] for i in cu_tree.query(g)]
+
+        dead = set()            # ids of shapes deleted this round
+        dirty = []              # areas changed this round
+        changed = 0
+        for n_done, (x, y, w) in enumerate(vias_now):
+            if progress is not None:
+                progress(n_done, len(vias_now), len(removed))
+            pad = box(x - w / 2.0, y - w / 2.0, x + w / 2.0, y + w / 2.0)
+            if any(d.intersects(pad) for d in dirty):
+                continue
             centre = Point(x, y)
             under = [j for j in tracer._query(centre) if geoms[j].intersects(centre)]
             if not under:
                 continue
             root = tracer.dsu.find(under[0])
             tol = w / 2.0 + 1
-            pad = box(x - w / 2.0, y - w / 2.0, x + w / 2.0, y + w / 2.0)
-            via = _via_shapes(cell, x, y, (la, lb), dielectric_layer)
+            via = [v for k in ((round(x) + dx, round(y) + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1))
+                   for v in vshapes.get(k, ())
+                   if abs((v.bbox()[0] + v.bbox()[2]) / 2 - x) <= 1
+                   and abs((v.bbox()[1] + v.bbox()[3]) / 2 - y) <= 1 and id(v) not in dead]
             gone = {id(v) for v in via}
             # copper touching the via on each layer, the via's own pads aside
             touch = {la: [], lb: []}
-            for sh in cell.shapes:
-                if sh.layer in touch and id(sh) not in gone:
-                    g = _geom(sh)
-                    if g is not None and g.intersects(pad):
-                        touch[sh.layer].append((sh, g))
+            for sh, g in cu_near(pad):
+                if sh.layer in touch and id(sh) not in gone and id(sh) not in dead \
+                        and g.intersects(pad):
+                    touch[sh.layer].append((sh, g))
+            # copper inside a placed part under the via (a bond finger, a
+            # pad): that side needs the via, and it is something to reach
+            for lay in (la, lb):
+                tr_ = inst_tree.get(lay)
+                if tr_ is not None:
+                    for i in tr_.query(pad):
+                        g = inst[lay][int(i)]
+                        if g.intersects(pad):
+                            touch[lay].append((None, g))
             plans = []
             for src, dst in ((lb, la), (la, lb)):
                 src_cu = touch[src]
@@ -159,8 +219,11 @@ def optimize_vias(library, cell, layers: Tuple[int, int], clearance: float,
                     continue
                 plans.append((length, src, dst, at))
             for length, src, dst, at in sorted(plans, key=lambda t: t[0]):
+                new = None
                 if at:
                     new = unary_union([LineString(p.points).buffer(p.width / 2.0) for p in at])
+                    if any(d.intersects(new.buffer(clearance)) for d in dirty):
+                        break          # next round, with a fresh trace
                     if dst == lb and dielectric_area is not None and \
                             not dielectric_area.buffer(1).contains(new):
                         continue
@@ -181,11 +244,10 @@ def optimize_vias(library, cell, layers: Tuple[int, int], clearance: float,
                     # it's a via, which carries on to the new layer too
                     lost = False
                     ids = {id(p) for p in at}
-                    for sh in cell.shapes:
-                        if sh.layer != src or id(sh) in gone or id(sh) in ids:
+                    for sh, g in cu_near(new):
+                        if sh.layer != src or id(sh) in gone or id(sh) in ids or id(sh) in dead:
                             continue
-                        g = _geom(sh)
-                        if g is None or not g.intersects(new):
+                        if not g.intersects(new):
                             continue
                         if isinstance(sh, (Rectangle, Polygon)) and not getattr(sh, "pin", ""):
                             b0, b1, b2, b3 = sh.bbox()
@@ -193,7 +255,7 @@ def optimize_vias(library, cell, layers: Tuple[int, int], clearance: float,
                                 continue
                         lost = True
                         break
-                    if not lost and any(g.intersects(new) for g in inst[src]):
+                    if not lost and inst_hits(src, new):
                         lost = True        # e.g. the bond finger the track starts from
                     if lost:
                         continue
@@ -206,13 +268,15 @@ def optimize_vias(library, cell, layers: Tuple[int, int], clearance: float,
                     for p in at:
                         p.layer = dst
                     moved += len(at)
-                cell.shapes[:] = [sh for sh in cell.shapes if id(sh) not in gone]
+                dead |= gone
+                region = pad if new is None else pad.union(new)
+                dirty.append(region.buffer(clearance + w))
                 removed.append((x, y))
-                done = True
+                changed += 1
                 break
-            if done:
-                break                  # the copper changed: re-trace, look at every via again
-        if not done:
+        if dead:
+            cell.shapes[:] = [sh for sh in cell.shapes if id(sh) not in dead]
+        if not changed:
             break
     return {"before": before, "after": len(find_vias(cell, (la, lb))),
             "removed": removed, "moved": moved}

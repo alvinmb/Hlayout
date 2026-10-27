@@ -204,10 +204,15 @@ Attached libraries:
                                        dielectric window sharing that centre); tracks
                                        ending on it stay. Also Edit > Delete Via and
                                        Session.delete_via()
+    VIA FIX [cell=<name>]              redraw every via to the design's one via: pad from
+                                       the Autoroute signal/power via, window = pad + 2 x
+                                       the Dielectric via window margin; the Route tool's
+                                       via cell too. Also Tools > Fix Vias...
     FREEROUTE EXPORT <file.dsn> | IMPORT <file.ses> | RUN [passes=<n>] [keep=0|1]
               [fresh=0|1] [layers=auto|single|two] [finger=<um>] [fingerlayer=1|2]
               [optpasses=<n>] [optstop=<%>] [directions=hv|vh|off] [viaopt=0|1]
-              [viacost=<n>] [viaflip=<um>]   |   FREEROUTE VIAOPT [viaflip=<um>]
+              [viacost=<n>] [viaflip=<um>] [shorten=0|1]   |   FREEROUTE VIAOPT [viaflip=<um>]
+              |   FREEROUTE SHORTEN
                                        Freerouting autorouter round trip: write a
                                        Specctra DSN (route layers, pads, net names,
                                        existing routing), read a session back (tracks,
@@ -227,7 +232,9 @@ Attached libraries:
                                        viaopt=1 takes out every via it can after the
                                        route (viaflip= caps the track moved per via),
                                        viacost= the router's cost of a via.
-                                       FREEROUTE VIAOPT runs just the via pass
+                                       FREEROUTE VIAOPT runs just the via pass;
+                                       shorten=1 (default) then straightens detours and
+                                       pulls corners tight, FREEROUTE SHORTEN runs just that
     AUTOPLACE RUN|IMPROVE <netlist> [overrides=<csv>] [effort=] [seed=] [thermal=] [grid=]
                                        place the netlist's parts (KiCad .net, CSV or
                                        Tango) for the shortest weighted net length;
@@ -240,6 +247,24 @@ Attached libraries:
                                        Interconnects). Session.sli()
     UNUSEDBONDS [LIST|REMOVE]          bonds/fingers on die pads no net uses: list / take off
     UNROUTED [<net>|NEXT|PREV|CLEAR]   list unrouted nets / zoom to one and show its SLI
+    IOPADS [PLAN|APPLY] [w=<um>] [l=<um>] [inset=<um>] [csv=<file>]
+                                       optimise the module pinout: each I/O net onto the
+                                       header pin / I/O pad with the shortest, uncrossed
+                                       way to its dice; APPLY draws the pads at the header
+                                       bond landings (size from Technology Properties,
+                                       I/O Pads tab, unless w=/l=/inset= are given) and
+                                       renames the nets. Also Tools >
+                                       Assign I/O Pads... and Session.assign_io_pads()
+    SHORTS                             copper joining two or more named nets (a short
+                                       circuit spacing DRC can't see) and where they meet.
+                                       Session.find_shorts()
+    RIPUP <x1,y1> <x2,y2> [route=0|1] [tol=<dbu>]
+                                       rip up the track between two points of one net
+                                       (through T-junctions and vias; a via left with
+                                       one side bare goes too), then start routing
+                                       again from the first point to the ringed second
+                                       (route=0: just rip up). Also Edit > Rip Up and
+                                       Reroute and Session.rip_up_between()
     SOLIDCRAFT [window=0|1] [export=<file.step|3mf|stl|obj>]
                                        build the current cell as a 3D model in
                                        SolidCraft through its MCP server (window=1:
@@ -2385,7 +2410,14 @@ class CommandInterpreter:
         usage = ("usage: VIA <layer1> <layer2> [shape=square|round] [size=<dbu>] "
                  "[name=<cellname>] [dielectric_layer=<n>] [dielectric_window=<dbu>] "
                  "[index=0|1] [overwrite=0|1]\n"
-                 "       VIA DELETE <x,y> [tol=<dbu>] [layers=<a,b,...>] [cell=<name>]")
+                 "       VIA DELETE <x,y> [tol=<dbu>] [layers=<a,b,...>] [cell=<name>]\n"
+                 "       VIA FIX [cell=<name>]")
+        if args and args[0].upper() == "FIX":
+            cell = next((a.split("=", 1)[1] for a in args[1:] if a.lower().startswith("cell=")), None)
+            r = self.session.fix_vias(cell_name=cell)
+            sig = self.session.via_spec(False)
+            return (f"redrew {r['vias']} via(s) and {r['via_cells']} via cell(s): signal via pad "
+                    f"{sig['pad']:g}, window {sig['window']:g}")
         if args and args[0].upper() == "DELETE":
             positional, kwargs = [], {}
             for a in args[1:]:
@@ -2490,6 +2522,75 @@ class CommandInterpreter:
         verb = "unused" if sub == "LIST" else "removed"
         return f"{r['bonds']} {verb} bond(s): {detail}"
 
+    def _cmd_iopads(self, args):
+        """IOPADS [PLAN|APPLY] [w=<um>] [l=<um>] [inset=<um>] [csv=<file>] --
+        optimise the I/O pinout; pad size from the I/O Pads rules unless given."""
+        usage = "usage: IOPADS [PLAN|APPLY] [w=<um>] [l=<um>] [inset=<um>] [csv=<file>]"
+        sub = (args[0].upper() if args and "=" not in args[0] else "PLAN")
+        if sub not in ("PLAN", "APPLY"):
+            raise CommandError(usage)
+        opts = {}
+        for a in args:
+            k, eq, v = a.partition("=")
+            if not eq:
+                continue
+            k = k.lower()
+            try:
+                if k == "w":
+                    opts["pad_w"] = float(v)
+                elif k == "l":
+                    opts["pad_l"] = float(v)
+                elif k == "inset":
+                    opts["bond_inset"] = float(v)
+                elif k == "csv":
+                    opts["csv_path"] = v
+                else:
+                    raise CommandError(usage)
+            except ValueError:
+                raise CommandError(usage)
+        p = self.session.assign_io_pads(apply=(sub == "APPLY"), **opts)
+        moved = sum(1 for st in p["sites"] if st["net"] != st.get("was"))
+        pins = ", ".join(f"{st['pin']}={st['net']}" for st in p["sites"])
+        return (f"I/O pinout {'applied' if sub == 'APPLY' else 'plan'}: pad-to-die "
+                f"{p['before'] / 1000:.0f} -> {p['after'] / 1000:.0f} mm, {moved} pin(s) change; {pins}")
+
+    def _cmd_shorts(self, args):
+        """SHORTS -- copper joining two or more named nets, and where."""
+        shorts = self.session.find_shorts()
+        if not shorts:
+            return "no shorts: no copper joins two named nets"
+        lines = []
+        for x in shorts:
+            where = ", ".join(f"{a},{b}" for a, b in x["at"][:4])
+            lines.append(f"{' + '.join(x['nets'])}" + (f" meet at {where}" if where else ""))
+        return f"{len(shorts)} short(s): " + "; ".join(lines)
+
+    def _cmd_ripup(self, args):
+        """RIPUP <x1,y1> <x2,y2> [route=0|1] [tol=<dbu>] -- rip up the track
+        between two points of one net, then (route=1, the default, with a
+        canvas) start routing again from the first point."""
+        usage = "usage: RIPUP <x1,y1> <x2,y2> [route=0|1] [tol=<dbu>]"
+        pts, route, tol = [], True, 0.0
+        for a in args:
+            k, eq, v = a.partition("=")
+            if eq and k.lower() == "route":
+                route = v.strip() not in ("0", "no", "false")
+            elif eq and k.lower() == "tol":
+                tol = float(v)
+            else:
+                pts.append(self._xy(a, usage))
+        if len(pts) != 2:
+            raise CommandError(usage)
+        r = self.session.rip_up_between(pts[0], pts[1], tol=tol)
+        if route and self.view is not None and hasattr(self.view, "start_reroute"):
+            self.view.start_reroute(r["a"][:2], r["b"][:2], r["a"][2], net=r.get("net"))
+        ax, ay, al = r["a"]
+        bx, by, bl = r["b"]
+        what = f"net {r['net']}" if r.get("net") else "track"
+        return (f"ripped up {what}: {r['length'] / 1000:.2f} mm of track, {len(r['vias'])} via(s); "
+                f"loose ends ({ax / 1000:.3f}, {ay / 1000:.3f}) mm on layer {al} and "
+                f"({bx / 1000:.3f}, {by / 1000:.3f}) mm on layer {bl}")
+
     def _cmd_unrouted(self, args):
         """UNROUTED [<net>|NEXT|PREV|CLEAR] -- no argument: list the nets
         still to route; a net (or NEXT/PREV through the list): show its SLI
@@ -2561,8 +2662,8 @@ class CommandInterpreter:
         usage = ("usage: FREEROUTE EXPORT <file.dsn> | FREEROUTE IMPORT <file.ses> [keep=0|1] | "
                  "FREEROUTE RUN [passes=<n>] [keep=0|1] [fresh=0|1] [layers=auto|single|two] "
                  "[finger=<um>] [fingerlayer=1|2] [optpasses=<n>] [optstop=<%>] "
-                 "[directions=hv|vh|off] [viaopt=0|1] [viacost=<n>] [viaflip=<um>] | "
-                 "FREEROUTE VIAOPT [viaflip=<um>]")
+                 "[directions=hv|vh|off] [viaopt=0|1] [viacost=<n>] [viaflip=<um>] [shorten=0|1] | "
+                 "FREEROUTE VIAOPT [viaflip=<um>] | FREEROUTE SHORTEN")
         if not args:
             raise CommandError(usage)
         sub = args[0].upper()
@@ -2603,10 +2704,16 @@ class CommandInterpreter:
                     opts["via_cost"] = int(v)
                 elif k == "viaflip":
                     opts["via_optimize_max_flip"] = float(v)
+                elif k == "shorten":
+                    opts["shorten_tracks"] = v.lower() not in ("0", "no", "false")
                 else:
                     raise CommandError(f"unknown FREEROUTE option {k!r}")
             else:
                 pos.append(a)
+        if sub == "SHORTEN" and not pos:
+            r = self.session.shorten_tracks(**opts)
+            return (f"shortened {r['tracks']} track(s): {r['before'] / 1000:.1f} -> "
+                    f"{r['after'] / 1000:.1f} mm")
         if sub == "VIAOPT" and not pos:
             r = self.session.optimize_vias(**opts)
             return (f"via optimisation: {r['before']} -> {r['after']} via(s), "

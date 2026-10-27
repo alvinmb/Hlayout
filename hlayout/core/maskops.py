@@ -520,45 +520,123 @@ def _close_holes(poly) -> List[Tuple[int, int]]:
     return [(int(round(x)), int(round(y))) for x, y in ring]
 
 
-def fracture_polygons(geom, max_points: int = MAX_POLY_POINTS, _depth: int = 0):
-    """Break a shapely Polygon/MultiPolygon (possibly with many holes,
-    or a single very high-vertex boundary) into a list of HOLE-FREE
-    shapely Polygons, each with at most ``max_points`` exterior
-    vertices, by recursively quartering its bounding box and
-    intersecting.
-
-    This is the standard way to get a big/holed boolean result -- a
-    ground pour, or a dielectric fill opened up around every via --
-    past ``shapely_to_polygons()``'s hard vertex limit (and GDSII's
-    lack of a hole primitive) without simplifying the geometry: every
-    output edge lies exactly on an input edge or a cut line.
-    """
-    _require_shapely()
-    if geom is None or geom.is_empty:
+def _split_hole_free(geom, max_points, depth=0):
+    """Cut a Polygon into hole-free pieces of at most ``max_points``
+    vertices. Every cut is a straight axis-aligned line THROUGH one of
+    the holes (the one nearest the middle, across the longer side), so
+    each cut takes out at least one hole and ends inside openings rather
+    than slicing off thin strips of fill; a hole-free piece that is
+    still too big is halved."""
+    if geom.is_empty or geom.area == 0:
         return []
     if geom.geom_type in ("MultiPolygon", "GeometryCollection"):
         out = []
         for g in geom.geoms:
             if g.geom_type in ("Polygon", "MultiPolygon", "GeometryCollection"):
-                out.extend(fracture_polygons(g, max_points, _depth))
+                out.extend(_split_hole_free(g, max_points, depth))
         return out
-    if geom.geom_type != "Polygon" or geom.area == 0:
+    if geom.geom_type != "Polygon":
         return []
-    # hole-free and small enough -> take it as-is
     if not geom.interiors and len(geom.exterior.coords) - 1 <= max_points:
         return [geom]
-    if _depth >= 24:
-        # pathological input -- fall back to a hole-bridged single ring
+    if depth >= 40:
         return [geom]
     x0, y0, x1, y1 = geom.bounds
-    mx, my = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+    vertical = (x1 - x0) >= (y1 - y0)          # cut across the longer side
+    if geom.interiors:
+        mid = (x0 + x1) / 2.0 if vertical else (y0 + y1) / 2.0
+        best = None
+        for ring in geom.interiors:
+            hx0, hy0, hx1, hy1 = ring.bounds
+            c = (hx0 + hx1) / 2.0 if vertical else (hy0 + hy1) / 2.0
+            if best is None or abs(c - mid) < abs(best - mid):
+                best = c
+        cut = best
+    else:
+        cut = (x0 + x1) / 2.0 if vertical else (y0 + y1) / 2.0
+    if vertical:
+        halves = (_box(x0 - 1, y0 - 1, cut, y1 + 1), _box(cut, y0 - 1, x1 + 1, y1 + 1))
+    else:
+        halves = (_box(x0 - 1, y0 - 1, x1 + 1, cut), _box(x0 - 1, cut, x1 + 1, y1 + 1))
     out = []
-    for qx0, qy0, qx1, qy1 in ((x0, y0, mx, my), (mx, y0, x1, my),
-                                (x0, my, mx, y1), (mx, my, x1, y1)):
-        piece = geom.intersection(_box(qx0, qy0, qx1, qy1))
+    for h in halves:
+        piece = geom.intersection(h)
         if not piece.is_empty:
-            out.extend(fracture_polygons(piece, max_points, _depth + 1))
+            out.extend(_split_hole_free(piece, max_points, depth + 1))
     return out
+
+
+def _clean(poly):
+    """Drop repeated and collinear vertices (exact: no shape change)."""
+    try:
+        q = poly.simplify(0.0, preserve_topology=True)
+        return q if q.geom_type == "Polygon" and not q.is_empty else poly
+    except Exception:
+        return poly
+
+
+def _merge_pieces(pieces, max_points):
+    """Join neighbouring pieces back together wherever the union is still
+    one hole-free polygon within ``max_points`` -- longest shared edge
+    first -- so the fill ends up as few, large, compact pieces."""
+    from shapely.ops import unary_union
+    from shapely.strtree import STRtree
+    alive = [_clean(p) for p in pieces]
+    changed = True
+    while changed:
+        changed = False
+        geoms = [g for g in alive if g is not None]
+        tree = STRtree(geoms)
+        cands = []
+        for i, a in enumerate(geoms):
+            for j in tree.query(a):
+                j = int(j)
+                if j <= i:
+                    continue
+                shared = a.boundary.intersection(geoms[j].boundary).length
+                if shared > 1.0:
+                    cands.append((shared, i, j))
+        cands.sort(reverse=True)
+        used = set()
+        merged = []
+        for shared, i, j in cands:
+            if i in used or j in used:
+                continue
+            u = unary_union([geoms[i], geoms[j]])
+            if u.geom_type != "Polygon" or u.interiors:
+                continue
+            u = _clean(u)
+            if len(u.exterior.coords) - 1 > max_points:
+                continue
+            used.update((i, j))
+            merged.append(u)
+            changed = True
+        alive = [g for k, g in enumerate(geoms) if k not in used] + merged
+    return alive
+
+
+def fracture_polygons(geom, max_points: int = MAX_POLY_POINTS, _depth: int = 0):
+    """Break a shapely Polygon/MultiPolygon (possibly with many holes,
+    or a single very high-vertex boundary) into a list of HOLE-FREE
+    shapely Polygons, each with at most ``max_points`` exterior
+    vertices -- a dielectric sheet opened up round every via, a ground
+    pour -- since GDSII has no hole primitive.
+
+    The pieces are kept few and compact: cuts run through the holes
+    themselves (never through solid fill alone, so no thin slivers are
+    cut off), then neighbouring pieces are joined back wherever the
+    result is still hole-free and within the vertex limit, and repeated
+    or collinear vertices are dropped. Nothing is simplified: every
+    output edge lies exactly on an input edge or a cut line, and the
+    pieces cover the input exactly.
+    """
+    _require_shapely()
+    if geom is None or geom.is_empty:
+        return []
+    pieces = _split_hole_free(geom, max_points)
+    if len(pieces) > 1:
+        pieces = _merge_pieces(pieces, max_points)
+    return [p for p in pieces if p.area > 0]
 
 
 def shapely_to_polygons(geom, layer: int, datatype: int = 0) -> List[Polygon]:

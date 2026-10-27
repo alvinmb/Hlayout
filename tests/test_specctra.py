@@ -101,8 +101,8 @@ def test_import_ses_keeps_existing_and_adds_new(tmp_path):
     assert st["wires"] == 1 and st["vias"] == 2 and st["skipped"] == 2
     assert sum(isinstance(x, Path) for x in s.cell.shapes) == n_paths + 1
     win = [x for x in s.cell.shapes if x.layer == 4 and x.datatype == 0
-           and (x.bbox()[2] - x.bbox()[0]) in (600, 800)]
-    assert len(win) == 2                                          # each via got its window
+           and (x.bbox()[2] - x.bbox()[0]) in (600, 900)]
+    assert len(win) == 2              # each via got its window: pad + 2 x the via window margin
     assert any(x.layer == 4 and x.datatype == 1 for x in s.cell.shapes)   # fill regenerated
     assert st["nets"] == 1 and st["complete"] == 1 and st["unrouted"] == []
     assert s.undo() is True

@@ -1568,3 +1568,25 @@ def test_top_view_enclosing_package_drawn_in_detail_with_pins_and_well():
     assert _min_dist_to_paths((-2100, 2000), paths) < 1   # the well wall
     assert _min_dist_to_paths((-3400, 2000), paths) < 1   # the case edge
     assert _min_dist_to_paths((10000, 5000), paths) < 1   # substrate edge on top
+
+
+def test_fracture_keeps_the_fill_in_few_compact_hole_free_pieces():
+    """A sheet with a grid of via windows fractures into hole-free
+    pieces within the vertex limit that cover it exactly -- cut through
+    the holes and joined back up, so far fewer pieces than holes and no
+    thin slivers."""
+    pytest.importorskip("shapely")
+    from shapely.geometry import box
+    from shapely.ops import unary_union
+    from hlayout.core.maskops import fracture_polygons
+    sheet = box(0, 0, 40000, 20000)
+    holes = [box(x - 300, y - 300, x + 300, y + 300)
+             for x in range(2000, 40000, 3000) for y in range(2000, 20000, 3000)]
+    geom = sheet.difference(unary_union(holes))
+    pieces = fracture_polygons(geom, max_points=200)
+    assert all(p.geom_type == "Polygon" and not p.interiors for p in pieces)
+    assert all(len(p.exterior.coords) - 1 <= 200 for p in pieces)
+    assert abs(unary_union(pieces).area - geom.area) < 1
+    assert abs(sum(p.area for p in pieces) - geom.area) < 1          # no overlaps
+    assert len(pieces) < len(holes) / 2
+    assert min(2 * p.area / p.length for p in pieces) > 500           # nothing thin

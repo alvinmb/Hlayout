@@ -100,23 +100,26 @@ class NetTracer:
         fill = None
         windows = None
         if dielectric_layer is not None and int(dielectric_layer) >= 0:
+            # The via windows drawn as the dielectric's datatype-0 inputs
+            # (a via cell placed by the Route tool carries its own), less
+            # the fill boundary -- the shape enclosing the fill / the rest.
+            ins = layer_geoms_flattened(library, cell, int(dielectric_layer), datatype=0)
             fg = layer_geoms_flattened(library, cell, int(dielectric_layer),
                                        datatype=fill_datatype)
             if fg:
                 fill = unary_union(fg)
-            else:
-                # Fill not generated (or cleared): the layers still connect
-                # only through the via windows drawn as the dielectric's
-                # datatype-0 inputs -- never through bare overlap. The one
-                # shape enclosing the rest is the fill boundary, not a window.
-                ins = layer_geoms_flattened(library, cell, int(dielectric_layer), datatype=0)
-                if len(ins) > 1:
-                    big = max(ins, key=lambda g: g.area)
-                    rest = [g for g in ins if g is not big]
-                    if big.buffer(1).contains(unary_union(rest)):
-                        ins = rest
-                if ins:
-                    windows = unary_union(ins)
+                ins = [g for g in ins if not g.buffer(1).contains(fill)]
+            elif len(ins) > 1:
+                big = max(ins, key=lambda g: g.area)
+                rest = [g for g in ins if g is not big]
+                if big.buffer(1).contains(unary_union(rest)):
+                    ins = rest
+            if ins:
+                windows = unary_union(ins)
+            if fill is not None and windows is not None:
+                # A window always opens the dielectric, even where a fill
+                # made before the via was dropped still covers it.
+                fill = fill.difference(windows)
 
         # inter-layer contacts: overlap, minus wherever dielectric covers it
         for i, (li, gi) in enumerate(self.nodes):

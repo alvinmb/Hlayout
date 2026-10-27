@@ -3262,11 +3262,41 @@ class Session:
             if not g.is_empty:
                 opening_geoms.append(g)
 
+        # a via window is drawn at its printed size (via_spec()); only
+        # keep-outs get the clearance
+        from ..io.specctra import find_vias as _fv, via_cell_sites as _vcs
+        try:
+            _la, _lb = self._route_layers()
+            vsites = [(x, y) for x, y, _w in _fv(cell, (_la, _lb))] + \
+                [(x, y) for x, y, _w, _r in _vcs(self.library, cell, (_la, _lb))]
+        except Exception:
+            vsites = []
+        vtree = None
+        if vsites:
+            from shapely.geometry import Point as _Pt
+            from shapely.strtree import STRtree as _STR
+            vpts = [_Pt(x, y) for x, y in vsites]
+            vtree = _STR(vpts)
+
+        def _is_via_window(g):
+            if vtree is None or g.geom_type != "Polygon":
+                return False
+            x0, y0, x1, y1 = g.bounds
+            w, h = x1 - x0, y1 - y0
+            if w <= 0 or w > 5000 or abs(w - h) > max(2, 0.02 * w):
+                return False
+            c = g.centroid
+            return any(vpts[int(i)].distance(c) <= 2 for i in vtree.query(c.buffer(3)))
+
+        windows = [g for g in holes if _is_via_window(g)]
+        others = [g for g in opening_geoms if not any(g is w for w in windows)]
         result = fill
         if opening_geoms:
-            merged = unary_union(opening_geoms)
-            if clr:
+            merged = unary_union(others) if others else None
+            if merged is not None and clr:
                 merged = size_geometry(merged, clr)
+            if windows:
+                merged = unary_union(([merged] if merged is not None else []) + windows)
             result = fill.difference(merged)
 
         dt = self.DIELECTRIC_FILL_DATATYPE
@@ -4867,6 +4897,10 @@ class Session:
         R = self.freerouting_rules()
         R.update(rules)
         R = self._rules_with_drc(R)
+        # the router keeps other nets clear of a via's whole dielectric
+        # window, not just its pad
+        R["signal_via_keep"] = max(self.via_spec(False, R)["window"], float(R["signal_via"]))
+        R["power_via_keep"] = max(self.via_spec(True, R)["window"], float(R["power_via"]))
         try:
             diel = int(load_dielectric_rules(self.library)["layer"])
         except Exception:
@@ -5028,8 +5062,8 @@ class Session:
                     stats["skipped"] += 1
                     continue
                 pwr = ps == VIA_PWR
-                size = R["power_via"] if pwr else R["signal_via"]
-                window = R["power_via_window"] if pwr else R["signal_via_window"]
+                spec = self.via_spec(pwr, R)
+                size, window = spec["pad"], spec["window"]
                 h = size / 2.0
                 cell.add_rectangle(la, x - h, y - h, x + h, y + h)
                 cell.add_rectangle(lb, x - h, y - h, x + h, y + h)
@@ -5134,6 +5168,9 @@ class Session:
         if R.get("via_optimize") and not self._single_layer_route(R):
             vo = self.optimize_vias(cell_name=name, **R)
             out.update(vias_before=vo["before"], vias_after=vo["after"])
+        if R.get("shorten_tracks", True):
+            sh = self.shorten_tracks(cell_name=name, **R)
+            out.update(shortened=sh["tracks"], shortened_by=sh["before"] - sh["after"])
         return out
 
     @staticmethod
@@ -5147,7 +5184,335 @@ class Session:
                                    exclude_classes=[EXCLUDED_CLASS] if R.get("exclude_nets") else [],
                                    java=java)
 
-    def optimize_vias(self, cell_name: Optional[str] = None, **rules) -> dict:
+    def _dielectric_area(self, cell, diel):
+        """Where the dielectric is printed -- the area the 2nd conductor
+        (and every via) must stay on: the generated fill with its via
+        windows, as one region; without a fill, the fill boundary
+        generate_dielectric() would use (an enclosing datatype-0 outline,
+        else the I/O-ring area). None when there is no dielectric."""
+        from shapely.geometry import Polygon as _SP
+        from shapely.geometry import box as _box
+        from shapely.ops import unary_union
+        if diel is None or diel < 0:
+            return None
+        dt = self.DIELECTRIC_FILL_DATATYPE
+        fill = [_SP(sh.points) for sh in cell.shapes if sh.layer == diel
+                and getattr(sh, "datatype", 0) == dt and len(getattr(sh, "points", ())) >= 3]
+        ins = [_box(*sh.bbox()) for sh in cell.shapes if sh.layer == diel
+               and getattr(sh, "datatype", 0) == 0 and hasattr(sh, "bbox")]
+        if fill:
+            u = unary_union(fill + ins)
+            # the windows are openings INSIDE the sheet: close them up
+            from shapely.geometry import MultiPolygon
+            polys = list(u.geoms) if isinstance(u, MultiPolygon) else [u]
+            return unary_union([_SP(p.exterior.coords) for p in polys if p.geom_type == "Polygon"])
+        if ins:
+            big = max(ins, key=lambda g: g.area)
+            rest = [g for g in ins if g is not big]
+            if rest and big.buffer(1).contains(unary_union(rest)):
+                return big
+        ring = self._io_ring_box(cell)
+        return ring if ring is not None else self._substrate_box(cell)
+
+    def shorten_tracks(self, cell_name: Optional[str] = None, progress=None, **rules) -> dict:
+        """Straighten detours and pull corners tight: every routed track
+        keeps its two ends and is re-laid on its own layer the shortest
+        clear way (straight, an L, or a maze route round the obstacles)
+        when that is at least 0.1 mm / 3 % shorter and keeps the
+        clearance (Freerouting rules tightened by the DRC) from every
+        other net, stays out of the die / part-body keep-outs, on the
+        substrate, and -- on the 2nd conductor -- on the printed
+        dielectric. A track something else joins part-way along is left
+        alone. Works with nets still unrouted. One undo step. Returns
+        {"tracks": shortened, "before": um, "after": um}. See
+        hlayout.core.shorten."""
+        from shapely.geometry import Polygon as _SP
+        from shapely.geometry import box as _box
+        from ..core.shorten import shorten_tracks as _short
+        from ..io.techfile import load_net_names
+        name = cell_name or self.current_cell_name
+        if name is None:
+            raise LayoutError("no current cell; call new_cell()/use_cell() first")
+        cell = self.library.get_cell(name)
+        la, lb = self._route_layers()
+        R = self.freerouting_rules()
+        R.update(rules)
+        R = self._rules_with_drc(R)
+        keep = {}
+        for lay, pts in self._route_keepouts(cell, (la, lb), R):
+            if len(pts) >= 3:
+                keep.setdefault(int(lay), []).append(_SP(pts))
+        keepin = self._substrate_box(cell)
+        try:
+            diel = int(load_dielectric_rules(self.library)["layer"])
+        except Exception:
+            diel = -1
+        keepin_b = self._dielectric_area(cell, diel)
+        vspec = self.via_spec(False, R)
+        margin = (vspec["window"] - vspec["pad"]) / 2.0 if vspec["window"] else 0.0
+        fill_dt = self.DIELECTRIC_FILL_DATATYPE
+
+        def make_via(x, y, size):
+            h = size / 2.0
+            out = [cell.add_rectangle(la, x - h, y - h, x + h, y + h),
+                   cell.add_rectangle(lb, x - h, y - h, x + h, y + h)]
+            if diel >= 0 and vspec["window"]:
+                hw = h + margin
+                out.append(cell.add_rectangle(diel, x - hw, y - hw, x + hw, y + hw))
+            return out
+
+        def remove_via(site):
+            x, y, _w, kind, obj = site
+            if kind == "cell":
+                if obj in cell.srefs:
+                    cell.srefs.remove(obj)
+                return
+            lays = {la, lb} | ({diel} if diel >= 0 else set())
+            doomed = set()
+            for sh in cell.shapes:
+                if sh.layer not in lays or getattr(sh, "pin", "") or isinstance(sh, _PathT) \
+                        or not hasattr(sh, "bbox") or getattr(sh, "datatype", 0) != 0:
+                    continue
+                b = sh.bbox()
+                bw, bh = b[2] - b[0], b[3] - b[1]
+                if 0 < bw <= 5000 and abs(bw - bh) <= max(2, 0.02 * bw) and \
+                        abs((b[0] + b[2]) / 2 - x) <= 1 and abs((b[1] + b[3]) / 2 - y) <= 1:
+                    doomed.add(id(sh))
+            cell.shapes[:] = [sh for sh in cell.shapes if id(sh) not in doomed]
+
+        from ..core.shapes import Path as _PathT
+        before = {frozenset(x["nets"]) for x in self.find_shorts(cell_name=name)}
+        keep_shapes, keep_srefs = list(cell.shapes), list(cell.srefs)
+        with self._batch():
+            res = _short(self.library, cell, (la, lb), float(R.get("clearance", 100)),
+                         keepouts=keep, keepin=keepin, keepin_b=keepin_b,
+                         dielectric_layer=diel if diel >= 0 else None,
+                         fill_datatype=fill_dt, via_size=vspec["pad"], via_margin=margin,
+                         make_via=make_via, remove_via=remove_via, progress=progress,
+                         pad_nets=load_net_names(self.library) or None)
+            if res["tracks"] and diel >= 0 and any(
+                    s.layer == diel and getattr(s, "datatype", 0) == fill_dt for s in cell.shapes):
+                try:
+                    self.generate_dielectric(cell_name=name)
+                except Exception:
+                    pass
+            # safety net: if the re-laid routing joined two named nets
+            # anywhere, put everything back as it was
+            res["shorts"] = []
+            if res["tracks"]:
+                new = [x for x in self.find_shorts(cell_name=name)
+                       if frozenset(x["nets"]) not in before]
+                if new:
+                    cell.shapes[:] = keep_shapes
+                    cell.srefs[:] = keep_srefs
+                    res.update(tracks=0, before=0.0, after=0.0, vias_before=0, vias_after=0,
+                               shorts=new, undone=True)
+        self._notify()
+        return res
+
+    def via_spec(self, power: bool = False, rules: Optional[dict] = None) -> dict:
+        """THE via of this design -- the one definition every via is made
+        from (Freerouting import, rip-up / shortening, the Route tool's
+        via cell, Fix Vias): {"pad": the conductor pad (signal_via /
+        power_via of the Autoroute rules), "window": the dielectric
+        window = pad + 2 x via_window_margin (Dielectric rules) -- larger
+        than the pad, and drawn at its printed size (generate_dielectric()
+        doesn't grow it) -- and "layer": the dielectric layer (-1 none)}."""
+        R = rules if rules is not None else self.freerouting_rules()
+        dr = load_dielectric_rules(self.library)
+        pad = float(R["power_via"] if power else R["signal_via"])
+        layer = int(dr.get("layer", -1))
+        margin = float(dr.get("via_window_margin", 100))
+        return {"pad": pad, "window": pad + 2.0 * margin if layer >= 0 else 0.0, "layer": layer}
+
+    def fix_vias(self, cell_name: Optional[str] = None) -> dict:
+        """Redraw every via of the cell to the design's one via
+        definition (via_spec()): pads on both route layers and the
+        dielectric window, power-net vias (Autoroute power nets) at the
+        power size, the rest at the signal size; a via CELL the cell
+        places (the Route tool's) is rebuilt to the signal via in place.
+        The dielectric fill is redone. One undo step. Returns
+        {"vias": flat vias redrawn, "via_cells": via cells rebuilt}."""
+        from ..io.specctra import find_vias, via_cell_sites
+        from ..io.techfile import load_net_names
+        name = cell_name or self.current_cell_name
+        cell = self.library.get_cell(name)
+        la, lb = self._route_layers()
+        R = self.freerouting_rules()
+        sig, pwr = self.via_spec(False, R), self.via_spec(True, R)
+        diel = sig["layer"]
+        power = {n.upper() for n in R.get("power_nets", [])}
+        names = load_net_names(self.library)
+        tr = self.net_tracer(cell_name=name)
+        from shapely.geometry import Point as _Pt
+
+        def net_at(x, y):
+            hit = [j for j in tr._query(_Pt(x, y)) if tr.nodes[j][0] == la
+                   and tr._geoms[j].distance(_Pt(x, y)) <= 1]
+            if not hit:
+                return None
+            root = tr.dsu.find(hit[0])
+            for p, n in names.items():
+                if p in tr.pin_node and tr.dsu.find(tr.pin_node[p]) == root:
+                    return n
+            return None
+
+        flat = find_vias(cell, (la, lb))
+        lays = {la, lb} | ({diel} if diel >= 0 else set())
+        n_flat = 0
+        with self._batch():
+            for x, y, _w in flat:
+                n = net_at(x, y)
+                spec = pwr if (n and n.upper() in power) else sig
+                cell.shapes[:] = [sh for sh in cell.shapes if not (
+                    sh.layer in lays and not getattr(sh, "pin", "") and hasattr(sh, "bbox")
+                    and not hasattr(sh, "width") and getattr(sh, "datatype", 0) == 0
+                    and abs((sh.bbox()[0] + sh.bbox()[2]) / 2 - x) <= 1
+                    and abs((sh.bbox()[1] + sh.bbox()[3]) / 2 - y) <= 1
+                    and (sh.bbox()[2] - sh.bbox()[0]) <= 5000)]
+                h = spec["pad"] / 2.0
+                cell.add_rectangle(la, x - h, y - h, x + h, y + h)
+                cell.add_rectangle(lb, x - h, y - h, x + h, y + h)
+                if diel >= 0 and spec["window"]:
+                    hw = spec["window"] / 2.0
+                    cell.add_rectangle(diel, x - hw, y - hw, x + hw, y + hw)
+                n_flat += 1
+            rebuilt = set()
+            # the via cells placed here, and the one the Route tool drops
+            via_cells = [ref.cell_name for _x, _y, _w, ref in
+                         via_cell_sites(self.library, cell, (la, lb))]
+            rv = load_route_rules(self.library).get("via_cell") or ""
+            if rv and rv in self.library.cells:
+                via_cells.append(rv)
+            for vname in via_cells:
+                vc = self.library.cells.get(vname)
+                if vc is None or vname in rebuilt:
+                    continue
+                vlays = {sh.layer for sh in vc.shapes} | {la, lb}
+                h = sig["pad"] / 2.0
+                vc.shapes[:] = [sh for sh in vc.shapes if sh.layer not in (la, lb, diel)]
+                for l in sorted(vlays & {la, lb}):
+                    vc.add_rectangle(l, -h, -h, h, h)
+                if diel >= 0 and sig["window"]:
+                    hw = sig["window"] / 2.0
+                    vc.add_rectangle(diel, -hw, -hw, hw, hw)
+                rebuilt.add(vname)
+            if diel >= 0 and any(sh.layer == diel and getattr(sh, "datatype", 0) ==
+                                 self.DIELECTRIC_FILL_DATATYPE for sh in cell.shapes):
+                try:
+                    self.generate_dielectric(cell_name=name)
+                except Exception:
+                    pass
+        self._notify()
+        return {"vias": n_flat, "via_cells": len(rebuilt)}
+
+    def assign_io_pads(self, cell_name: Optional[str] = None, apply: bool = True,
+                       csv_path: Optional[str] = None, pad_w: Optional[float] = None,
+                       pad_l: Optional[float] = None,
+                       bond_inset: Optional[float] = None) -> dict:
+        """Optimise the module pinout for routing: put each I/O net on the
+        I/O pad (header pin) that gives the shortest, uncrossed connection
+        to the copper it must reach, and (``apply``) draw the pads at the
+        header-bond landings and rename the nets IO.<pin> to match. The
+        pinout is written to ``csv_path`` (default: io_pinout.csv next to
+        the design). Pad size and the bond landing's inset from the pad's
+        outer end default to the design's I/O pad rules (Setup > Technology
+        Properties, I/O Pads tab; techfile.load_io_pad_rules). The
+        dielectric fill is redone if there is one. One undo step. Returns the plan: {"sites": [{"pin", "net", "was", ...}],
+        "before", "after" (um, pad-to-nearest-copper totals), "unreached",
+        "csv"}. See hlayout.scripting.iopads."""
+        from . import iopads
+        from ..io.techfile import load_io_pad_rules
+        pr = load_io_pad_rules(self.library)
+        pad_w = float(pr["width"] if pad_w is None else pad_w)
+        pad_l = float(pr["length"] if pad_l is None else pad_l)
+        bond_inset = float(pr["bond_inset"] if bond_inset is None else bond_inset)
+        if pad_w <= 0 or pad_l <= 0 or bond_inset < 0:
+            raise LayoutError("I/O pad width and length must be positive, the bond inset 0 or more")
+        p = iopads.plan(self, cell_name=cell_name)
+        if not apply:
+            return p
+        if csv_path is None and getattr(self, "current_path", None):
+            csv_path = os.path.join(os.path.dirname(self.current_path), "io_pinout.csv")
+        with self._batch():
+            r = iopads.apply(self, p, pad_w=pad_w, pad_l=pad_l, csv_path=csv_path,
+                             bond_inset=bond_inset)
+            cell = self.library.get_cell(p["cell"])
+            try:
+                diel = int(load_dielectric_rules(self.library)["layer"])
+            except Exception:
+                diel = -1
+            if diel >= 0 and any(s.layer == diel and getattr(s, "datatype", 0) ==
+                                 self.DIELECTRIC_FILL_DATATYPE for s in cell.shapes):
+                try:
+                    self.generate_dielectric(cell_name=p["cell"])
+                except Exception:
+                    pass
+        p["csv"] = r["csv"]
+        return p
+
+    def find_shorts(self, cell_name: Optional[str] = None) -> list:
+        """Short circuits: copper that joins pads of two or more design
+        nets (net names, see import_net_names()). Spacing DRC can't see
+        these -- touching copper of two nets is one shape to it. Returns
+        [{"nets": [names], "pins": {net: [pads]}, "at": [(x, y)]}] -- ``at``
+        the via windows / crossings where the nets' copper meets."""
+        from collections import deque
+        from shapely.geometry import box as _box
+        from shapely.ops import unary_union
+        from ..io.techfile import load_net_names
+        names = load_net_names(self.library)
+        if not names:
+            return []
+        name = cell_name or self.current_cell_name
+        tr = self.net_tracer(cell_name=name)
+        groups = {}
+        for p, n in names.items():
+            if p in tr.pin_node:
+                groups.setdefault(tr.dsu.find(tr.pin_node[p]), {}).setdefault(n, []).append(p)
+        out = []
+        cell = self.library.get_cell(name)
+        try:
+            diel = int(load_dielectric_rules(self.library)["layer"])
+        except Exception:
+            diel = -1
+        wins = unary_union([_box(*sh.bbox()) for sh in cell.shapes if sh.layer == diel
+                            and getattr(sh, "datatype", 0) == 0 and hasattr(sh, "bbox")]) \
+            if diel >= 0 else None
+        nodes, geoms = tr.nodes, tr._geoms
+        for root, by_net in groups.items():
+            if len(by_net) < 2:
+                continue
+            # where do the nets meet? grow each net out from its own pads
+            lab, q, at = {}, deque(), []
+            for n, pins in by_net.items():
+                for p in pins:
+                    j = tr.pin_node[p]
+                    if j not in lab:
+                        lab[j] = n
+                        q.append(j)
+            while q and len(at) < 6:
+                j = q.popleft()
+                for k in tr._query(geoms[j]):
+                    if k == j or not geoms[k].intersects(geoms[j]):
+                        continue
+                    ov = geoms[k].intersection(geoms[j])
+                    if nodes[k][0] != nodes[j][0] and wins is not None and \
+                            ov.intersection(wins).area < 1:
+                        continue
+                    if k not in lab:
+                        lab[k] = lab[j]
+                        q.append(k)
+                    elif lab[k] != lab[j]:
+                        c = ov.representative_point()
+                        xy = (round(c.x), round(c.y))
+                        if xy not in at:
+                            at.append(xy)
+            out.append({"nets": sorted(by_net), "pins": {n: sorted(v) for n, v in by_net.items()},
+                        "at": at})
+        return out
+
+    def optimize_vias(self, cell_name: Optional[str] = None, progress=None, **rules) -> dict:
         """Take out every via of the routed cell that can safely go: the
         track(s) on one side of it move onto the other conductor and the
         via -- both pads and its dielectric window -- is deleted, when the
@@ -5171,25 +5536,67 @@ class Session:
             diel = int(load_dielectric_rules(self.library)["layer"])
         except Exception:
             diel = -1
-        area = None
-        if diel >= 0:
-            from shapely.geometry import box as _box
-            ins = [sh for sh in cell.shapes
-                   if sh.layer == diel and getattr(sh, "datatype", 0) == 0 and hasattr(sh, "bbox")]
-            if ins:
-                big = max(ins, key=lambda sh: (sh.bbox()[2] - sh.bbox()[0]) * (sh.bbox()[3] - sh.bbox()[1]))
-                area = _box(*big.bbox())
+        area = self._dielectric_area(cell, diel)
         with self._batch():
             res = _opt(self.library, cell, (la, lb), float(R.get("clearance", 100)),
                        dielectric_layer=diel if diel >= 0 else None, dielectric_area=area,
                        fill_datatype=self.DIELECTRIC_FILL_DATATYPE,
-                       max_flip=float(R.get("via_optimize_max_flip", 0) or 0))
+                       max_flip=float(R.get("via_optimize_max_flip", 0) or 0),
+                       progress=progress)
             if res["removed"] and diel >= 0 and \
                     any(s.layer == diel and getattr(s, "datatype", 0) == 0 for s in cell.shapes):
                 try:
                     self.generate_dielectric(cell_name=name)
                 except Exception:
                     pass
+        self._notify()
+        return res
+
+    def rip_up_between(self, a, b, cell_name: Optional[str] = None, tol: float = 0.0) -> dict:
+        """Rip up the routing between two points on one net: the shortest
+        run of track from ``a`` to ``b`` (DBU points on tracks of either
+        route layer) -- along the tracks, through T-junctions and vias --
+        is cut out, the tracks cut at the two points; a via on the run
+        goes too once nothing is left on one of its sides. ``tol`` (DBU)
+        lets a point just beside a thin track still pick it. The
+        dielectric fill is regenerated if the design has one. One undo
+        step. Returns {"a": (x, y, layer), "b": (x, y, layer), "length",
+        "tracks", "vias": [(x, y)], "net"} -- ``a``/``b`` are where the
+        cut ends are, ready to be routed again. See hlayout.core.ripup."""
+        from ..core.ripup import rip_up as _rip
+        name = cell_name or self.current_cell_name
+        if name is None:
+            raise LayoutError("no current cell; call new_cell()/use_cell() first")
+        cell = self.library.get_cell(name)
+        la, lb = self._route_layers()
+        net = None
+        try:
+            from ..io.techfile import load_net_names
+            tr = self.net_tracer(cell_name=name).trace_point(a[0], a[1], tol=tol)
+            if tr is not None:
+                tr.name_from(load_net_names(self.library))
+                net = tr.name if tr.name not in (None, "unnamed") else None
+        except Exception:
+            net = None
+        with self._batch():
+            res = _rip(self.library, cell, (la, lb), a, b, tol=tol)
+            if res is None:
+                raise LayoutError(
+                    f"no track joins ({a[0] / 1000:.3f}, {a[1] / 1000:.3f}) and "
+                    f"({b[0] / 1000:.3f}, {b[1] / 1000:.3f}) mm -- pick two points on tracks "
+                    f"of one net (layer {la} or {lb})")
+            try:
+                diel = int(load_dielectric_rules(self.library)["layer"])
+            except Exception:
+                diel = -1
+            if res["vias"] and diel >= 0 and any(
+                    s.layer == diel and getattr(s, "datatype", 0) == self.DIELECTRIC_FILL_DATATYPE
+                    for s in cell.shapes):
+                try:
+                    self.generate_dielectric(cell_name=name)
+                except Exception:
+                    pass
+        res["net"] = net
         self._notify()
         return res
 

@@ -136,3 +136,18 @@ def test_without_generated_fill_only_via_windows_connect():
     s.clear_dielectric()
     assert s.highlight_net("U1.1").pins == ["U1.1"]          # no overlap short
     assert s.highlight_net("IO.1").pins == ["IO.1", "U1.2"]  # via window still joins
+
+
+def test_a_via_cell_dropped_after_the_fill_still_joins_the_layers():
+    """The Route tool's Space places a via CELL (pads + its own window);
+    the fill made before it still covers the spot until it is redone --
+    the window must count as an opening anyway."""
+    s = _board(via=False)
+    s.new_cell("VIA35")
+    s.rect(3, -200, -200, 200, 200)
+    s.rect(5, -200, -200, 200, 200)
+    s.rect(4, -300, -300, 300, 300)
+    s.use_cell("TOP")
+    assert s.highlight_net("IO.1").pins == ["IO.1"]      # fill already generated
+    s.sref("VIA35", (4000, 0))
+    assert s.highlight_net("IO.1").pins == ["IO.1", "U1.2"]

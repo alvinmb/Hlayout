@@ -458,6 +458,7 @@ class LayoutCanvas(tk.Canvas):
     def set_mode(self, mode):
         """Switch the active drawing tool: select, rect, poly, path, text, sref, aref, zoomwin, route, wire_bond."""
         self.cancel_draw()
+        self._end_reroute()
         if mode != "select":
             self.selected = None
             self.selected_multi = []
@@ -480,22 +481,33 @@ class LayoutCanvas(tk.Canvas):
         """Edit > Continue Path: re-enter Path drawing pre-seeded with an
         existing Path shape's own points, so you can click to add more
         points onto its end instead of only ever starting a brand new
-        path. Requires a single whole Path shape to currently be
-        selected (not a vertex/edge of one, not a window-selected
-        group); returns False and does nothing otherwise.
+        path. Works on a selected Path, or a vertex or edge of one (a
+        click on a track usually grabs an edge); not on a window-selected
+        group -- returns False and does nothing otherwise. It carries on
+        from whichever END of the path is nearer the grabbed vertex, or
+        the last pointer position: an end that is the path's start is
+        continued from there (the points are reversed).
 
         The original shape is left untouched until the extended path
         is actually finished (double-click/Enter, see _commit_path()),
         so Esc still cleanly cancels back to nothing having changed --
         cancel_draw() just drops the pending points and the
         _continue_target reference below."""
-        if self.selected is None or self.selected[0] != "shape":
+        if self.selected is None or self.selected[0] not in ("shape", "edge", "vertex"):
             return False
-        _, shape = self.selected
-        if not isinstance(shape, Path):
+        kind, shape = self.selected[0], self.selected[1]
+        if not isinstance(shape, Path) or len(shape.points) < 2:
             return False
+        pts = list(shape.points)
+        if kind == "vertex":
+            ref = pts[self.selected[2]]
+        else:
+            ref = getattr(self, "_select_click_dbu", None) or pts[-1]
+        d = lambda p: (p[0] - ref[0]) ** 2 + (p[1] - ref[1]) ** 2
+        if d(pts[0]) < d(pts[-1]):
+            pts.reverse()              # carry on from the path's start
         self.set_mode("path")
-        self._pending_points = list(shape.points)
+        self._pending_points = pts
         self._continue_target = shape
         self._update_preview(*self._last_mouse_dbu)
         self.on_mode_status(
@@ -529,6 +541,7 @@ class LayoutCanvas(tk.Canvas):
             "wire_bond": self._wire_bond_hint(),
             "del_bond": self._del_bond_hint(),
             "del_via": self._del_via_hint(),
+            "ripup": self._ripup_hint(),
             "hilite": ("Highlight Net: click a pad or trace -- every pad and track "
                        "on its net is highlighted (layers connect only through via "
                        "windows). Click another to switch; Esc stops"),
@@ -591,8 +604,59 @@ class LayoutCanvas(tk.Canvas):
         return (f"Create Cell {self._pending_cell_name!r}: click the point to use as "
                 f"the cell's origin -- it becomes local (0, 0); Esc cancels")
 
+    def _ripup_hint(self):
+        if self._pending_points:
+            return ("Rip Up and Reroute: now click the second point on the same net -- "
+                    "the track between the two is ripped up and routing starts from the "
+                    "first (Esc cancels)")
+        return ("Rip Up and Reroute: click a point on a track, then a second point on the "
+                "same net -- the track between them is ripped up and you route it again")
+
+    #: Rip Up and Reroute: the loose end the new route has to reach, and
+    #: whether the net's SLI was picked out for it (dropped again when the
+    #: reroute ends -- route finished or another tool chosen)
+    _reroute_target = None
+    _reroute_focus = False
+
+    def _end_reroute(self):
+        self._reroute_target = None
+        if self._reroute_focus:
+            self._reroute_focus = False
+            self.sli_focus = None
+
+    def start_reroute(self, a, b, layer, net=None):
+        """After a rip-up: Route mode, already started at ``a`` on
+        ``layer``, with ``b`` -- the other cut end -- ringed as the target
+        and the net's SLI picked out (see focus_sli_net)."""
+        self.set_mode("route")
+        if layer in (self.route_layer_a, self.route_layer_b):
+            self._route_active_layer = layer
+        self._pending_points = [(int(round(a[0])), int(round(a[1])))]
+        self._reroute_target = (b[0], b[1])
+        if net:
+            self._reroute_focus = self.sli_focus is None or self.sli_focus == net
+            self.sli_focus = net
+            self.show_sli = True
+        self.redraw()
+        self._update_preview(*self._pending_points[0])
+        self.on_mode_status(self._route_hint())
+
+    def _draw_reroute_target(self):
+        t = self._reroute_target
+        if t is None or self.draw_mode != "route":
+            return
+        px, py = self.to_px(*t)
+        r = self.SLI_FOCUS_RING_PX + 3
+        self.create_oval(px - r, py - r, px + r, py + r, outline=self.SLI_FOCUS_COLOR,
+                         width=2, dash=(3, 2), tags="reroute_target")
+
     def _route_hint(self):
         layer = self._route_active_layer
+        if self._reroute_target is not None:
+            tx, ty = self._reroute_target
+            return (f"Reroute on layer {layer} to the ringed end at ({tx / 1000:.3f}, "
+                    f"{ty / 1000:.3f}) mm: click points, Space drops a via and switches "
+                    f"layer, double-click/Enter finishes, Esc cancels")
         return (f"Route (2-layer): routing on layer {layer}. Click points; "
                 f"Space drops a via and switches conductor layer; "
                 f"double-click/Enter finishes; Esc cancels the current segment "
@@ -1100,6 +1164,19 @@ class LayoutCanvas(tk.Canvas):
         elif self.draw_mode == "hilite":
             if self.on_commit:
                 self.on_commit("hilite", self.current_layer, [pt], {})
+        elif self.draw_mode == "ripup":
+            self._pending_points.append(pt)
+            if len(self._pending_points) >= 2:
+                pts, self._pending_points = self._pending_points[:2], []
+                self.delete("preview")
+                if self.on_commit:
+                    self.on_commit("ripup", self.current_layer, pts, {})
+            else:
+                self.delete("preview")
+                px, py = self.to_px(*pt)
+                self.create_oval(px - 7, py - 7, px + 7, py + 7, outline=self.SLI_FOCUS_COLOR,
+                                 width=2, tags="preview")
+                self.on_mode_status(self._ripup_hint())
         elif self.draw_mode == "del_via":
             self.delete("preview")
             if self.on_commit:
@@ -1243,6 +1320,10 @@ class LayoutCanvas(tk.Canvas):
         return best
 
     def _select_click(self, e):
+        try:
+            self._select_click_dbu = self.to_dbu(e.x, e.y)   # Continue Path's end pick
+        except Exception:
+            self._select_click_dbu = None
         self._select_click_impl(e)
         self.on_select()
 
@@ -2674,6 +2755,9 @@ class LayoutCanvas(tk.Canvas):
             self.on_commit("path", self._route_active_layer, points,
                             {"width": self.path_width, "cap": self.path_cap})
         self._route_active_layer = self.route_layer_a
+        if self._reroute_target is not None:
+            self._end_reroute()
+            self.redraw()
         self.on_mode_status(self._route_hint())
 
     def _route_drop_via(self, event=None):
@@ -2795,6 +2879,7 @@ class LayoutCanvas(tk.Canvas):
         self._draw_selection_highlight()
         self._draw_net_highlight()
         self._draw_sli()
+        self._draw_reroute_target()
         self._draw_issue_markers()
 
     # --- Straight-line interconnects (Auto Place) ----------------------------

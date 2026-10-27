@@ -34,10 +34,8 @@ _NUM_FIELDS = (
     ("Signal width (um)", "signal_width"),
     ("Power width (um)", "power_width"),
     ("Clearance (um)", "clearance"),
-    ("Signal via (um)", "signal_via"),
-    ("Signal via window (um)", "signal_via_window"),
-    ("Power via (um)", "power_via"),
-    ("Power via window (um)", "power_via_window"),
+    ("Signal via pad (um)", "signal_via"),
+    ("Power via pad (um)", "power_via"),
     ("Bond finger (um)", "bond_finger"),
     ("Die keep-out (um)", "die_keepout"),
     ("Via cost", "via_cost"),
@@ -169,6 +167,11 @@ class FreeroutingWindow(tk.Toplevel):
             row=row, column=2, sticky="e", padx=4)
         ttk.Entry(gf, textvariable=self.vars["via_optimize_max_flip"], width=9).grid(
             row=row, column=3, sticky="w")
+        row += 1
+        self.vars["shorten_tracks"] = tk.BooleanVar()
+        ttk.Checkbutton(gf, text="Shorten tracks at the end (straighten detours, pull corners tight)",
+                        variable=self.vars["shorten_tracks"]).grid(
+            row=row, column=0, columnspan=4, sticky="w", padx=4)
 
         nf = ttk.Frame(outer)
         nf.pack(fill="x", pady=(8, 0))
@@ -230,6 +233,7 @@ class FreeroutingWindow(tk.Toplevel):
         self.vars["layer_directions"].set(next((t for t, v in _DIRECTIONS if v == ld),
                                                _DIRECTIONS[0][0]))
         self.vars["via_optimize"].set(bool(rules.get("via_optimize", True)))
+        self.vars["shorten_tracks"].set(bool(rules.get("shorten_tracks", True)))
         self.vars["via_optimize_max_flip"].set(f"{float(rules.get('via_optimize_max_flip', 0)):g}")
         self.vars["router"].set(app_settings.get_setting(app_settings.FREEROUTING_PATH_KEY)
                                 or find_freerouting() or "")
@@ -282,6 +286,7 @@ class FreeroutingWindow(tk.Toplevel):
         shown = self.vars["layer_directions"].get()
         out["layer_directions"] = next((v for t, v in _DIRECTIONS if t == shown), "hv")
         out["via_optimize"] = bool(self.vars["via_optimize"].get())
+        out["shorten_tracks"] = bool(self.vars["shorten_tracks"].get())
         try:
             out["via_optimize_max_flip"] = float(self.vars["via_optimize_max_flip"].get() or 0)
         except ValueError:
@@ -552,8 +557,18 @@ class FreeroutingWindow(tk.Toplevel):
                 vo = self._optimize_vias()
                 if vo is not None:
                     vias = f"; via optimisation {vo['before']} -> {vo['after']} vias"
+                sh = self._shorten_tracks()
+                if sh is not None and sh["tracks"]:
+                    vias += f"; {sh['tracks']} track(s) shortened by " \
+                            f"{(sh['before'] - sh['after']) / 1000:.1f} mm"
+                shorts = self._check_shorts()
+                if shorts:
+                    vias += f"; SHORT CIRCUIT: " + ", ".join(" + ".join(x["nets"]) for x in shorts)
             if st is None:
                 self._announce("FAILED -- the result could not be imported (see the log)", "err")
+            elif "SHORT CIRCUIT" in vias:
+                self._announce(f"FINISHED in {self._took()} WITH SHORTS -- {st['complete']} of "
+                               f"{st['nets']} nets complete{vias}", "err")
             elif st["unrouted"]:
                 self._announce(f"FINISHED in {self._took()} -- {st['complete']} of {st['nets']} "
                                f"nets complete ({100 * st['complete'] // max(st['nets'], 1)}%); "
@@ -570,13 +585,77 @@ class FreeroutingWindow(tk.Toplevel):
             if not rules.get("via_optimize") or self.session._single_layer_route(rules):
                 return None
             self._say("Via optimisation: looking for vias that can go...")
-            vo = self.session.optimize_vias()
+            import time as _time
+            last = [0.0]
+
+            def tick(i, n, gone):
+                # keep the window painting and the status bar moving
+                now = _time.monotonic()
+                if now - last[0] > 0.25:
+                    last[0] = now
+                    self.app.status.set(f"Via optimisation: {gone} via(s) out so far "
+                                        f"({i}/{n} looked at this pass)")
+                    try:
+                        self.update_idletasks()
+                    except tk.TclError:
+                        pass
+            vo = self.session.optimize_vias(progress=tick)
         except Exception as e:
             self._say(f"Via optimisation failed: {e}")
             return None
         self._say(f"Via optimisation: {vo['before']} -> {vo['after']} vias "
                   f"({vo['moved']} track(s) moved to the other conductor)")
         return vo
+
+    def _check_shorts(self):
+        """After the run: any copper joining two named nets? (Spacing DRC
+        can't see a short -- touching copper is one shape.) Logged with
+        where the nets meet."""
+        try:
+            shorts = self.session.find_shorts()
+        except Exception as e:
+            self._say(f"Short-circuit check failed: {e}")
+            return []
+        for x in shorts:
+            where = ", ".join(f"({a / 1000:.2f}, {b / 1000:.2f}) mm" for a, b in x["at"][:4])
+            self._say(f"SHORT CIRCUIT: {' + '.join(x['nets'])}" + (f" -- they meet at {where}"
+                                                                  if where else ""))
+        if not shorts:
+            self._say("Short-circuit check: no nets joined")
+        return shorts
+
+    def _shorten_tracks(self):
+        """With "Shorten tracks at the end": straighten detours and pull
+        corners tight (Session.shorten_tracks). None if off."""
+        try:
+            rules = self.session.freerouting_rules()
+            if not rules.get("shorten_tracks", True):
+                return None
+            self._say("Shortening tracks: looking for shorter ways round...")
+            import time as _time
+            last = [0.0]
+
+            def tick(i, n, done):
+                now = _time.monotonic()
+                if now - last[0] > 0.25:
+                    last[0] = now
+                    self.app.status.set(f"Shortening tracks: {done} shortened so far "
+                                        f"({i}/{n} looked at this pass)")
+                    try:
+                        self.update_idletasks()
+                    except tk.TclError:
+                        pass
+            sh = self.session.shorten_tracks(progress=tick)
+        except Exception as e:
+            self._say(f"Shortening tracks failed: {e}")
+            return None
+        if sh.get("undone"):
+            self._say("Shortening tracks: undone -- the re-laid routing would have joined "
+                      + "; ".join(" + ".join(x["nets"]) for x in sh["shorts"]))
+        else:
+            self._say(f"Shortening tracks: {sh['tracks']} track(s) shortened, "
+                      f"{sh['before'] / 1000:.1f} -> {sh['after'] / 1000:.1f} mm")
+        return sh
 
     def _stop(self):
         self._cancel = True
@@ -602,13 +681,22 @@ def open_freerouting_window(app):
     """Tools > Autoroute (Freerouting)... . One window per App."""
     win = getattr(app, "_freerouting_window", None)
     if win is not None and win.winfo_exists():
-        win._hide_when_done = False
-        win.deiconify()
-        if not win._running:
-            win.reload()
-        win.lift()
-        win.focus_set()
-        return win
+        try:
+            win._hide_when_done = False
+            win.deiconify()
+            if not win._running:
+                win.reload()
+            win.lift()
+            win.focus_set()
+            return win
+        except tk.TclError:
+            # half torn down (closed while being reopened): start afresh
+            if win._running:
+                raise
+            try:
+                win.destroy()
+            except tk.TclError:
+                pass
     win = FreeroutingWindow(app, app)
     app._freerouting_window = win
     return win
