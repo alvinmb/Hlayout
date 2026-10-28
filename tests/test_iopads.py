@@ -67,7 +67,8 @@ def test_iopads_command():
 def test_pad_size_comes_from_the_io_pad_rules():
     from hlayout.io.techfile import load_io_pad_rules, save_io_pad_rules
     s = _board()
-    assert load_io_pad_rules(s.library) == {"width": 300, "length": 600, "bond_inset": 150}
+    assert load_io_pad_rules(s.library) == {"width": 300, "length": 600, "bond_inset": 150,
+                                            "edge_margin": 250}
     save_io_pad_rules(s.library, {"width": 400, "length": 1000, "bond_inset": 200})
     s.assign_io_pads()
     x0, y0, x1, y1 = next(sh.bbox() for sh in s.library.cells["TOP"].shapes if getattr(sh, "pin", "") == "1")

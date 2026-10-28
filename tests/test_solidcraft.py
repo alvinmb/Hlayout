@@ -169,3 +169,28 @@ def test_3d_stack_skips_empty_layers_and_header_pins_stand_on_the_base(tmp_path)
     txt = open(write_freecad_macro(lib, "TOP", str(tmp_path / "m.FCMacro"))).read()
     assert "layer 49 (L49) : z 0.0120..0.0220 mm" in txt
     assert "V(1.00000,-3.00000,-0.63500)" in txt
+
+
+def test_freecad_enclosing_package_model_goes_under_the_substrate(tmp_path):
+    """A header package given a STEP model is placed from the substrate's
+    underside (less its floor, z_offset_um), not on top of the films."""
+    from hlayout.core.library import Library
+    from hlayout.io.freecadio import write_freecad_macro
+    from hlayout.io.techfile import save_component_models, save_layer_thickness
+    lib = Library("t")
+    top = lib.new_cell("TOP")
+    lib.layers.set_style(1, name="Substrate", fill=True, visible=True)
+    top.add_rectangle(1, 0, 0, 20000, 10000)
+    top.add_rectangle(3, 1000, 1000, 3000, 3000)
+    pkg = lib.new_cell("PKG")
+    pkg.add_path(61, [(-3000, -3000), (23000, -3000), (23000, 13000), (-3000, 13000),
+                      (-3000, -3000)], 100)
+    lib.new_cell("PIN").add_rectangle(49, -200, -200, 200, 200)
+    pkg.add_sref("PIN", (1500, -2000))
+    top.add_sref("PKG", (0, 0))
+    save_layer_thickness(lib, {1: 635, 3: 12})
+    save_component_models(lib, {"PKG": {"mode": "model", "model_path": "C:/m/K.step",
+                                        "z_offset_um": -1000}})
+    txt = open(write_freecad_macro(lib, "TOP", str(tmp_path / "m.FCMacro"))).read()
+    line = [l for l in txt.splitlines() if "_place_model(" in l and "K.step" in l][0]
+    assert "-1.63500" in line

@@ -255,6 +255,12 @@ Attached libraries:
                                        I/O Pads tab, unless w=/l=/inset= are given) and
                                        renames the nets. Also Tools >
                                        Assign I/O Pads... and Session.assign_io_pads()
+    IOPADS BOND [all=1] [pins=<n,n,...>] [layer=<n>] [w=] [l=] [inset=] [margin=]
+                                       bond the header pins: an I/O pad at the nearest
+                                       substrate edge (outer end margin= um in) and a
+                                       header bond for each pin with an I/O net (all=1:
+                                       every pin). Also Tools > Bond Header Pins... and
+                                       Session.bond_header()
     SHORTS                             copper joining two or more named nets (a short
                                        circuit spacing DRC can't see) and where they meet.
                                        Session.find_shorts()
@@ -2525,8 +2531,35 @@ class CommandInterpreter:
     def _cmd_iopads(self, args):
         """IOPADS [PLAN|APPLY] [w=<um>] [l=<um>] [inset=<um>] [csv=<file>] --
         optimise the I/O pinout; pad size from the I/O Pads rules unless given."""
-        usage = "usage: IOPADS [PLAN|APPLY] [w=<um>] [l=<um>] [inset=<um>] [csv=<file>]"
+        usage = ("usage: IOPADS [PLAN|APPLY] [w=<um>] [l=<um>] [inset=<um>] [csv=<file>] | "
+                 "IOPADS BOND [all=1] [pins=<n,n,...>] [layer=<n>] [w=] [l=] [inset=] [margin=]")
         sub = (args[0].upper() if args and "=" not in args[0] else "PLAN")
+        if sub == "BOND":
+            kw = {}
+            for a in args[1:]:
+                k, eq, v = a.partition("=")
+                k = k.lower()
+                if not eq:
+                    raise CommandError(usage)
+                try:
+                    if k == "all":
+                        kw["all_pins"] = v.lower() not in ("0", "false", "no")
+                    elif k == "pins":
+                        kw["pins"] = [t for t in v.replace(";", ",").split(",") if t.strip()]
+                    elif k == "layer":
+                        kw["layer"] = int(v) if v.lstrip("-").isdigit() else v
+                    elif k in ("w", "l", "inset", "margin"):
+                        kw[{"w": "pad_w", "l": "pad_l", "inset": "bond_inset",
+                            "margin": "edge_margin"}[k]] = float(v)
+                    else:
+                        raise CommandError(usage)
+                except ValueError:
+                    raise CommandError(usage)
+            r = self.session.bond_header(**kw)
+            out = f"header bonded: {r['pads']} pads + bonds on layer {r['layer']}"
+            if r["skipped"]:
+                out += "; skipped " + "; ".join(f"pin {p}: {w}" for p, w in r["skipped"].items())
+            return out
         if sub not in ("PLAN", "APPLY"):
             raise CommandError(usage)
         opts = {}

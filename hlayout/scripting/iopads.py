@@ -206,3 +206,114 @@ def apply(session, p: dict, pad_w: float = 300.0, pad_l: float = 600.0,
                 w.writerow([st["pin"], st["net"] or "", st.get("was") or ""])
     session._notify()
     return {"pads": len(p["sites"]), "csv": csv_path}
+
+
+def header_pins(session, cell, sub=None) -> Dict[str, Tuple[float, float]]:
+    """{pin: (x, y)} of the module's header (package) pins: the numbered
+    pads of the placed part with the most numbered pads off the substrate
+    -- the package the substrate sits in."""
+    from shapely.geometry import Point
+    sub = sub if sub is not None else session._substrate_box(cell)
+    best = {}
+    for r in cell.srefs:
+        pins = {}
+        for pin, xy in _pinned_points(session.library, r.cell_name, 1, _xf(r)):
+            if sub is None or not sub.contains(Point(xy)):
+                pins.setdefault(pin, xy)
+        if len(pins) > len(best):
+            best = pins
+    return best
+
+
+def _header_bond_layer(session):
+    """The layer header bonds go on: a drawn layer named for header bonds,
+    else the Wire Bond rules' layer."""
+    from ..io.techfile import load_bond_rules
+    lib = session.library
+    for n in range(len(lib.layers)):
+        nm = (lib.layers[n].name or "").lower()
+        if "bond" in nm and ("header" in nm or "package" in nm or "pin" in nm):
+            return n
+    return int(load_bond_rules(lib)["layer"])
+
+
+def bond_header(session, cell_name: Optional[str] = None, pins=None, all_pins: bool = False,
+                layer=None, pad_w: float = 300.0, pad_l: float = 600.0,
+                bond_inset: float = 150.0, edge_margin: float = 250.0,
+                width=None) -> dict:
+    """Bond the module's header pins to the substrate: for each header pin
+    (see header_pins()) a numbered I/O pad (pin = the header pin) on the
+    1st conductor at the nearest substrate edge -- its outer end
+    ``edge_margin`` in from the edge, ``pad_l`` long pointing in, ``pad_w``
+    wide along the edge -- and a header bond from the pin to the pad,
+    landing ``bond_inset`` in from the pad's outer end.
+
+    Which pins: ``pins`` (a list of pin numbers), else ``all_pins``, else
+    the pins with an IO.<pin> net name (every pin when there are none).
+    A pin's old I/O pad and its old header bond are replaced. One undo
+    step. Returns {"pads": n, "pins": [...], "layer": bond layer,
+    "skipped": {pin: reason}}."""
+    from shapely.geometry import Point
+    from shapely.ops import nearest_points
+    from ..io.techfile import load_net_names
+    lib = session.library
+    name = cell_name or session.current_cell_name
+    cell = lib.get_cell(name)
+    sub = session._substrate_box(cell)
+    if sub is None:
+        raise LayoutError("no substrate outline -- the I/O pads go at the substrate edge")
+    hp = header_pins(session, cell, sub)
+    if not hp:
+        raise LayoutError("no header pins found -- place the package (a part with numbered "
+                          "pads off the substrate) first")
+    if pins:
+        want = [str(p) for p in pins]
+    elif all_pins:
+        want = list(hp)
+    else:
+        io = {k[3:] for k in load_net_names(lib) if k.startswith("IO.")}
+        want = [p for p in hp if p in io] or list(hp)
+    la, _lb = session._route_layers()
+    bl = session.library.layers.resolve(layer) if layer is not None else _header_bond_layer(session)
+    if bl is None or bl < 0:
+        raise LayoutError("no bond layer -- pass layer= or set the Wire Bond rules' layer")
+    skipped = {}
+    done = []
+    ring = sub.exterior
+    with session._batch():
+        for pin in sorted(want, key=lambda p: (len(p), p)):
+            if pin not in hp:
+                skipped[pin] = "no such header pin"
+                continue
+            px, py = hp[pin]
+            q = nearest_points(ring, Point(px, py))[0]
+            dx, dy = q.x - px, q.y - py
+            if abs(dx) >= abs(dy):                 # pin left / right of the substrate
+                ux, uy = (1.0 if dx > 0 else -1.0), 0.0
+            else:                                  # pin below / above
+                ux, uy = 0.0, (1.0 if dy > 0 else -1.0)
+            # pad on the edge line straight in from the pin
+            ex, ey = (q.x, py) if uy == 0 else (px, q.y)
+            ox, oy = ex + ux * edge_margin, ey + uy * edge_margin      # outer end
+            cx, cy = ox + ux * pad_l / 2.0, oy + uy * pad_l / 2.0
+            hw, hh = (pad_l / 2.0, pad_w / 2.0) if uy == 0 else (pad_w / 2.0, pad_l / 2.0)
+            lx, ly = ox + ux * bond_inset, oy + uy * bond_inset         # bond landing
+            # replace this pin's old pad and its old header bond
+            cell.shapes[:] = [sh for sh in cell.shapes
+                              if not (isinstance(sh, Rectangle) and sh.layer == la
+                                      and str(getattr(sh, "pin", "")) == pin)]
+            for _ in range(4):
+                try:
+                    session.delete_wire_bond((px, py), layer=bl, cell_name=name)
+                except Exception:
+                    break
+            cell.add_rectangle(la, round(cx - hw), round(cy - hh), round(cx + hw),
+                               round(cy + hh), pin=pin)
+            try:
+                session.wire_bond([(px, py), (lx, ly)], layer=bl, width=width, cell_name=name)
+            except LayoutError as e:
+                skipped[pin] = str(e)
+                continue
+            done.append(pin)
+    session._notify()
+    return {"pads": len(done), "pins": done, "layer": bl, "skipped": skipped, "cell": name}

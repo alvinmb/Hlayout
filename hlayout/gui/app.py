@@ -532,6 +532,7 @@ class App(tk.Tk):
         toolsm.add_command(label="Generate Dielectric Fill...", command=self.show_dielectric_dialog)
         toolsm.add_command(label="Remove Dielectric Fill", command=self.remove_dielectric_fill)
         toolsm.add_command(label="Remove Unused Bonds...", command=self.remove_unused_bonds)
+        toolsm.add_command(label="Bond Header Pins...", command=self.bond_header)
         toolsm.add_command(label="Assign I/O Pads...", command=self.assign_io_pads)
         toolsm.add_command(label="Fix Vias...", command=self.fix_vias)
 
@@ -1986,11 +1987,12 @@ class App(tk.Tk):
         rules = load_io_pad_rules(self.session.library)
         ttk.Label(
             parent,
-            text="Module I/O pads, drawn by Tools > Assign I/O Pads... where each\n"
-                 "header bond lands on the substrate. Width runs along the\n"
-                 "substrate edge, length points in from the header; the bond\n"
-                 "lands the inset in from the pad's outer end, so the track\n"
-                 "leaves from the inner end.",
+            text="Module I/O pads, drawn by Tools > Bond Header Pins... and\n"
+                 "Tools > Assign I/O Pads... where each header bond lands on the\n"
+                 "substrate. Width runs along the substrate edge, length points\n"
+                 "in from the header; the bond lands the inset in from the pad's\n"
+                 "outer end, so the track leaves from the inner end. Bond Header\n"
+                 "Pins puts the pad's outer end the edge margin in from the edge.",
             justify="left", foreground="#555",
         ).pack(anchor="w", padx=12, pady=(12, 8))
         form = ttk.Frame(parent)
@@ -1998,7 +2000,9 @@ class App(tk.Tk):
         fields = []
         for row, (label, key) in enumerate((("Pad width (mm):", "width"),
                                             ("Pad length (mm):", "length"),
-                                            ("Bond inset from outer end (mm):", "bond_inset"))):
+                                            ("Bond inset from outer end (mm):", "bond_inset"),
+                                            ("Edge margin (mm, Bond Header Pins):",
+                                             "edge_margin"))):
             ttk.Label(form, text=label).grid(row=row, column=0, sticky="e", padx=4, pady=4)
             var = tk.DoubleVar(value=dbu_to_mm(rules[key]))
             ttk.Spinbox(form, from_=0.0, to=20.0, increment=0.05, width=10,
@@ -2014,6 +2018,8 @@ class App(tk.Tk):
                 return "Pad width and length must be more than 0."
             if vals["bond_inset"] < 0 or vals["bond_inset"] > vals["length"]:
                 return "The bond inset must be between 0 and the pad length."
+            if vals["edge_margin"] < 0:
+                return "The edge margin must be 0 or more."
             save_io_pad_rules(self.session.library, vals)
             return None
 
@@ -2822,6 +2828,47 @@ class App(tk.Tk):
             return
         r = self.session.fix_vias(cell_name=self.canvas.cell_name)
         self.status.set(f"vias redrawn: {r['vias']} via(s), {r['via_cells']} via cell(s)")
+        self.refresh_all()
+
+    def bond_header(self):
+        """Tools > Bond Header Pins...: an I/O pad at the substrate edge and a
+        header bond for each header pin with an I/O net (see
+        Session.bond_header)."""
+        from .. import scripting as _s  # noqa: F401
+        from ..scripting import iopads
+        from ..io.techfile import load_net_names
+        cell = self.session.library.get_cell(self.canvas.cell_name)
+        try:
+            hp = iopads.header_pins(self.session, cell)
+        except Exception as e:
+            dialogs.show_error("Bond Header Pins", str(e), parent=self)
+            return
+        if not hp:
+            dialogs.show_error("Bond Header Pins", "No header pins found -- place the package "
+                               "(a part with numbered pads off the substrate) first.", parent=self)
+            return
+        io = {k[3:] for k in load_net_names(self.session.library) if k.startswith("IO.")}
+        used = [p for p in hp if p in io]
+        if not dialogs.ask_yes_no(
+                "Bond Header Pins",
+                f"{len(hp)} header pins found, {len(used)} with an I/O net.\n\n"
+                "Draw an I/O pad at the substrate edge and a header bond for "
+                + (f"the {len(used)} pins with an I/O net?" if used else "every pin?")
+                + "\n\nPad size and edge margin: Setup > Technology Properties, I/O Pads "
+                "tab. A pin's old pad and bond are replaced. (IOPADS BOND all=1 bonds "
+                "every pin.)",
+                parent=self):
+            return
+        try:
+            r = self.session.bond_header(cell_name=self.canvas.cell_name)
+        except Exception as e:
+            dialogs.show_error("Bond Header Pins", str(e), parent=self)
+            return
+        msg = f"Header bonded: {r['pads']} pads and bonds on layer {r['layer']}"
+        if r["skipped"]:
+            msg += "; skipped " + ", ".join(f"pin {p} ({why})" for p, why in
+                                            list(r["skipped"].items())[:4])
+        self.status.set(msg)
         self.refresh_all()
 
     def assign_io_pads(self):

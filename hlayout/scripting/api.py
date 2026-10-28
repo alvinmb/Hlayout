@@ -5478,6 +5478,48 @@ class Session:
         self._notify()
         return {"vias": n_flat, "via_cells": len(rebuilt)}
 
+    def bond_header(self, cell_name: Optional[str] = None, pins=None, all_pins: bool = False,
+                    layer=None, pad_w: Optional[float] = None, pad_l: Optional[float] = None,
+                    bond_inset: Optional[float] = None, edge_margin: Optional[float] = None,
+                    width=None) -> dict:
+        """Bond the module's header (package) pins to the substrate: for
+        each pin a numbered I/O pad on the 1st conductor at the nearest
+        substrate edge and a header bond from the pin to it -- e.g. after
+        placing or replacing the package. Then assign_io_pads() can
+        optimise which net goes on which pin. Pins: ``pins``, else
+        ``all_pins``, else those with an IO.<pin> net name. Sizes default
+        to the I/O pad rules (I/O Pads tab); the bond layer to a layer
+        named for header bonds, else the Wire Bond layer. The dielectric
+        fill is redone if there is one. One undo step. Returns
+        {"pads", "pins", "layer", "skipped"}. See iopads.bond_header()."""
+        from . import iopads
+        from ..io.techfile import load_io_pad_rules
+        pr = load_io_pad_rules(self.library)
+        kw = dict(pad_w=float(pr["width"] if pad_w is None else pad_w),
+                  pad_l=float(pr["length"] if pad_l is None else pad_l),
+                  bond_inset=float(pr["bond_inset"] if bond_inset is None else bond_inset),
+                  edge_margin=float(pr["edge_margin"] if edge_margin is None else edge_margin))
+        if kw["pad_w"] <= 0 or kw["pad_l"] <= 0 or kw["bond_inset"] < 0 or kw["edge_margin"] < 0:
+            raise LayoutError("I/O pad width and length must be positive, the bond inset and "
+                              "edge margin 0 or more")
+        with self._batch():
+            r = iopads.bond_header(self, cell_name=cell_name, pins=pins, all_pins=all_pins,
+                                   layer=layer, width=width, **kw)
+            cell = self.library.get_cell(r["cell"])
+            try:
+                diel = int(load_dielectric_rules(self.library)["layer"])
+            except Exception:
+                diel = -1
+            if r["pads"] and diel >= 0 and any(
+                    s.layer == diel and getattr(s, "datatype", 0) == self.DIELECTRIC_FILL_DATATYPE
+                    for s in cell.shapes):
+                try:
+                    self.generate_dielectric(cell_name=r["cell"])
+                except Exception:
+                    pass
+        self._notify()
+        return r
+
     def assign_io_pads(self, cell_name: Optional[str] = None, apply: bool = True,
                        csv_path: Optional[str] = None, pad_w: Optional[float] = None,
                        pad_l: Optional[float] = None,

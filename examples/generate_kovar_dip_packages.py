@@ -2,23 +2,25 @@
 (20, 30 and 40 pins by default): 0.1 in (2.54 mm) pin pitch, 0.9 in
 (22.86 mm) row to row, each pin in a glass-to-metal seal through the
 package floor. Matching 3D STEP models come from
-build_STEP_parts/build_kovar_dip.py (same dimensions, same origin),
-into examples/step_models/kovar_dip.
+examples/step_models/kovar_dip/build_step_models.py (same dimensions,
+same origin).
 
 Each package cell KOVAR_DIP<n> has:
 
   * the outside of the Kovar body and the inside of the cavity as two
     closed outline Paths on LAYER 61 (0.1 mm), every corner chamfered
     0.6 mm -- the walls are 1 mm thick;
-  * one placed KOVAR_PIN_SEAL per pin, the placement's pin number
-    "1".."n" set (pin 1 bottom left, counter-clockwise from above);
+  * a numbered pad per pin: the glass seal's footprint (1.6 mm round)
+    on LAYER 49, pin "1".."n" (pin 1 bottom left, counter-clockwise from
+    above) -- the bond target, and what shows the pin number on screen
+    and feeds the netlist / I/O pad numbering;
+  * one placed KOVAR_PIN_SEAL per pin (its pin number set too), drawing
+    the pin (0.46 mm) and seal circles on LAYER 63;
   * a pin-1 dot and a "J" ref-des placeholder on LAYER 62.
 
-KOVAR_PIN_SEAL is the bond target -- the glass seal's footprint
-(1.6 mm round) on LAYER 49 -- plus the pin (0.46 mm) and seal circles
-drawn on LAYER 63, the same layers as the Header_Pin_Round pins already
-used in the example designs. Put layer 49 in the Wire Bond rules' pad
-layers if your design does not already.
+These are the same layers as the Header_Pin_Round pins already used in
+the example designs. Put layer 49 in the Wire Bond rules' pad layers if
+your design does not already.
 
 Origin: the BOTTOM-LEFT corner of the body, the body spanning (0, 0) to
 (L, W) -- this family's convention; the STEP models use the same
@@ -52,7 +54,7 @@ DRAWING_LAYER = 63
 OUTLINE_WIDTH_MM = 0.1
 LABEL_HEIGHT_MM = 1.0
 
-#: all mm -- keep in step with build_STEP_parts/build_kovar_dip.py
+#: all mm -- keep in step with step_models/kovar_dip/build_step_models.py
 PITCH_MM = 2.54          # 0.1 in, pin to pin
 ROW_MM = 22.86           # 0.9 in, row to row
 WALL_MM = 1.0
@@ -105,7 +107,6 @@ def build_pin_cell(lib):
     if PIN_CELL in lib.cells:
         return lib.cells[PIN_CELL]
     c = lib.new_cell(PIN_CELL)
-    c.add_polygon(SEAL_LAYER, _circle(SEAL_D_MM))       # glass seal: the bond target
     c.add_polygon(DRAWING_LAYER, _circle(SEAL_D_MM))
     c.add_polygon(DRAWING_LAYER, _circle(PIN_D_MM))
     return c
@@ -124,8 +125,12 @@ def build_package(lib, n):
     cell.add_path(OUTLINE_LAYER, _chamfered_ring(mm_to_dbu(WALL_MM), mm_to_dbu(WALL_MM),
                                                  mm_to_dbu(WALL_MM + il),
                                                  mm_to_dbu(WALL_MM + iw), c), w)
+    seal = _circle(SEAL_D_MM)
     for pin, x, y in pin_sites(n):
-        cell.add_sref(PIN_CELL, (mm_to_dbu(x), mm_to_dbu(y)), pin=str(pin))
+        px, py = mm_to_dbu(x), mm_to_dbu(y)
+        # the numbered seal pad, flat in the package cell
+        cell.add_polygon(SEAL_LAYER, [(px + sx, py + sy) for sx, sy in seal], pin=str(pin))
+        cell.add_sref(PIN_CELL, (px, py), pin=str(pin))
     # pin-1 dot beside pin 1, between its seal and the end wall
     _p, x1, y1 = pin_sites(n)[0]
     dot = [(px + mm_to_dbu(x1 - SEAL_D_MM / 2.0 - (x1 - WALL_MM - SEAL_D_MM / 2.0) / 2.0),

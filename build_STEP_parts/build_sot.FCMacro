@@ -14,7 +14,8 @@ V = App.Vector
 # <HLayout>/examples/step_models/sot wherever it is run from
 _ROOT = (os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
          if "__file__" in globals() else os.getcwd())
-OUT_DIR = os.path.join(_ROOT, "examples", "step_models", "sot")
+# HLAYOUT_STEP_DIR (set by build_all.py) overrides where the STEP files go
+OUT_DIR = os.path.join(os.environ.get("HLAYOUT_STEP_DIR") or os.path.join(_ROOT, "examples", "step_models"), "sot")
 os.makedirs(OUT_DIR, exist_ok=True)
 
 

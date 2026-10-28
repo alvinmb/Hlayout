@@ -744,6 +744,7 @@ DEFAULT_IO_PAD_RULES = {
     "width": 300,
     "length": 600,
     "bond_inset": 150,
+    "edge_margin": 250,     # Bond Header Pins: pad outer end in from the substrate edge
 }
 
 

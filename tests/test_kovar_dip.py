@@ -23,5 +23,7 @@ def test_kovar_dip_cells_pins_rows_and_walls():
         assert ib[0] - ob[0] == 1000 and ob[2] - ib[2] == 1000     # 1 mm walls
         assert min(p[0] for p in outer.points) == 0 == min(p[1] for p in outer.points)  # origin
         assert len(outer.points) == 9                               # all four corners chamfered
-    seal = lib.cells[K.PIN_CELL]
-    assert any(sh.layer == K.SEAL_LAYER for sh in seal.shapes)
+        pads = {sh.pin: sh.bbox() for sh in c.shapes if sh.layer == K.SEAL_LAYER}
+        assert sorted(int(p) for p in pads) == list(range(1, n + 1))    # numbered pads
+        b = pads["1"]
+        assert ((b[0] + b[2]) // 2, (b[1] + b[3]) // 2) == pins[1]

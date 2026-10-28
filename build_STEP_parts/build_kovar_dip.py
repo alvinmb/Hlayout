@@ -9,8 +9,13 @@ into the cavity above the floor and runs 5 mm out below the package.
 Pin 1 bottom left (−X, −Y), numbered counter-clockwise from above (the
 DIP convention), so pin n/2 is bottom right and pin n top left. The
 origin is the BOTTOM-LEFT corner of the body (body spanning (0, 0) to
-(L, W)) with the package underside at Z = 0 -- the same origin as the
-2D cells from examples/generate_kovar_dip_packages.py. Each STEP is an assembly of three coloured parts: body (Kovar),
+(L, W)) -- the same origin as the 2D cells from
+examples/generate_kovar_dip_packages.py -- and Z = 0 is the top of the
+package floor, where the substrate sits (the underside is at Z = -1 mm),
+like the chip_wire header models: give the part's component model
+z_ref = substrate_bottom, or just let HLayout's FreeCAD export place it
+(a package enclosing the substrate is referenced to its underside
+automatically). Each STEP is an assembly of three coloured parts: body (Kovar),
 seals (glass) and pins.
 
 Run:  python build_STEP_parts/build_kovar_dip.py [out_dir]     (needs cadquery)
@@ -96,7 +101,8 @@ def make_pins(n):
 
 def build(n, out_dir):
     L, W, _il, _iw = body_size(n)
-    shift = (L / 2.0, W / 2.0, 0)               # body bottom-left to the origin
+    shift = (L / 2.0, W / 2.0, -FLOOR)          # body bottom-left to the origin,
+    #                                             floor top to Z = 0
     a = cq.Assembly(name=f"KOVAR_DIP{n}")
     a.add(make_body(n).translate(shift), name="body", color=KOVAR)
     a.add(make_seals(n).translate(shift), name="seals", color=GLASS)

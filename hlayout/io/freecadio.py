@@ -806,7 +806,19 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
                 lines.append(f"_add({obj_name!r}, _sh, {_PACKAGE_RGB!r})")
                 n_comp += 1
                 continue
-        if entry.get("z_ref") == "substrate_bottom":
+        encloses = False
+        if bb is not None and sub_box is not None:
+            cs = [xf(p_) for p_ in ((bb[0], bb[1]), (bb[2], bb[1]), (bb[2], bb[3]), (bb[0], bb[3]))]
+            encloses = (min(c[0] for c in cs) <= sub_box[0] + 1
+                        and min(c[1] for c in cs) <= sub_box[1] + 1
+                        and max(c[0] for c in cs) >= sub_box[2] - 1
+                        and max(c[1] for c in cs) >= sub_box[3] - 1)
+        if entry.get("z_ref") == "substrate_bottom" or encloses:
+            # an enclosing package (header) model: the substrate sits IN it,
+            # so the model is placed from the substrate's underside -- with
+            # z_offset_um = minus the package floor thickness, the floor
+            # ends up under the substrate (resting on the films would bury
+            # the whole circuit in the floor)
             base_expr = f"{-sub_t_mm + zoff:.5f}"
         elif bb is not None:
             # rests on whatever film is under its footprint -- worked out
