@@ -74,3 +74,98 @@ def test_builds_headless_in_solidcraft(tmp_path):
     assert r["errors"] == []
     assert r["bodies"] >= 5            # substrate, 2 copper, die, bond
     assert os.path.getsize(out) > 1000
+
+
+def test_header_package_goes_under_the_substrate_and_header_bonds_are_wires():
+    """A package enclosing the substrate (a header) is a base under the
+    substrate, not a box burying the circuit; a die carrying its own
+    bonds is die-thick; every layer named for bonds is piped as wire."""
+    from hlayout.core.library import Library
+    from hlayout.io.solidcraftio import build_batches
+    from hlayout.io.techfile import save_layer_thickness
+    lib = Library("t")
+    top = lib.new_cell("TOP")
+    lib.layers.set_style(1, name="Substrate", fill=True, visible=True)
+    lib.layers.set_style(3, name="Conductor", fill=True, visible=True)
+    lib.layers.set_style(60, name="Header_wire_Bond", fill=True, visible=True)
+    lib.layers.set_style(59, name="Chip_wire_Bond", fill=True, visible=True)
+    top.add_rectangle(1, 0, 0, 20000, 10000)
+    top.add_rectangle(3, 1000, 1000, 3000, 3000)
+    top.add_path(60, [(1500, -2000), (1500, 1500)], 50)
+    pkg = lib.new_cell("40_PIN_pkg")
+    pkg.add_path(61, [(-3000, -3000), (23000, -3000), (23000, 13000), (-3000, 13000),
+                      (-3000, -3000)], 100)
+    lib.new_cell("PIN").add_rectangle(49, -200, -200, 200, 200)
+    pkg.add_sref("PIN", (1500, -2000))
+    top.add_sref("40_PIN_pkg", (0, 0))
+    die = lib.new_cell("DIE_X")
+    die.add_rectangle(20, -700, -700, 700, 700)
+    die.add_path(59, [(-500, 500), (-1500, 1500)], 25)
+    top.add_sref("DIE_X", (10000, 5000), label="U1")
+    save_layer_thickness(lib, {1: 635, 3: 12, 60: 25, 59: 25})
+    batches = build_batches(lib, "TOP")
+    labels = [b[0] for b in batches]
+    assert not any("Header_wire_Bond" in l for l in labels)            # not a film
+    assert any(l.endswith("wire bonds") and l.startswith("2 ") for l in labels)
+    boxes = {c["params"]["body_name"]: c["params"] for b in batches for c in b[1]
+             if c["command"] == "solid.box"}
+    pk = boxes["40_PIN_pkg_1"]
+    assert pk["corner"][2] + pk["height"] <= -0.635 + 1e-6             # under the substrate
+    assert abs(boxes["U1"]["height"] - 0.38) < 1e-6
+
+
+def test_freecad_macro_package_under_substrate_die_body_and_all_bonds(tmp_path):
+    """The FreeCAD export: the header package is a base under the
+    substrate, a die's box is its own body (not its fingers and bonds),
+    die-thick, and every bond layer is wire, not film."""
+    from hlayout.core.library import Library
+    from hlayout.io.freecadio import write_freecad_macro
+    from hlayout.io.techfile import save_layer_thickness
+    lib = Library("t")
+    top = lib.new_cell("TOP")
+    lib.layers.set_style(1, name="Substrate", fill=True, visible=True)
+    lib.layers.set_style(60, name="Header_wire_Bond", fill=True, visible=True)
+    lib.layers.set_style(59, name="Chip_wire_Bond", fill=True, visible=True)
+    top.add_rectangle(1, 0, 0, 20000, 10000)
+    top.add_path(60, [(1500, -2000), (1500, 1500)], 50)
+    pkg = lib.new_cell("40_PIN_pkg")
+    pkg.add_path(61, [(-3000, -3000), (23000, -3000), (23000, 13000), (-3000, 13000),
+                      (-3000, -3000)], 100)
+    lib.new_cell("PIN").add_rectangle(49, -200, -200, 200, 200)
+    pkg.add_sref("PIN", (1500, -2000))
+    top.add_sref("40_PIN_pkg", (0, 0))
+    die = lib.new_cell("DIE_X")
+    die.add_rectangle(20, -700, -700, 700, 700)
+    die.add_path(59, [(-500, 500), (-1500, 1500)], 25)
+    die.add_rectangle(3, -1700, 1300, -1300, 1700)
+    top.add_sref("DIE_X", (10000, 5000), label="U1")
+    save_layer_thickness(lib, {1: 635, 3: 12, 60: 25, 59: 25})
+    txt = open(write_freecad_macro(lib, "TOP", str(tmp_path / "m.FCMacro"))).read()
+    assert "package 40_PIN_pkg (base under the substrate)" in txt
+    assert "Header_wire_Bond" not in txt.split("# --- wire bonds")[0]   # not a film
+    assert "extrude 0.3800 mm" in txt
+    die_block = txt.split("# --- component DIE_X")[1].split("_add(")[0]
+    assert "9.3" in die_block and "8.3" not in die_block                 # body only
+
+
+def test_3d_stack_skips_empty_layers_and_header_pins_stand_on_the_base(tmp_path):
+    """A layer with a thickness but nothing drawn takes no place in the
+    stack, and a film off the substrate (a header pin) is a post from the
+    substrate's underside up -- in both the SolidCraft and FreeCAD builds."""
+    from hlayout.core.library import Library
+    from hlayout.io.freecadio import write_freecad_macro
+    from hlayout.io.solidcraftio import build_batches
+    from hlayout.io.techfile import save_layer_thickness
+    lib = Library("t")
+    top = lib.new_cell("TOP")
+    lib.layers.set_style(1, name="Substrate", fill=True, visible=True)
+    top.add_rectangle(1, 0, 0, 20000, 10000)
+    top.add_rectangle(3, 1000, 1000, 3000, 3000)
+    top.add_rectangle(49, 1000, -3000, 1500, -2500)            # header pin, off the substrate
+    save_layer_thickness(lib, {1: 635, 3: 12, 10: 200, 49: 10})   # 10: nothing drawn
+    sk = {c["params"]["name"]: c["params"]["offset"] for b in build_batches(lib, "TOP")
+          for c in b[1] if c["command"] == "sketch.create"}
+    assert abs(sk["L49 L49 posts sketch"] + 0.635) < 1e-6
+    txt = open(write_freecad_macro(lib, "TOP", str(tmp_path / "m.FCMacro"))).read()
+    assert "layer 49 (L49) : z 0.0120..0.0220 mm" in txt
+    assert "V(1.00000,-3.00000,-0.63500)" in txt

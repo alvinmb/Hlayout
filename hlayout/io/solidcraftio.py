@@ -29,6 +29,12 @@ from .techfile import (DEFAULT_COMPONENT_HEIGHT_UM, default_component_models,
 #: points round caps and buffers make, far below anything visible
 SIMPLIFY_UM = 1.0
 COMPONENT_HEX = "#26262b"
+PACKAGE_HEX = "#8a8f96"          # header / package base under the substrate
+#: a bare chip-and-wire die (a part carrying its own wire bonds) with no
+#: height of its own in the component models: a typical die thickness
+DIE_HEIGHT_UM = 380.0
+#: an enclosing package (header) the substrate sits on: its base depth
+PACKAGE_BASE_UM = 500.0
 SUBSTRATE_HEX = "#f7f7f2"
 GLAZE_HEX = "#38b85a"
 
@@ -123,6 +129,13 @@ def build_batches(library, cell_name: str, *, layer_thickness=None, component_mo
         bond_layer = int(load_bond_rules(library)["layer"])
     except Exception:
         bond_layer = -1
+    # every wire-bond layer: the Wire Bond rules' one plus any layer named
+    # for bonds (separate chip-bond and header-bond layers) -- drawn as
+    # wires, never extruded as a flat film
+    bond_layers = {bond_layer} if bond_layer >= 0 else set()
+    drawn = {sh.layer for c in library.cells.values() for sh in c.shapes}
+    bond_layers |= {n for n in drawn if 0 <= n < len(library.layers)
+                    and "bond" in (library.layers[n].name or "").lower()}
     loop_h = _mm(loop_height_um if loop_height_um is not None else F._DEFAULT_LOOP_HEIGHT_UM)
 
     subs = F.substrate_layers(library)
@@ -149,11 +162,10 @@ def build_batches(library, cell_name: str, *, layer_thickness=None, component_mo
     # films, in print order
     z = 0.0
     surf = []                                    # (geometry, top z mm)
+    from shapely.ops import unary_union as _uu0
+    sub_geom = _uu0(sub_polys) if sub_polys else None
     for n in sorted(film_layers):
-        t = _mm(thick[str(n)])
-        zb, zt = z, z + t
-        z = zt
-        if n == bond_layer:
+        if n in bond_layers:
             continue
         try:
             geom = layer_to_shapely_flattened(library, cell, n,
@@ -166,20 +178,40 @@ def build_batches(library, cell_name: str, *, layer_thickness=None, component_mo
         polys = [p for p in F._iter_polygons(geom) if p.area > 1.0]
         if not polys:
             continue
+        # only layers actually printed here take a place in the stack
+        t = _mm(thick[str(n)])
+        zb, zt = z, z + t
+        z = zt
         surf.append((geom, zt))
         lay = library.layers[n]
         colour = GLAZE_HEX if n in glazes else _hex(F._rgb01(lay.color))
         name = _safe(f"{lay.name} L{n}")
-        b = _film_batch(name, polys, round(zb, 5), round(t, 5), colour,
-                        opacity=0.45 if n in glazes else 1.0)
-        if b:
-            batches.append((f"Layer {n} {lay.name} ({len(polys)} shapes)", b[0], b[1]))
+        # off the substrate (a header pin): a post from the substrate's
+        # underside -- the package base -- up to this film's top
+        on = [q for q in polys if sub_geom is None or q.intersects(sub_geom)]
+        off = [q for q in polys if sub_geom is not None and not q.intersects(sub_geom)]
+        op = 0.45 if n in glazes else 1.0
+        if on:
+            b = _film_batch(name, on, round(zb, 5), round(t, 5), colour, opacity=op)
+            if b:
+                batches.append((f"Layer {n} {lay.name} ({len(on)} shapes)", b[0], b[1]))
+        if off:
+            b = _film_batch(f"{name} posts", off, round(-sub_t, 5), round(zt + sub_t, 5),
+                            colour, opacity=op)
+            if b:
+                batches.append((f"Layer {n} {lay.name} ({len(off)} off the substrate)",
+                                b[0], b[1]))
 
     # parts: a dark body the size of the part's own outline (not its pads
     # or die-attach pad, which are printed films), resting on what's under it
     tops = []                                    # (x0, y0, x1, y1, z_top) DBU / mm
     seen = {}
+    sub_box = None
+    if sub_polys:
+        from shapely.ops import unary_union as _uu
+        sub_box = _uu(sub_polys).bounds         # DBU
     part_cmds = [{"command": "component.create", "params": {"name": "Parts", "activate": True}}]
+    pkg_cmds = [{"command": "component.create", "params": {"name": "Package", "activate": True}}]
     for kind, payload in F._walk_instances(library, cell_name, film_layers, comp_models):
         if kind != "component":
             continue
@@ -188,7 +220,7 @@ def build_batches(library, cell_name: str, *, layer_thickness=None, component_mo
         if c is None:
             continue
         body = [sh.bbox() for sh in c.shapes if sh.layer not in film_layers
-                and sh.layer not in pad_only and sh.layer != bond_layer]
+                and sh.layer not in pad_only and sh.layer not in bond_layers]
         if not body:
             body = [sh.bbox() for sh in c.shapes]
         if not body:
@@ -198,24 +230,43 @@ def build_batches(library, cell_name: str, *, layer_thickness=None, component_mo
         cs = [xf(p) for p in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))]
         fx0, fy0 = min(p[0] for p in cs), min(p[1] for p in cs)
         fx1, fy1 = max(p[0] for p in cs), max(p[1] for p in cs)
-        base = F._rest_z(surf, fx0, fy0, fx1, fy1)
-        h = _mm(float(entry.get("height_um", DEFAULT_COMPONENT_HEIGHT_UM)))
         seen[cn] = seen.get(cn, 0) + 1
         name = _safe(label or f"{cn}_{seen[cn]}")
+        if sub_box is not None and fx0 <= sub_box[0] + 1 and fy0 <= sub_box[1] + 1 \
+                and fx1 >= sub_box[2] - 1 and fy1 >= sub_box[3] - 1:
+            # an enclosing package (a header the substrate sits in): its
+            # base goes UNDER the substrate, showing round it -- a box over
+            # everything would bury the whole circuit
+            hb = _mm(PACKAGE_BASE_UM)
+            pkg_cmds.append(
+                {"command": "solid.box",
+                 "params": {"length": _mm(fx1 - fx0), "width": _mm(fy1 - fy0), "height": hb,
+                            "corner": [_mm(fx0), _mm(fy0), round(-sub_t - hb, 5)],
+                            "operation": "new", "body_name": name}})
+            continue
+        base = F._rest_z(surf, fx0, fy0, fx1, fy1)
+        if "height_um" in entry:
+            h = _mm(float(entry["height_um"]))
+        elif any(sh.layer in bond_layers for sh in c.shapes):
+            h = _mm(DIE_HEIGHT_UM)               # a bare die with its own bonds
+        else:
+            h = _mm(DEFAULT_COMPONENT_HEIGHT_UM)
         part_cmds.append(
             {"command": "solid.box",
              "params": {"length": _mm(fx1 - fx0), "width": _mm(fy1 - fy0), "height": h,
                         "corner": [_mm(fx0), _mm(fy0), round(base, 5)],
                         "operation": "new", "body_name": name}})
         tops.append((fx0, fy0, fx1, fy1, base + h))
+    if len(pkg_cmds) > 1:
+        batches.append(("Package", pkg_cmds + _close_component("Package", PACKAGE_HEX), None))
     if len(part_cmds) > 1:
         batches.append((f"{len(part_cmds) - 1} parts",
                         part_cmds + _close_component("Parts", COMPONENT_HEX), None))
 
     # wire bonds: an arc in the vertical plane through both ends, piped
-    if bond_layer >= 0:
+    if bond_layers:
         from shapely.geometry import Point
-        segs = F._bond_segments(library, cell_name, bond_layer)
+        segs = [s_ for n in sorted(bond_layers) for s_ in F._bond_segments(library, cell_name, n)]
 
         def zat(x, y):
             best = 0.0
@@ -227,7 +278,8 @@ def build_batches(library, cell_name: str, *, layer_thickness=None, component_mo
                     best = zt
             return best
 
-        colour = _hex(F._rgb01(library.layers[bond_layer].color))
+        colour = _hex(F._rgb01(library.layers[bond_layer if bond_layer >= 0
+                                              else min(bond_layers)].color))
         names = []
         cmds = [{"command": "component.create", "params": {"name": "Wire bonds", "activate": True}}]
         for k, (p0, p1, w) in enumerate(segs, 1):

@@ -795,6 +795,7 @@ DEFAULT_TOPVIEW_SETTINGS = {
     "used_only": True,
     "refdes": True,
     "refdes_height_um": 600.0,
+    "bond_width_um": 200.0,     # wire bonds drawn one bold line this wide (0 = outline)
 }
 
 
@@ -821,7 +822,8 @@ def load_topview_settings(library: Library) -> dict:
         out["out_cell"] = data["out_cell"].strip()
     if "excluded" in data:
         out["excluded"] = _layer_list(data["excluded"])
-    for k in ("line_width_um", "hatch_pitch_um", "simplify_um", "refdes_height_um"):
+    for k in ("line_width_um", "hatch_pitch_um", "simplify_um", "refdes_height_um",
+              "bond_width_um"):
         try:
             out[k] = float(data.get(k, out[k]))
         except (TypeError, ValueError):

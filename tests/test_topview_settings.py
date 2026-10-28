@@ -96,3 +96,72 @@ def test_top_view_refdes_sits_on_the_part_centroid_not_the_floated_label():
     cx, cy = (bx0 + bx1) / 2, (by0 + by1) / 2
     assert abs(t.origin[0] + 0.6 * 500 * 2 / 2 - cx) <= 1
     assert abs(t.origin[1] + 500 / 2 - cy) <= 1
+
+
+def test_top_view_die_with_its_own_bonds_hides_the_conductor_under_it():
+    """A chip-and-wire die part (body, pads and its own wire bonds drawn
+    flat in one cell, no placed pins) is a solid component: a conductor
+    track running under the die is hidden there."""
+    from hlayout.io.techfile import load_bond_rules, save_bond_rules
+    s = _session()
+    lib = s.library
+    bond = 40
+    rules = load_bond_rules(lib)
+    rules["layer"] = bond
+    save_bond_rules(lib, rules)
+    die = lib.new_cell("DIE_X")
+    die.add_rectangle(20, -700, -700, 700, 700)               # die body
+    die.add_rectangle(21, -600, 500, -500, 600)               # die pad
+    die.add_path(bond, [(-550, 550), (-1500, 1500)], 25)       # its own bond
+    s.place_cell("DIE_X", (5000, 5000))
+    s.cell.add_rectangle(0, 3000, 4900, 7000, 5100)           # track under the die
+    s.mask_op_top_view(9, exclude_layers=[2], out_cell="TV")
+    xs = sorted({p[0] for sh in lib.cells["TV"].shapes for p in sh.points
+                 if 4900 <= p[1] <= 5100 and getattr(sh, "layer", 9) == 9})
+    assert not [x for x in xs if 4400 < x < 5600]             # nothing drawn under the body
+
+
+def test_top_view_epoxy_wider_than_the_die_shows_and_hides_the_conductor():
+    """Die-attach epoxy (a layer named Epoxy) is its own tier under the
+    part: where the fillet spreads past the die its edge is drawn and the
+    conductor under it is hidden."""
+    from hlayout.io.techfile import load_bond_rules, save_bond_rules
+    s = _session()
+    lib = s.library
+    rules = load_bond_rules(lib)
+    rules["layer"] = 40
+    save_bond_rules(lib, rules)
+    lib.layers.set_style(20, name="Epoxy", fill=False, visible=False)
+    die = lib.new_cell("DIE_E")
+    die.add_rectangle(21, -700, -700, 700, 700)               # die body
+    die.add_rectangle(20, -1200, -1200, 1200, 1200)           # wider epoxy fillet
+    die.add_path(40, [(-550, 550), (-1500, 1500)], 25)
+    s.place_cell("DIE_E", (5000, 5000))
+    s.cell.add_rectangle(0, 3000, 4900, 7000, 5100)           # track under it
+    assert s.top_view_layer_roles().get(20) == "epoxy"
+    s.mask_op_top_view(9, exclude_layers=[2], out_cell="TV")
+    pts = [p for sh in lib.cells["TV"].shapes for p in sh.points]
+    xs = sorted({p[0] for p in pts if 4900 <= p[1] <= 5100})
+    assert not [x for x in xs if 3900 < x < 6100]             # hidden under the epoxy
+    assert any(p[0] == 3800 for p in pts) and any(p[0] == 4300 for p in pts)  # epoxy + die edges
+
+
+def test_top_view_draws_bonds_as_bold_lines_on_every_bond_layer():
+    """Bond wires come out as one line of the bond width along the wire
+    -- on the Wire Bond layer AND any other layer named for bonds (a
+    header-bond layer) -- not as the hairline outline of the real wire."""
+    from hlayout.core.shapes import Path
+    from hlayout.io.techfile import save_topview_settings
+    s = _session()
+    lib = s.library
+    lib.layers.set_style(41, name="Header_wire_Bond", fill=True, visible=True)
+    s.cell.add_path(41, [(500, 500), (500, 4000)], 50)
+    assert s.top_view_layer_roles().get(41) == "bond"
+    save_topview_settings(lib, {"result_layer": 9, "excluded": [2], "bond_width_um": 250})
+    s.top_view_from_settings()
+    bonds = [sh for sh in lib.cells["TOPVIEW"].shapes
+             if isinstance(sh, Path) and sh.width == 250]
+    assert [list(map(tuple, b.points)) for b in bonds] == [[(500, 500), (500, 4000)]]
+    save_topview_settings(lib, {"bond_width_um": 0})
+    s.top_view_from_settings()
+    assert not [sh for sh in lib.cells["TOPVIEW"].shapes if getattr(sh, "width", 0) == 250]

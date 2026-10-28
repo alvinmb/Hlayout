@@ -7,7 +7,7 @@ moment it changes (techfile.save_topview_settings), so the window -- and
 TOPVIEW with no arguments -- start from the same settings next time.
 
 The view is role-based: placed components are always on top, then
-resistor ink, conductor, any other drawn layer, and the substrate at
+die-attach epoxy (any layer named epoxy / die attach), resistor ink, conductor, any other drawn layer, and the substrate at
 the bottom; glaze and wire bonds are overlays that never hide anything.
 Unticking a layer leaves it out of the view. The result layer is never
 read back in as input. The view is always of the main design cell and
@@ -24,8 +24,9 @@ from ..core.units import dbu_to_mm, mm_to_dbu
 from ..io.techfile import load_topview_settings, save_topview_settings
 
 #: stacking order shown in the table, top of the view first
-ROLE_ORDER = ("resistor", "conductor", "other", "substrate", "glaze", "bond")
+ROLE_ORDER = ("epoxy", "resistor", "conductor", "other", "substrate", "glaze", "bond")
 ROLE_TEXT = {
+    "epoxy": "die-attach epoxy (under parts)",
     "resistor": "resistor ink",
     "conductor": "conductor",
     "other": "other layer",
@@ -61,6 +62,7 @@ class TopViewWindow(tk.Toplevel):
                                        if st["result_layer"] >= 0 else "")
         self.out_cell_var = tk.StringVar(value=st["out_cell"])
         self.width_var = tk.StringVar(value=f"{dbu_to_mm(st['line_width_um']):g}")
+        self.bond_width_var = tk.StringVar(value=f"{dbu_to_mm(st['bond_width_um']):g}")
         self.hatch_var = tk.BooleanVar(value=st["hatch"])
         self.hatch_pitch_var = tk.StringVar(value=f"{dbu_to_mm(st['hatch_pitch_um']):g}")
         self.hatch_angles_var = tk.StringVar(
@@ -72,7 +74,7 @@ class TopViewWindow(tk.Toplevel):
 
         self._build()
         self._populate_layers()
-        for v in (self.out_cell_var, self.width_var, self.hatch_pitch_var,
+        for v in (self.out_cell_var, self.width_var, self.bond_width_var, self.hatch_pitch_var,
                   self.hatch_angles_var, self.simplify_var, self.refdes_h_var):
             v.trace_add("write", lambda *_: self._save())
         self._sync_hatch()
@@ -149,6 +151,10 @@ class TopViewWindow(tk.Toplevel):
         ttk.Label(form, text="Line width (mm):").grid(row=1, column=0, sticky="e", padx=4, pady=3)
         ttk.Entry(form, textvariable=self.width_var, width=10).grid(
             row=1, column=1, sticky="w", padx=4, pady=3)
+        ttk.Label(form, text="Bond wire width (mm, 0 = outline):").grid(
+            row=1, column=2, sticky="e", padx=4, pady=3)
+        ttk.Entry(form, textvariable=self.bond_width_var, width=10).grid(
+            row=1, column=3, sticky="w", padx=4, pady=3)
 
         opts = ttk.Labelframe(self, text="Options")
         # bottom-up (pack order = bottom first): buttons, message, Options, Output
@@ -179,7 +185,7 @@ class TopViewWindow(tk.Toplevel):
         ttk.Label(
             self,
             text="Builds a top-down, hidden-line view of the design (components on top, "
-                 "then resistor ink, conductor, other layers and the substrate; glaze and "
+                 "then die-attach epoxy, resistor ink, conductor, other layers and the substrate; glaze and "
                  "wire bonds are drawn over everything). Untick a layer to leave it out. "
                  "Settings are saved with the design.",
             wraplength=680, justify="left",
@@ -327,6 +333,7 @@ class TopViewWindow(tk.Toplevel):
         if width <= 0:
             raise ValueError("Line width must be greater than zero.")
         st["line_width_um"] = float(mm_to_dbu(width))
+        st["bond_width_um"] = float(mm_to_dbu(self._mm(self.bond_width_var, "Bond wire width")))
         st["simplify_um"] = float(mm_to_dbu(self._mm(self.simplify_var, "Simplify")))
         st["refdes"] = self.refdes_var.get()
         rh = self._mm(self.refdes_h_var, "Ref-des text height")

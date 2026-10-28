@@ -167,7 +167,7 @@ def _transform_geom(geom, point_transform):
 
 
 def layer_geoms_flattened(library, cell, layer, point_transform=None, _depth=0,
-                          datatype=None) -> list:
+                          datatype=None, skip_paths=False) -> list:
     """Return the individual (NOT unioned) shapely geometries for every
     shape on `layer` in `cell`, descending into every placed cell
     instance (Sref), recursively, and applying each instance's own
@@ -195,6 +195,8 @@ def layer_geoms_flattened(library, cell, layer, point_transform=None, _depth=0,
             continue
         if datatype is not None and getattr(shape, "datatype", 0) != datatype:
             continue
+        if skip_paths and isinstance(shape, Path):
+            continue
         g = shape_to_shapely(shape)
         if g is None or g.is_empty:
             continue
@@ -207,8 +209,31 @@ def layer_geoms_flattened(library, cell, layer, point_transform=None, _depth=0,
         child = library.cells[ref.cell_name]
         combined = _compose_transforms(point_transform, _sref_point_transform(ref))
         geoms.extend(layer_geoms_flattened(library, child, layer, combined,
-                                            _depth + 1, datatype=datatype))
+                                            _depth + 1, datatype=datatype,
+                                            skip_paths=skip_paths))
     return geoms
+
+
+def layer_paths_flattened(library, cell, layer, point_transform=None, _depth=0) -> list:
+    """The centre lines (world coordinates) of every Path on ``layer`` in
+    ``cell`` and everything placed in it -- e.g. the wire bonds, for a
+    top view that draws a bond as one line rather than its outline."""
+    out = []
+    if _depth > 64:
+        return out
+    for shape in cell.shapes:
+        if shape.layer == layer and isinstance(shape, Path) and len(shape.points) >= 2:
+            pts = [tuple(p) for p in shape.points]
+            if point_transform is not None:
+                pts = [point_transform(p) for p in pts]
+            out.append(pts)
+    for ref in cell.srefs + expand_arefs_to_srefs(cell.arefs):
+        child = library.cells.get(ref.cell_name)
+        if child is not None:
+            out.extend(layer_paths_flattened(
+                library, child, layer,
+                _compose_transforms(point_transform, _sref_point_transform(ref)), _depth + 1))
+    return out
 
 
 def layer_to_shapely_flattened(library, cell, layer, point_transform=None, datatype=None):
@@ -220,6 +245,11 @@ def layer_to_shapely_flattened(library, cell, layer, point_transform=None, datat
     geoms = layer_geoms_flattened(library, cell, layer, point_transform, datatype=datatype)
     if not geoms:
         return _ShapelyPolygon()
+    # a self-crossing outline (a vertex dragged across the shape) makes
+    # GEOS refuse the whole union -- repair just the bad shapes
+    if not all(g.is_valid for g in geoms):
+        from shapely.validation import make_valid
+        geoms = [g if g.is_valid else make_valid(g) for g in geoms]
     return unary_union(geoms)
 
 

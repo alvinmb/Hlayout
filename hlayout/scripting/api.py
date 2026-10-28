@@ -97,7 +97,8 @@ def _segments_cross(p1, p2, p3, p4) -> bool:
 
 def _matched_component_footprint(library, cell_name, component_models, role_layers=frozenset(),
                                   excluded_layers=frozenset(), split_packages=False,
-                                  pad_layers=frozenset()):
+                                  pad_layers=frozenset(), bond_layers=frozenset(),
+                                  body_skip_layers=frozenset()):
     """The union, in world DBU coordinates, of every placed instance's
     OWN shapes (every layer -- pads included, not just an outline)
     whose cell is a recognized real component: an explicit
@@ -243,6 +244,16 @@ def _matched_component_footprint(library, cell_name, component_models, role_laye
             # caller's explicit way out, the same escape hatch every
             # other tier already gets from exclude_layers=.
             return True
+        if (c is not None and bond_layers
+                and any(sh.layer in bond_layers for sh in c.shapes)
+                and any(sh.layer not in role_layers and sh.layer not in excluded_layers
+                        for sh in c.shapes)):
+            # a chip-and-wire die part (Auto Place's DIE_* cells): the die
+            # body / pads / outline drawn flat beside its own wire bonds and
+            # bond fingers -- so neither "all non-role" nor "has children"
+            # holds, but it is a solid die sitting on the conductor. Its
+            # bonds and fingers stay out of the body (pad_layers).
+            return True
         return False
 
     geoms = []          # (component cell name, geometry) per placed shape
@@ -280,7 +291,7 @@ def _matched_component_footprint(library, cell_name, component_models, role_laye
                             if sh.layer in pad_layers] if pad_layers else []
                     pads = [g for g in pads if g is not None and not g.is_empty]
                     for shape in target.shapes:
-                        if shape.layer in pad_layers:
+                        if shape.layer in pad_layers or shape.layer in body_skip_layers:
                             continue
                         g = shape_to_shapely(shape)
                         if g is not None and not g.is_empty:
@@ -2690,6 +2701,8 @@ class Session:
         if float(st.get("simplify_um", 0)) > 0:
             kwargs["simplify"] = float(st["simplify_um"])
         kwargs["refdes"] = bool(st.get("refdes", True))
+        if float(st.get("bond_width_um", 0)) > 0:
+            kwargs["bond_width"] = float(st["bond_width_um"])
         kwargs["refdes_height"] = float(st.get("refdes_height_um", 600.0))
         main = self.library.top_cell_name
         if main and main in self.library.cells and main != st["out_cell"]:
@@ -2718,7 +2731,7 @@ class Session:
     def top_view_layer_roles(self) -> dict:
         """{layer: role} for the role-based Top View stacking (and the
         Top View window's layer table): "resistor", "conductor", "glaze",
-        "bond", "substrate" or "other". Roles come from the Setup rules
+        "bond", "epoxy", "substrate" or "other". Roles come from the Setup rules
         (resistor geometry, route layers, wire bonds, dielectric fill);
         "substrate"/"other" are layers with drawn, visible, filled
         geometry not otherwise claimed. Components (placed parts) are not
@@ -2769,6 +2782,13 @@ class Session:
         for c in self.library.cells.values():
             for sh in c.shapes:
                 drawn.add(sh.layer)
+        # every wire-bond layer, not just the Wire Bond setup's one -- e.g.
+        # separate chip-bond and header-bond layers
+        bond_layers |= {
+            n for n in drawn
+            if 0 <= n < len(self.library.layers)
+            and "bond" in (self.library.layers[n].name or "").lower()
+        } - resistor_layers - conductor_layers - glaze_layers
         role_layers = resistor_layers | conductor_layers | glaze_layers | bond_layers
         generic_layers = {
             n for n in drawn
@@ -2792,10 +2812,20 @@ class Session:
                 substrate_layers.add(t)
         except Exception:
             pass
-        other_layers = generic_layers - role_layers - substrate_layers
+        # die-attach epoxy: any DRAWN layer named for it, shown or not --
+        # it sits on the substrate under a part and can spread past the
+        # part's edge, so it gets its own tier just under the components
+        epoxy_layers = {
+            n for n in drawn
+            if 0 <= n < len(self.library.layers)
+            and any(w in (self.library.layers[n].name or "").lower()
+                    for w in ("epoxy", "die attach", "die-attach", "dieattach", "adhesive"))
+        } - role_layers - substrate_layers
+        other_layers = generic_layers - role_layers - substrate_layers - epoxy_layers
 
         roles = {}
         for role, group in (("other", other_layers), ("substrate", substrate_layers),
+                            ("epoxy", epoxy_layers),
                             ("bond", bond_layers), ("glaze", glaze_layers),
                             ("conductor", conductor_layers), ("resistor", resistor_layers)):
             for n in group:
@@ -2812,8 +2842,14 @@ class Session:
                           simplify: Optional[float] = None,
                           out_cell: str = "TOPVIEW",
                           refdes: bool = False,
-                          refdes_height: float = 600.0) -> dict:
-        """`refdes=True` also writes every placed part's reference
+                          refdes_height: float = 600.0,
+                          bond_width: Optional[float] = None) -> dict:
+        """`bond_width` (DBU, role-based view only): draw every wire bond
+        (a Path on a bond layer) as one line of this width along the wire,
+        so the bonds stand out, instead of the outline of the real wire;
+        the ball / stitch pads keep their outlines. None / 0 = outlines.
+
+        `refdes=True` also writes every placed part's reference
         designator as a Text on the result layer, AFTER all the outlines
         (the last thing in the view, never hidden), `refdes_height` DBU
         tall, centred where the canvas shows it (or at the baked ref-des
@@ -2957,6 +2993,7 @@ class Session:
             bond_layers = {n for n, r in roles.items() if r == "bond"}
             substrate_layers = {n for n, r in roles.items() if r == "substrate"}
             other_layers = {n for n, r in roles.items() if r == "other"}
+            epoxy_layers = {n for n, r in roles.items() if r == "epoxy"}
 
             excluded = {resolve(n) for n in exclude_layers} if exclude_layers else set()
             if excluded:
@@ -2966,9 +3003,10 @@ class Session:
                 bond_layers -= excluded
                 substrate_layers -= excluded
                 other_layers -= excluded
+                epoxy_layers -= excluded
 
             all_considered_layers = resistor_layers | conductor_layers | glaze_layers \
-                | bond_layers | substrate_layers | other_layers
+                | bond_layers | substrate_layers | other_layers | epoxy_layers
 
             if not all_considered_layers:
                 raise LayoutError(
@@ -3017,7 +3055,8 @@ class Session:
                 comp_geom, pkg_geom, pkg_names = _matched_component_footprint(
                     self.library, cell.name, load_component_models(self.library),
                     resistor_layers | conductor_layers | glaze_layers | bond_layers, excluded,
-                    split_packages=True, pad_layers=conductor_layers | bond_layers)
+                    split_packages=True, pad_layers=conductor_layers | bond_layers,
+                    bond_layers=bond_layers, body_skip_layers=epoxy_layers)
                 if pkg_names:
                     # the layer tiers must not pick up an enclosing
                     # package's own pads/outline again (they'd sit above
@@ -3030,6 +3069,11 @@ class Session:
                     view.arefs = [a for a in cell.arefs if a.cell_name not in pkg_names]
                     src["cell"] = view
                 layer_geoms = [(comp_geom, True)]
+                # die-attach epoxy: under the parts, over every film -- a
+                # fillet wider than the part shows round it and hides the
+                # conductor it covers
+                for n in sorted(epoxy_layers, reverse=True):
+                    layer_geoms.append((gather(n), True))
                 for n in sorted(resistor_layers, reverse=True):
                     layer_geoms.append((gather(n), True))
                 # the dielectric counts as a conductor-tier film for
@@ -3058,7 +3102,26 @@ class Session:
                     layer_geoms.append((g, True))
                 for n in sorted(glaze_layers):
                     layer_geoms.append((gather(n), False))
+                bond_lines = []
+                from ..core.shapes import Path as _BondPath
                 for n in sorted(bond_layers):
+                    if bond_width:
+                        from ..core.maskops import layer_paths_flattened
+                        c = src["cell"]
+                        bond_lines.extend(layer_paths_flattened(self.library, c, n)
+                                          if flatten else
+                                          [list(sh.points) for sh in c.shapes_on_layer(n)
+                                           if isinstance(sh, _BondPath) and len(sh.points) >= 2])
+                        if flatten:
+                            from ..core.maskops import layer_geoms_flattened
+                            from shapely.ops import unary_union as _uu
+                            gs = layer_geoms_flattened(self.library, c, n, skip_paths=True)
+                            layer_geoms.append((_uu(gs) if gs else None, False))
+                        else:
+                            layer_geoms.append((layer_to_shapely(
+                                [sh for sh in c.shapes_on_layer(n)
+                                 if not isinstance(sh, _BondPath)]), False))
+                        continue
                     # A wire bond terminates ON a component's own pad,
                     # at the surface -- it doesn't run buried underneath
                     # one the way a real conductor trace does, so it
@@ -3069,12 +3132,21 @@ class Session:
                     # Non-occluding, same as glaze.
                     layer_geoms.append((gather(n), False))
             else:
+                bond_lines = []
                 layer_geoms = [(gather(n), True) for n in sorted(layer_set, reverse=True)]
 
             result = hidden_line_top_view(layer_geoms)
             if simplify:
                 result = result.simplify(simplify, preserve_topology=True)
             new_paths = shapely_lines_to_paths(result, r_layer, width_dbu, datatype=datatype)
+            if bond_lines:
+                # the bonds over every outline, one bold line each
+                bw = int(round(bond_width))
+                from ..core.shapes import Path as _BondPath
+                new_paths = list(new_paths) + [
+                    _BondPath(layer=r_layer, points=[(int(round(x)), int(round(y))) for x, y in pts],
+                         width=bw, cap="round", datatype=datatype)
+                    for pts in bond_lines]
             if refdes:
                 # ref-des LAST: drawn over the finished outlines, never hidden
                 new_paths = list(new_paths) + self._top_view_refdes_texts(

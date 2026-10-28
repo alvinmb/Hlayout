@@ -562,6 +562,51 @@ def _rest_z(surf_geoms, x0, y0, x1, y1):
     return best
 
 
+#: a bare chip-and-wire die (a part carrying its own wire bonds) with no
+#: height of its own in the component models: a typical die thickness
+DIE_HEIGHT_UM = 380.0
+#: an enclosing package (header) the substrate sits on: its base depth
+PACKAGE_BASE_UM = 500.0
+_PACKAGE_RGB = (0.54, 0.56, 0.59)
+
+
+def all_bond_layers(library) -> set:
+    """Every wire-bond layer: the Wire Bond rules' one plus any drawn layer
+    named for bonds (separate chip-bond and header-bond layers)."""
+    out = set()
+    try:
+        b = int(load_bond_rules(library)["layer"])
+        if b >= 0:
+            out.add(b)
+    except Exception:
+        pass
+    drawn = {sh.layer for c in library.cells.values() for sh in c.shapes}
+    out |= {n for n in drawn if 0 <= n < len(library.layers)
+            and "bond" in (library.layers[n].name or "").lower()}
+    return out
+
+
+def _carries_bonds(library, cell_name, bond_layers) -> bool:
+    c = library.cells.get(cell_name)
+    return c is not None and any(sh.layer in bond_layers for sh in c.shapes)
+
+
+def _body_bbox_dbu(library, cell_name, film_layers, pad_only, bond_layers):
+    """The bbox of a part's BODY: its own shapes that aren't printed film,
+    pads or wire bonds (a die cell carrying its fingers and bonds would
+    otherwise get a box over all of them); the whole cell when it has
+    nothing else."""
+    c = library.cells.get(cell_name)
+    if c is None:
+        return None
+    body = [sh.bbox() for sh in c.shapes if sh.layer not in film_layers
+            and sh.layer not in pad_only and sh.layer not in bond_layers]
+    if not body:
+        return _cell_bbox_dbu(library, cell_name)
+    return (min(b[0] for b in body), min(b[1] for b in body),
+            max(b[2] for b in body), max(b[3] for b in body))
+
+
 def write_freecad_macro(library: Library, cell_name: str, path: str, *,
                         layer_thickness: Optional[dict] = None,
                         component_models: Optional[dict] = None,
@@ -597,6 +642,7 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
         bond_layer = int(load_bond_rules(library)["layer"])
     except Exception:
         bond_layer = -1
+    bond_layers = all_bond_layers(library)
     loop_h_mm = _mm(float(loop_height_um) if loop_height_um is not None
                     else _DEFAULT_LOOP_HEIGHT_UM)
 
@@ -638,10 +684,35 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
     sub_given = [thick[str(n)] for n in sorted(subs) if str(n) in thick]
     sub_t_mm = _mm(sub_given[0] if sub_given else substrate_thickness_um(library))
 
-    # running elevation, layer-number order == print/fire order
+    # the substrate outline, first: a film off the substrate (header pins)
+    # stands on what's under it, not in mid-air
+    sub_polys = []
+    for n in sorted(subs):
+        try:
+            sub_polys += list(_iter_polygons(layer_to_shapely_flattened(library, cell, n)))
+        except Exception:
+            continue
+    from shapely.ops import unary_union as _uu0
+    sub_geom = _uu0(sub_polys) if sub_polys else None
+
+    # running elevation, layer-number order == print/fire order -- only
+    # layers this cell actually prints take a place in it (a resistor ink
+    # with a thickness but nothing drawn would lift everything above it)
+    film_geoms = {}
+    for n in sorted(film_layers - bond_layers):
+        try:
+            # the dielectric layer's datatype-0 shapes are the fill's
+            # INPUTS (its boundary and keep-out holes) -- only the
+            # generated fill (datatype 1) is printed dielectric
+            g = layer_to_shapely_flattened(library, cell, n,
+                                           datatype=1 if n == diel else None)
+        except Exception:
+            continue
+        if g is not None and not g.is_empty and list(_iter_polygons(g)):
+            film_geoms[n] = g
     z = 0.0
     stack = []                       # (layer_n, z_bottom_mm, z_top_mm)
-    for n in sorted(film_layers):
+    for n in sorted(film_geoms):
         t_mm = _mm(thick[str(n)])
         stack.append((n, z, z + t_mm))
         z += t_mm
@@ -653,16 +724,7 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
     n_solids = 0
     surf_geoms = []          # (merged film geometry, its top z) -- see _rest_z()
     for (n, zb, zt) in stack:
-        if n == bond_layer:
-            continue                 # bonds get raised loops, below
-        try:
-            # the dielectric layer's datatype-0 shapes are the fill's
-            # INPUTS (its boundary and keep-out holes) -- only the
-            # generated fill (datatype 1) is printed dielectric
-            geom = layer_to_shapely_flattened(library, cell, n,
-                                              datatype=1 if n == diel else None)
-        except Exception:
-            continue
+        geom = film_geoms[n]
         polys = list(_iter_polygons(geom))
         if not polys:
             continue
@@ -678,22 +740,21 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
                      f"z {zb:.4f}..{zt:.4f} mm ---")
         lines.append("_s = []")
         for poly in polys:
-            faces = [_ring_literal(poly.exterior.coords, zb)]
-            faces += [_ring_literal(r.coords, zb) for r in poly.interiors]
+            # off the substrate (a header pin): a post from the substrate's
+            # underside -- the package base -- up to this film's top
+            pb = zb
+            if sub_geom is not None and not poly.intersects(sub_geom):
+                pb = -sub_t_mm
+            faces = [_ring_literal(poly.exterior.coords, pb)]
+            faces += [_ring_literal(r.coords, pb) for r in poly.interiors]
             lines.append(f"_s.append(Part.Face([{', '.join(faces)}])"
-                         f".extrude(V(0,0,{zt - zb:.5f})))")
+                         f".extrude(V(0,0,{zt - pb:.5f})))")
             n_solids += 1
         lines.append(f"_add({library.layers[n].name!r} + '_L{n}', _fuse(_s), "
                      f"({rgb[0]:.4f},{rgb[1]:.4f},{rgb[2]:.4f}), surface=True"
                      + (f", transparency={transp})" if transp else ")"))
 
     # substrate -- white slab from -thickness up to z=0, under the films
-    sub_polys = []
-    for n in sorted(subs):
-        try:
-            sub_polys += list(_iter_polygons(layer_to_shapely_flattened(library, cell, n)))
-        except Exception:
-            continue
     if sub_polys:
         lines.append(f"# --- substrate (layers {sorted(subs)}) : "
                      f"z {-sub_t_mm:.4f}..0 mm ---")
@@ -717,6 +778,11 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
     # to an explicit per-cell counter when a placement has none) so repeats
     # of the same part stay recognizably the same part.
     seen_counts: dict = {}
+    sub_box = None
+    if sub_polys:
+        from shapely.ops import unary_union as _uu
+        sub_box = _uu(sub_polys).bounds
+    pad_only = isolated_pad_layers(library)
     for kind, payload in _walk_instances(library, cell_name, film_layers, comp_models):
         if kind != "component":
             continue
@@ -725,7 +791,21 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
         obj_name = f"{label}_{cn}" if label else f"{cn}_{seen_counts[cn]}"
         mode = entry.get("mode", "extrude")
         zoff = _mm(float(entry.get("z_offset_um", 0.0)))
-        bb = _cell_bbox_dbu(library, cn)
+        bb = _body_bbox_dbu(library, cn, film_layers, pad_only, bond_layers)
+        if mode != "model" and bb is not None and sub_box is not None:
+            cs = [xf(p_) for p_ in ((bb[0], bb[1]), (bb[2], bb[1]), (bb[2], bb[3]), (bb[0], bb[3]))]
+            if (min(c[0] for c in cs) <= sub_box[0] + 1 and min(c[1] for c in cs) <= sub_box[1] + 1
+                    and max(c[0] for c in cs) >= sub_box[2] - 1
+                    and max(c[1] for c in cs) >= sub_box[3] - 1):
+                # an enclosing package (a header the substrate sits in): a
+                # base UNDER the substrate, not a box burying the circuit
+                hb = _mm(PACKAGE_BASE_UM)
+                lines.append(f"# --- package {cn} (base under the substrate) ---")
+                lines.append(f"_sh = Part.Face({_ring_literal(cs, 0.0)}).extrude(V(0,0,{hb:.5f}))")
+                lines.append(f"_sh.translate(V(0, 0, {-sub_t_mm - hb:.5f}))")
+                lines.append(f"_add({obj_name!r}, _sh, {_PACKAGE_RGB!r})")
+                n_comp += 1
+                continue
         if entry.get("z_ref") == "substrate_bottom":
             base_expr = f"{-sub_t_mm + zoff:.5f}"
         elif bb is not None:
@@ -773,7 +853,12 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
             continue
         x0, y0, x1, y1 = bb
         corners = [xf((x0, y0)), xf((x1, y0)), xf((x1, y1)), xf((x0, y1))]
-        h_mm = _mm(float(entry.get("height_um", DEFAULT_COMPONENT_HEIGHT_UM)))
+        if "height_um" in entry:
+            h_mm = _mm(float(entry["height_um"]))
+        elif _carries_bonds(library, cn, bond_layers):
+            h_mm = _mm(DIE_HEIGHT_UM)            # a bare die with its own bonds
+        else:
+            h_mm = _mm(DEFAULT_COMPONENT_HEIGHT_UM)
         lines.append(f"# --- component {cn} (extrude {h_mm:.4f} mm) ---")
         lines.append(f"_sh = Part.Face({_ring_literal(corners, 0.0)}).extrude(V(0,0,{h_mm:.5f}))")
         lines.append(f"_sh.translate(V(0, 0, {base_expr}))")
@@ -784,10 +869,10 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
     # wire bonds -- raised loops, built LAST so each end lands on the
     # actual surface under it (die pad, header pin head, trace) found in
     # FreeCAD from the solids above, not on a guessed film height
-    if bond_layer >= 0:
-        segs = _bond_segments(library, cell_name, bond_layer)
+    if bond_layers:
+        segs = [s_ for n in sorted(bond_layers) for s_ in _bond_segments(library, cell_name, n)]
         if segs:
-            lines.append(f"# --- wire bonds (layer {bond_layer}) ---")
+            lines.append(f"# --- wire bonds (layers {sorted(bond_layers)}) ---")
             lines.append("_BONDS = [")
             for (p0, p1, w) in segs:
                 (x0, y0), (x1b, y1b) = p0, p1
@@ -802,7 +887,8 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
             lines.append(f"    _za = max(_z0, _z1) + {loop_h_mm:.5f}")
             lines.append("    _bw.append(_bondwire(V(_x0, _y0, _z0), "
                          "V((_x0 + _x1) / 2.0, (_y0 + _y1) / 2.0, _za), V(_x1, _y1, _z1), _r))")
-            rgb = _rgb01(library.layers[bond_layer].color)
+            rgb = _rgb01(library.layers[bond_layer if bond_layer >= 0
+                                        else min(bond_layers)].color)
             lines.append(f"_add('wire_bonds', _fuse(_bw), "
                          f"({rgb[0]:.4f},{rgb[1]:.4f},{rgb[2]:.4f}))")
             n_solids += len(segs)

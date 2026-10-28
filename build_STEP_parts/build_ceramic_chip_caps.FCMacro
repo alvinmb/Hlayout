@@ -10,7 +10,11 @@ import FreeCAD as App
 import Part
 
 V = App.Vector
-OUT_DIR = 'examples/step_models/sot'
+# this script lives in <HLayout>/build_STEP_parts; the STEP files go to
+# <HLayout>/examples/step_models/ceramic_chip_caps wherever it is run from
+_ROOT = (os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+         if "__file__" in globals() else os.getcwd())
+OUT_DIR = os.path.join(_ROOT, "examples", "step_models", "ceramic_chip_caps")
 os.makedirs(OUT_DIR, exist_ok=True)
 
 
@@ -133,11 +137,7 @@ def make_dip(L, W, H, leads_neg_y, leads_pos_y, lead_t, lead_out, lead_foot, lid
 
 def _gullwing_side_x(x_wall, x_dir, leads, lead_out, lead_t, lead_mid_z, lead_foot):
     """The _gullwing_side() twin for a package whose two rows run
-    along X instead of Y -- leads: list of (y, lead_w). The foot
-    continues from the DROP's own outer edge (x_outer + x_dir*lead_t),
-    not from x_outer again -- reusing x_outer for both made the foot
-    double back and sit inside/under the drop instead of extending
-    past it to form the flat landing pad."""
+    along X instead of Y -- leads: list of (y, lead_w)."""
     shapes = []
     for y, lead_w in leads:
         x_outer = x_wall + x_dir * lead_out
@@ -145,14 +145,13 @@ def _gullwing_side_x(x_wall, x_dir, leads, lead_out, lead_t, lead_mid_z, lead_fo
         stub_x1 = max(x_wall, x_outer)
         shapes.append(Part.makeBox(stub_x1 - stub_x0, lead_w, lead_t,
                                     V(stub_x0, y - lead_w / 2.0, lead_mid_z - lead_t / 2.0)))
-        x_drop_end = x_outer + x_dir * lead_t
-        drop_x0 = min(x_outer, x_drop_end)
-        drop_x1 = max(x_outer, x_drop_end)
+        drop_x0 = min(x_outer, x_outer + x_dir * lead_t)
+        drop_x1 = max(x_outer, x_outer + x_dir * lead_t)
         shapes.append(Part.makeBox(drop_x1 - drop_x0, lead_w, lead_mid_z + lead_t / 2.0,
                                     V(drop_x0, y - lead_w / 2.0, 0)))
-        x_tip = x_drop_end + x_dir * lead_foot
-        foot_x0 = min(x_drop_end, x_tip)
-        foot_x1 = max(x_drop_end, x_tip)
+        x_tip = x_outer + x_dir * lead_foot
+        foot_x0 = min(x_outer, x_tip)
+        foot_x1 = max(x_outer, x_tip)
         shapes.append(Part.makeBox(foot_x1 - foot_x0, lead_w, lead_t,
                                     V(foot_x0, y - lead_w / 2.0, 0)))
     return shapes
@@ -185,17 +184,13 @@ def export(shape, name, out_dir):
 
 _doc = App.newDocument("HLayoutStepModels")
 
-export(make_dip(L=2.9, W=1.3, H=1.1, leads_neg_y=[(-0.475, 0.55), (0.475, 0.55)], leads_pos_y=[(0.0, 0.55)], lead_t=0.15, lead_out=0.15, lead_foot=0.24999999999999992), 'SOT-23', OUT_DIR)
-export(make_dip(L=2.9, W=1.6, H=1.1, leads_neg_y=[(-0.95, 0.55), (0.0, 0.55), (0.95, 0.55)], leads_pos_y=[(0.475, 0.55), (-0.475, 0.55)], lead_t=0.15, lead_out=0.18750000000000003, lead_foot=0.4125000000000001), 'SOT-23-5', OUT_DIR)
-export(make_dip(L=2.9, W=1.6, H=1.1, leads_neg_y=[(-0.95, 0.55), (0.0, 0.55), (0.95, 0.55)], leads_pos_y=[(0.95, 0.55), (0.0, 0.55), (-0.95, 0.55)], lead_t=0.15, lead_out=0.18750000000000003, lead_foot=0.4125000000000001), 'SOT-23-6', OUT_DIR)
-export(make_dip_x(L=4.5, W=2.5, H=1.5, leads_neg_x=[(-0.75, 0.6), (0.75, 0.6)], leads_pos_x=[(0.75, 2.0), (-0.75, 0.6)], lead_t=0.15, lead_out=0.24999999999999997, lead_foot=0.5999999999999999), 'SOT-89', OUT_DIR)
-export(make_dip(L=2.9, W=1.3, H=1.1, leads_neg_y=[(-0.475, 0.55), (0.475, 0.55)], leads_pos_y=[(0.475, 0.55), (-0.475, 1.1)], lead_t=0.15, lead_out=0.15, lead_foot=0.24999999999999992), 'SOT-143', OUT_DIR)
-export(make_dip_x(L=6.5, W=3.5, H=1.6, leads_neg_x=[(-1.15, 0.9), (1.15, 0.9)], leads_pos_x=[(1.15, 2.0), (-1.15, 0.9)], lead_t=0.15, lead_out=0.26250000000000007, lead_foot=0.6375000000000002), 'SOT-223', OUT_DIR)
-export(make_dip(L=2.0, W=1.25, H=0.95, leads_neg_y=[(-0.65, 0.4), (0.0, 0.4), (0.65, 0.4)], leads_pos_y=[(0.65, 0.4), (0.0, 0.4), (-0.65, 0.4)], lead_t=0.15, lead_out=0.17500000000000002, lead_foot=0.375), 'SOT-363', OUT_DIR)
-export(make_dip(L=5.1, W=3.95, H=1.75, leads_neg_y=[(-1.905, 0.38), (-0.635, 0.38), (0.635, 0.38), (1.905, 0.38)], leads_pos_y=[(1.905, 0.38), (0.635, 0.38), (-0.635, 0.38), (-1.905, 0.38)], lead_t=0.15, lead_out=0.25, lead_foot=1.0), 'SOT-8', OUT_DIR)
-export(make_dip(L=9.9, W=3.95, H=1.75, leads_neg_y=[(-4.445, 0.38), (-3.175, 0.38), (-1.905, 0.38), (-0.635, 0.38), (0.635, 0.38), (1.905, 0.38), (3.175, 0.38), (4.445, 0.38)], leads_pos_y=[(4.445, 0.38), (3.175, 0.38), (1.905, 0.38), (0.635, 0.38), (-0.635, 0.38), (-1.905, 0.38), (-3.175, 0.38), (-4.445, 0.38)], lead_t=0.15, lead_out=0.25, lead_foot=1.0), 'SOT-16', OUT_DIR)
-export(make_dip(L=11.5, W=7.5, H=1.75, leads_neg_y=[(-5.08, 0.38), (-3.81, 0.38), (-2.54, 0.38), (-1.27, 0.38), (0.0, 0.38), (1.27, 0.38), (2.54, 0.38), (3.81, 0.38), (5.08, 0.38)], leads_pos_y=[(5.08, 0.38), (3.81, 0.38), (2.54, 0.38), (1.27, 0.38), (0.0, 0.38), (-1.27, 0.38), (-2.54, 0.38), (-3.81, 0.38), (-5.08, 0.38)], lead_t=0.15, lead_out=0.25, lead_foot=1.0), 'SOT-18', OUT_DIR)
-export(make_dip(L=12.8, W=7.5, H=1.75, leads_neg_y=[(-5.715, 0.38), (-4.445, 0.38), (-3.175, 0.38), (-1.905, 0.38), (-0.635, 0.38), (0.635, 0.38), (1.905, 0.38), (3.175, 0.38), (4.445, 0.38), (5.715, 0.38)], leads_pos_y=[(5.715, 0.38), (4.445, 0.38), (3.175, 0.38), (1.905, 0.38), (0.635, 0.38), (-0.635, 0.38), (-1.905, 0.38), (-3.175, 0.38), (-4.445, 0.38), (-5.715, 0.38)], lead_t=0.15, lead_out=0.25, lead_foot=1.0), 'SOT-20', OUT_DIR)
-export(make_dip(L=15.4, W=7.5, H=1.75, leads_neg_y=[(-6.985, 0.38), (-5.715, 0.38), (-4.445, 0.38), (-3.175, 0.38), (-1.905, 0.38), (-0.635, 0.38), (0.635, 0.38), (1.905, 0.38), (3.175, 0.38), (4.445, 0.38), (5.715, 0.38), (6.985, 0.38)], leads_pos_y=[(6.985, 0.38), (5.715, 0.38), (4.445, 0.38), (3.175, 0.38), (1.905, 0.38), (0.635, 0.38), (-0.635, 0.38), (-1.905, 0.38), (-3.175, 0.38), (-4.445, 0.38), (-5.715, 0.38), (-6.985, 0.38)], lead_t=0.15, lead_out=0.25, lead_foot=1.0), 'SOT-24', OUT_DIR)
-export(make_dip(L=17.9, W=7.5, H=1.75, leads_neg_y=[(-8.255, 0.38), (-6.985, 0.38), (-5.715, 0.38), (-4.445, 0.38), (-3.175, 0.38), (-1.905, 0.38), (-0.635, 0.38), (0.635, 0.38), (1.905, 0.38), (3.175, 0.38), (4.445, 0.38), (5.715, 0.38), (6.985, 0.38), (8.255, 0.38)], leads_pos_y=[(8.255, 0.38), (6.985, 0.38), (5.715, 0.38), (4.445, 0.38), (3.175, 0.38), (1.905, 0.38), (0.635, 0.38), (-0.635, 0.38), (-1.905, 0.38), (-3.175, 0.38), (-4.445, 0.38), (-5.715, 0.38), (-6.985, 0.38), (-8.255, 0.38)], lead_t=0.15, lead_out=0.25, lead_foot=1.0), 'SOT-28', OUT_DIR)
+export(make_end_cap(L=0.6, W=0.3, H=0.3, term_len=0.1, overhang=0.0), 'EIA-0201', OUT_DIR)
+export(make_end_cap(L=1.0, W=0.5, H=0.5, term_len=0.25, overhang=0.0), 'EIA-0402', OUT_DIR)
+export(make_end_cap(L=1.6, W=0.8, H=0.8, term_len=0.3, overhang=0.0), 'EIA-0603', OUT_DIR)
+export(make_end_cap(L=2.0, W=1.25, H=0.85, term_len=0.4, overhang=0.0), 'EIA-0805', OUT_DIR)
+export(make_end_cap(L=3.2, W=1.6, H=1.15, term_len=0.5, overhang=0.0), 'EIA-1206', OUT_DIR)
+export(make_end_cap(L=3.2, W=2.5, H=1.15, term_len=0.5, overhang=0.0), 'EIA-1210', OUT_DIR)
+export(make_end_cap(L=4.5, W=3.2, H=1.4, term_len=0.6, overhang=0.0), 'EIA-1812', OUT_DIR)
+export(make_end_cap(L=5.7, W=5.0, H=1.5, term_len=0.6, overhang=0.0), 'EIA-2220', OUT_DIR)
+export(make_end_cap(L=5.7, W=6.3, H=1.5, term_len=0.6, overhang=0.0), 'EIA-2225', OUT_DIR)
 App.Console.PrintMessage("HLayout: STEP model build complete.\n")

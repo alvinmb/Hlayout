@@ -1,0 +1,484 @@
+"""HLayout chip-and-wire parts: coloured 3D STEP models for the
+chip_wire library's ceramic chip capacitors (CAP_0201 ... CAP_2512),
+the LM741 (uA741) bare die and the 20-, 30- and 40-pin hybrid header
+packages (20_PIN_pkg, 30_PIN_pkg, 40_PIN_pkg -- same 2.54 mm pitch,
+20.86 mm row spacing and well, only the length grows).
+
+Each model's origin is its HLayout cell's own origin, so a placed
+instance lines up with its 2D footprint (X/Y in mm, Z up):
+  * caps   -- terminal/body outline from the cell, sitting on conductive
+              epoxy dots (the cell's epoxy layer) 30 um thick at Z=0;
+  * LM741  -- 1.1 x 1.1 x 0.38 mm silicon die on a 25 um silver-epoxy
+              attach, 7 aluminium bond pads at the cell's pad positions;
+  * header -- Kovar (nickel-plated) bathtub package, 1.0 mm floor and a
+              6.0 mm deep well, 0.5 mm fillets on every edge (inside and
+              outside corners, rim, well floor and bottom surface); Z=0 is the TOP of the floor (the well
+              bottom, where the substrate sits). Gold pins (0.63 mm) pass
+              through green glass seals (1.61 mm) in the floor, stand
+              0.75 mm proud of the floor inside the well, and run 6.35 mm
+              below the package.
+
+Colours are written into the STEP files, so this has to run with the
+FreeCAD GUI layer loaded -- headless is fine:
+    set QT_QPA_PLATFORM=offscreen
+    freecadcmd build_step_models.FCMacro
+or Macro > Macros... > Execute inside FreeCAD."""
+import os
+import FreeCAD as App
+import FreeCADGui as Gui
+import Part
+
+if not hasattr(Gui, "getMainWindow") or Gui.getMainWindow() is None:
+    Gui.showMainWindow()
+import ImportGui
+
+V = App.Vector
+# this script lives in <HLayout>/build_STEP_parts; the STEP files go to
+# <HLayout>/examples/step_models/chip_wire wherever it is run from
+_ROOT = (os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+         if "__file__" in globals() else os.getcwd())
+OUT_DIR = os.path.join(_ROOT, "examples", "step_models", "chip_wire")
+
+CAPS = {
+ "CAP_0201": {
+  "body": [
+   0.0,
+   0.0,
+   0.6,
+   0.3
+  ],
+  "terms": [
+   [
+    0.0,
+    0.0,
+    0.15,
+    0.3
+   ],
+   [
+    0.45,
+    0.0,
+    0.6,
+    0.3
+   ]
+  ],
+  "epoxy": [
+   [
+    -0.2,
+    -0.2,
+    0.35,
+    0.5
+   ],
+   [
+    0.25,
+    -0.2,
+    0.8,
+    0.5
+   ]
+  ],
+  "h": 0.3
+ },
+ "CAP_0402": {
+  "body": [
+   0.0,
+   0.0,
+   1.0,
+   0.5
+  ],
+  "terms": [
+   [
+    0.0,
+    0.0,
+    0.45,
+    0.5
+   ],
+   [
+    0.55,
+    0.0,
+    1.0,
+    0.5
+   ]
+  ],
+  "epoxy": [
+   [
+    -0.2,
+    -0.2,
+    0.45,
+    0.7
+   ],
+   [
+    0.55,
+    -0.2,
+    1.2,
+    0.7
+   ]
+  ],
+  "h": 0.5
+ },
+ "CAP_0603": {
+  "body": [
+   0.0,
+   0.0,
+   1.6,
+   0.8
+  ],
+  "terms": [
+   [
+    0.0,
+    0.0,
+    0.6,
+    0.8
+   ],
+   [
+    1.0,
+    0.0,
+    1.6,
+    0.8
+   ]
+  ],
+  "epoxy": [
+   [
+    -0.2,
+    -0.2,
+    0.6,
+    1.0
+   ],
+   [
+    1.0,
+    -0.2,
+    1.8,
+    1.0
+   ]
+  ],
+  "h": 0.8
+ },
+ "CAP_0805": {
+  "body": [
+   0.0,
+   0.0,
+   2.0,
+   1.25
+  ],
+  "terms": [
+   [
+    0.0,
+    0.0,
+    0.7,
+    1.25
+   ],
+   [
+    1.3,
+    0.0,
+    2.0,
+    1.25
+   ]
+  ],
+  "epoxy": [
+   [
+    -0.2,
+    -0.2,
+    0.7,
+    1.45
+   ],
+   [
+    1.3,
+    -0.2,
+    2.2,
+    1.45
+   ]
+  ],
+  "h": 1.25
+ },
+ "CAP_1206": {
+  "body": [
+   0.0,
+   0.0,
+   3.2,
+   1.6
+  ],
+  "terms": [
+   [
+    0.0,
+    0.0,
+    0.8,
+    1.6
+   ],
+   [
+    2.4,
+    0.0,
+    3.2,
+    1.6
+   ]
+  ],
+  "epoxy": [
+   [
+    -0.2,
+    -0.2,
+    0.8,
+    1.8
+   ],
+   [
+    2.4,
+    -0.2,
+    3.4,
+    1.8
+   ]
+  ],
+  "h": 1.6
+ },
+ "CAP_1210": {
+  "body": [
+   0.0,
+   0.0,
+   3.2,
+   2.5
+  ],
+  "terms": [
+   [
+    0.0,
+    0.0,
+    0.8,
+    2.5
+   ],
+   [
+    2.4,
+    0.0,
+    3.2,
+    2.5
+   ]
+  ],
+  "epoxy": [
+   [
+    -0.2,
+    -0.2,
+    0.8,
+    2.7
+   ],
+   [
+    2.4,
+    -0.2,
+    3.4,
+    2.7
+   ]
+  ],
+  "h": 1.6
+ },
+ "CAP_1812": {
+  "body": [
+   0.0,
+   0.0,
+   4.5,
+   3.2
+  ],
+  "terms": [
+   [
+    0.0,
+    0.0,
+    0.8,
+    3.2
+   ],
+   [
+    3.7,
+    0.0,
+    4.5,
+    3.2
+   ]
+  ],
+  "epoxy": [
+   [
+    -0.2,
+    -0.2,
+    0.8,
+    3.4
+   ],
+   [
+    3.7,
+    -0.2,
+    4.7,
+    3.4
+   ]
+  ],
+  "h": 1.6
+ },
+ "CAP_2010": {
+  "body": [
+   0.0,
+   0.0,
+   5.0,
+   2.5
+  ],
+  "terms": [
+   [
+    0.0,
+    0.0,
+    0.8,
+    2.5
+   ],
+   [
+    4.2,
+    0.0,
+    5.0,
+    2.5
+   ]
+  ],
+  "epoxy": [
+   [
+    -0.2,
+    -0.2,
+    0.8,
+    2.7
+   ],
+   [
+    4.2,
+    -0.2,
+    5.2,
+    2.7
+   ]
+  ],
+  "h": 1.6
+ },
+ "CAP_2512": {
+  "body": [
+   0.0,
+   0.0,
+   6.4,
+   3.2
+  ],
+  "terms": [
+   [
+    0.0,
+    0.0,
+    0.8,
+    3.2
+   ],
+   [
+    5.6,
+    0.0,
+    6.4,
+    3.2
+   ]
+  ],
+  "epoxy": [
+   [
+    -0.2,
+    -0.2,
+    0.8,
+    3.4
+   ],
+   [
+    5.6,
+    -0.2,
+    6.6,
+    3.4
+   ]
+  ],
+  "h": 1.6
+ }
+}
+DIE = {"body": [-0.55, -0.55, 0.55, 0.55], "epoxy": [-0.45, -0.45, 0.45, 0.45], "pads": {"1": [-0.45, 0.25, -0.25, 0.45], "2": [-0.4, 0.05, -0.3, 0.15], "3": [-0.4, -0.15, -0.3, -0.05], "4": [-0.4, -0.4, -0.3, -0.3], "5": [0.35, -0.45, 0.45, -0.35], "6": [0.35, -0.1, 0.45, 0.0], "7": [0.35, 0.3, 0.45, 0.4]}}
+HEADERS = {"20_PIN_pkg": {"outer": [-3.4, -3.4, 26.0, 24.6], "inner": [-2.1, -1.7, 24.9, 22.9], "pins": [["1", 0.1, 0.2], ["2", 2.64, 0.2], ["3", 5.18, 0.2], ["4", 7.72, 0.2], ["5", 10.26, 0.2], ["6", 12.8, 0.2], ["7", 15.34, 0.2], ["8", 17.88, 0.2], ["9", 20.42, 0.2], ["10", 22.96, 0.2], ["11", 22.96, 21.06], ["12", 20.42, 21.06], ["13", 17.88, 21.06], ["14", 15.34, 21.06], ["15", 12.8, 21.06], ["16", 10.26, 21.06], ["17", 7.72, 21.06], ["18", 5.18, 21.06], ["19", 2.64, 21.06], ["20", 0.1, 21.06]]}, "30_PIN_pkg": {"outer": [-3.4, -3.4, 38.7, 24.6], "inner": [-2.1, -1.7, 37.6, 22.9], "pins": [["1", 0.1, 0.2], ["2", 2.64, 0.2], ["3", 5.18, 0.2], ["4", 7.72, 0.2], ["5", 10.26, 0.2], ["6", 12.8, 0.2], ["7", 15.34, 0.2], ["8", 17.88, 0.2], ["9", 20.42, 0.2], ["10", 22.96, 0.2], ["11", 25.5, 0.2], ["12", 28.04, 0.2], ["13", 30.58, 0.2], ["14", 33.12, 0.2], ["15", 35.66, 0.2], ["16", 35.66, 21.06], ["17", 33.12, 21.06], ["18", 30.58, 21.06], ["19", 28.04, 21.06], ["20", 25.5, 21.06], ["21", 22.96, 21.06], ["22", 20.42, 21.06], ["23", 17.88, 21.06], ["24", 15.34, 21.06], ["25", 12.8, 21.06], ["26", 10.26, 21.06], ["27", 7.72, 21.06], ["28", 5.18, 21.06], ["29", 2.64, 21.06], ["30", 0.1, 21.06]]}, "40_PIN_pkg": {"outer": [-3.4, -3.4, 51.4, 24.6], "inner": [-2.1, -1.7, 50.3, 22.9], "pins": [["1", 0.1, 0.2], ["2", 2.64, 0.2], ["3", 5.18, 0.2], ["4", 7.72, 0.2], ["5", 10.26, 0.2], ["6", 12.8, 0.2], ["7", 15.34, 0.2], ["8", 17.88, 0.2], ["9", 20.42, 0.2], ["10", 22.96, 0.2], ["11", 25.5, 0.2], ["12", 28.04, 0.2], ["13", 30.58, 0.2], ["14", 33.12, 0.2], ["15", 35.66, 0.2], ["16", 38.2, 0.2], ["17", 40.74, 0.2], ["18", 43.28, 0.2], ["19", 45.82, 0.2], ["20", 48.36, 0.2], ["21", 48.36, 21.06], ["22", 45.82, 21.06], ["23", 43.28, 21.06], ["24", 40.74, 21.06], ["25", 38.2, 21.06], ["26", 35.66, 21.06], ["27", 33.12, 21.06], ["28", 30.58, 21.06], ["29", 28.04, 21.06], ["30", 25.5, 21.06], ["31", 22.96, 21.06], ["32", 20.42, 21.06], ["33", 17.88, 21.06], ["34", 15.34, 21.06], ["35", 12.8, 21.06], ["36", 10.26, 21.06], ["37", 7.72, 21.06], ["38", 5.18, 21.06], ["39", 2.64, 21.06], ["40", 0.1, 21.06]]}}
+
+CERAMIC = (0.80, 0.68, 0.50)
+TERMINATION = (0.83, 0.83, 0.86)   # Pd-Ag / nickel-tin end cap
+EPOXY = (0.70, 0.70, 0.72)         # silver-filled conductive epoxy
+SILICON = (0.22, 0.24, 0.33)
+ALUMINIUM = (0.85, 0.85, 0.88)
+KOVAR = (0.62, 0.63, 0.66)         # nickel-plated Kovar
+GOLD = (1.00, 0.77, 0.20)
+GLASS = (0.10, 0.62, 0.32)         # green sealing glass
+
+
+def box(x0, y0, x1, y1, z0, z1):
+    return Part.makeBox(x1 - x0, y1 - y0, z1 - z0, V(x0, y0, z0))
+
+
+def export(name, parts):
+    """parts: [(label, shape, rgb, transparency%)]"""
+    doc = App.newDocument(name)
+    objs = []
+    for label, shape, rgb, transp in parts:
+        o = doc.addObject("Part::Feature", label)
+        o.Shape = shape
+        objs.append((o, rgb, transp))
+    doc.recompute()
+    for o, rgb, transp in objs:
+        o.ViewObject.ShapeColor = rgb
+        if transp:
+            o.ViewObject.Transparency = transp
+    path = os.path.join(OUT_DIR, name + ".step")
+    ImportGui.export([o for o, _, _ in objs], path)
+    App.closeDocument(doc.Name)
+    print("wrote", path)
+
+
+def build_cap(name, d):
+    z_e = 0.03                              # epoxy dot thickness
+    h = d["h"]
+    x0, y0, x1, y1 = d["body"]
+    terms = d["terms"]
+    over = min(0.02, h * 0.05)
+    t_lo = max(t[2] for t in terms if t[0] <= x0 + 1e-6)
+    t_hi = min(t[0] for t in terms if t[2] >= x1 - 1e-6)
+    body = box(t_lo, y0, t_hi, y1, z_e, z_e + h)
+    caps_ = [box(t[0] - over, t[1] - over, t[2] + over, t[3] + over, z_e - over, z_e + h + over)
+             for t in terms]
+    epoxy = [box(e[0] + 0.1, e[1] + 0.1, e[2] - 0.1, e[3] - 0.1, 0, z_e) for e in d["epoxy"]]
+    export(name, [("body", body, CERAMIC, 0),
+                  ("terminations", Part.makeCompound(caps_), TERMINATION, 0),
+                  ("epoxy", Part.makeCompound(epoxy), EPOXY, 0)])
+
+
+def build_die():
+    z_e, t = 0.025, 0.38
+    x0, y0, x1, y1 = DIE["body"]
+    ex0, ey0, ex1, ey1 = DIE["epoxy"]
+    die = box(x0, y0, x1, y1, z_e, z_e + t)
+    pads = []
+    for pin, (px0, py0, px1, py1) in sorted(DIE["pads"].items()):
+        cx, cy = (px0 + px1) / 2.0, (py0 + py1) / 2.0
+        hs = 0.05                           # real bond pads are ~100 um
+        pads.append(box(cx - hs, cy - hs, cx + hs, cy + hs, z_e + t, z_e + t + 0.003))
+    dot = Part.makeCylinder(0.04, 0.003, V(x0 + 0.12, y1 - 0.12, z_e + t))   # pin-1 mark
+    export("LM741", [("die", die, SILICON, 0),
+                     ("bond_pads", Part.makeCompound(pads), ALUMINIUM, 0),
+                     ("pin1_mark", dot, GOLD, 0),
+                     ("die_attach", box(ex0, ey0, ex1, ey1, 0, z_e), EPOXY, 0)])
+
+
+FILLET = 0.5   # mm, every edge of the header can
+
+
+def build_header(name, HDR):
+    floor_t, well = 1.0, 6.0
+    pin_d, seal_d = 0.63, 1.61
+    above, below = 0.75, 6.35
+    ox0, oy0, ox1, oy1 = HDR["outer"]
+    ix0, iy0, ix1, iy1 = HDR["inner"]
+    body = box(ox0, oy0, ox1, oy1, -floor_t, well)
+    body = body.cut(box(ix0, iy0, ix1, iy1, 0, well + 1))
+    # 0.5 mm fillets on every edge of the can: outside and inside (well)
+    # corners, the top rim, the well floor and the bottom surface edges
+    body = body.makeFillet(FILLET, body.Edges)
+    holes, seals, pins = [], [], []
+    for pin, x, y in HDR["pins"]:
+        holes.append(Part.makeCylinder(seal_d / 2.0, floor_t + 0.2, V(x, y, -floor_t - 0.1)))
+        glass = Part.makeCylinder(seal_d / 2.0, floor_t + 0.08, V(x, y, -floor_t))
+        glass = glass.cut(Part.makeCylinder(pin_d / 2.0, floor_t + 0.3, V(x, y, -floor_t - 0.1)))
+        seals.append(glass)
+        p = Part.makeCylinder(pin_d / 2.0, below + floor_t + above, V(x, y, -floor_t - below))
+        head = Part.makeCylinder(pin_d * 0.75, 0.1, V(x, y, above - 0.1))   # flattened bond head
+        pins.append(p.fuse(head))
+    body = body.cut(Part.makeCompound(holes))
+    # pin-1 marker: small gold dot on the rim next to pin 1
+    p1 = [p for p in HDR["pins"] if p[0] == "1"][0]
+    mark = Part.makeCylinder(0.35, 0.02, V(p1[1], oy0 + (iy0 - oy0) / 2.0, well))
+    export(name, [("body", body, KOVAR, 0),
+                          ("glass_seals", Part.makeCompound(seals), GLASS, 25),
+                          ("pins", Part.makeCompound(pins), GOLD, 0),
+                          ("pin1_mark", mark, GOLD, 0)])
+
+
+for _name, _d in sorted(CAPS.items()):
+    build_cap(_name, _d)
+build_die()
+for _name, _h in sorted(HEADERS.items()):
+    build_header(_name, _h)

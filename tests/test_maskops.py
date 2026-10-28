@@ -1590,3 +1590,16 @@ def test_fracture_keeps_the_fill_in_few_compact_hole_free_pieces():
     assert abs(sum(p.area for p in pieces) - geom.area) < 1          # no overlaps
     assert len(pieces) < len(holes) / 2
     assert min(2 * p.area / p.length for p in pieces) > 500           # nothing thin
+
+
+
+def test_flattened_union_survives_self_crossing_polygon():
+    from hlayout.core.library import Library
+    from hlayout.core.maskops import layer_to_shapely_flattened
+    lib = Library("t")
+    c = lib.new_cell("TOP")
+    c.add_rectangle(7, 0, 0, 100, 100)
+    # bow-tie: self-intersecting
+    c.add_polygon(7, [(200, 0), (300, 100), (300, 0), (200, 100)])
+    g = layer_to_shapely_flattened(lib, c, 7)
+    assert g.is_valid and g.area > 10000
