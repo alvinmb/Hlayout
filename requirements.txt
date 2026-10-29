@@ -2,6 +2,9 @@ gdstk>=0.9
 shapely>=2.0
 numpy>=1.24
 scipy>=1.10
+# Pillow: the screenshot in Help > Report Bug... (optional -- the
+# report is still made without it).
+Pillow>=10.0
 # GUI uses Tkinter, which ships with the standard Python installer on
 # Windows/macOS. On Debian/Ubuntu Linux you may need: sudo apt install python3-tk
 # numpy/scipy are only needed for the Resistor Trim Simulator (Tools >

@@ -51,6 +51,7 @@ from .gerber_batch_window import open_gerber_batch_window
 from .maskop_window import open_maskop_batch_window
 from .resistor_designer import open_resistor_designer
 from .thermal_window import open_thermal_window
+from .bug_report import get_log as _bug_log, install as _install_bug_log, open_bug_report_window
 
 
 def _unique_arcname(used: set, name: str) -> str:
@@ -213,6 +214,10 @@ class App(tk.Tk):
         self.session.on_change(self.refresh_all)
         self.session.on_change(self._update_undo_redo_menu_state)
         self._update_undo_redo_menu_state()
+        # Help > Report Bug...: start recording commands, status
+        # messages, uncaught exceptions and stderr for this session so a
+        # report shows the lead-up to a problem (see gui/bug_report.py).
+        _install_bug_log(self)
 
         # Force the initial sash position explicitly — the Layers table's
         # many columns otherwise drive the panel wider than intended
@@ -243,7 +248,16 @@ class App(tk.Tk):
         except Exception:
             pass  # no console attached (windowed build) -- nothing to print to
         try:
-            dialogs.show_error("Unexpected Error", f"{summary}\n\n{frames}", parent=self)
+            _bug_log().exception(exc, val, tb, where="Tk callback")
+        except Exception:
+            pass
+        try:
+            if dialogs.ask_yes_no(
+                    "Unexpected Error",
+                    f"{summary}\n\n{frames}\n"
+                    "Report this bug? The error details are added for you.",
+                    parent=self):
+                open_bug_report_window(self, summary=summary[:120])
         except Exception:
             pass  # dialog itself failed -- we already tried stderr above
 
@@ -540,6 +554,8 @@ class App(tk.Tk):
         helpm = add_menu("Help")
         helpm.add_command(label="User Manual", command=self.show_user_manual)
         helpm.add_command(label="Command Reference", command=self.show_command_reference, accelerator="F1")
+        helpm.add_separator()
+        helpm.add_command(label="Report Bug...", command=lambda: open_bug_report_window(self))
         helpm.add_separator()
         helpm.add_command(label="About HLayout", command=self.show_about)
 
