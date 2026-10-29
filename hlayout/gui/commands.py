@@ -211,8 +211,8 @@ Attached libraries:
     FREEROUTE EXPORT <file.dsn> | IMPORT <file.ses> | RUN [passes=<n>] [keep=0|1]
               [fresh=0|1] [layers=auto|single|two] [finger=<um>] [fingerlayer=1|2]
               [optpasses=<n>] [optstop=<%>] [directions=hv|vh|off] [viaopt=0|1]
-              [viacost=<n>] [viaflip=<um>] [shorten=0|1]   |   FREEROUTE VIAOPT [viaflip=<um>]
-              |   FREEROUTE SHORTEN
+              [viacost=<n>] [viaflip=<um>] [shorten=0|1] [dejog=0|1] [maxjog=<um>]
+              |   FREEROUTE VIAOPT [viaflip=<um>]   |   FREEROUTE SHORTEN   |   FREEROUTE DEJOG
                                        Freerouting autorouter round trip: write a
                                        Specctra DSN (route layers, pads, net names,
                                        existing routing), read a session back (tracks,
@@ -234,7 +234,10 @@ Attached libraries:
                                        viacost= the router's cost of a via.
                                        FREEROUTE VIAOPT runs just the via pass;
                                        shorten=1 (default) then straightens detours and
-                                       pulls corners tight, FREEROUTE SHORTEN runs just that
+                                       pulls corners tight, FREEROUTE SHORTEN runs just that;
+                                       dejog=1 (default) then lines up jogs -- short
+                                       sideways steps up to maxjog= um (default 1000) --
+                                       FREEROUTE DEJOG runs just that
     AUTOPLACE RUN|IMPROVE <netlist> [overrides=<csv>] [effort=] [seed=] [thermal=] [grid=]
                                        place the netlist's parts (KiCad .net, CSV or
                                        Tango) for the shortest weighted net length;
@@ -2695,8 +2698,9 @@ class CommandInterpreter:
         usage = ("usage: FREEROUTE EXPORT <file.dsn> | FREEROUTE IMPORT <file.ses> [keep=0|1] | "
                  "FREEROUTE RUN [passes=<n>] [keep=0|1] [fresh=0|1] [layers=auto|single|two] "
                  "[finger=<um>] [fingerlayer=1|2] [optpasses=<n>] [optstop=<%>] "
-                 "[directions=hv|vh|off] [viaopt=0|1] [viacost=<n>] [viaflip=<um>] [shorten=0|1] | "
-                 "FREEROUTE VIAOPT [viaflip=<um>] | FREEROUTE SHORTEN")
+                 "[directions=hv|vh|off] [viaopt=0|1] [viacost=<n>] [viaflip=<um>] [shorten=0|1] "
+                 "[dejog=0|1] [maxjog=<um>] | "
+                 "FREEROUTE VIAOPT [viaflip=<um>] | FREEROUTE SHORTEN | FREEROUTE DEJOG [maxjog=<um>]")
         if not args:
             raise CommandError(usage)
         sub = args[0].upper()
@@ -2739,10 +2743,22 @@ class CommandInterpreter:
                     opts["via_optimize_max_flip"] = float(v)
                 elif k == "shorten":
                     opts["shorten_tracks"] = v.lower() not in ("0", "no", "false")
+                elif k == "dejog":
+                    opts["remove_jogs"] = v.lower() not in ("0", "no", "false")
+                elif k == "maxjog":
+                    opts["max_jog"] = float(v)
                 else:
                     raise CommandError(f"unknown FREEROUTE option {k!r}")
             else:
                 pos.append(a)
+        if sub == "DEJOG" and not pos:
+            r = self.session.remove_jogs(**opts)
+            if r.get("undone"):
+                return "jogs left in: removing them would have joined " + \
+                    "; ".join(" + ".join(x["nets"]) for x in r["shorts"])
+            return (f"removed {r['jogs']} of {r['found']} jog(s) in {r['tracks']} track(s)"
+                    + (" -- left: " + ", ".join(f"{k} {v}" for k, v in r["why"].items())
+                       if r["why"] else ""))
         if sub == "SHORTEN" and not pos:
             r = self.session.shorten_tracks(**opts)
             return (f"shortened {r['tracks']} track(s): {r['before'] / 1000:.1f} -> "

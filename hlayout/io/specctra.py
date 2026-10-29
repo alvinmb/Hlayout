@@ -94,6 +94,10 @@ DEFAULT_RULES = {
     #: after routing (and the via optimisation), straighten detours and
     #: pull corners tight track by track (Session.shorten_tracks())
     "shorten_tracks": True,
+    #: ...then take out the jogs -- short sideways steps in a straight run
+    #: (Session.remove_jogs()), up to this long (um)
+    "remove_jogs": True,
+    "max_jog": 1000,
     #: keep tracks this far (um) clear of a bare die / its attach epoxy
     "die_keepout": 200,
     #: no track between a part's own terminations (under a chip

@@ -157,9 +157,13 @@ class SolidCraftWindow(tk.Toplevel):
         def work():
             from ..io.solidcraftio import send_to_solidcraft
             try:
+                path = getattr(self.app, "current_path", None) or \
+                    getattr(self.app.session, "current_path", None)
                 r = send_to_solidcraft(lib, cell, app=folder or None, window=window, export=export,
                                        on_progress=progress, cancel=lambda: self._cancel,
-                                       design_name=f"{name} {cell}")
+                                       design_name=f"{name} {cell}",
+                                       model_dir=os.path.dirname(os.path.abspath(path))
+                                       if path else None)
                 self.after(0, self._done, r, None, time.monotonic() - t0)
             except Exception as e:
                 self.after(0, self._done, None, e, time.monotonic() - t0)

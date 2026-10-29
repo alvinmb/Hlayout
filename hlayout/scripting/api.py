@@ -3887,8 +3887,10 @@ class Session:
                 app = _as.get_setting("solidcraft_path") or None
             except Exception:
                 app = None
+        path = getattr(self, "current_path", None)
         return _send(self.library, name, app=app, window=window, export=export,
-                     on_progress=on_progress, cancel=cancel)
+                     on_progress=on_progress, cancel=cancel,
+                     model_dir=os.path.dirname(os.path.abspath(path)) if path else None)
 
     def _substrate_box(self, cell):
         """The substrate outline (boundary layer) of ``cell`` as a shapely
@@ -5243,6 +5245,9 @@ class Session:
         if R.get("shorten_tracks", True):
             sh = self.shorten_tracks(cell_name=name, **R)
             out.update(shortened=sh["tracks"], shortened_by=sh["before"] - sh["after"])
+        if R.get("remove_jogs", True):
+            dj = self.remove_jogs(cell_name=name, **R)
+            out.update(jogs_removed=dj["jogs"])
         return out
 
     @staticmethod
@@ -5379,6 +5384,60 @@ class Session:
                     cell.srefs[:] = keep_srefs
                     res.update(tracks=0, before=0.0, after=0.0, vias_before=0, vias_after=0,
                                shorts=new, undone=True)
+        self._notify()
+        return res
+
+    def remove_jogs(self, cell_name: Optional[str] = None, progress=None, **rules) -> dict:
+        """Take the jogs out of the routing: a short sideways step (up to
+        the Autoroute rules' max_jog, default 1 mm) in an otherwise
+        straight run is removed by sliding one side across so the two runs
+        meet in line -- when nothing else joins the copper that moves, an
+        end of the track only slides within its own pad, and the moved
+        copper keeps the clearance (Freerouting rules tightened by the
+        DRC) from every other net, stays out of the die / part-body
+        keep-outs, on the substrate, and -- on the 2nd conductor -- on the
+        printed dielectric. Tracks joined end to end with nothing else at
+        the join count as one. Works with nets still unrouted. If the
+        result would join two named nets anywhere it is all put back. One
+        undo step. Returns {"jogs": removed, "tracks", "found", "before",
+        "after" (um), "why"}. See hlayout.core.dejog."""
+        from shapely.geometry import Polygon as _SP
+        from ..core.dejog import remove_jogs as _dejog
+        from ..io.techfile import load_net_names
+        name = cell_name or self.current_cell_name
+        if name is None:
+            raise LayoutError("no current cell; call new_cell()/use_cell() first")
+        cell = self.library.get_cell(name)
+        la, lb = self._route_layers()
+        R = self.freerouting_rules()
+        R.update(rules)
+        R = self._rules_with_drc(R)
+        keep = {}
+        for lay, pts in self._route_keepouts(cell, (la, lb), R):
+            if len(pts) >= 3:
+                keep.setdefault(int(lay), []).append(_SP(pts))
+        keepin = self._substrate_box(cell)
+        try:
+            diel = int(load_dielectric_rules(self.library)["layer"])
+        except Exception:
+            diel = -1
+        keepin_b = self._dielectric_area(cell, diel)
+        before = {frozenset(x["nets"]) for x in self.find_shorts(cell_name=name)}
+        keep_shapes = list(cell.shapes)
+        with self._batch():
+            res = _dejog(self.library, cell, (la, lb), float(R.get("clearance", 100)),
+                         max_jog=float(R.get("max_jog", 1000)), keepouts=keep,
+                         keepin=keepin, keepin_b=keepin_b,
+                         dielectric_layer=diel if diel >= 0 else None,
+                         fill_datatype=self.DIELECTRIC_FILL_DATATYPE,
+                         pad_nets=load_net_names(self.library) or None, progress=progress)
+            res["shorts"] = []
+            if res["jogs"]:
+                new = [x for x in self.find_shorts(cell_name=name)
+                       if frozenset(x["nets"]) not in before]
+                if new:
+                    cell.shapes[:] = keep_shapes
+                    res.update(jogs=0, tracks=0, before=0.0, after=0.0, shorts=new, undone=True)
         self._notify()
         return res
 

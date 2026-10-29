@@ -37,6 +37,10 @@ DIE_HEIGHT_UM = 380.0
 PACKAGE_BASE_UM = 500.0
 SUBSTRATE_HEX = "#f7f7f2"
 GLAZE_HEX = "#38b85a"
+BOND_HEX = "#d4af37"             # gold wire
+#: wire bonds are drawn at least this thick (um) so they show -- a real
+#: 25-50 um wire is near invisible at module scale; 0 = true size
+BOND_DIAMETER_UM = 100.0
 
 
 def _mm(v):
@@ -104,8 +108,29 @@ def _close_component(name, colour, opacity=1.0):
             {"command": "component.activate", "params": {"component": "root"}}]
 
 
+def _model_path(entry, model_dir):
+    """The STEP file a component model entry points at, if it exists --
+    absolute, or relative to ``model_dir`` (the design's folder)."""
+    if entry.get("mode") != "model" or not entry.get("model_path"):
+        return None
+    mp = entry["model_path"]
+    if not os.path.isabs(mp) and model_dir:
+        mp = os.path.join(model_dir, mp)
+    mp = os.path.abspath(mp)
+    return mp if os.path.isfile(mp) else None
+
+
+def model_files(batches) -> List[str]:
+    """The STEP files ``batches`` insert (SolidCraft must be allowed to read
+    their folders)."""
+    return [c["params"]["path"] for _l, cmds, _f in batches for c in cmds
+            if c.get("command") == "file.insert_step"]
+
+
 def build_batches(library, cell_name: str, *, layer_thickness=None, component_models=None,
-                  loop_height_um: Optional[float] = None) -> List[Tuple[str, list]]:
+                  loop_height_um: Optional[float] = None,
+                  bond_diameter_um: Optional[float] = None,
+                  model_dir: Optional[str] = None) -> List[Tuple[str, list]]:
     """[(label, [SolidCraft command, ...], finish), ...] building
     ``cell_name`` in 3D, in mm with z up (substrate top at z = 0).
     Each film, the parts and the bonds are built inside their own
@@ -212,10 +237,12 @@ def build_batches(library, cell_name: str, *, layer_thickness=None, component_mo
         sub_box = _uu(sub_polys).bounds         # DBU
     part_cmds = [{"command": "component.create", "params": {"name": "Parts", "activate": True}}]
     pkg_cmds = [{"command": "component.create", "params": {"name": "Package", "activate": True}}]
+    model_batches = []
+    model_encloses = []
     for kind, payload in F._walk_instances(library, cell_name, film_layers, comp_models):
         if kind != "component":
             continue
-        cn, entry, xf, _rot, _mir, label = payload
+        cn, entry, xf, rot_deg, mirrored, label = payload
         c = library.cells.get(cn)
         if c is None:
             continue
@@ -232,8 +259,40 @@ def build_batches(library, cell_name: str, *, layer_thickness=None, component_mo
         fx1, fy1 = max(p[0] for p in cs), max(p[1] for p in cs)
         seen[cn] = seen.get(cn, 0) + 1
         name = _safe(label or f"{cn}_{seen[cn]}")
-        if sub_box is not None and fx0 <= sub_box[0] + 1 and fy0 <= sub_box[1] + 1 \
-                and fx1 >= sub_box[2] - 1 and fy1 >= sub_box[3] - 1:
+        encloses = (sub_box is not None and fx0 <= sub_box[0] + 1 and fy0 <= sub_box[1] + 1
+                    and fx1 >= sub_box[2] - 1 and fy1 >= sub_box[3] - 1)
+        mp = _model_path(entry, model_dir)
+        if mp and not mirrored:
+            # its own STEP model (Component Library / component_models):
+            # inserted and placed the way the FreeCAD export places it --
+            # the model's (0, 0) at the cell's origin_um, turned with the
+            # placement, resting on the film under it, or from the
+            # substrate underside for a header the substrate sits in
+            zoff = _mm(float(entry.get("z_offset_um", 0.0)))
+            if entry.get("z_ref") == "substrate_bottom" or encloses:
+                z = -sub_t + zoff
+            else:
+                z = F._rest_z(surf, fx0, fy0, fx1, fy1) + zoff
+            org = entry.get("origin_um") or (0.0, 0.0)
+            ox, oy = xf((float(org[0]), float(org[1])))
+            a = math.radians(rot_deg + float(entry.get("rotation_deg", 0.0)))
+            ca, sa = round(math.cos(a), 12), round(math.sin(a), 12)
+            matrix = [ca, -sa, 0.0, _mm(ox), sa, ca, 0.0, _mm(oy), 0.0, 0.0, 1.0, round(z, 5)]
+            model_batches.append((f"{name}: {os.path.basename(mp)}", [
+                {"command": "component.activate", "params": {"component": "root"}},
+                # inserted at the origin and placed by one occurrence.move
+                # (_finish): a headless SolidCraft honours Insert STEP's own
+                # matrix, the window ignores it, and a move after a placed
+                # insert would apply twice
+                {"command": "file.insert_step", "params": {"path": mp, "name": name}},
+                {"command": "component.activate", "params": {"component": "root"}}],
+                {"place": matrix}))
+            model_encloses.append(encloses)
+            if not encloses:
+                h = _mm(float(entry.get("height_um", DEFAULT_COMPONENT_HEIGHT_UM)))
+                tops.append((fx0, fy0, fx1, fy1, z + h))
+            continue
+        if encloses:
             # an enclosing package (a header the substrate sits in): its
             # base goes UNDER the substrate, showing round it -- a box over
             # everything would bury the whole circuit
@@ -259,66 +318,94 @@ def build_batches(library, cell_name: str, *, layer_thickness=None, component_mo
         tops.append((fx0, fy0, fx1, fy1, base + h))
     if len(pkg_cmds) > 1:
         batches.append(("Package", pkg_cmds + _close_component("Package", PACKAGE_HEX), None))
+    batches += model_batches
     if len(part_cmds) > 1:
         batches.append((f"{len(part_cmds) - 1} parts",
                         part_cmds + _close_component("Parts", COMPONENT_HEX), None))
+
+    # an inserted header model has its own pins: the stand-in posts go
+    if any(model_encloses):
+        batches = [b for b in batches if "off the substrate" not in b[0]]
 
     # wire bonds: an arc in the vertical plane through both ends, piped
     if bond_layers:
         from shapely.geometry import Point
         segs = [s_ for n in sorted(bond_layers) for s_ in F._bond_segments(library, cell_name, n)]
+        colour = BOND_HEX
+        bd = BOND_DIAMETER_UM if bond_diameter_um is None else float(bond_diameter_um)
 
-        def zat(x, y):
-            best = 0.0
-            for g, zt in surf:
-                if zt > best and g.intersects(Point(x, y)):
-                    best = zt
-            for x0, y0, x1, y1, zt in tops:
-                if zt > best and x0 <= x <= x1 and y0 <= y <= y1:
-                    best = zt
-            return best
+        def bond_cmds(extra_tops=()):
+            """The wire-bond batch; ``extra_tops`` [(x0, y0, x1, y1, z top)]
+            (mm) adds surfaces found after the STEP models went in -- the
+            tops of a header model's pins, so a bond lands ON its pin."""
+            ext = [(x0 / DBU_MM, y0 / DBU_MM, x1 / DBU_MM, y1 / DBU_MM, zt)
+                   for x0, y0, x1, y1, zt in extra_tops]
 
-        colour = _hex(F._rgb01(library.layers[bond_layer if bond_layer >= 0
-                                              else min(bond_layers)].color))
-        names = []
-        cmds = [{"command": "component.create", "params": {"name": "Wire bonds", "activate": True}}]
-        for k, (p0, p1, w) in enumerate(segs, 1):
-            z0, z1 = zat(*p0), zat(*p1)
-            dx, dy = p1[0] - p0[0], p1[1] - p0[1]
-            L = math.hypot(dx, dy)
-            if L <= 0:
-                continue
-            ux, uy = dx / L, dy / L
-            Lm = _mm(L)
-            top = max(z0, z1) + loop_h
-            sk = f"bond {k} path"
-            nm = f"Bond {k}"
-            cmds += [
-                {"command": "sketch.create",
-                 "params": {"plane": {"origin": [_mm(p0[0]), _mm(p0[1]), round(z0, 5)],
-                                      "x_dir": [round(ux, 6), round(uy, 6), 0.0],
-                                      "y_dir": [0.0, 0.0, 1.0]}, "name": sk}},
-                {"command": "sketch.arc.three_point",
-                 "params": {"start": [0.0, 0.0], "end": [Lm, round(z1 - z0, 5)],
-                            "through": [round(Lm / 2.0, 5), round(top - z0, 5)],
-                            "connect": False}},
-                {"command": "sketch.finish", "params": {}},
-                {"command": "solid.pipe",
-                 "params": {"path_sketch": sk, "path": ["a1"],
-                            "diameter": max(_mm(w), 0.01), "operation": "new", "body_name": nm}},
-            ]
-            names.append(nm)
-        if names:
-            cmds += _close_component("Wire bonds", colour)
-            batches.append((f"{len(names)} wire bonds", cmds, None))
+            def zat(x, y):
+                best = 0.0
+                for g, zt in surf:
+                    if zt > best and g.intersects(Point(x, y)):
+                        best = zt
+                for x0, y0, x1, y1, zt in list(tops) + ext:
+                    if zt > best and x0 <= x <= x1 and y0 <= y <= y1:
+                        best = zt
+                return best
+
+            names = []
+            cmds = [{"command": "component.create",
+                     "params": {"name": "Wire bonds", "activate": True}}]
+            for k, (p0, p1, w) in enumerate(segs, 1):
+                z0, z1 = zat(*p0), zat(*p1)
+                dx, dy = p1[0] - p0[0], p1[1] - p0[1]
+                L = math.hypot(dx, dy)
+                if L <= 0:
+                    continue
+                ux, uy = dx / L, dy / L
+                Lm = _mm(L)
+                top = max(z0, z1) + loop_h
+                sk = f"bond {k} path"
+                nm = f"Bond {k}"
+                cmds += [
+                    {"command": "sketch.create",
+                     "params": {"plane": {"origin": [_mm(p0[0]), _mm(p0[1]), round(z0, 5)],
+                                          "x_dir": [round(ux, 6), round(uy, 6), 0.0],
+                                          "y_dir": [0.0, 0.0, 1.0]}, "name": sk}},
+                    {"command": "sketch.arc.three_point",
+                     "params": {"start": [0.0, 0.0], "end": [Lm, round(z1 - z0, 5)],
+                                "through": [round(Lm / 2.0, 5), round(top - z0, 5)],
+                                "connect": False}},
+                    {"command": "sketch.finish", "params": {}},
+                    {"command": "solid.pipe",
+                     "params": {"path_sketch": sk, "path": ["a1"],
+                                "diameter": max(_mm(w), _mm(bd), 0.01), "operation": "new",
+                                "body_name": nm}},
+                ]
+                names.append(nm)
+            if not names:
+                return None, 0
+            return cmds + _close_component("Wire bonds", colour), len(names)
+
+        cmds, nb = bond_cmds()
+        if cmds:
+            batches.append((f"{nb} wire bonds", cmds,
+                            {"rebond": bond_cmds} if model_batches else None))
     if not batches:
         raise LayoutError(f"nothing to build from {cell_name!r}")
     return batches
 
 
 def _finish(sc, result, fin):
-    """Join the bodies a batch created into one and colour it (see
-    build_batches())."""
+    """Join the bodies a batch created into one and colour it, or place an
+    inserted STEP model (see build_batches())."""
+    if fin.get("place") is not None:
+        # the model went in at the origin; one move puts it in place
+        occ = None
+        for step in (result or {}).get("results", []) if isinstance(result, dict) else []:
+            if isinstance(step, dict) and step.get("occurrence") is not None:
+                occ = step["occurrence"]
+        if occ is not None:
+            sc.execute("occurrence.move", occurrence=occ, matrix=fin["place"], space="world")
+        return
     made = []
     for step in (result or {}).get("results", []) if isinstance(result, dict) else []:
         if isinstance(step, dict):
@@ -340,6 +427,35 @@ def _finish(sc, result, fin):
         cmds.append({"command": "appearance.assign", "params": look})
     if cmds:
         sc.batch(cmds, rollback=True, timeout=600)
+
+
+#: a model body this small (mm, across) is a pin / lead a bond can land on
+LEAD_MAX_MM = 3.0
+
+
+def _model_tops(sc, inserted) -> list:
+    """[(x0, y0, x1, y1, z top)] in mm, world coordinates, of the small
+    bodies (pins, leads, seals) the inserted STEP models brought in --
+    measured in SolidCraft, where bodies are reported in their own
+    component's frame, so each is moved by its model's placement."""
+    info = sc.call("inspect_design", measure=True, sketches=False) or {}
+    by_name = {}
+    for b in info.get("bodies", []) if isinstance(info, dict) else []:
+        if b.get("bbox"):
+            by_name.setdefault(b.get("name"), []).append(b["bbox"])
+    out = []
+    for names, m in inserted:
+        for nm in names:
+            for bb in by_name.get(nm, []):
+                (x0, y0, z0), (x1, y1, z1) = bb["min"], bb["max"]
+                if x1 - x0 > LEAD_MAX_MM or y1 - y0 > LEAD_MAX_MM:
+                    continue
+                pts = [(m[0] * x + m[1] * y + m[3], m[4] * x + m[5] * y + m[7])
+                       for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))]
+                out.append((min(p[0] for p in pts), min(p[1] for p in pts),
+                            max(p[0] for p in pts), max(p[1] for p in pts),
+                            z1 + m[11]))
+    return out
 
 
 def send_to_solidcraft(library, cell_name: str, *, app: Optional[str] = None,
@@ -377,16 +493,34 @@ def send_to_solidcraft(library, cell_name: str, *, app: Optional[str] = None,
             except Exception:
                 pass
         allow.append(os.path.dirname(export))
+    for mp in model_files(batches):                 # let it read the STEP models
+        d = os.path.dirname(mp)
+        if d not in allow:
+            allow.append(d)
     errors = []
     total = len(batches)
     with SolidCraftClient(cli, connect=port, allow=allow, timeout=600) as sc:
         sc.call("new_design", name=design_name or f"{library.name} {cell_name}")
+        inserted = []                    # (created body names, placement matrix)
         for i, (label, cmds, fin) in enumerate(batches, 1):
             if cancel and cancel():
                 errors.append("stopped")
                 break
             try:
+                if fin and fin.get("rebond") and inserted:
+                    # land the bonds on the inserted models' own pins
+                    try:
+                        extra = _model_tops(sc, inserted)
+                        if extra:
+                            cmds = fin["rebond"](extra)[0] or cmds
+                    except Exception as e:      # keep the first estimate
+                        errors.append(f"{label}: model pin heights: {e}")
+                    fin = None
                 r = sc.batch(cmds, rollback=True, timeout=600)
+                if fin and fin.get("place") is not None and isinstance(r, dict):
+                    made = [b for step in r.get("results", []) if isinstance(step, dict)
+                            for b in (step.get("created_bodies") or [])]
+                    inserted.append((made, fin["place"]))
                 if isinstance(r, dict) and r.get("ok") is False:
                     f = r.get("failed") or {}
                     errors.append(f"{label}: step {f.get('index')} {f.get('command')}: {f.get('error')}")

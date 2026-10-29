@@ -172,6 +172,15 @@ class FreeroutingWindow(tk.Toplevel):
         ttk.Checkbutton(gf, text="Shorten tracks at the end (straighten detours, pull corners tight)",
                         variable=self.vars["shorten_tracks"]).grid(
             row=row, column=0, columnspan=4, sticky="w", padx=4)
+        row += 1
+        self.vars["remove_jogs"] = tk.BooleanVar()
+        ttk.Checkbutton(gf, text="Remove jogs at the end (line up short sideways steps)",
+                        variable=self.vars["remove_jogs"]).grid(
+            row=row, column=0, columnspan=2, sticky="w", padx=4)
+        self.vars["max_jog"] = tk.StringVar()
+        ttk.Label(gf, text="Longest jog (um):").grid(row=row, column=2, sticky="e", padx=4)
+        ttk.Entry(gf, textvariable=self.vars["max_jog"], width=9).grid(
+            row=row, column=3, sticky="w")
 
         nf = ttk.Frame(outer)
         nf.pack(fill="x", pady=(8, 0))
@@ -234,6 +243,8 @@ class FreeroutingWindow(tk.Toplevel):
                                                _DIRECTIONS[0][0]))
         self.vars["via_optimize"].set(bool(rules.get("via_optimize", True)))
         self.vars["shorten_tracks"].set(bool(rules.get("shorten_tracks", True)))
+        self.vars["remove_jogs"].set(bool(rules.get("remove_jogs", True)))
+        self.vars["max_jog"].set(f"{float(rules.get('max_jog', 1000)):g}")
         self.vars["via_optimize_max_flip"].set(f"{float(rules.get('via_optimize_max_flip', 0)):g}")
         self.vars["router"].set(app_settings.get_setting(app_settings.FREEROUTING_PATH_KEY)
                                 or find_freerouting() or "")
@@ -287,6 +298,14 @@ class FreeroutingWindow(tk.Toplevel):
         out["layer_directions"] = next((v for t, v in _DIRECTIONS if t == shown), "hv")
         out["via_optimize"] = bool(self.vars["via_optimize"].get())
         out["shorten_tracks"] = bool(self.vars["shorten_tracks"].get())
+        out["remove_jogs"] = bool(self.vars["remove_jogs"].get())
+        try:
+            mj = float(self.vars["max_jog"].get() or 1000)
+        except ValueError:
+            raise LayoutError("Longest jog must be a number (um)")
+        if mj <= 0:
+            raise LayoutError("Longest jog must be more than 0")
+        out["max_jog"] = mj
         try:
             out["via_optimize_max_flip"] = float(self.vars["via_optimize_max_flip"].get() or 0)
         except ValueError:
@@ -561,6 +580,9 @@ class FreeroutingWindow(tk.Toplevel):
                 if sh is not None and sh["tracks"]:
                     vias += f"; {sh['tracks']} track(s) shortened by " \
                             f"{(sh['before'] - sh['after']) / 1000:.1f} mm"
+                dj = self._remove_jogs()
+                if dj is not None and dj["jogs"]:
+                    vias += f"; {dj['jogs']} jog(s) removed"
                 shorts = self._check_shorts()
                 if shorts:
                     vias += f"; SHORT CIRCUIT: " + ", ".join(" + ".join(x["nets"]) for x in shorts)
@@ -656,6 +678,40 @@ class FreeroutingWindow(tk.Toplevel):
             self._say(f"Shortening tracks: {sh['tracks']} track(s) shortened, "
                       f"{sh['before'] / 1000:.1f} -> {sh['after'] / 1000:.1f} mm")
         return sh
+
+    def _remove_jogs(self):
+        """With "Remove jogs at the end": line up short sideways steps
+        (Session.remove_jogs). None if off."""
+        try:
+            rules = self.session.freerouting_rules()
+            if not rules.get("remove_jogs", True):
+                return None
+            self._say("Removing jogs: looking for short sideways steps...")
+            import time as _time
+            last = [0.0]
+
+            def tick(i, n, done):
+                now = _time.monotonic()
+                if now - last[0] > 0.25:
+                    last[0] = now
+                    self.app.status.set(f"Removing jogs: {done} removed so far ({i}/{n} tracks)")
+                    try:
+                        self.update_idletasks()
+                    except tk.TclError:
+                        pass
+            dj = self.session.remove_jogs(progress=tick)
+        except Exception as e:
+            self._say(f"Removing jogs failed: {e}")
+            return None
+        if dj.get("undone"):
+            self._say("Removing jogs: undone -- it would have joined "
+                      + "; ".join(" + ".join(x["nets"]) for x in dj["shorts"]))
+        else:
+            left = dj["found"] - dj["jogs"]
+            self._say(f"Removing jogs: {dj['jogs']} removed"
+                      + (f", {left} left (" + ", ".join(f"{k}: {v}" for k, v in dj["why"].items())
+                         + ")" if left > 0 and dj["why"] else ""))
+        return dj
 
     def _stop(self):
         self._cancel = True

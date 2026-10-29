@@ -562,6 +562,11 @@ def _rest_z(surf_geoms, x0, y0, x1, y1):
     return best
 
 
+#: wire bonds: gold, and drawn at least this thick (um) so they show -- a
+#: real 25-50 um wire is near invisible at module scale; 0 = true size
+BOND_RGB = (0.831, 0.686, 0.216)
+BOND_DIAMETER_UM = 100.0
+
 #: a bare chip-and-wire die (a part carrying its own wire bonds) with no
 #: height of its own in the component models: a typical die thickness
 DIE_HEIGHT_UM = 380.0
@@ -610,7 +615,8 @@ def _body_bbox_dbu(library, cell_name, film_layers, pad_only, bond_layers):
 def write_freecad_macro(library: Library, cell_name: str, path: str, *,
                         layer_thickness: Optional[dict] = None,
                         component_models: Optional[dict] = None,
-                        loop_height_um: Optional[float] = None) -> str:
+                        loop_height_um: Optional[float] = None,
+                        bond_diameter_um: Optional[float] = None) -> str:
     """Write a FreeCAD macro rebuilding ``cell_name`` as a 3D solid
     stack. ``layer_thickness`` ({str(layer): microns}) and
     ``component_models`` default to the design's saved tech-params, then
@@ -888,7 +894,8 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
             lines.append("_BONDS = [")
             for (p0, p1, w) in segs:
                 (x0, y0), (x1b, y1b) = p0, p1
-                r_mm = max(_mm(w) / 2.0, 0.005)
+                bd = BOND_DIAMETER_UM if bond_diameter_um is None else float(bond_diameter_um)
+                r_mm = max(_mm(w) / 2.0, _mm(bd) / 2.0, 0.005)
                 lines.append(f"    ({_mm(x0):.5f}, {_mm(y0):.5f}, {_mm(x1b):.5f}, "
                              f"{_mm(y1b):.5f}, {r_mm:.5f}),")
             lines.append("]")
@@ -899,8 +906,7 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
             lines.append(f"    _za = max(_z0, _z1) + {loop_h_mm:.5f}")
             lines.append("    _bw.append(_bondwire(V(_x0, _y0, _z0), "
                          "V((_x0 + _x1) / 2.0, (_y0 + _y1) / 2.0, _za), V(_x1, _y1, _z1), _r))")
-            rgb = _rgb01(library.layers[bond_layer if bond_layer >= 0
-                                        else min(bond_layers)].color)
+            rgb = BOND_RGB
             lines.append(f"_add('wire_bonds', _fuse(_bw), "
                          f"({rgb[0]:.4f},{rgb[1]:.4f},{rgb[2]:.4f}))")
             n_solids += len(segs)
