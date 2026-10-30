@@ -24,6 +24,48 @@ the requirements captured in `spec.odt`:
   and place cells/Srefs from, plus the ability to save the current
   design out under a chosen library name for reuse as one
 
+## Download
+
+Installers for Windows, Linux (Debian/Ubuntu) and macOS are attached to
+each [GitHub release](https://github.com/alvinmb/Hlayout/releases).
+To uninstall: on Windows use Settings > Apps (or "Uninstall HLayout" in
+the Start menu); on Debian/Ubuntu run `sudo apt remove hlayout`; on
+macOS drag HLayout from Applications to the Bin.
+
+## License
+
+HLayout is free software, licensed under the
+[GNU General Public License v3.0](LICENSE). The chip-and-wire router in
+`router/` is a fork of [Freerouting](https://github.com/freerouting/freerouting),
+which is also GPL-3.0.
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io),
+certificate by [SignPath Foundation](https://signpath.org).
+
+- Committers and reviewers: [Alvin Brown](https://github.com/alvinmb)
+- Approvers: [Alvin Brown](https://github.com/alvinmb)
+
+Only release builds made by this repository's GitHub Actions workflow
+from its public source are signed, and each signing request is approved
+by hand.
+
+## Privacy policy
+
+This program will not transfer any information to other networked
+systems unless specifically requested by the user or the person
+installing or operating it.
+
+- **Help > Report Bug...** writes the report to your own computer. It
+  opens a GitHub issue in your browser only when you click
+  *Open GitHub Issue*, and you attach the report yourself.
+- The **MCP bridge** (Tools > MCP Server) is off until you turn it on,
+  and it listens only on this computer (127.0.0.1).
+- **Freerouting** is installed separately by you; HLayout runs it with
+  its usage analytics turned off (`-da`). See Freerouting's own
+  documentation for its policies.
+
 ## Install
 
 ```

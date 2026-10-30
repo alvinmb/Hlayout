@@ -129,6 +129,11 @@ section{padding-block:72px}
 .ex-grid figcaption b{color:var(--ink);font-weight:600}
 .ex-grid .tile img{background:#fff}
 @media (max-width:760px){.ex-grid{grid-template-columns:1fr}}
+
+.pol-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;align-items:start}
+.pol{background:var(--tile);border:1px solid var(--rule);border-radius:10px;padding:22px;display:grid;gap:10px;align-content:start;min-width:0}
+.pol p{color:var(--muted);font-size:.94rem}
+@media (max-width:760px){.pol-grid{grid-template-columns:1fr}}
 /* 3d */
 .pair{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px}
 figure{margin:0;display:grid;gap:10px}
@@ -392,20 +397,49 @@ python hlayout_app.py examples/notch_filter.gds</pre>
       </div>
     </div>
   </section>
+
+  <section id="policies">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="eyebrow">Licence and policies</span>
+        <h2>Free software, signed releases</h2>
+      </div>
+      <div class="pol-grid">
+        <div class="pol">
+          <h3>Licence</h3>
+          <p>HLayout is free software under the <a href="https://github.com/alvinmb/Hlayout/blob/main/LICENSE" target="_blank" rel="noopener">GNU General Public License v3.0</a>. The chip-and-wire router is a fork of Freerouting, also GPL-3.0.</p>
+        </div>
+        <div class="pol">
+          <h3>Code signing policy</h3>
+          <p>Free code signing provided by <a href="https://about.signpath.io" target="_blank" rel="noopener">SignPath.io</a>, certificate by <a href="https://signpath.org" target="_blank" rel="noopener">SignPath Foundation</a>.</p>
+          <p>Committers and reviewers: Alvin Brown. Approvers: Alvin Brown. Only release builds made by the project's GitHub Actions workflow from its public source are signed, and each request is approved by hand.</p>
+        </div>
+        <div class="pol">
+          <h3>Privacy policy</h3>
+          <p>This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it.</p>
+          <p>Help → Report Bug saves its report on your computer and opens a GitHub issue only when you ask. The MCP bridge is off until you turn it on and listens only on this computer. Freerouting, installed separately, is run with its analytics turned off.</p>
+        </div>
+        <div class="pol">
+          <h3>Uninstalling</h3>
+          <p>Windows: Settings → Apps, or Uninstall HLayout in the Start menu. Debian/Ubuntu: <span class="mono">sudo apt remove hlayout</span>. macOS: drag HLayout from Applications to the Bin.</p>
+        </div>
+      </div>
+    </div>
+  </section>
 </div>
 </main>
 
 <footer>
   <div class="wrap">
-    <span>HLayout · thick-film hybrid layout CAD</span>
-    <span><a href="https://github.com/alvinmb/Hlayout" target="_blank" rel="noopener">GitHub</a> · <a href="https://github.com/alvinmb/Hlayout/releases" target="_blank" rel="noopener">Releases</a> · <a href="https://github.com/alvinmb/Hlayout/issues" target="_blank" rel="noopener">Report an issue</a></span>
+    <span>HLayout · thick-film hybrid layout CAD · GPL-3.0</span>
+    <span><a href="https://github.com/alvinmb/Hlayout" target="_blank" rel="noopener">GitHub</a> · <a href="https://github.com/alvinmb/Hlayout/releases" target="_blank" rel="noopener">Releases</a> · <a href="https://github.com/alvinmb/Hlayout/issues" target="_blank" rel="noopener">Report an issue</a> · <a href="#download" onclick="setTimeout(function(){var e=document.getElementById('policies');if(e)e.scrollIntoView()},60)">Licence, code signing and privacy</a></span>
   </div>
 </footer>
 
 <script>
 (function(){
   // Release version: bump this when a new vX.Y.Z tag is pushed. File names follow .github/workflows/build-installers.yml.
-  var VERSION = "0.2.0";
+  var VERSION = "0.6.0";
   var REPO = "https://github.com/alvinmb/Hlayout";
   var base = REPO + "/releases/download/v" + VERSION + "/";
   var files = {

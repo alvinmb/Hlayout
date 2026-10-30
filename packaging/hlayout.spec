@@ -99,8 +99,37 @@ a = Analysis(
 )
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+def _windows_version_info(version):
+    """Product name and version for hlayout.exe's Properties > Details
+    tab. Code signing (SignPath) checks that every signed file carries
+    the same product name and version, so they come from APP_VERSION."""
+    import re
+    from PyInstaller.utils.win32.versioninfo import (
+        FixedFileInfo, StringFileInfo, StringStruct, StringTable,
+        VarFileInfo, VarStruct, VSVersionInfo)
+    nums = [int(n) for n in re.findall(r"\d+", version.split("-")[0])][:4]
+    nums += [0] * (4 - len(nums))
+    strings = [
+        StringStruct("CompanyName", "Alvin Brown"),
+        StringStruct("FileDescription", "HLayout - thick-film hybrid layout CAD"),
+        StringStruct("FileVersion", version),
+        StringStruct("InternalName", "hlayout"),
+        StringStruct("LegalCopyright", "Copyright (C) Alvin Brown. GPL-3.0."),
+        StringStruct("OriginalFilename", "hlayout.exe"),
+        StringStruct("ProductName", "HLayout"),
+        StringStruct("ProductVersion", version),
+    ]
+    return VSVersionInfo(
+        ffi=FixedFileInfo(filevers=tuple(nums), prodvers=tuple(nums)),
+        kids=[StringFileInfo([StringTable("040904B0", strings)]),
+              VarFileInfo([VarStruct("Translation", [1033, 1200])])],
+    )
+
+
+version_info = None
 if sys.platform == "win32":
     icon_file = str(ROOT / "packaging" / "icons" / "hlayout.ico")
+    version_info = _windows_version_info(APP_VERSION)
 elif sys.platform == "darwin":
     icon_file = str(ROOT / "packaging" / "icons" / "hlayout.icns")
 else:
@@ -117,6 +146,7 @@ exe = EXE(
     upx=False,
     console=False,
     icon=icon_file,
+    version=version_info,
 )
 
 coll = COLLECT(

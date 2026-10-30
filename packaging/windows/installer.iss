@@ -11,7 +11,10 @@
 #endif
 
 #define MyAppName "HLayout"
-#define MyAppPublisher "Alvin"
+#define MyAppPublisher "Alvin Brown"
+; Numeric part of the version for the Windows version resource, which
+; only takes digits ("0.0.0-dev12" -> "0.0.0").
+#define MyAppNumVersion Copy(MyAppVersion, 1, Pos("-", MyAppVersion + "-") - 1)
 #define MyAppExeName "hlayout.exe"
 #define RepoRoot ".."  ; this script lives in packaging\windows
 
@@ -20,6 +23,18 @@ AppId={{9F1B9C2E-6C2C-4A9E-9C1E-2B6E1E7C6C8A}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
+AppPublisherURL=https://github.com/alvinmb/Hlayout
+LicenseFile={#RepoRoot}\..\LICENSE
+; Product name and version on the installer's Properties > Details tab;
+; code signing checks these match the signed hlayout.exe.
+VersionInfoVersion={#MyAppNumVersion}
+VersionInfoTextVersion={#MyAppVersion}
+VersionInfoProductName={#MyAppName}
+VersionInfoProductVersion={#MyAppNumVersion}
+VersionInfoProductTextVersion={#MyAppVersion}
+VersionInfoCompany={#MyAppPublisher}
+VersionInfoDescription={#MyAppName} Setup
+VersionInfoCopyright=Copyright (C) Alvin Brown. GPL-3.0.
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
