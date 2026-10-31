@@ -57,6 +57,8 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 ; The full PyInstaller onedir payload (dist/hlayout/**), built by the
 ; workflow immediately before this script runs.
 Source: "{#RepoRoot}\..\dist\hlayout\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; The licence next to hlayout.exe, where users look for it.
+Source: "{#RepoRoot}\..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

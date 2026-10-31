@@ -36,6 +36,9 @@ datas = [
     # the hlayout package (App.user_manual_path()) -- in a frozen build
     # that's _internal/, so the PDF lands at _internal/docs/.
     (str(ROOT / "docs" / "HLayout_User_Manual.pdf"), "docs"),
+    # The GPL asks that everyone who receives the program also gets a
+    # copy of the licence, so every installer carries LICENSE.
+    (str(ROOT / "LICENSE"), "."),
 ]
 binaries = []
 hiddenimports = []
