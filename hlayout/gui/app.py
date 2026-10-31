@@ -821,7 +821,12 @@ class App(tk.Tk):
             "A layout editor for thick-film hybrid microelectronics: "
             "64 layers, GDSII I/O, mouse and command-bar driven drawing/editing, "
             "attached reference libraries, and a full Python scripting API.\n\n"
-            f"Version {__version__}",
+            f"Version {__version__}\n\n"
+            "Copyright (C) Alvin Brown\n"
+            "Free and open-source software, licensed under the GNU General "
+            "Public License v3.0 or later. HLayout comes with ABSOLUTELY NO "
+            "WARRANTY; you may redistribute it under the terms of that licence.\n\n"
+            "Source code and licence: https://github.com/alvinmb/Hlayout",
             parent=self,
         )
 

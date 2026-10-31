@@ -1,5 +1,13 @@
 # HLayout — Thick-Film Hybrid Layout CAD Tool
 
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/alvinmb/Hlayout)](https://github.com/alvinmb/Hlayout/releases)
+
+**HLayout is free and open-source software, licensed under the
+[GNU General Public License v3.0 or later](LICENSE).** You can use,
+study, change and share it; anyone who distributes a changed version
+must share its source under the same licence.
+
 A layout editor for thick-film hybrid microelectronics, built to
 the requirements captured in `spec.odt`:
 
@@ -35,7 +43,7 @@ macOS drag HLayout from Applications to the Bin.
 ## License
 
 HLayout is free software, licensed under the
-[GNU General Public License v3.0](LICENSE). The chip-and-wire router in
+[GNU General Public License v3.0 or later](LICENSE) (SPDX: `GPL-3.0-or-later`). The chip-and-wire router in
 `router/` is a fork of [Freerouting](https://github.com/freerouting/freerouting),
 which is also GPL-3.0.
 
