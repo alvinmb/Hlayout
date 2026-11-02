@@ -1,0 +1,51 @@
+2026-10-25 17:06:33.497 INFO   Freerouting v2.5.0 (build-date: 2026-10-05)
+2026-10-25 17:06:33.826 INFO   Hardware: 8 CPU cores, 410 CPU score, 4050 MB RAM
+2026-10-25 17:06:33.827 WARN   Deprecated settings path '-mp / --router.max_passes'; use '--router.autorouter.max_passes' instead. The old path will be removed in a future release.
+2026-10-25 17:06:33.829 WARN   GUI is disabled and you don't have a console available, so the only feedback from Freerouting is in the log.
+2026-10-25 17:06:35.064 WARN   Deprecated settings path 'router.max_passes'; use 'router.autorouter.max_passes' instead. The old path will be removed in a future release.
+2026-10-25 17:06:35.362 INFO   [7344CC\21E3C9] Loading board file 'cheap1.dsn'...
+2026-10-25 17:06:35.701 INFO   [7344CC\21E3C9] Job '7344CC\21E3C9' started at 2026-10-25T17:06:35.701209300Z.
+2026-10-25 17:06:35.898 INFO   [7344CC\21E3C9] Pipeline thread limits: autorouter pass is single-threaded, optimizer.max_threads=7.
+2026-10-25 17:06:36.026 INFO   [7344CC\21E3C9] Fanout stage started on board '454665d78fe7072491f603bd6d201e8f' with 24 of 24 SMD pins needing fanout (0 already connected, 0 netless).
+2026-10-25 17:06:38.287 INFO   [7344CC\21E3C9] Fanout pass #1 on board '6b702f15a6e54286afd8eb39efa145a1' completed in 2.18 seconds with 24 SMD pins fanouted, 0 not routed, 0 insert errors, +23 extra vias (0 SMD pins still to check in pass, ripup costs=100).
+2026-10-25 17:06:38.449 INFO   [7344CC\21E3C9] Fanout pass #2 on board '6b702f15a6e54286afd8eb39efa145a1' completed in 0.05 seconds with 0 SMD pins fanouted, 0 not routed, 0 insert errors, +0 extra vias (0 SMD pins still to check in pass, ripup costs=200).
+2026-10-25 17:06:38.464 INFO   [7344CC\21E3C9] Fanout stage completed: started with 24 total SMD pins, completed in 2.43 seconds, escaped pins: 24/24 (100.0%), using 1.14 total CPU seconds, 0.06 GB total allocated, and 55.6 MB peak heap usage.
+2026-10-25 17:06:38.500 INFO   [7344CC\21E3C9] Auto-routing stage started on board '6b702f15a6e54286afd8eb39efa145a1' with baseline score 55.56 for 11 unrouted items.
+2026-10-25 17:06:42.603 INFO   [7344CC\21E3C9] Auto-routing pass #1 on board '6b702f15a6e54286afd8eb39efa145a1' was completed in 3.93 seconds with score 1000.00 (0 unrouted and 0 violations), using 2.80 CPU seconds and the job allocated 0.26 GB of memory so far.
+2026-10-25 17:06:42.664 INFO   [7344CC\21E3C9] Auto-routing pass #2 on board '216fcbe0a393ae7f36aaab58d92ba618' was completed in 0.01 seconds with score 1000.00 (0 unrouted and 0 violations), using 2.80 CPU seconds and the job allocated 0.26 GB of memory so far.
+2026-10-25 17:06:42.739 INFO   [7344CC\21E3C9] Auto-routing stage completed: started with 12 unrouted nets, completed in 6.82 seconds, final score: 1000.00 (0 unrouted and 0 violations), using 2.80 total CPU seconds, 0.26 GB total allocated, and 84.5 MB peak heap usage.
+2026-10-25 17:06:42.918 INFO   [7344CC\21E3C9] Optimization stage started on board '005e24088f69cae74b7fff4b020e4c9c'. Baseline router score: 1000.00, optimizer score: 0.00, incomplete connections: 0, clearance violations: 0.
+2026-10-25 17:06:53.002 INFO   [7344CC\21E3C9] Optimizer pass #1 on board '4de22a1ff7be9109a7cb483bcaafcbc6' was completed in 10.01 seconds with the score of 0.00 (0 unrouted and 0 violations).
+2026-10-25 17:06:53.023 INFO   [7344CC\21E3C9] Optimizer pass #1 candidate rejected: OPTIMIZER_SCORE_NOT_IMPROVED. Restoring incumbent (optimizer score 0.00, incomplete connections: 0, clearance violations: 0).
+2026-10-25 17:06:53.083 INFO   [7344CC\21E3C9] Optimizer pass #1: optimizer score 0.00 -> 0.00 (UNCHANGED, n/a (baseline was 0.00)), router score: 1000.00, incomplete connections: 0, clearance violations: 0.
+2026-10-25 17:06:58.300 INFO   [7344CC\21E3C9] Optimizer pass #2 on board '85d923f74296e62f930421065bc06343' was completed in 5.15 seconds with the score of 0.00 (0 unrouted and 0 violations).
+2026-10-25 17:06:58.308 INFO   [7344CC\21E3C9] Optimizer pass #2 candidate rejected: OPTIMIZER_SCORE_NOT_IMPROVED. Restoring incumbent (optimizer score 0.00, incomplete connections: 0, clearance violations: 0).
+2026-10-25 17:06:58.351 INFO   [7344CC\21E3C9] Optimizer pass #2: optimizer score 0.00 -> 0.00 (UNCHANGED, n/a (baseline was 0.00)), router score: 1000.00, incomplete connections: 0, clearance violations: 0.
+2026-10-25 17:07:03.739 INFO   [7344CC\21E3C9] Optimizer pass #3 on board '4de22a1ff7be9109a7cb483bcaafcbc6' was completed in 5.34 seconds with the score of 0.00 (0 unrouted and 0 violations).
+2026-10-25 17:07:03.752 INFO   [7344CC\21E3C9] Optimizer pass #3 candidate rejected: OPTIMIZER_SCORE_NOT_IMPROVED. Restoring incumbent (optimizer score 0.00, incomplete connections: 0, clearance violations: 0).
+2026-10-25 17:07:03.800 INFO   [7344CC\21E3C9] Optimizer pass #3: optimizer score 0.00 -> 0.00 (UNCHANGED, n/a (baseline was 0.00)), router score: 1000.00, incomplete connections: 0, clearance violations: 0.
+2026-10-25 17:07:07.065 INFO   [7344CC\21E3C9] Optimizer pass #4 on board '85d923f74296e62f930421065bc06343' was completed in 3.21 seconds with the score of 0.00 (0 unrouted and 0 violations).
+2026-10-25 17:07:07.072 INFO   [7344CC\21E3C9] Optimizer pass #4 candidate rejected: OPTIMIZER_SCORE_NOT_IMPROVED. Restoring incumbent (optimizer score 0.00, incomplete connections: 0, clearance violations: 0).
+2026-10-25 17:07:07.101 INFO   [7344CC\21E3C9] Optimizer pass #4: optimizer score 0.00 -> 0.00 (UNCHANGED, n/a (baseline was 0.00)), router score: 1000.00, incomplete connections: 0, clearance violations: 0.
+2026-10-25 17:07:10.053 INFO   [7344CC\21E3C9] Optimizer pass #5 on board '4de22a1ff7be9109a7cb483bcaafcbc6' was completed in 2.91 seconds with the score of 0.00 (0 unrouted and 0 violations).
+2026-10-25 17:07:10.061 INFO   [7344CC\21E3C9] Optimizer pass #5 candidate rejected: OPTIMIZER_SCORE_NOT_IMPROVED. Restoring incumbent (optimizer score 0.00, incomplete connections: 0, clearance violations: 0).
+2026-10-25 17:07:10.090 INFO   [7344CC\21E3C9] Optimizer pass #5: optimizer score 0.00 -> 0.00 (UNCHANGED, n/a (baseline was 0.00)), router score: 1000.00, incomplete connections: 0, clearance violations: 0.
+2026-10-25 17:07:12.221 INFO   [7344CC\21E3C9] Optimizer pass #6 on board '85d923f74296e62f930421065bc06343' was completed in 2.09 seconds with the score of 0.00 (0 unrouted and 0 violations).
+2026-10-25 17:07:12.229 INFO   [7344CC\21E3C9] Optimizer pass #6 candidate rejected: OPTIMIZER_SCORE_NOT_IMPROVED. Restoring incumbent (optimizer score 0.00, incomplete connections: 0, clearance violations: 0).
+2026-10-25 17:07:12.260 INFO   [7344CC\21E3C9] Optimizer pass #6: optimizer score 0.00 -> 0.00 (UNCHANGED, n/a (baseline was 0.00)), router score: 1000.00, incomplete connections: 0, clearance violations: 0.
+2026-10-25 17:07:14.190 INFO   [7344CC\21E3C9] Optimizer pass #7 on board '4de22a1ff7be9109a7cb483bcaafcbc6' was completed in 1.89 seconds with the score of 0.00 (0 unrouted and 0 violations).
+2026-10-25 17:07:14.194 INFO   [7344CC\21E3C9] Optimizer pass #7 candidate rejected: OPTIMIZER_SCORE_NOT_IMPROVED. Restoring incumbent (optimizer score 0.00, incomplete connections: 0, clearance violations: 0).
+2026-10-25 17:07:14.223 INFO   [7344CC\21E3C9] Optimizer pass #7: optimizer score 0.00 -> 0.00 (UNCHANGED, n/a (baseline was 0.00)), router score: 1000.00, incomplete connections: 0, clearance violations: 0.
+2026-10-25 17:07:15.573 INFO   [7344CC\21E3C9] Optimizer pass #8 on board '85d923f74296e62f930421065bc06343' was completed in 1.33 seconds with the score of 0.00 (0 unrouted and 0 violations).
+2026-10-25 17:07:15.582 INFO   [7344CC\21E3C9] Optimizer pass #8 candidate rejected: OPTIMIZER_SCORE_NOT_IMPROVED. Restoring incumbent (optimizer score 0.00, incomplete connections: 0, clearance violations: 0).
+2026-10-25 17:07:15.587 INFO   [7344CC\21E3C9] Optimizer pass #8: optimizer score 0.00 -> 0.00 (UNCHANGED, n/a (baseline was 0.00)), router score: 1000.00, incomplete connections: 0, clearance violations: 0.
+2026-10-25 17:07:16.485 INFO   [7344CC\21E3C9] Optimizer pass #9 on board '4de22a1ff7be9109a7cb483bcaafcbc6' was completed in 0.87 seconds with the score of 0.00 (0 unrouted and 0 violations).
+2026-10-25 17:07:16.490 INFO   [7344CC\21E3C9] Optimizer pass #9 candidate rejected: OPTIMIZER_SCORE_NOT_IMPROVED. Restoring incumbent (optimizer score 0.00, incomplete connections: 0, clearance violations: 0).
+2026-10-25 17:07:16.500 INFO   [7344CC\21E3C9] Optimizer pass #9: optimizer score 0.00 -> 0.00 (UNCHANGED, n/a (baseline was 0.00)), router score: 1000.00, incomplete connections: 0, clearance violations: 0.
+2026-10-25 17:07:17.350 INFO   [7344CC\21E3C9] Optimizer pass #10 on board '85d923f74296e62f930421065bc06343' was completed in 0.82 seconds with the score of 0.00 (0 unrouted and 0 violations).
+2026-10-25 17:07:17.352 INFO   [7344CC\21E3C9] Optimizer pass #10 candidate rejected: OPTIMIZER_SCORE_NOT_IMPROVED. Restoring incumbent (optimizer score 0.00, incomplete connections: 0, clearance violations: 0).
+2026-10-25 17:07:17.362 INFO   [7344CC\21E3C9] Optimizer pass #10: optimizer score 0.00 -> 0.00 (UNCHANGED, n/a (baseline was 0.00)), router score: 1000.00, incomplete connections: 0, clearance violations: 0.
+2026-10-25 17:07:17.371 INFO   [7344CC\21E3C9] Optimization stage completed:. Baseline router score: 1000.00, baseline optimizer score: 0.00, final router score: 1000.00, final optimizer score: 0.00, completed in 34.45 seconds, using 53.02 total CPU seconds, 13.03 GB total allocated, and 416.3 MB peak heap usage.
+2026-10-25 17:07:17.371 INFO   [7344CC\21E3C9] Job '7344CC\21E3C9' finished with state: COMPLETED (elapsed: 41.67 seconds, finished at UTC: 2026-10-25T17:07:17.371185100Z).
+2026-10-25 17:07:17.384 INFO   Saving output file 'C:\dev\HLayout\example5\_frtest\cheap1.ses' (SES)...
+2026-10-25 17:07:17.388 INFO   Successfully saved output file 'C:\dev\HLayout\example5\_frtest\cheap1.ses' (7788 bytes).

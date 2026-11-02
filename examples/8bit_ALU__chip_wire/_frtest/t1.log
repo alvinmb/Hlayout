@@ -1,0 +1,132 @@
+2026-10-25 16:42:54.238 INFO   Freerouting v2.5.0 (build-date: 2026-10-05)
+2026-10-25 16:42:54.560 INFO   Hardware: 8 CPU cores, 414 CPU score, 4050 MB RAM
+2026-10-25 16:42:54.560 WARN   Deprecated settings path '-mp / --router.max_passes'; use '--router.autorouter.max_passes' instead. The old path will be removed in a future release.
+2026-10-25 16:42:54.562 WARN   GUI is disabled and you don't have a console available, so the only feedback from Freerouting is in the log.
+2026-10-25 16:42:55.755 WARN   Deprecated settings path 'router.max_passes'; use 'router.autorouter.max_passes' instead. The old path will be removed in a future release.
+2026-10-25 16:42:56.041 INFO   [996761\1B2D79] Loading board file 't1.dsn'...
+2026-10-25 16:42:56.129 INFO   [996761\1B2D79] Job '996761\1B2D79' started at 2026-10-25T16:42:56.128827200Z.
+2026-10-25 16:42:56.207 WARN   Design Warning: Board has 21 pre-existing clearance violation(s) in the loaded design (before routing):
+  - 21 unfixable violation(s) (cannot be resolved by Freerouting):
+      * 21 pin-to-pin clearance violations (first 5 shown):
+          - HL_EDGE.E3 <-> HL_EDGE.E1
+          - HL_EDGE.E3 <-> HL_EDGE.E0
+          - HL_EDGE.E2 <-> HL_EDGE.E1
+          - HL_EDGE.E2 <-> HL_EDGE.E0
+          - BOND.B87 [net V] <-> BOND.B86 [net VN]
+          ... and 16 more
+  - 0 potentially fixable violations
+Notice: Freerouting does not modify component placement, board outlines, or fixed items.
+Resolving these 21 unfixable violation(s) is the responsibility of the board author in their EDA tool (e.g. KiCad).
+2026-10-25 16:42:56.236 INFO   [996761\1B2D79] Pipeline thread limits: autorouter pass is single-threaded, optimizer.max_threads=7.
+2026-10-25 16:42:56.286 INFO   [996761\1B2D79] Fanout stage started on board '679be9e25f04ed94ad75b7f9cf729158' with 131 of 184 SMD pins needing fanout (0 already connected, 53 netless).
+2026-10-25 16:42:56.824 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:42:57.273 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:42:57.276 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:42:57.424 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:42:59.612 INFO   [996761\1B2D79] Fanout pass #1 on board '39b0410a480336f801e82bb94606e9b4' completed in 3.27 seconds with 72 SMD pins fanouted, 59 not routed, 0 insert errors, +65 extra vias (0 SMD pins still to check in pass, ripup costs=100).
+2026-10-25 16:42:59.781 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:42:59.972 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:00.012 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:00.060 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:00.961 INFO   [996761\1B2D79] Fanout pass #2 on board 'de6e60aff4dce4b2167aa040a53cccb8' completed in 1.31 seconds with 28 SMD pins fanouted, 57 not routed, 0 insert errors, +5 extra vias (0 SMD pins still to check in pass, ripup costs=200).
+2026-10-25 16:43:01.074 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:01.242 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:01.244 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:01.336 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:02.075 INFO   [996761\1B2D79] Fanout pass #3 on board '09dee3a6766c7dd5953f649af4db5ee0' completed in 1.08 seconds with 19 SMD pins fanouted, 57 not routed, 0 insert errors, +6 extra vias (0 SMD pins still to check in pass, ripup costs=300).
+2026-10-25 16:43:02.158 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:02.305 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:02.308 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:02.969 INFO   [996761\1B2D79] Fanout pass #4 on board '12ec34331b5dd751fc40d99e4e77042a' completed in 0.87 seconds with 14 SMD pins fanouted, 57 not routed, 0 insert errors, +1 extra via (0 SMD pins still to check in pass, ripup costs=400).
+2026-10-25 16:43:03.044 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:03.179 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:03.230 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:03.259 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:03.709 INFO   [996761\1B2D79] Fanout pass #5 on board '8b7e8ffca106d350f4bbce30e967465f' completed in 0.71 seconds with 9 SMD pins fanouted, 57 not routed, 0 insert errors, +5 extra vias (0 SMD pins still to check in pass, ripup costs=500).
+2026-10-25 16:43:03.792 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:03.938 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:03.942 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:03.953 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:04.420 INFO   [996761\1B2D79] Fanout pass #6 on board '8c3add250dc91fe90560ad09f89db191' completed in 0.69 seconds with 6 SMD pins fanouted, 57 not routed, 0 insert errors, +1 extra via (0 SMD pins still to check in pass, ripup costs=600).
+2026-10-25 16:43:04.484 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:04.601 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:04.605 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:04.711 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:05.063 INFO   [996761\1B2D79] Fanout pass #7 on board 'dcfabc6554dad5d9929c13d068a8410d' completed in 0.63 seconds with 6 SMD pins fanouted, 58 not routed, 0 insert errors, +0 extra vias (0 SMD pins still to check in pass, ripup costs=700).
+2026-10-25 16:43:05.145 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:05.233 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:05.237 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:05.328 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:05.763 INFO   [996761\1B2D79] Fanout pass #8 on board '206ed4e30acfa5f39c1da7fff82d8f91' completed in 0.68 seconds with 5 SMD pins fanouted, 58 not routed, 0 insert errors, +0 extra vias (0 SMD pins still to check in pass, ripup costs=800).
+2026-10-25 16:43:05.846 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:05.935 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:05.939 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:05.968 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:06.337 INFO   [996761\1B2D79] Fanout pass #9 on board '6e8be42806affe7e03cc2f210f0ee36e' completed in 0.56 seconds with 4 SMD pins fanouted, 58 not routed, 0 insert errors, +0 extra vias (0 SMD pins still to check in pass, ripup costs=900).
+2026-10-25 16:43:06.412 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:06.499 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:06.503 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:06.569 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:06.984 INFO   [996761\1B2D79] Fanout pass #10 on board '04ae55be7d56afdfe3d2c05197a67fd3' completed in 0.62 seconds with 5 SMD pins fanouted, 58 not routed, 0 insert errors, +3 extra vias (0 SMD pins still to check in pass, ripup costs=1000).
+2026-10-25 16:43:07.045 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:07.121 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:07.125 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:07.190 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:07.476 INFO   [996761\1B2D79] Fanout pass #11 on board '7d63f60bdff6e02c2313e6d7dc894502' completed in 0.47 seconds with 3 SMD pins fanouted, 58 not routed, 0 insert errors, +3 extra vias (0 SMD pins still to check in pass, ripup costs=1100).
+2026-10-25 16:43:07.545 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:07.623 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:07.627 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:07.646 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:07.887 INFO   [996761\1B2D79] Fanout pass #12 on board '3373dde5654eaf2a46e53650a05af800' completed in 0.39 seconds with 1 SMD pin fanouted, 58 not routed, 0 insert errors, +2 extra vias (0 SMD pins still to check in pass, ripup costs=1200).
+2026-10-25 16:43:07.945 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:08.060 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:08.065 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:08.095 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:08.327 INFO   [996761\1B2D79] Fanout pass #13 on board '2e9cfcda3df29d81ac6ce9787a5e8ecf' completed in 0.43 seconds with 1 SMD pin fanouted, 56 not routed, 0 insert errors, +0 extra vias (0 SMD pins still to check in pass, ripup costs=1300).
+2026-10-25 16:43:08.401 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:08.498 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:08.542 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:08.719 INFO   [996761\1B2D79] Fanout pass #14 on board '44e650a43971f7cfe8ebb7dad06565a8' completed in 0.36 seconds with 1 SMD pin fanouted, 55 not routed, 0 insert errors, +0 extra vias (0 SMD pins still to check in pass, ripup costs=1400).
+2026-10-25 16:43:08.793 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:08.881 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:09.133 INFO   [996761\1B2D79] Fanout pass #15 on board 'd65c7aca23f4cc51d6305425025eb4e8' completed in 0.40 seconds with 1 SMD pin fanouted, 55 not routed, 0 insert errors, +4 extra vias (0 SMD pins still to check in pass, ripup costs=1500).
+2026-10-25 16:43:09.177 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:09.280 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:09.313 INFO   [996761\1B2D79] Fanout pass #16 on board '13442a62356d0d29c59066fc0e861b03' completed in 0.17 seconds with 0 SMD pins fanouted, 20 not routed, 0 insert errors, +0 extra vias (0 SMD pins still to check in pass, ripup costs=1600).
+2026-10-25 16:43:09.325 INFO   [996761\1B2D79] Fanout stage completed: started with 131 total SMD pins, completed in 13.02 seconds, escaped pins: 74/131 (56.5%), using 12.58 total CPU seconds, 2.82 GB total allocated, and 142.2 MB peak heap usage.
+2026-10-25 16:43:09.412 INFO   [996761\1B2D79] Auto-routing stage started on board '13442a62356d0d29c59066fc0e861b03' with baseline score 57.46 for 77 unrouted items.
+2026-10-25 16:43:10.592 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:18.366 INFO   [996761\1B2D79] Auto-routing pass #1 on board '13442a62356d0d29c59066fc0e861b03' was completed in 8.88 seconds with score 135.89 (67 unrouted and 21 violations), using 21.36 CPU seconds and the job allocated 6.23 GB of memory so far.
+2026-10-25 16:43:20.437 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:20.469 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:25.822 INFO   [996761\1B2D79] Auto-routing pass #2 on board '61c58783ce189b913903831dd77bbd66' was completed in 7.42 seconds with score 135.89 (67 unrouted and 21 violations), using 28.27 CPU seconds and the job allocated 9.01 GB of memory so far.
+2026-10-25 16:43:28.102 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:28.118 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:32.369 INFO   [996761\1B2D79] Auto-routing pass #3 on board 'b97b0f5919c5e21bf63ad37b50073a52' was completed in 6.52 seconds with score 112.36 (70 unrouted and 21 violations), using 35.13 CPU seconds and the job allocated 11.54 GB of memory so far.
+2026-10-25 16:43:36.490 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:36.627 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:38.421 INFO   [996761\1B2D79] Auto-routing pass #4 on board '2278510f3337db0f57d496ab2acc7602' was completed in 6.02 seconds with score 120.21 (69 unrouted and 21 violations), using 40.98 CPU seconds and the job allocated 14.21 GB of memory so far.
+2026-10-25 16:43:40.269 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:40.295 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:44.920 INFO   [996761\1B2D79] Auto-routing pass #5 on board 'dc9885af02362f715a800f95f3202093' was completed in 6.48 seconds with score 143.73 (66 unrouted and 21 violations), using 46.97 CPU seconds and the job allocated 16.30 GB of memory so far.
+2026-10-25 16:43:46.794 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:46.803 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:50.621 INFO   [996761\1B2D79] Auto-routing pass #6 on board '22d993a956b94ec1c753114d1016d16d' was completed in 5.68 seconds with score 135.89 (67 unrouted and 21 violations), using 52.84 CPU seconds and the job allocated 18.89 GB of memory so far.
+2026-10-25 16:43:52.419 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:52.438 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:55.906 INFO   [996761\1B2D79] Auto-routing pass #7 on board 'aace3c94edf83f1c70ed15c8317dc73e' was completed in 5.25 seconds with score 159.42 (64 unrouted and 21 violations), using 57.80 CPU seconds and the job allocated 21.23 GB of memory so far.
+2026-10-25 16:43:58.373 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:43:58.431 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:44:02.849 INFO   [996761\1B2D79] Auto-routing pass #8 on board 'ee926eabed0f5ed6ca6070ddac0d74d4' was completed in 6.91 seconds with score 159.42 (64 unrouted and 21 violations), using 64.69 CPU seconds and the job allocated 24.24 GB of memory so far.
+2026-10-25 16:44:05.475 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:44:05.512 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:44:10.093 INFO   [996761\1B2D79] Auto-routing pass #9 on board '6aac57342c6aa58b023bdc97c8febd8c' was completed in 7.22 seconds with score 175.11 (62 unrouted and 21 violations), using 71.63 CPU seconds and the job allocated 27.36 GB of memory so far.
+2026-10-25 16:44:12.819 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:44:12.854 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:44:18.080 INFO   [996761\1B2D79] Auto-routing pass #10 on board 'e43ff698692487d015233939e5beed55' was completed in 7.95 seconds with score 143.73 (66 unrouted and 21 violations), using 79.55 CPU seconds and the job allocated 30.85 GB of memory so far.
+2026-10-25 16:44:20.463 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:44:20.506 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:44:25.200 INFO   [996761\1B2D79] Auto-routing pass #11 on board '3c276d9424cee866d3be3ef54179a98b' was completed in 7.10 seconds with score 167.26 (63 unrouted and 21 violations), using 86.47 CPU seconds and the job allocated 33.91 GB of memory so far.
+2026-10-25 16:44:28.698 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:44:28.731 WARN   Polyline: must contain at least 2 different points
+2026-10-25 16:44:28.765 WARN   Polyline: must contain at least 2 different points

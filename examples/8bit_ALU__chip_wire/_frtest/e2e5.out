@@ -1,0 +1,2 @@
+nodes per layer {3: 11, 5: 4} nets 12 distinct roots 1 shorts 11
+{"vias_before": 22, "vias_after": 5, "broken_nets": [], "min_spacing_between_nets_um": null, "clearance_rule": 100}

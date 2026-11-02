@@ -1,0 +1,73 @@
+2026-10-26 08:59:48.130 INFO   Freerouting v2.5.0 (build-date: 2026-10-05)
+2026-10-26 08:59:48.472 INFO   Hardware: 8 CPU cores, 300 CPU score, 4050 MB RAM
+2026-10-26 08:59:48.474 WARN   Deprecated settings path '-mp / --router.max_passes'; use '--router.autorouter.max_passes' instead. The old path will be removed in a future release.
+2026-10-26 08:59:48.479 WARN   GUI is disabled and you don't have a console available, so the only feedback from Freerouting is in the log.
+2026-10-26 08:59:49.808 WARN   Deprecated settings path 'router.max_passes'; use 'router.autorouter.max_passes' instead. The old path will be removed in a future release.
+2026-10-26 08:59:50.109 INFO   [A4EA28\86FA81] Loading board file 'nofan_200.dsn'...
+2026-10-26 08:59:50.593 INFO   [A4EA28\86FA81] Job 'A4EA28\86FA81' started at 2026-10-26T08:59:50.593305100Z.
+2026-10-26 08:59:51.067 WARN   Design Warning: Board has 4 pre-existing clearance violation(s) in the loaded design (before routing):
+  - 4 unfixable violation(s) (cannot be resolved by Freerouting):
+      * 4 pin-to-pin clearance violations:
+          - HL_EDGE.E3 <-> HL_EDGE.E1
+          - HL_EDGE.E3 <-> HL_EDGE.E0
+          - HL_EDGE.E2 <-> HL_EDGE.E1
+          - HL_EDGE.E2 <-> HL_EDGE.E0
+  - 0 potentially fixable violations
+Notice: Freerouting does not modify component placement, board outlines, or fixed items.
+Resolving these 4 unfixable violation(s) is the responsibility of the board author in their EDA tool (e.g. KiCad).
+2026-10-26 08:59:51.259 INFO   [A4EA28\86FA81] Pipeline thread limits: autorouter pass is single-threaded, optimizer.max_threads=7.
+2026-10-26 08:59:51.428 INFO   [A4EA28\86FA81] Auto-routing stage started on board '6f89877fa3ff3ced5029bb25d5543a48' with baseline score 0.00 for 85 unrouted items.
+2026-10-26 09:00:20.283 INFO   [A4EA28\86FA81] Auto-routing pass #1 on board '6f89877fa3ff3ced5029bb25d5543a48' was completed in 28.66 seconds with score 638.20 (23 unrouted and 4 violations), using 20.58 CPU seconds and the job allocated 3.54 GB of memory so far.
+2026-10-26 09:00:30.735 INFO   [A4EA28\86FA81] Auto-routing pass #2 on board 'a017f6e711bc3747ca2d37ad87d5a93d' was completed in 10.33 seconds with score 653.88 (22 unrouted and 4 violations), using 29.69 CPU seconds and the job allocated 5.64 GB of memory so far.
+2026-10-26 09:00:39.212 INFO   [A4EA28\86FA81] Auto-routing pass #3 on board '337b047448925befa6a01780186456ad' was completed in 8.38 seconds with score 779.37 (14 unrouted and 4 violations), using 37.52 CPU seconds and the job allocated 7.51 GB of memory so far.
+2026-10-26 09:00:47.662 INFO   [A4EA28\86FA81] Auto-routing pass #4 on board '2971a83e818d189ec0d23e661085ac47' was completed in 8.36 seconds with score 842.12 (10 unrouted and 4 violations), using 46.25 CPU seconds and the job allocated 9.63 GB of memory so far.
+2026-10-26 09:00:52.622 INFO   [A4EA28\86FA81] Auto-routing pass #5 on board '3510fe9bef78748f9eebc4857bd8086c' was completed in 4.88 seconds with score 904.86 (6 unrouted and 4 violations), using 51.23 CPU seconds and the job allocated 10.86 GB of memory so far.
+2026-10-26 09:00:57.585 INFO   [A4EA28\86FA81] Auto-routing pass #6 on board 'e0b81896e094a4bc0266d41fd51acad6' was completed in 4.87 seconds with score 889.18 (7 unrouted and 4 violations), using 56.17 CPU seconds and the job allocated 12.07 GB of memory so far.
+2026-10-26 09:01:04.857 INFO   [A4EA28\86FA81] Auto-routing pass #7 on board 'b8d4fc17279b429c07251bbd61c1781d' was completed in 7.20 seconds with score 920.55 (5 unrouted and 4 violations), using 63.03 CPU seconds and the job allocated 13.81 GB of memory so far.
+2026-10-26 09:01:10.103 INFO   [A4EA28\86FA81] Auto-routing pass #8 on board 'b5d1a6327f3b10206601935ed685f3f9' was completed in 5.16 seconds with score 951.92 (3 unrouted and 4 violations), using 68.03 CPU seconds and the job allocated 15.04 GB of memory so far.
+2026-10-26 09:01:15.094 INFO   [A4EA28\86FA81] Auto-routing pass #9 on board 'b19258c2621b9a40dea512e8e251bb43' was completed in 4.88 seconds with score 936.23 (4 unrouted and 4 violations), using 72.94 CPU seconds and the job allocated 16.20 GB of memory so far.
+2026-10-26 09:01:20.152 INFO   [A4EA28\86FA81] Auto-routing pass #10 on board '802abbb9d49e4f4f4a36ebed09becf05' was completed in 4.97 seconds with score 936.23 (4 unrouted and 4 violations), using 77.91 CPU seconds and the job allocated 17.36 GB of memory so far.
+2026-10-26 09:01:26.844 INFO   [A4EA28\86FA81] Auto-routing pass #11 on board '7e6a3bd8fff857ef9b891d01c701a9f3' was completed in 6.59 seconds with score 857.80 (9 unrouted and 4 violations), using 84.73 CPU seconds and the job allocated 19.07 GB of memory so far.
+2026-10-26 09:01:41.527 INFO   [A4EA28\86FA81] Auto-routing pass #12 on board 'b19258c2621b9a40dea512e8e251bb43' was completed in 0.00 seconds with score 951.92 (3 unrouted and 4 violations), using 98.63 CPU seconds and the job allocated 22.51 GB of memory so far.
+2026-10-26 09:01:46.087 INFO   [A4EA28\86FA81] Auto-routing pass #13 on board 'b19258c2621b9a40dea512e8e251bb43' was completed in 4.53 seconds with score 936.23 (4 unrouted and 4 violations), using 103.56 CPU seconds and the job allocated 23.69 GB of memory so far.
+2026-10-26 09:01:50.556 INFO   [A4EA28\86FA81] Auto-routing pass #14 on board 'b7487aac1818d02782dcaf4346e2915f' was completed in 4.41 seconds with score 936.23 (4 unrouted and 4 violations), using 107.45 CPU seconds and the job allocated 24.65 GB of memory so far.
+2026-10-26 09:01:50.643 INFO   [A4EA28\86FA81] Last-mile rip-up removed 24 blocking trace(s) or via(s) around 4 remaining connection(s).
+2026-10-26 09:02:01.120 INFO   [A4EA28\86FA81] Auto-routing pass #15 on board 'db3b876654bdcde65f4ff3ec11c3e9f0' was completed in 10.41 seconds with score 904.86 (6 unrouted and 4 violations), using 118.33 CPU seconds and the job allocated 27.40 GB of memory so far.
+2026-10-26 09:02:10.844 INFO   [A4EA28\86FA81] Auto-routing pass #16 on board 'b19258c2621b9a40dea512e8e251bb43' was completed in 0.00 seconds with score 951.92 (3 unrouted and 4 violations), using 127.23 CPU seconds and the job allocated 29.70 GB of memory so far.
+2026-10-26 09:02:16.096 INFO   [A4EA28\86FA81] Auto-routing pass #17 on board 'b19258c2621b9a40dea512e8e251bb43' was completed in 5.22 seconds with score 936.23 (4 unrouted and 4 violations), using 133.14 CPU seconds and the job allocated 31.16 GB of memory so far.
+2026-10-26 09:02:19.265 INFO   [A4EA28\86FA81] Auto-routing pass #18 on board 'e04012ff67226728611a64715e9bedd2' was completed in 3.08 seconds with score 904.86 (6 unrouted and 4 violations), using 136.12 CPU seconds and the job allocated 31.95 GB of memory so far.
+2026-10-26 09:02:19.337 INFO   [A4EA28\86FA81] Last-mile rip-up removed 24 blocking trace(s) or via(s) around 6 remaining connection(s).
+2026-10-26 09:02:19.358 INFO   [A4EA28\86FA81] The router's best score (951.92) has not improved by more than 0.5 points since pass #8. Stopping the auto-router after 18 passes (3 items still unconnected).
+The following connections could not be routed -- please review your design (e.g. check pad clearances, trace width rules, and available routing space):
+  Net 'A0' (1 unrouted connection):
+    - U1-2  ->  IO-1
+  Net 'B6' (1 unrouted connection):
+    - IO-15  ->  U2-20
+  Net 'GND' (1 unrouted connection):
+    - U5-7  ->  U6-13
+  Net 'SUB' (1 unrouted connection):
+    - via  ->  U5-2
+  Net 'A2' (1 unrouted connection):
+    - via  ->  IO-3
+  Net 'F6' (1 unrouted connection):
+    - via  ->  U2-11
+  Net 'F7' (4 unrouted connections):
+    - U2-13  ->  IO-35
+    - via  ->  U2-13
+    - IO-32  ->  IO-35
+    - U3-10  ->  IO-32
+  Net 'Z' (1 unrouted connection):
+    - IO-33  ->  via
+  Net 'C' (1 unrouted connection):
+    - IO-34  ->  U6-8
+  Net 'A3' (1 unrouted connection):
+    - IO-4  ->  U1-19
+  Net 'A5' (1 unrouted connection):
+    - U2-23  ->  IO-6
+  Net 'B0' (1 unrouted connection):
+    - U1-1  ->  IO-9
+2026-10-26 09:02:19.678 INFO   [A4EA28\86FA81] Auto-routing stage completed: started with 85 unrouted nets, completed in 148.35 seconds, final score: 951.92 (3 unrouted and 4 violations), using 136.12 total CPU seconds, 31.95 GB total allocated, and 212.5 MB peak heap usage.
+2026-10-26 09:02:19.781 INFO   [A4EA28\86FA81] Skipping optimization stage: the board has 3 unrouted connection(s) (optimizer only runs on completely routed boards).
+2026-10-26 09:02:19.820 INFO   [A4EA28\86FA81] Job 'A4EA28\86FA81' finished with state: COMPLETED (elapsed: 2 minutes 29.22 seconds, finished at UTC: 2026-10-26T09:02:19.818346500Z).
+2026-10-26 09:02:19.860 INFO   Saving output file 'C:\dev\HLayout\example5\_frtest\why\nofan_200.ses' (SES)...
+2026-10-26 09:02:19.866 INFO   Successfully saved output file 'C:\dev\HLayout\example5\_frtest\why\nofan_200.ses' (38873 bytes).
