@@ -4469,6 +4469,27 @@ class App(tk.Tk):
         ttk.Spinbox(form, from_=0.0, to=10.0, increment=0.05, width=10,
                     textvariable=attach_margin_var).grid(row=row, column=1, sticky="w", padx=4, pady=4)
         row += 1
+        # back contact: the die-attach pad is itself a pin (e.g. a bipolar
+        # transistor's collector), with a tab the router can reach past
+        # the die keep-out
+        back_var = tk.BooleanVar(value=False)
+        back_row = ttk.Frame(form)
+        ttk.Checkbutton(form, text="Back of die is a contact: attach pad is pin",
+                        variable=back_var).grid(row=row, column=0, sticky="w", padx=4, pady=2)
+        back_name_var = tk.StringVar(value="C")
+        ttk.Entry(back_row, textvariable=back_name_var, width=6).pack(side="left")
+        back_row.grid(row=row, column=1, sticky="w", padx=4, pady=2)
+        row += 1
+        ttk.Label(form, text="Tab for the track (mm, side):").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        tab_row = ttk.Frame(form)
+        tab_var = tk.DoubleVar(value=0.6)
+        ttk.Spinbox(tab_row, from_=0.0, to=20.0, increment=0.1, width=6,
+                    textvariable=tab_var).pack(side="left")
+        tab_side_var = tk.StringVar(value="bottom")
+        ttk.Combobox(tab_row, textvariable=tab_side_var, width=8, state="readonly",
+                     values=("bottom", "top", "left", "right")).pack(side="left", padx=(6, 0))
+        tab_row.grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
 
         ttk.Label(form, text="Pin 1 cell:").grid(row=row, column=0, sticky="e", padx=4, pady=4)
         pin1_cell_var = tk.StringVar(value=_default("chip_pin1", "chip_pin_1"))
@@ -4486,6 +4507,15 @@ class App(tk.Tk):
         pins_var = tk.IntVar(value=4)
         ttk.Spinbox(form, from_=1, to=1000, width=10,
                     textvariable=pins_var).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+        ttk.Label(form, text="Pin names (optional):").grid(row=row, column=0, sticky="e", padx=4, pady=4)
+        pin_names_var = tk.StringVar(value="")
+        ttk.Entry(form, textvariable=pin_names_var, width=22).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+        row += 1
+        ttk.Label(form, foreground="#8b949e",
+                  text="Blank: pins are numbered 1..N. Or list them in click order,\n"
+                       "e.g. E,B -- they must match the pin numbers in the netlist.").grid(
+            row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(0, 4))
         row += 1
 
         save_var = tk.BooleanVar(value=True)
@@ -4533,9 +4563,30 @@ class App(tk.Tk):
             except (tk.TclError, ValueError):
                 error_var.set("Chip and epoxy-pad length/width must be numbers.")
                 return
+            pin_names = chip_pin_names(pin_names_var.get())
+            if pin_names:
+                pins_var.set(len(pin_names))
             n_pins = int(pins_var.get())
             if n_pins < 1:
                 error_var.set("Number of pins must be at least 1.")
+                return
+            if len(set(pin_names)) != len(pin_names):
+                error_var.set("Pin names must all be different.")
+                return
+            back_pin = back_name_var.get().strip() if back_var.get() else ""
+            if back_var.get() and not attach_var.get():
+                error_var.set("A back contact needs the conductor die-attach pad ticked.")
+                return
+            if back_var.get() and not back_pin:
+                error_var.set("Give the back-contact pin a name, e.g. C.")
+                return
+            if back_pin and back_pin in pin_names:
+                error_var.set(f"Pin {back_pin!r} is both the back contact and a top pin.")
+                return
+            try:
+                tab = mm_to_dbu(float(tab_var.get())) if back_pin else 0
+            except (tk.TclError, ValueError):
+                error_var.set("Tab length must be a number.")
                 return
             g_layer = int(gfx_layer_var.get().split(" ", 1)[0])
             e_layer = int(epoxy_layer_var.get().split(" ", 1)[0])
@@ -4553,7 +4604,8 @@ class App(tk.Tk):
                 return self.session.create_chip_cell(
                     name, length, width, g_layer, epoxy_l, epoxy_w, e_layer,
                     overwrite=overwrite, attach_pad_layer=a_layer,
-                    attach_pad_margin=a_margin)
+                    attach_pad_margin=a_margin, attach_pad_pin=back_pin,
+                    attach_tab=tab, attach_tab_side=tab_side_var.get())
 
             try:
                 do_create(overwrite=False)
@@ -4580,6 +4632,7 @@ class App(tk.Tk):
                 "prev_grid": int(self.canvas.grid_dbu),
                 "pin1_cell": pin1_cell, "pin_cell": pin_cell,
                 "save_to_lib": bool(save_var.get()),
+                "pin_names": pin_names,
                 "lib_name": lib_name_var.get().strip() or name,
             }
             self.session.use_cell(name)
@@ -4590,8 +4643,9 @@ class App(tk.Tk):
             self._refresh_grid_spacing_var()
             self.canvas.fit_view()
             self.refresh_all()
-            self.canvas.start_chip_pins(n_pins)
-            self.status.set(f"Chip Wizard: click where pin 1 of {n_pins} goes "
+            self.canvas.start_chip_pins(n_pins, pin_names)
+            first = pin_names[0] if pin_names else "1"
+            self.status.set(f"Chip Wizard: click where pin {first} of {n_pins} goes "
                             f"(grid 0.1 mm)")
             win.destroy()
 
@@ -4612,9 +4666,13 @@ class App(tk.Tk):
         if w is None:
             return
         cell_name = w["pin1_cell"] if pin_no == 1 else w["pin_cell"]
+        names = w.get("pin_names") or []
+        pin = names[pin_no - 1] if pin_no <= len(names) else str(pin_no)
         try:
             self.session.use_cell(w["name"])
-            self.session.place_cell(cell_name, point, label=str(pin_no))
+            # pin= makes this instance the part's pin (SRef.pin) for netlist
+            # extraction, Auto Place and routing; label= shows it on screen
+            self.session.place_cell(cell_name, point, label=pin, pin=pin)
             self.session.show_layers_of_cell(cell_name)
         except LayoutError as e:
             dialogs.show_error("Chip Wizard", str(e), parent=self)
@@ -4623,8 +4681,9 @@ class App(tk.Tk):
         self.refresh_all()
         nxt = pin_no + 1
         if nxt <= w["total"]:
-            self.status.set(f"Chip Wizard: placed pin {pin_no} -- click where pin "
-                            f"{nxt} of {w['total']} goes")
+            nxt_name = names[nxt - 1] if nxt <= len(names) else str(nxt)
+            self.status.set(f"Chip Wizard: placed pin {pin} -- click where pin "
+                            f"{nxt_name} of {w['total']} goes")
 
     def _restore_chip_grid(self, w):
         prev = (w or {}).get("prev_grid")
@@ -5077,6 +5136,13 @@ class App(tk.Tk):
         if getattr(self, "_mcp_bridge", None) is not None:
             self._mcp_bridge.stop()
         self.destroy()
+
+
+def chip_pin_names(text: str):
+    """Chip Wizard 'Pin names': 'E,B' / 'E B' / 'E; B' -> ['E', 'B'];
+    blank -> [] (pins numbered 1..N)."""
+    import re as _re
+    return [t for t in _re.split(r"[,;\s]+", text or "") if t]
 
 
 def main():

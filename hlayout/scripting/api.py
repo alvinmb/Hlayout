@@ -1046,7 +1046,8 @@ class Session:
                          graphics_layer, epoxy_length: float, epoxy_width: float,
                          epoxy_layer, *, outline_width: Optional[float] = None,
                          overwrite: bool = False, attach_pad_layer=None,
-                         attach_pad_margin: float = 200.0):
+                         attach_pad_margin: float = 200.0, attach_pad_pin: str = "",
+                         attach_tab: float = 0.0, attach_tab_side: str = "bottom"):
         """Start a bare-die / chip footprint cell in the CURRENT design:
 
           * a body outline -- a closed rectangular Path of ``length`` x
@@ -1061,6 +1062,17 @@ class Session:
         2nd conductor -- ``attach_pad_margin`` DBU (default 200) larger
         than the body on every side. The autorouter keeps tracks clear of
         it (and of the die) by the die keep-out.
+
+        ``attach_pad_pin`` makes that pad a pin of the part -- the back
+        contact of a die whose back is an electrode, e.g. the collector
+        "C" of a bipolar transistor or the drain of a MOSFET, connected
+        through conductive epoxy. A pinned pad is no longer part of the
+        die's routing keep-out, but the keep-out round the die body still
+        covers most of it, so ``attach_tab`` (DBU) extends the pad on
+        ``attach_tab_side`` ("bottom", "top", "left" or "right") into a
+        tab the router can reach: make it longer than die_keepout plus
+        the track clearance (default 0, no tab). Requires
+        ``attach_pad_layer``.
 
         The die *pins* are added afterwards as instances of the
         ``chip_pin`` / ``chip_pin1`` cells you provide (e.g. in the
@@ -1097,13 +1109,34 @@ class Session:
         if attach_pad_layer is not None and (a_layer is None or a_layer < 0):
             raise LayoutError(f"no layer {attach_pad_layer!r} for the die-attach pad")
         am = float(attach_pad_margin or 0)
+        a_pin = str(attach_pad_pin or "").strip()
+        tab = float(attach_tab or 0)
+        side = (attach_tab_side or "bottom").strip().lower()
+        if a_pin and a_layer is None:
+            raise LayoutError("attach_pad_pin needs attach_pad_layer (a conductor die-attach pad)")
+        if side not in ("bottom", "top", "left", "right"):
+            raise LayoutError(f"attach_tab_side must be bottom, top, left or right, not {attach_tab_side!r}")
+        if tab < 0:
+            raise LayoutError("attach_tab must not be negative")
 
         with self._batch():
             cell = self.library.new_cell(name)
             self.current_cell_name = name
             if a_layer is not None:
-                # conductor die-attach pad, `am` larger than the chip all round
-                cell.add_rectangle(a_layer, -hl - am, -hw - am, hl + am, hw + am)
+                # conductor die-attach pad, `am` larger than the chip all round,
+                # optionally extended into a tab on one side and made a pin
+                x1, y1, x2, y2 = -hl - am, -hw - am, hl + am, hw + am
+                if tab:
+                    if side == "bottom":
+                        y1 -= tab
+                    elif side == "top":
+                        y2 += tab
+                    elif side == "left":
+                        x1 -= tab
+                    else:
+                        x2 += tab
+                cell.add_rectangle(a_layer, int(round(x1)), int(round(y1)),
+                                   int(round(x2)), int(round(y2)), pin=a_pin)
             cell.add_rectangle(e_layer, -el, -ew, el, ew)   # epoxy die-attach pad
             cell.add_path(
                 g_layer,

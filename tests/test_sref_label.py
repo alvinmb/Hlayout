@@ -193,8 +193,8 @@ def test_edit_dialog_has_label_and_label_size_fields():
             walk(win)
             # add_field() order for kind == "sref": Label, Label Size (px),
             # Label Offset X, Label Offset Y, X, Y, Rotation, Magnification,
-            # Mirror
-            assert len(entries) == 9
+            # Mirror, Pin
+            assert len(entries) == 10
             entries[0].delete(0, "end")
             entries[0].insert(0, "IC1")
             entries[1].delete(0, "end")

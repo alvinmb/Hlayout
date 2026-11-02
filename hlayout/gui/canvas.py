@@ -796,7 +796,7 @@ class LayoutCanvas(tk.Canvas):
         self.on_mode_status(f"Number Pins: stamped pin {stamped!r}. " + self._pin_number_hint())
         self._after_edit()
 
-    def start_chip_pins(self, total: int):
+    def start_chip_pins(self, total: int, names=None):
         """Tools > Chip Wizard...: after the body outline is placed,
         enter click-to-place-a-pin mode. Each click drops epoxy pad
         `_chip_pin_next` (via on_chip_pin) and advances; after pin
@@ -804,13 +804,21 @@ class LayoutCanvas(tk.Canvas):
         exits to Select. Esc first (cancel_draw()) bails out
         (on_chip_pins_cancel)."""
         self._chip_pin_total = int(total)
+        self._chip_pin_names = list(names or [])
         self._chip_pin_next = 1
         self.set_mode("chip_pins")
 
+    def _chip_pin_name(self, n: int) -> str:
+        names = getattr(self, "_chip_pin_names", None) or []
+        return names[n - 1] if 0 < n <= len(names) else str(n)
+
     def _chip_pins_hint(self):
         if self._chip_pin_next <= self._chip_pin_total:
-            return (f"Chip Wizard: click where pin {self._chip_pin_next} of "
-                    f"{self._chip_pin_total} goes (an epoxy pad is dropped there). "
+            nm = self._chip_pin_name(self._chip_pin_next)
+            which = (f"pin {nm} ({self._chip_pin_next} of {self._chip_pin_total})"
+                     if nm != str(self._chip_pin_next)
+                     else f"pin {nm} of {self._chip_pin_total}")
+            return (f"Chip Wizard: click where {which} goes. "
                     f"Esc cancels -- the half-built cell is left in the design.")
         return "Chip Wizard: done."
 
@@ -4279,6 +4287,11 @@ def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
         add_field("Rotation (deg)", shape.rotation)
         add_field("Magnification", shape.magnification)
         add_field("Mirror (0/1)", int(shape.x_reflection))
+        # This placement's own pin name (SRef.pin) -- a die pin or lead
+        # placed from a shared pad-cell template, e.g. by the Chip
+        # Wizard. Numbers or names ("E", "B", "C") both work: pins are
+        # matched as text against the netlist.
+        add_field("Pin", getattr(shape, "pin", ""))
 
     def on_ok(event=None):
         try:
@@ -4348,6 +4361,7 @@ def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
             else:  # sref
                 old_label = shape.label
                 shape.label = entries["Label"].get()
+                shape.pin = entries["Pin"].get().strip()
                 label_height = int(round(float(entries["Label Size (px)"].get())))
                 if label_height <= 0:
                     raise ValueError("label size must be positive")
