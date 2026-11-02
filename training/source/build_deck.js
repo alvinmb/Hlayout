@@ -124,7 +124,7 @@ function content(title, sub, mod, notes) { const s = pres.addSlide(); head(s, ti
   const s = content('What you will be able to do', 'By the end of day 3, on your own machine', 'Introduction',
     'Read the objectives aloud and link each to a day. Day 1 covers the foundations: shapes and cells, technology, mask operations and dielectric, and printed resistors. Day 2 takes the ALU8 from netlist to a routed design. Day 3 checks it, makes every output, links it to 3D models and ends with a capstone. Stress that this is a hands-on course: about 60% of the time is labs. Each lab has a checkpoint file, so nobody gets left behind if a step goes wrong; they load the checkpoint and carry on. Ask: what does each of you most want to leave with? Write the answers on the flipchart and come back to them at the wrap-up.');
   const items = [['Set up', 'a thick-film process: layers, rules, wire bonds and dielectric, saved as a technology file'],
-  ['Build', 'shapes, cells, bare dies and printed resistors, and place them from a KiCad netlist'],
+  ['Build', 'shapes and cells, vias, pads and dies with the wizards, and printed resistors; place them from a KiCad netlist'],
   ['Bond', 'every die and package pin, and clear unused bonds before routing'],
   ['Route', 'two conductors with Freerouting and clean the result up'],
   ['Verify', 'with DRC, bond-angle checks, connectivity and thermal analysis'],
@@ -147,13 +147,13 @@ function content(title, sub, mod, notes) { const s = pres.addSlide(); head(s, ti
     'Walk through the timetable. Day 1 is foundations: the tools and concepts every layout uses, including the new modules on shapes and cells, mask operations and dielectric, and printed resistors. Day 2 builds the ALU8 from its netlist to a routed design. Day 3 verifies it, makes the outputs, links the 2D cells to 3D STEP models, and ends with a capstone in which students repeat the flow alone with an engineering change. Labs 8 (Auto Place) and 10 (routing) run long most often; protect that time.');
   table(s, [['Time', 'Day 1: foundations', 'Day 2: netlist to routed design', 'Day 3: checks, outputs, 3D'],
   ['09:00', '1  Welcome · 2  Hybrids', '8  Circuit and netlist · Lab 6', '14  Verification · Lab 12'],
-  ['10:30', '3  Tour of HLayout · Lab 1', '9  Dies and package · Lab 7 (09:45)', '15  Outputs · Lab 13 (10:15)'],
-  ['11:15', '4  Shapes, paths, SRef, ARef · Lab 2', '10  Auto Place · Lab 8 (11:00)', '16  2D to 3D STEP · Lab 14'],
+  ['10:30', '3  Tour of HLayout · Lab 1', '9  Wizards, dies, package · Lab 7 (09:45)', '15  Outputs · Lab 13 (10:15)'],
+  ['11:15', '4  Shapes, paths, SRef, ARef · Lab 2', '10  Auto Place · Lab 8 (11:15)', '16  2D to 3D STEP · Lab 14'],
   ['13:15', '5  Technology setup · Lab 3', '11  Nets and wire bonds · Lab 9', '17  Documentation, 3D · Lab 15'],
   ['14:05', '6  Mask ops, dielectric, bond edits · Lab 4', '12  Routing · Lab 10 (14:45)', '18  Automation · Lab 16 (14:00)'],
   ['15:15', '7  Thick-film resistors · Lab 5', '13  Editing the route · Lab 11 (16:00)', 'Capstone (14:30)'],
   ['16:35', 'Day 1 review', 'Day 2 review (16:45)', 'Quiz and wrap-up (16:15)']], 0.45, 1.25, 9.1, [0.75, 2.85, 2.75, 2.75], 10.5, 0.42);
-  T(s, 'Lunch 12:30–13:15. Breaks: day 1 10:15 and 15:00 · day 2 10:45 and 14:30 · day 3 11:00 and during the capstone.', { x: 0.45, y: 4.85, w: 9.1, h: 0.3, fontSize: 10, color: MUTED });
+  T(s, 'Lunch 12:30–13:15. Breaks: day 1 10:15 and 15:00 · day 2 11:00 and 14:30 · day 3 11:00 and during the capstone.', { x: 0.45, y: 4.85, w: 9.1, h: 0.3, fontSize: 10, color: MUTED });
 }
 
 {
@@ -437,8 +437,30 @@ lab(6, 'Read the ALU8 netlist', '09:20 · 25 min', 'Find the facts you will need
 
 // =============================================================================
 // ---- Module 5
-opener(9, 'Bare dies and the package', '09:45 · 60 min with Lab 7', ['Describe the parts of a die cell: outline, epoxy, pads, die-attach pad', 'Build a die with Tools → Chip Wizard, or by script', 'Place the Kovar DIP40 and the substrate'], [1], 'stage1_dies.png',
-  'Picture: CP1, the six dies on the 30 × 30 mm working substrate with its I/O pads, as built by build_alu8_dies.py. Students build one die by hand to learn the parts of a die cell; the script builds all five types the same way.');
+opener(9, 'Wizards, bare dies and the package', '09:45 · 75 min with Lab 7', ['Build reusable parts with the Via, Pad and Chip Wizards', 'Describe the parts of a die cell: outline, epoxy, pads, die-attach pad', 'Place the Kovar DIP40 and the substrate'], [1], 'stage1_dies.png',
+  'Picture: CP1, the six dies on the 30 × 30 mm working substrate with its I/O pads, as built by build_alu8_dies.py. This module introduces the three wizards that add parts to a library: Via, Pad and Chip. Students build one of each in Lab 7, then look at how the ALU8 dies and package are put together.');
+{
+  const s = content('Three wizards, one pattern', 'Tools → Via Wizard… / Pad Wizard… / Chip Wizard… add reusable parts to a library', 'Module 9 · Wizards',
+    'The wizards are how new parts get into a parts library. All three follow the same pattern: attach a library first (Setup → Attach Library…), fill in a short form, and the finished cell is written straight into that library file, so every design that attaches the library can use it. Without an attached library the wizard tells you to attach one and stops. Each has a command-bar and Python equivalent, which is how the example libraries were built. Every cell they write carries a created and modified date and time, visible in Setup → Library Cells…; the Via and Pad Wizards ask before overwriting a cell of the same name.');
+  table(s, [['Wizard', 'Makes', 'You enter', 'Command / Python'], ['Via', 'Square or round pad on two conductors, optional dielectric window', 'Shape, size, layers, window', 'VIA · create_via_cell()'], ['Pad', 'Conductor pad with an undersized paste or epoxy pad; single or rows × cols grid', 'Length, width, margin, layers, grid, pitch', 'PAD · create_pad_cell()'], ['Chip', 'Bare-die footprint: outline, epoxy, die-attach pad, numbered pins', 'Body, epoxy, layers, pin cells, pin count; then click each pin', 'create_chip_cell() + export_cell_to_library()']], 0.45, 1.3, 9.1, [0.9, 3.2, 2.7, 2.3], 11.5, 0.5);
+  T(s, [{ text: 'First  ', options: { bold: true, color: GOLD } }, { text: 'Setup → Attach Library… the .gds the part should be saved into. Then Find & Place Cell… places it.', options: { color: INK } }], { x: 0.45, y: 4.35, w: 9.1, h: 0.4, fontSize: 12.5 });
+}
+{
+  const s = content('Via Wizard', 'A via cell that matches the routed vias', 'Module 9 · Wizards',
+    'The Via Wizard starts from the design\'s one via definition: the Autoroute signal via pad and the Dielectric tab\'s layer and via window margin. So a cell built with the defaults matches what the router and Fix Vias draw: for the ALU8, a 0.3 mm pad on layers 3 and 5 and a 0.5 mm window on layer 4 (pad plus 0.1 mm each side). The window size follows the pad size until you change it. The default name is VIA_Layer3_to_Layer5; type your own to keep a round and a square version side by side. The Route tab of Technology Properties has a New Via Cell… button that opens this wizard and selects the result.');
+  bullets(s, [['Shape', 'square or round; size is the full width or diameter.'], ['Layers', 'Layer 1 and Layer 2, the two conductors it joins.'], ['Window', 'tick Add dielectric via window: layer 4, pad + 2 × margin.'], ['Name', 'VIA_Layer<n1>_to_Layer<n2> by default, or your own.'], ['Save to', 'which attached library.']], 0.45, 1.4, 5.0, 2.9, 13);
+  code(s, 'VIA 3 5 shape=round size=300 name=VIA_R300\n    dielectric_layer=4 dielectric_window=500', 0.45, 4.25, 5.0, 0.6, 10.5);
+  const r = img(s, 'wiz_via.png', 5.8, 1.35, 3.75, 3.2); cap(s, 'VIA_R300: pad on 3 and 5 (gold), window on 4 (blue)', r);
+}
+{
+  const s = content('Pad Wizard', 'Land patterns: a conductor pad with a smaller paste or epoxy pad', 'Module 9 · Wizards',
+    'The Pad Wizard draws a conductor rectangle, length along X and width along Y, with a second rectangle centred on it and undersized by the margin on every side. On a solder process the second layer is solder paste; on a chip-and-wire hybrid like the ALU8 it is the conductive epoxy that holds a chip capacitor, layer 20. Rows and columns lay out a grid of identical pads centred on the origin, with pitch between pad centres. A two-pad footprint is numbered automatically, pin 1 at lower X; any other grid is left for you to number with Edit → Number Pins…, because which pad is pin 1 depends on the part. In the lab students make an 0805 capacitor land: two 1.0 × 1.4 mm pads at 1.9 mm pitch with epoxy 0.1 mm smaller.');
+  table(s, [['Field', '0805 land on the ALU8'], ['Length × width', '1.0 × 1.4 mm'], ['Margin', '0.1 mm (epoxy 0.8 × 1.2 mm)'], ['Conductor / paste layer', '5 / 20 (epoxy)'], ['Rows × cols, pitch X', '1 × 2, 1.9 mm'], ['Pins', '1 and 2, numbered for you']], 0.45, 1.3, 5.1, [2.3, 2.8], 12, 0.42);
+  code(s, 'PAD LAND_0805 5 20 1.0 1.4 0.1 cols=2 pitch_x=1.9', 0.45, 4.25, 5.1, 0.45, 10.5);
+  const r = img(s, 'wiz_pad.png', 5.8, 1.3, 3.75, 2.0); cap(s, 'LAND_0805: conductor (purple), epoxy (grey)', r);
+  T(s, [{ text: 'Grid  ', options: { bold: true, color: GOLD } }, { text: 'rows × cols > 1 for a connector strip, with a pitch per direction.', options: { color: INK } }], { x: 5.8, y: 3.8, w: 3.75, h: 0.5, fontSize: 11.5 });
+  T(s, [{ text: 'Pins  ', options: { bold: true, color: GOLD } }, { text: '2 pads numbered for you; 3 or more: Edit → Number Pins….', options: { color: INK } }], { x: 5.8, y: 4.25, w: 3.75, h: 0.5, fontSize: 11.5 });
+}
 {
   const s = content('Anatomy of a die cell', 'Every die is built the same way, so bonding and DRC can find its pads', 'Module 9 · Dies',
     'Use the close-up again, this time naming the layers. Body outline on layer 61, documentation only. Epoxy die attach on layer 20, 100 µm smaller than the body. Die-attach pad on the 2nd conductor (layer 5), 200 µm larger than the die all round. Bond pads on layer 58, 100 µm square, 150 µm in from the die edge, each with a pin number equal to its die-pad number. The pads go round the die in the same order as the LCC terminals, so the bonds fan out without crossing. The 50 µm gap at each corner keeps end pads of adjacent sides apart.');
@@ -455,9 +477,9 @@ opener(9, 'Bare dies and the package', '09:45 · 60 min with Lab 7', ['Describe 
 }
 {
   const s = content('Chip Wizard', 'Tools → Chip Wizard… builds a die interactively', 'Module 9 · Dies',
-    'Demo Chip Wizard on the projector. Enter the die size; it draws the outline, epoxy and a die-attach pad on the 2nd conductor 0.2 mm larger than the die all round. Then pick the pin-1 and pin cells (chip_pin1, chip_pin) and click each pad position in pad order on the 0.1 mm grid; each click is numbered. Optionally save the die to a library under its own name so the next job can use it. Compare the result with the script-built DIE_54LS00 in CP1.');
-  bullets(s, [['1  Size', 'die width and height; outline, epoxy and attach pad drawn for you.'], ['2  Pins', 'choose the pin-1 and pin cells from the dropdowns.'], ['3  Place', 'click each pad in pad order on the 0.1 mm grid; each is numbered.'], ['4  Save', 'optionally into a library with its own cell name.'], ['Then', 'place it with Create → Find & Place Cell and give it its reference designator.']], 0.45, 1.4, 5.2, 3.4, 13.5);
-  const r = img(s, 'stage1_dies.png', 5.9, 1.3, 3.65, 3.45); cap(s, 'CP1: the six dies and I/O pads', r);
+    'Demo Chip Wizard on the projector. It needs an attached library holding the die-pad cells; the course uses a copy of chip_wire.gds, which has chip_pin_1 (200 µm square, marks pin 1) and chip_pin (100 µm). Enter the body size, the outline layer (61), the epoxy size and layer (1.4 mm on 20) and tick the die-attach pad (layer 5, 0.2 mm larger all round). Choose the pin cells and the pin count, then Start Placing Pins: the grid switches to 0.1 mm and the status bar asks for each pin in turn; each click places a pin labelled with its number. After the last pin the cell is copied into the first attached library if Save to attached library is ticked, and the grid goes back. Compare the result with the script-built DIE_54LS00 in CP1.');
+  bullets(s, [['1  Body', 'size, outline layer, epoxy size and layer, die-attach pad.'], ['2  Pins', 'pin-1 cell, pin cell, number of pins, from the attached library.'], ['3  Place', 'Start Placing Pins, then click each pad in order on the 0.1 mm grid.'], ['4  Save', 'tick Save to attached library; name the library cell.'], ['Then', 'Find & Place Cell… and give it its reference designator.']], 0.45, 1.4, 5.2, 3.4, 13.5);
+  const r = img(s, 'wiz_chip.png', 5.9, 1.3, 3.65, 3.45); cap(s, 'MY_54LS00 from the Chip Wizard', r);
 }
 {
   const s = content('Package and substrate', 'The substrate sits in the Kovar DIP40; its pins are bonded to the substrate edge', 'Module 9 · Dies',
@@ -465,13 +487,13 @@ opener(9, 'Bare dies and the package', '09:45 · 60 min with Lab 7', ['Describe 
   const r = img(s, 'stage3_bonded.png', 0.45, 1.3, 5.6, 3.0); cap(s, 'The substrate in the DIP40 (CP2)', r);
   table(s, [['Item', 'Value'], ['Package', 'KOVAR_DIP40'], ['Pins', '40 on 2.54 mm pitch, 0.46 mm'], ['Row spacing', '22.86 mm (0.9 in)'], ['Pin pads', 'Layer 49, numbered, pin 1 bottom left'], ['Substrate', '21.7 × 14.9 mm alumina'], ['Pins used', '37 (38, 39 unused)']], 6.3, 1.3, 3.25, [1.15, 2.1], 10.5, 0.38);
 }
-lab(7, 'Build a die and place the package', '10:10 · 35 min', 'Build a 54LS00 die with Chip Wizard and set up the package and substrate.', 'File → New, then load my_alu8_tech.json',
-  ['Tools → Chip Wizard…: 1.5 × 1.5 mm, 14 pads, pads 150 µm in from the edge.', 'Click pads 1–14 in order, counter-clockwise from pin 1.', 'Save it to a library as MY_54LS00.', 'Open checkpoints\\CP1_dies_on_substrate.gds; compare your die with DIE_54LS00 (pad positions, attach pad).', 'Discussion: what changes in CP2, where the substrate sits in the DIP40?'],
-  ['MY_54LS00 has 14 numbered pads', 'Attach pad 0.2 mm larger than the die', 'You can explain CP1 vs CP2'], 'Lab 7',
-  'Most students will place pads slightly off the reference positions; that is fine, the point is the structure. Check that pad numbers run counter-clockwise from pin 1 so bonds will not cross. Make sure everyone saves the die; they do not need it later, as Lab 8 starts from CP1.');
+lab(7, 'Build a parts library with the wizards', '10:15 · 45 min', 'Make a via, a capacitor land and a 54LS00 die with the wizards, save them in your own library, and place them.', 'File → New, load alu8_tech.json; attach checkpoints\\my_parts.gds',
+  ['Setup → Attach Library…: checkpoints\\my_parts.gds (a copy of chip_wire.gds).', 'Via Wizard: round, 0.3 mm, layers 3 and 5, window on 4 (0.5 mm), name VIA_R300.', 'Pad Wizard: LAND_0805, 1.0 × 1.4 mm, margin 0.1, layers 5 and 20, 1 × 2 at 1.9 mm.', 'Chip Wizard: MY_54LS00, 1.5 mm body on 61, epoxy 1.4 mm on 20, attach pad on 5; 14 pins.', 'Click pins 1–14 counter-clockwise, 0.6 mm from the centre (handout table 7.1).', 'Find & Place Cell… each part; check Setup → Library Cells… for their dates.', 'Open CP1: compare MY_54LS00 with DIE_54LS00. Then CP2: where does the substrate sit?'],
+  ['Three new cells in my_parts.gds', 'LAND_0805 pads numbered 1 and 2', 'MY_54LS00: 14 pins, attach pad 1.9 mm'], 'Lab 7',
+  'Each student needs their own copy of my_parts.gds: the wizards write into the attached file. If a wizard says no library is attached, the student skipped step 1. The Via Wizard default name is VIA_Layer3_to_Layer5, which already exists in chip_wire.gds; that is why the lab names it VIA_R300. Pin positions on the 0.1 mm grid differ slightly from the script-built die, whose top and bottom pads sit at 0.225 and 0.45 mm; that is fine, the point is the structure and the counter-clockwise order. Lab 8 starts from CP1, so nothing here is needed later.');
 
 // ---- Module 7
-opener(10, 'Auto Place', '11:00 · 75 min with Lab 8', ['Run Auto Place from alu8_die.net and read its result', 'Use straight-line interconnects to judge a placement', 'Improve a placement by hand, lock parts and run Improve'], [2], 'alu8_autoplace_preview.png',
+opener(10, 'Auto Place', '11:15 · 75 min with Lab 8', ['Run Auto Place from alu8_die.net and read its result', 'Use straight-line interconnects to judge a placement', 'Improve a placement by hand, lock parts and run Improve'], [2], 'alu8_autoplace_preview.png',
   'Picture: CP1 as built (left) and after Auto Place (right). Auto Place is where students first see the design come together, and they enjoy comparing results. Keep the seed and settings the same across the room so results can be compared, then let them experiment.');
 {
   const s = content('How Auto Place decides', 'Shortest total weighted net length, no overlaps, hot parts apart', 'Module 10 · Auto Place',
@@ -492,7 +514,7 @@ opener(10, 'Auto Place', '11:00 · 75 min with Lab 8', ['Run Auto Place from alu
   code(s, 'AUTOPLACE RUN alu8_die.net effort=1 seed=0\nSLI ON\nAUTOPLACE IMPROVE alu8_die.net\nAUTOPLACE WEIGHT C4 3\nUNROUTED', 5.3, 1.4, 4.25, 1.75, 11.5);
   T(s, 'Raising the weight of C4 pulls U1 and U2 together: the carry is the slowest path.', { x: 5.3, y: 3.35, w: 4.25, h: 0.7, fontSize: 12, color: MUTED });
 }
-lab(8, 'Place the ALU8', '11:30 · 45 min', 'Place the six dies from the netlist and get the shortest total length you can.', 'checkpoints\\CP1_dies_on_substrate.gds',
+lab(8, 'Place the ALU8', '11:45 · 45 min', 'Place the six dies from the netlist and get the shortest total length you can.', 'checkpoints\\CP1_dies_on_substrate.gds',
   ['Tools → Auto Place…; netlist alu8_die.net.', 'Check the Parts tab: every U maps to a DIE_ cell with family die.', 'Settings: grid 50 µm, clearance 0.3 mm, bond reach 1.5 mm, seed 0. Run.', 'Turn on SLIs; write down the total length.', 'Improve by hand or with Improve. Can you beat the first result?', 'Try weight 3 on C4 and run Improve. What moved?', 'Save as my_alu8_placed.gds.'],
   ['No overlaps, all dies inside the I/O ring', 'Total length written down', 'U1 and U2 side by side'], 'Lab 8',
   'Put a table on the whiteboard and collect each student\'s total length after the first run and after their improvements; it makes a good finish to the morning. If the Parts tab shows an unmapped part, the student opened alu8.net instead of alu8_die.net; module 4 explains why. If a run looks scrambled, check the seed and that they did not press Run twice with different settings.');
