@@ -185,6 +185,7 @@ Attached libraries:
     ATTACH <path.gds>                 attach a GDSII file as a reference library (max 2)
     LIBS                              list attached reference libraries
     LIBLIST [current|0|1]             list the cells in a library (default: current)
+    CELLSTAMPS [current|0|1]          created/modified date/time of every cell, design + attached libraries
     FIND <substring>                  search cell names, current + attached libraries
     PLACE <cellname> <x,y> [source=current|0|1] [rotation] [mag] [mirror]
                                        find-and-place a cell as an Sref; source
@@ -1478,7 +1479,19 @@ class CommandInterpreter:
         cells = self.session.list_library(source)
         if not cells:
             return "(no cells)"
-        return "\n".join(f"{c['name']}: {c['shapes']} shapes, {c['srefs']} srefs" for c in cells)
+        return "\n".join(f"{c['name']}: {c['shapes']} shapes, {c['srefs']} srefs  "
+                         f"{_stamp_str(c)}" for c in cells)
+
+    def _cmd_cellstamps(self, args):
+        source = None
+        if args:
+            source = "current" if args[0].lower() == "current" else int(args[0])
+        rows = self.session.cell_stamps(source)
+        if not rows:
+            return "(no cells)"
+        rows.sort(key=lambda r: (str(r["source"]), r["name"].lower()))
+        w = max(len(r["name"]) for r in rows)
+        return "\n".join(f"[{r['source']}] {r['name']:<{w}}  {_stamp_str(r)}" for r in rows)
 
     def _cmd_find(self, args):
         if not args:
@@ -1487,7 +1500,7 @@ class CommandInterpreter:
         matches = self.session.find_cells(query)
         if not matches:
             return f"no cells matching {query!r}"
-        return "\n".join(f"{m['name']} (source: {m['source']})" for m in matches)
+        return "\n".join(f"{m['name']} (source: {m['source']})  {_stamp_str(m)}" for m in matches)
 
     def _cmd_place(self, args):
         args = _join_points(args, 1, 1)
@@ -3153,3 +3166,11 @@ class CommandInterpreter:
 
     def _cmd_help(self, args):
         return COMMAND_REFERENCE
+
+
+def _stamp_str(row) -> str:
+    """'created 2026-11-02 13:05:07  modified ...' from a cell row dict."""
+    c, m = row.get("created"), row.get("modified")
+    if not c and not m:
+        return "not saved yet"
+    return f"created {(c or '?').replace('T', ' ')}  modified {(m or '?').replace('T', ' ')}"

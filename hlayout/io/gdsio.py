@@ -18,12 +18,19 @@ does not natively distinguish these hlayout concepts):
   * Text: GDSII has no explicit font-size field. Height is encoded as
     ``magnification * TEXT_BASE_HEIGHT`` and font (0-3) is encoded in
     the GDS texttype field, matching GDSII's native 4-font model.
+  * Cell date/time stamps: Cell.created / Cell.modified are the
+    creation and modification dates of the GDSII BGNSTR record. gdstk
+    writes one timestamp for every structure, so save_gds() patches each
+    BGNSTR afterwards and load_gds() reads them back by scanning the
+    records itself (see _patch_cell_stamps / read_cell_stamps).
 """
 
 import math
 import os
+import struct
 import warnings
-from typing import Optional
+from datetime import datetime
+from typing import Dict, Optional, Tuple
 
 import gdstk
 
@@ -90,9 +97,75 @@ _CAP_TO_GDSTK = {
 _GDSTK_TO_CAP = {v: k for k, v in _CAP_TO_GDSTK.items()}
 
 
+# --- cell date/time stamps (GDSII BGNSTR) --------------------------------
+_REC_BGNSTR = 0x05
+_REC_STRNAME = 0x06
+_REC_ENDLIB = 0x04
+
+
+def _decode_gds_time(vals) -> Optional[datetime]:
+    year, month, day, hour, minute, second = (int(v) for v in vals)
+    if year < 1000:  # GDSII years are usually stored as year - 1900
+        year += 1900
+    try:
+        return datetime(year, month, day, hour, minute, second)
+    except ValueError:
+        return None
+
+
+def _encode_gds_time(dt: datetime):
+    return (dt.year - 1900, dt.month, dt.day, dt.hour, dt.minute, dt.second)
+
+
+def _scan_structures(data: bytes):
+    """Yield (bgnstr_offset, name) for every structure in GDSII bytes."""
+    i, n = 0, len(data)
+    bgnstr_at = None
+    while i + 4 <= n:
+        length, rectype, _dt = struct.unpack(">HBB", data[i:i + 4])
+        if length < 4:
+            break
+        if rectype == _REC_BGNSTR and length == 28:
+            bgnstr_at = i
+        elif rectype == _REC_STRNAME and bgnstr_at is not None:
+            name = data[i + 4:i + length].rstrip(b"\x00").decode("ascii", "replace")
+            yield bgnstr_at, name
+            bgnstr_at = None
+        elif rectype == _REC_ENDLIB:
+            break
+        i += length
+
+
+def read_cell_stamps(path: str) -> Dict[str, Tuple[Optional[datetime], Optional[datetime]]]:
+    """{cell name: (created, modified)} from a GDSII file's BGNSTR records."""
+    with open(path, "rb") as f:
+        data = f.read()
+    stamps = {}
+    for at, name in _scan_structures(data):
+        vals = struct.unpack(">12h", data[at + 4:at + 28])
+        stamps[name] = (_decode_gds_time(vals[:6]), _decode_gds_time(vals[6:]))
+    return stamps
+
+
+def _patch_cell_stamps(path: str, library: Library) -> None:
+    with open(path, "r+b") as f:
+        data = f.read()
+        for at, name in list(_scan_structures(data)):
+            cell = library.cells.get(name)
+            if cell is None or cell.created is None or cell.modified is None:
+                continue
+            f.seek(at + 4)
+            f.write(struct.pack(">12h", *_encode_gds_time(cell.created),
+                                *_encode_gds_time(cell.modified)))
+
+
 def save_gds(library: Library, path: str) -> None:
-    """Write a Library to a GDSII file."""
+    """Write a Library to a GDSII file. Each cell's date/time stamps are
+    brought up to date first (Cell.stamp) and written into its BGNSTR."""
     library.check_no_cycles()
+    now = datetime.now().replace(microsecond=0)
+    for cell in library.cells.values():
+        cell.stamp(now)
 
     glib = gdstk.Library(name=library.name, unit=UNIT, precision=PRECISION)
     gcells = {name: gdstk.Cell(name) for name in library.cells}
@@ -166,7 +239,8 @@ def save_gds(library: Library, path: str) -> None:
             ))
 
     glib.add(*gcells.values())
-    glib.write_gds(str(path))
+    glib.write_gds(str(path), timestamp=now)
+    _patch_cell_stamps(str(path), library)
 
 
 def load_gds(path: str, library_name: Optional[str] = None) -> Library:
@@ -309,6 +383,15 @@ def load_gds(path: str, library_name: Optional[str] = None) -> Library:
     top = gdslib.top_level()
     if top:
         library.top_cell_name = top[0].name
+
+    try:
+        stamps = read_cell_stamps(str(path))
+    except (OSError, struct.error):
+        stamps = {}
+    for name, cell in library.cells.items():
+        created, modified = stamps.get(name, (None, None))
+        cell.created, cell.modified = created, modified
+        cell.mark_clean()
 
     library.check_no_cycles()
 

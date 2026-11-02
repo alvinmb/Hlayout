@@ -36,6 +36,7 @@ class Library:
         if name in self.cells:
             raise CellError(f"cell {name!r} already exists")
         cell = Cell(name=name)
+        cell.stamp()
         self.cells[name] = cell
         if self.top_cell_name is None:
             self.top_cell_name = name
@@ -256,6 +257,12 @@ class Library:
             cell.shapes = new_shapes
             cell.srefs = new_srefs
             cell.arefs = new_arefs
+            # Keep the library cell's date/time stamps on the copy: the
+            # placed part is the same part, so it shows when it was made
+            # and last changed in its library, until it is edited here.
+            cell.created = src_cell.created
+            cell.modified = src_cell.modified
+            cell.mark_clean()
             return new_name
 
         return visit(root_name)

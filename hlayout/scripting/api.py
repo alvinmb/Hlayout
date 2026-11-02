@@ -353,6 +353,12 @@ SHEET_SIZES_MM = {
 }
 
 
+
+def _cell_stamps(cell):
+    """{'created', 'modified'} ISO strings (or None) for a Cell."""
+    return {"created": cell.created.isoformat(sep="T") if cell.created else None,
+            "modified": cell.modified.isoformat(sep="T") if cell.modified else None}
+
 class Session:
     # An "attached" library is a second (read-mostly) GDSII file kept
     # alongside the current design purely as a source of cells to search
@@ -1204,13 +1210,28 @@ class Session:
 
     def list_library(self, source: Union[str, int, None] = "current"):
         """List the cells of `source` ('current', or an attached library's
-        0-based index): [{'name', 'shapes', 'srefs', 'bbox'}, ...]."""
+        0-based index): [{'name', 'shapes', 'srefs', 'bbox', 'created',
+        'modified'}, ...]. 'created'/'modified' are the cell's date/time
+        stamps as ISO strings ('YYYY-MM-DDTHH:MM:SS'), or None for a
+        cell not saved yet."""
         lib = self._resolve_source(source)
         return [
             {"name": name, "shapes": len(cell.shapes), "srefs": len(cell.srefs),
-             "arefs": len(cell.arefs), "bbox": cell.bbox()}
+             "arefs": len(cell.arefs), "bbox": cell.bbox(), **_cell_stamps(cell)}
             for name, cell in lib.cells.items()
         ]
+
+    def cell_stamps(self, source: Union[str, int, None] = None):
+        """Date/time stamps of every cell (Sref target) in the current
+        design and every attached library: [{'source', 'name',
+        'created', 'modified'}, ...], source 'current' or an attached
+        library's index. Stamps live in each cell's GDSII BGNSTR record;
+        'modified' moves when a changed cell is saved. Pass `source` to
+        list one library only."""
+        sources = ([("current", self.library)] + list(enumerate(self.attached_libraries))
+                   if source is None else [(source, self._resolve_source(source))])
+        return [{"source": src, "name": name, **_cell_stamps(cell)}
+                for src, lib in sources for name, cell in lib.cells.items()]
 
     def find_cells(self, query: str):
         """Case-insensitive substring search for cell (Sref target) names
@@ -1218,9 +1239,11 @@ class Session:
         [{'source', 'name'}, ...] where source is 'current' or an
         attached library's index."""
         query_l = query.lower()
-        matches = [{"source": "current", "name": n} for n in self.library.cells if query_l in n.lower()]
+        matches = [{"source": "current", "name": n, **_cell_stamps(c)}
+                   for n, c in self.library.cells.items() if query_l in n.lower()]
         for i, lib in enumerate(self.attached_libraries):
-            matches.extend({"source": i, "name": n} for n in lib.cells if query_l in n.lower())
+            matches.extend({"source": i, "name": n, **_cell_stamps(c)}
+                           for n, c in lib.cells.items() if query_l in n.lower())
         return matches
 
     # --- change notification (used by the GUI to repaint) ---------------

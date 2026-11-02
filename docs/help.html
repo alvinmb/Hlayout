@@ -410,7 +410,8 @@ const DATA = [
 {group:"command", groupLabel:"Command Bar", cat:"Attached Libraries", items:[
   {name:"ATTACH", syntax:"ATTACH <path.gds>", desc:"Attach a GDSII file as a reference library to search/place cells from (max 2 at once).", example:"ATTACH parts/vias.gds"},
   {name:"LIBS", syntax:"LIBS", desc:"List the currently attached reference libraries.", example:"LIBS"},
-  {name:"LIBLIST", syntax:"LIBLIST [current|0|1]", desc:"List the cells inside a library &mdash; defaults to the current design.", example:"LIBLIST 0"},
+  {name:"LIBLIST", syntax:"LIBLIST [current|0|1]", desc:"List the cells inside a library &mdash; defaults to the current design &mdash; with each cell's created/modified date and time.", example:"LIBLIST 0"},
+  {name:"CELLSTAMPS", syntax:"CELLSTAMPS [current|0|1]", desc:"Created and last-modified date/time of every cell (Sref target) in the design and every attached library, or one library. Stamps are stored in each cell's GDSII BGNSTR record and travel with the cell when it is placed from a library; modified moves when a changed cell is saved. Also Setup &gt; Library Cells...", example:"CELLSTAMPS"},
   {name:"FIND", syntax:"FIND <substring>", desc:"Case-insensitive cell-name search across the current design and every attached library.", example:"FIND via"},
   {name:"PLACE", syntax:"PLACE <cellname> <x,y> [source=current|0|1] [rotation] [mag] [mirror]",
    desc:"Find-and-place a cell as an SREF; <code>source</code> disambiguates a name that exists in more than one attached library.",
@@ -718,8 +719,11 @@ const DATA = [
    desc:"List a library's cells &mdash; <code>source</code> is <code>\"current\"</code> or an attached library's 0-based index.",
    example:'for c in s.list_library():\n    print(c["name"], c["shapes"], c["bbox"])'},
   {name:"find_cells()", syntax:"s.find_cells(query: str) -> list[dict]",
-   desc:"Case-insensitive substring search across the current library and every attached library. Returns <code>[{'source','name'}, &hellip;]</code>.",
+   desc:"Case-insensitive substring search across the current library and every attached library. Returns <code>[{'source','name','created','modified'}, &hellip;]</code>.",
    example:'matches = s.find_cells("via")'},
+  {name:"cell_stamps()", syntax:"s.cell_stamps(source: str | int | None = None) -> list[dict]",
+   desc:"Created and modified date/time of every cell in the design and each attached library (or one <code>source</code>). Returns <code>[{'source','name','created','modified'}, &hellip;]</code> with ISO date strings, <code>None</code> for a cell not saved yet. <code>list_library()</code> and <code>find_cells()</code> rows carry the same two keys.",
+   example:'for c in s.cell_stamps():\n    print(c["source"], c["name"], c["modified"])'},
 ]},
 
 {group:"python", groupLabel:"Python API", cat:"Change Notification", items:[

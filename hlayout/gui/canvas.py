@@ -3856,6 +3856,12 @@ def _layer_label(library, layer_number):
     return f"{layer_number} ({layer.name})"
 
 
+def _cell_stamp_line(library, cell_name) -> str:
+    """'\n  cell created ... modified ...' for an instance's target cell."""
+    cell = library.cells.get(cell_name) if library is not None else None
+    return f"\n  cell {cell.stamp_text()}" if cell is not None else ""
+
+
 def _describe_one(kind, shape, library):
     """One-line (or short multi-line) human-readable summary of a single
     selected shape/sref -- shared by describe_selection() below for both
@@ -3867,7 +3873,8 @@ def _describe_one(kind, shape, library):
         return (f"Cell Instance  cell={shape.cell_name!r}  "
                 f"origin=({shape.origin[0]},{shape.origin[1]})  "
                 f"rotation={shape.rotation:g}°  magnification={shape.magnification:g}  "
-                f"mirror={mirror}{label_part}{pin_part}")
+                f"mirror={mirror}{label_part}{pin_part}"
+                f"{_cell_stamp_line(library, shape.cell_name)}")
     if kind == "aref" or isinstance(shape, ARef):
         mirror = "yes" if shape.x_reflection else "no"
         return (f"Array Instance  cell={shape.cell_name!r}  "
@@ -3875,7 +3882,8 @@ def _describe_one(kind, shape, library):
                 f"{shape.columns}x{shape.rows}  "
                 f"col_spacing={shape.col_spacing:g}  row_spacing={shape.row_spacing:g}  "
                 f"rotation={shape.rotation:g}°  magnification={shape.magnification:g}  "
-                f"mirror={mirror}  ({shape.count} instances)")
+                f"mirror={mirror}  ({shape.count} instances)"
+                f"{_cell_stamp_line(library, shape.cell_name)}")
     if isinstance(shape, Path):
         return (f"Path  layer={_layer_label(library, shape.layer)}  "
                 f"width={shape.width}  cap={shape.cap.value}  "

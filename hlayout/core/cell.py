@@ -1,7 +1,9 @@
 """Cell: a named collection of shapes and Sref instances."""
 
+import hashlib
 from dataclasses import dataclass, field
-from typing import List, Union
+from datetime import datetime
+from typing import List, Optional, Union
 
 from .errors import GeometryError
 from .shapes import ARef, Path, Polygon, Rectangle, SRef, Text, circle_points
@@ -15,6 +17,56 @@ class Cell:
     shapes: List[Shape] = field(default_factory=list)
     srefs: List[SRef] = field(default_factory=list)
     arefs: List[ARef] = field(default_factory=list)
+    # Date/time stamps, kept in the GDSII BGNSTR record of every cell so
+    # they travel with the cell into any library or design it is placed
+    # in. ``created`` is set once; ``modified`` moves on save when the
+    # cell's content has changed since it was loaded or last saved (see
+    # stamp()). Neither takes part in equality.
+    created: Optional[datetime] = field(default=None, compare=False)
+    modified: Optional[datetime] = field(default=None, compare=False)
+    _saved_fingerprint: Optional[str] = field(default=None, compare=False, repr=False)
+
+    # --- date/time stamps ----------------------------------------------
+    def fingerprint(self) -> str:
+        """Hash of this cell's content (shapes, srefs, arefs) -- used to
+        tell whether it changed since it was loaded or last saved."""
+        h = hashlib.sha1()
+        for group in (self.shapes, self.srefs, self.arefs):
+            for item in group:
+                h.update(repr(item).encode("utf-8", "replace"))
+            h.update(b"|")
+        return h.hexdigest()
+
+    def mark_clean(self) -> None:
+        """Record the current content as the saved state."""
+        self._saved_fingerprint = self.fingerprint()
+
+    def stamp(self, now: Optional[datetime] = None) -> None:
+        """Bring the stamps up to date before a save: a new cell gets
+        created = modified = now; a cell whose content changed since it
+        was loaded/saved gets modified = now. Unchanged cells keep the
+        stamps they were loaded with."""
+        now = (now or datetime.now()).replace(microsecond=0)
+        fp = self.fingerprint()
+        if self.created is None:
+            self.created = now
+        if self.modified is None:
+            self.modified = now
+        elif self._saved_fingerprint is not None and fp != self._saved_fingerprint:
+            self.modified = now
+        if self.modified < self.created:
+            self.modified = self.created
+        self._saved_fingerprint = fp
+
+    def stamp_text(self) -> str:
+        """'created 2026-11-02 13:05  modified 2026-11-02 13:42', or
+        'not saved yet' for a cell with no stamps."""
+        fmt = "%Y-%m-%d %H:%M:%S"
+        if self.created is None and self.modified is None:
+            return "not saved yet"
+        c = self.created.strftime(fmt) if self.created else "?"
+        m = self.modified.strftime(fmt) if self.modified else "?"
+        return f"created {c}  modified {m}"
 
     # --- adders -----------------------------------------------------
     def add_polygon(self, layer: int, points, datatype: int = 0, pin: str = "") -> Polygon:

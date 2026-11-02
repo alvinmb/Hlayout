@@ -408,6 +408,7 @@ class App(tk.Tk):
         setupm = add_menu("Setup")
         setupm.add_command(label="Attach Library...", command=self.attach_library)
         setupm.add_command(label="Attached Libraries...", command=self.show_attached_libraries)
+        setupm.add_command(label="Library Cells...", command=self.show_library_cells)
         setupm.add_separator()
         setupm.add_command(label="Layers...", command=self._show_layers_tab)
         setupm.add_checkbutton(label="Snap to Grid", variable=self.snap_var,
@@ -4774,6 +4775,79 @@ class App(tk.Tk):
         refresh()
         win.bind("<Escape>", lambda e: win.destroy())
 
+    def show_library_cells(self):
+        """Setup > Library Cells...: every cell (Sref target) in the
+        design and in each attached library with its created and
+        last-modified date/time (Session.cell_stamps). The stamps live
+        in each cell's GDSII BGNSTR record, so a part placed from an
+        attached library keeps its library dates until it is edited
+        here; 'modified' moves when a changed cell is saved. Click a
+        heading to sort; type to filter."""
+        win = tk.Toplevel(self)
+        win.title("Library Cells")
+        win.transient(self)
+        win.geometry("760x460")
+
+        top = ttk.Frame(win)
+        top.pack(fill="x", padx=8, pady=(8, 4))
+        ttk.Label(top, text="Filter:").pack(side="left")
+        filt_var = tk.StringVar()
+        filt = ttk.Entry(top, textvariable=filt_var, width=24)
+        filt.pack(side="left", padx=4)
+        count_var = tk.StringVar()
+        ttk.Label(top, textvariable=count_var, foreground="#8b949e").pack(side="right")
+
+        cols = ("library", "cell", "created", "modified")
+        frame = ttk.Frame(win)
+        frame.pack(fill="both", expand=True, padx=8)
+        tree = ttk.Treeview(frame, columns=cols, show="headings", selectmode="browse")
+        vbar = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=vbar.set)
+        for col, label, width in (("library", "Library", 170), ("cell", "Cell", 230),
+                                  ("created", "Created", 150), ("modified", "Modified", 150)):
+            tree.heading(col, text=label, command=lambda c=col: sort_by(c))
+            tree.column(col, width=width, anchor="w")
+        tree.pack(side="left", fill="both", expand=True)
+        vbar.pack(side="right", fill="y")
+
+        lib_names = {"current": f"Design ({self.session.library.name})"}
+        for l in self.session.list_attached_libraries():
+            lib_names[l["index"]] = f"[{l['index']}] {l['name']}"
+        state = {"key": "cell", "reverse": False}
+
+        def fmt(iso):
+            return iso.replace("T", " ") if iso else "not saved yet"
+
+        def refresh(*_):
+            q = filt_var.get().strip().lower()
+            rows = [r for r in self.session.cell_stamps() if q in r["name"].lower()]
+            key = state["key"]
+            getter = {"library": lambda r: str(r["source"]), "cell": lambda r: r["name"].lower(),
+                      "created": lambda r: r["created"] or "", "modified": lambda r: r["modified"] or ""}[key]
+            rows.sort(key=getter, reverse=state["reverse"])
+            tree.delete(*tree.get_children())
+            for r in rows:
+                tree.insert("", "end", values=(lib_names.get(r["source"], str(r["source"])), r["name"],
+                                               fmt(r["created"]), fmt(r["modified"])))
+            count_var.set(f"{len(rows)} cell(s)")
+
+        def sort_by(col):
+            state["reverse"] = (not state["reverse"]) if state["key"] == col else col in ("created", "modified")
+            state["key"] = col
+            refresh()
+
+        filt_var.trace_add("write", refresh)
+        ttk.Label(win, foreground="#8b949e",
+                  text="Created/modified are stored with each cell in the GDS file; "
+                       "modified updates when a changed cell is saved.").pack(anchor="w", padx=8, pady=(4, 0))
+        btns = ttk.Frame(win)
+        btns.pack(fill="x", padx=8, pady=8)
+        ttk.Button(btns, text="Refresh", command=refresh).pack(side="left")
+        ttk.Button(btns, text="Close", command=win.destroy).pack(side="right")
+        win.bind("<Escape>", lambda e: win.destroy())
+        refresh()
+        filt.focus_set()
+
     def find_and_place_cell(self):
         win = tk.Toplevel(self)
         win.title("Find & Place Cell")
@@ -4793,7 +4867,8 @@ class App(tk.Tk):
             listbox.delete(0, tk.END)
             for m in matches:
                 src = "current" if m["source"] == "current" else f"lib {m['source']}"
-                listbox.insert(tk.END, f"{m['name']}  ({src})")
+                when = (m.get("modified") or "").replace("T", " ")[:16]
+                listbox.insert(tk.END, f"{m['name']}  ({src})" + (f"  modified {when}" if when else ""))
 
         entry.bind("<Return>", do_search)
         entry.bind("<KeyRelease>", do_search)
