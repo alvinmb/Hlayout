@@ -507,24 +507,55 @@ python hlayout_app.py hlayout/examples/notch_filter.gds</pre>
 
 <script>
 (function(){
-  // Release version: bump this when a new vX.Y.Z tag is pushed. File names follow .github/workflows/build-installers.yml.
-  var VERSION = "0.7.0";
+  // Download links follow the newest published GitHub release: on load the
+  // page asks the GitHub API for releases/latest and uses its tag and
+  // installer files. FALLBACK_VERSION is used until that answers, or if it
+  // can't (offline, rate-limited, repository private) -- keep it at a
+  // release that really exists. File names follow
+  // .github/workflows/build-installers.yml.
+  var FALLBACK_VERSION = "0.6.0";
   var REPO = "https://github.com/alvinmb/Hlayout";
-  var base = REPO + "/releases/download/v" + VERSION + "/";
-  var files = {
-    windows: "HLayout-" + VERSION + "-windows-setup.exe",
-    linux:   "hlayout_" + VERSION + "_amd64.deb",
-    mac:     "HLayout-" + VERSION + "-macos.dmg"
-  };
+  var API = "https://api.github.com/repos/alvinmb/Hlayout/releases/latest";
   var names = {windows:"Windows", linux:"Linux", mac:"macOS"};
+  var patterns = {windows: /-windows-setup\.exe$/i, linux: /_amd64\.deb$/i, mac: /-macos\.dmg$/i};
 
-  document.querySelectorAll("[data-ver]").forEach(function(el){ el.textContent = "v" + VERSION; });
-  document.querySelectorAll(".plat").forEach(function(card){
-    var os = card.getAttribute("data-os");
-    card.querySelector("[data-file]").textContent = files[os];
-    card.querySelector("[data-link]").href = base + files[os];
-    var f = card.querySelector("[data-fname]"); if (f) f.textContent = files[os];
-  });
+  function fileNames(v){
+    return {
+      windows: "HLayout-" + v + "-windows-setup.exe",
+      linux:   "hlayout_" + v + "_amd64.deb",
+      mac:     "HLayout-" + v + "-macos.dmg"
+    };
+  }
+
+  function apply(version, urls){
+    var files = fileNames(version);
+    var base = REPO + "/releases/download/v" + version + "/";
+    document.querySelectorAll("[data-ver]").forEach(function(el){ el.textContent = "v" + version; });
+    document.querySelectorAll(".plat").forEach(function(card){
+      var os = card.getAttribute("data-os");
+      var url = (urls && urls[os]) || base + files[os];
+      var file = url.split("/").pop();
+      card.querySelector("[data-file]").textContent = file;
+      card.querySelector("[data-link]").href = url;
+      var f = card.querySelector("[data-fname]"); if (f) f.textContent = file;
+    });
+  }
+
+  apply(FALLBACK_VERSION);
+  if (window.fetch){
+    fetch(API, {headers: {"Accept": "application/vnd.github+json"}})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(rel){
+        if (!rel || !rel.tag_name || rel.draft) return;
+        var urls = {};
+        (rel.assets || []).forEach(function(a){
+          for (var os in patterns) if (patterns[os].test(a.name)) urls[os] = a.browser_download_url;
+        });
+        if (!urls.windows && !urls.linux && !urls.mac) return;
+        apply(rel.tag_name.replace(/^v/i, ""), urls);
+      })
+      .catch(function(){});
+  }
 
   function detect(){
     var p = ((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent || "").toLowerCase();
