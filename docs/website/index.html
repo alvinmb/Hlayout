@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HLayout – Free Thick-Film Hybrid Circuit Layout Software (Open Source CAD)</title>
 <meta name="description" content="HLayout is free, open-source layout CAD for thick-film hybrid circuits and chip-and-wire modules: printed conductors, dielectric and resistors, wire bonds, DRC, Gerber and 3D output. Windows, Linux and macOS.">
-<link rel="canonical" href="https://h-layout.co.uk/">
+<link rel="canonical" href="https://www.h-layout.co.uk/">
 <meta name="robots" content="index, follow, max-image-preview:large">
 <meta name="author" content="Alvin Brown">
 <meta name="theme-color" content="#16202E">
@@ -14,23 +14,23 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="HLayout">
 <meta property="og:locale" content="en_GB">
-<meta property="og:url" content="https://h-layout.co.uk/">
+<meta property="og:url" content="https://www.h-layout.co.uk/">
 <meta property="og:title" content="HLayout – free thick-film hybrid circuit layout software">
 <meta property="og:description" content="HLayout is free, open-source layout CAD for thick-film hybrid circuits and chip-and-wire modules: printed conductors, dielectric and resistors, wire bonds, DRC, Gerber and 3D output. Windows, Linux and macOS.">
-<meta property="og:image" content="https://h-layout.co.uk/img/og-image.jpg">
+<meta property="og:image" content="https://www.h-layout.co.uk/img/og-image.jpg">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="An 8-bit ALU chip-and-wire hybrid designed in HLayout, shown in 3D in its Kovar package">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="HLayout – free thick-film hybrid circuit layout software">
 <meta name="twitter:description" content="HLayout is free, open-source layout CAD for thick-film hybrid circuits and chip-and-wire modules: printed conductors, dielectric and resistors, wire bonds, DRC, Gerber and 3D output. Windows, Linux and macOS.">
-<meta name="twitter:image" content="https://h-layout.co.uk/img/og-image.jpg">
+<meta name="twitter:image" content="https://www.h-layout.co.uk/img/og-image.jpg">
 <script type="application/ld+json">
 {
  "@context": "https://schema.org",
  "@type": "SoftwareApplication",
  "name": "HLayout",
- "url": "https://h-layout.co.uk/",
+ "url": "https://www.h-layout.co.uk/",
  "description": "HLayout is free, open-source layout CAD for thick-film hybrid circuits and chip-and-wire modules: printed conductors, dielectric and resistors, wire bonds, DRC, Gerber and 3D output. Windows, Linux and macOS.",
  "applicationCategory": "DesignApplication",
  "applicationSubCategory": "Electronic design automation (EDA) for thick-film hybrid circuits",
@@ -42,9 +42,9 @@
  },
  "license": "https://www.gnu.org/licenses/gpl-3.0.html",
  "isAccessibleForFree": true,
- "downloadUrl": "https://h-layout.co.uk/#download",
- "screenshot": "https://h-layout.co.uk/img/alu8-3d.jpg",
- "image": "https://h-layout.co.uk/img/og-image.jpg",
+ "downloadUrl": "https://www.h-layout.co.uk/#download",
+ "screenshot": "https://www.h-layout.co.uk/img/alu8-3d.jpg",
+ "image": "https://www.h-layout.co.uk/img/og-image.jpg",
  "author": {
   "@type": "Person",
   "name": "Alvin Brown"
@@ -132,7 +132,7 @@
    "name": "Is training or help available?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "Yes. A three-day hands-on training course takes an 8-bit ALU chip-and-wire design from netlist to Gerbers and 3D, and process setup, part libraries, custom features, layout design and support are available from support@hlayout.co.uk."
+    "text": "Yes. A three-day hands-on training course takes an 8-bit ALU chip-and-wire design from netlist to Gerbers and 3D, and process setup, part libraries, custom features, layout design and support are available from support@h-layout.co.uk."
    }
   }
  ]
@@ -368,6 +368,7 @@ td:first-child{font-weight:600;white-space:nowrap}
       <a class="hide-sm" href="#example">Example</a>
       <a class="hide-sm" href="#three-d">3D</a>
       <a class="hide-sm" href="#services">Services</a>
+      <a class="hide-sm" href="/thermal-and-trim.htm">Thermal &amp; trim</a>
       <a class="hide-sm" href="#faq">FAQ</a>
       <a class="btn btn-gold btn-sm" href="#download">Download</a>
     </nav>
@@ -448,7 +449,7 @@ td:first-child{font-weight:600;white-space:nowrap}
         <div><span class="tag">BOND</span><h3>Chip-and-wire router</h3><p>Single-conductor hybrids routed with wire-bond jumpers, plus a bond diagram CSV in bonding order for the wire bonder.</p></div>
         <div><span class="tag">PLACE</span><h3>Auto Place</h3><p>Shortest weighted net length with power and ground counted, hot parts kept apart, and straight-line interconnects that follow every drag.</p></div>
         <div><span class="tag">CHECK</span><h3>DRC and netlist extraction</h3><p>Widths, spacings, substrate-edge clearance and wire-bond length and angle, then copper connectivity compared against your nets.</p></div>
-        <div><span class="tag">HEAT</span><h3>Thermal analysis</h3><p>Steady-state conduction through substrate and films gives each resistor, die and part a temperature against its limit.</p></div>
+        <div><span class="tag">HEAT</span><h3>Thermal analysis and laser trim</h3><p>Steady-state conduction through substrate and films gives each resistor, die and part a temperature against its limit, and a trim simulator shows plunge and L-cut trims step by step. <a href="/thermal-and-trim.htm">See both tools</a></p></div>
         <div><span class="tag">CAM</span><h3>Manufacturing outputs</h3><p>Gerber per print layer, DXF, pick-and-place centroids, test netlists and a one-step assembly drawing with pin, resistor and bond tables.</p></div>
       </div>
     </div>
@@ -463,10 +464,10 @@ td:first-child{font-weight:600;white-space:nowrap}
         <p class="lede">An 8-bit ALU built from six bare dies (two 54AS181 ALU slices and four 54LS gates) wire-bonded onto a two-conductor thick-film substrate, sealed in a 40-pin Kovar DIP package. 46 nets, placed by Auto Place from the netlist and routed with Freerouting.</p>
       </div>
       <div class="ex-grid">
-        <figure class="tile ex-wide"><img src="img/alu8-layout.jpg" alt="ALU8 layout in HLayout: six dies with wire bonds, the 1st conductor in orange and 2nd conductor in purple over the dielectric, inside the 40-pin Kovar package" width="1200" height="613" loading="lazy" loading="lazy" decoding="async"><figcaption><b>Layout.</b> 1st conductor (orange) and 2nd conductor (purple) over the dielectric, dies wire-bonded to their fingers, 40 package pins round the edge.</figcaption></figure>
-        <figure class="tile ex-wide"><img src="img/alu8-3d.jpg" alt="The same ALU8 design in 3D: green dielectric with gold conductors and dark dies on a white alumina substrate, seated in a grey Kovar package with gold pins in green glass seals" width="1200" height="884" loading="lazy" loading="lazy" decoding="async"><figcaption><b>The corresponding 3D view.</b> The FreeCAD export of the same design: fired films at their real thickness, dies on their attach pads, and the substrate seated in the Kovar DIP40 with its glass-sealed pins.</figcaption></figure>
-        <figure class="tile"><img src="img/alu8-die-3d.jpg" alt="Close-up of a 54AS181 die in 3D with gold wire bonds looping out to bond fingers on the conductor" width="1000" height="697" loading="lazy" loading="lazy" decoding="async"><figcaption><b>Close-up.</b> A 54AS181 die with its gold wire bonds looping out to the bond fingers.</figcaption></figure>
-        <figure class="tile"><img src="img/alu8-assembly-drawing.jpg" alt="The ALU8 assembly drawing on an A3 sheet: scaled top view, pin function table and title block" width="700" height="1010" loading="lazy" loading="lazy" decoding="async"><figcaption><b>Assembly drawing.</b> Built in one step: scaled top view, 40-pin function table and title block.</figcaption></figure>
+        <figure class="tile ex-wide"><img src="img/alu8-layout.jpg" alt="ALU8 layout in HLayout: six dies with wire bonds, the 1st conductor in orange and 2nd conductor in purple over the dielectric, inside the 40-pin Kovar package" width="1200" height="613" loading="lazy" decoding="async"><figcaption><b>Layout.</b> 1st conductor (orange) and 2nd conductor (purple) over the dielectric, dies wire-bonded to their fingers, 40 package pins round the edge.</figcaption></figure>
+        <figure class="tile ex-wide"><img src="img/alu8-3d.jpg" alt="The same ALU8 design in 3D: green dielectric with gold conductors and dark dies on a white alumina substrate, seated in a grey Kovar package with gold pins in green glass seals" width="1200" height="884" loading="lazy" decoding="async"><figcaption><b>The corresponding 3D view.</b> The FreeCAD export of the same design: fired films at their real thickness, dies on their attach pads, and the substrate seated in the Kovar DIP40 with its glass-sealed pins.</figcaption></figure>
+        <figure class="tile"><img src="img/alu8-die-3d.jpg" alt="Close-up of a 54AS181 die in 3D with gold wire bonds looping out to bond fingers on the conductor" width="1000" height="697" loading="lazy" decoding="async"><figcaption><b>Close-up.</b> A 54AS181 die with its gold wire bonds looping out to the bond fingers.</figcaption></figure>
+        <figure class="tile"><img src="img/alu8-assembly-drawing.jpg" alt="The ALU8 assembly drawing on an A3 sheet: scaled top view, pin function table and title block" width="700" height="1010" loading="lazy" decoding="async"><figcaption><b>Assembly drawing.</b> Built in one step: scaled top view, 40-pin function table and title block.</figcaption></figure>
       </div>
     </div>
   </section>
@@ -479,8 +480,8 @@ td:first-child{font-weight:600;white-space:nowrap}
         <p class="lede">Export the design to FreeCAD as one solid per film at its fired thickness, with real STEP bodies for chip capacitors, SOT and LCC packages, Kovar headers and bare dies. The SolidCraft view writes STEP, 3MF, STL or OBJ.</p>
       </div>
       <div class="pair">
-        <figure class="tile"><img src="img/alu16-freecad-3d.jpg" alt="The ALU16 module rebuilt in 3D in FreeCAD, showing the substrate, conductor and dielectric films and the LCC packages" width="1000" height="667" loading="lazy" loading="lazy" decoding="async"><figcaption>ALU16 rebuilt in FreeCAD from the exported macro.</figcaption></figure>
-        <figure class="tile"><img src="img/alu16-chip-and-wire.jpg" alt="Chip-and-wire ALU16: the whole substrate on the left and a die with wire bonds fanning out to bond fingers on the right" width="900" height="450" loading="lazy" loading="lazy" decoding="async"><figcaption>Chip-and-wire ALU16: bare dies wire-bonded to fingers on the 2nd conductor.</figcaption></figure>
+        <figure class="tile"><img src="img/alu16-freecad-3d.jpg" alt="The ALU16 module rebuilt in 3D in FreeCAD, showing the substrate, conductor and dielectric films and the LCC packages" width="1000" height="667" loading="lazy" decoding="async"><figcaption>ALU16 rebuilt in FreeCAD from the exported macro.</figcaption></figure>
+        <figure class="tile"><img src="img/alu16-chip-and-wire.jpg" alt="Chip-and-wire ALU16: the whole substrate on the left and a die with wire bonds fanning out to bond fingers on the right" width="900" height="450" loading="lazy" decoding="async"><figcaption>Chip-and-wire ALU16: bare dies wire-bonded to fingers on the 2nd conductor.</figcaption></figure>
       </div>
     </div>
   </section>
@@ -493,9 +494,9 @@ td:first-child{font-weight:600;white-space:nowrap}
         <p class="lede">HLayout is free to use. When you need it adapted to your line, extended with your own tools, or a design laid out for you, the author offers paid help built on the same open-source code.</p>
         <div class="contact">
           <span class="contact-label">Email</span>
-          <span class="contact-addr" id="svc-email">support@hlayout.co.uk</span>
+          <span class="contact-addr" id="svc-email">support@h-layout.co.uk</span>
           <button class="btn btn-line btn-sm" type="button" id="copy-email">Copy address</button>
-          <a class="btn btn-gold btn-sm" href="mailto:support@hlayout.co.uk?subject=HLayout%20consultancy%20enquiry">Write an email</a>
+          <a class="btn btn-gold btn-sm" href="mailto:support@h-layout.co.uk?subject=HLayout%20consultancy%20enquiry">Write an email</a>
         </div>
         <p class="hint">Tell us about your process, the parts you use and what you want HLayout to do.</p>
       </div>
@@ -543,7 +544,7 @@ td:first-child{font-weight:600;white-space:nowrap}
         <details><summary>Which manufacturing outputs does it produce?</summary><p>Gerber RS-274X for every print layer, DXF, pick-and-place files, bond lists for the wire bonder, test netlists, an assembly drawing with title block and pin table, and a 3D model of the fired substrate and parts for FreeCAD with STEP models.</p></details>
         <details><summary>Does it check wire bonds and design rules?</summary><p>Yes. Design rule checks cover track widths, spacing, substrate-edge clearance and wire-bond length and departure angle. Netlist extraction compares the drawn copper and bonds with the schematic, and a thermal analysis estimates die and resistor temperatures.</p></details>
         <details><summary>Is HLayout really free, and which systems does it run on?</summary><p>HLayout is free software under the GNU GPL v3.0 or later, with the full source on GitHub. Installers are available for Windows, Linux (Debian/Ubuntu) and macOS, and it can also run from source with Python.</p></details>
-        <details><summary>Is training or help available?</summary><p>Yes. A three-day hands-on training course takes an 8-bit ALU chip-and-wire design from netlist to Gerbers and 3D, and process setup, part libraries, custom features, layout design and support are available from support@hlayout.co.uk.</p></details>
+        <details><summary>Is training or help available?</summary><p>Yes. A three-day hands-on training course takes an 8-bit ALU chip-and-wire design from netlist to Gerbers and 3D, and process setup, part libraries, custom features, layout design and support are available from support@h-layout.co.uk.</p></details>
       </div>
     </div>
   </section>
@@ -675,7 +676,7 @@ python hlayout_app.py hlayout/examples/notch_filter.gds</pre>
 
 <footer>
   <div class="wrap">
-    <span>HLayout · thick-film hybrid layout CAD · GPL-3.0 · support@hlayout.co.uk</span>
+    <span>HLayout · thick-film hybrid layout CAD · GPL-3.0 · support@h-layout.co.uk</span>
     <span><a href="https://github.com/alvinmb/Hlayout" target="_blank" rel="noopener">GitHub</a> · <a href="https://github.com/alvinmb/Hlayout/releases" target="_blank" rel="noopener">Releases</a> · <a href="#policies" data-go-policies>Privacy</a> · <button class="linklike" type="button" data-consent-open>Cookie settings</button> · <a href="https://github.com/alvinmb/Hlayout/issues" target="_blank" rel="noopener">Report an issue</a> · <a href="#services">Consultancy</a> · <a href="#download" onclick="setTimeout(function(){var e=document.getElementById('policies');if(e)e.scrollIntoView()},60)">Licence, code signing and privacy</a></span>
   </div>
 </footer>
