@@ -394,7 +394,8 @@ td:first-child{font-weight:600;white-space:nowrap}
     <h1>Get HLayout</h1>
     <p class="lede">Pick your operating system. Each installer bundles Python and every library HLayout needs, so there is nothing else to install before you start drawing.</p>
     <span class="ver">Current release <b data-ver></b> <a href="https://github.com/alvinmb/Hlayout/releases" target="_blank" rel="noopener">All releases and notes</a></span>
-    <div class="new"><b>New in 0.6</b><span>Help → Report Bug collects versions, errors and recent steps into one report you can preview before sending. When an unexpected error appears, HLayout offers to report it with the details filled in.</span></div>
+    <div class="new" data-new="0.7" hidden><b>New in 0.7</b><span>Every cell carries a created and modified date and time, in your design and in attached libraries (Setup → Library Cells…). The Chip Wizard makes real, named pins (E, B for a transistor) and can make the die-attach pad the back contact, such as a collector, with a tab for the track. HLayout is open source under GPL-3.0, and there is a three-day ALU8 training course.</span></div>
+    <div class="new" data-new="0.6"><b>New in 0.6</b><span>Help → Report Bug collects versions, errors and recent steps into one report you can preview before sending. When an unexpected error appears, HLayout offers to report it with the details filled in.</span></div>
   </div>
 
   <div class="wrap">
@@ -531,6 +532,15 @@ python hlayout_app.py hlayout/examples/notch_filter.gds</pre>
     var files = fileNames(version);
     var base = REPO + "/releases/download/v" + version + "/";
     document.querySelectorAll("[data-ver]").forEach(function(el){ el.textContent = "v" + version; });
+    // show the "New in X.Y" note for this release, or the newest one older than it
+    var mm = version.split(".").slice(0, 2).join("."), notes = document.querySelectorAll("[data-new]"), shown = null;
+    notes.forEach(function(el){
+      var v = el.getAttribute("data-new");
+      var a = v.split(".").map(Number), b = mm.split(".").map(Number);
+      var older = a[0] < b[0] || (a[0] === b[0] && (a[1] || 0) <= (b[1] || 0));
+      if (!shown && older) shown = el;
+    });
+    notes.forEach(function(el){ el.hidden = el !== shown; });
     document.querySelectorAll(".plat").forEach(function(card){
       var os = card.getAttribute("data-os");
       var url = (urls && urls[os]) || base + files[os];
