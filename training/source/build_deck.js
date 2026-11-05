@@ -152,7 +152,7 @@ function content(title, sub, mod, notes) { const s = pres.addSlide(); head(s, ti
   ['13:15', '5  Technology setup · Lab 3', '11  Nets and wire bonds · Lab 9', '17  Documentation, 3D · Lab 15'],
   ['14:05', '6  Mask ops, dielectric, bond edits · Lab 4', '12  Routing · Lab 10 (14:45)', '18  Automation · Lab 16 (14:00)'],
   ['15:15', '7  Thick-film resistors · Lab 5', '13  Editing the route · Lab 11 (16:00)', 'Capstone (14:30)'],
-  ['16:35', 'Day 1 review', 'Day 2 review (16:45)', 'Quiz and wrap-up (16:15)']], 0.45, 1.25, 9.1, [0.75, 2.85, 2.75, 2.75], 10.5, 0.42);
+  ['16:35', 'Day 1 review (16:40)', 'Day 2 review (16:45)', 'Quiz and wrap-up (16:15)']], 0.45, 1.25, 9.1, [0.75, 2.85, 2.75, 2.75], 10.5, 0.42);
   T(s, 'Lunch 12:30–13:15. Breaks: day 1 10:15 and 15:00 · day 2 11:00 and 14:30 · day 3 11:00 and during the capstone.', { x: 0.45, y: 4.85, w: 9.1, h: 0.3, fontSize: 10, color: MUTED });
 }
 
@@ -345,7 +345,7 @@ lab(4, 'Mask ops, dielectric and a bond move', '14:30 · 30 min', 'Make derived 
   'Answers: layer 54 is the bare substrate not covered by 1st conductor. After Remove Dielectric Fill only the 94 input shapes on layer 4 remain, mostly via windows; Generate gives 23 fill pieces again. A bond moved outside 1.0–2.5 mm shows in DRC as BOND.L.MIN or BOND.L.MAX. Make sure students work on the copy.');
 
 // ---- Module 7: thick-film resistors
-opener(7, 'Thick-film resistor design', '15:15 · 90 min with Lab 5', ['Explain sheet resistance, squares and why resistors are printed low and trimmed up', 'Size a resistor by hand the way the Resistor Designer does', 'Place sized resistors and simulate their laser trim'], [1], 'resistor_anatomy.png',
+opener(7, 'Thick-film resistor design', '15:15 · 90 min with Lab 5', ['Explain sheet resistance, squares and why resistors are printed low and trimmed up', 'Size a resistor by hand the way the Resistor Designer does', 'Choose a resistor shape, place it and simulate its laser trim'], [1], 'resistor_anatomy.png',
   'The ALU8 has no printed resistors, so this module uses worked examples and a scratch design; the capstone on day 3 adds a printed pull-up to the ALU8. The numbers on these slides come from HLayout\'s own sizing code and trim simulator.');
 {
   const s = content('How a printed resistor works', 'Resistance comes from the ink and the shape: R = Rsh × L / W', 'Module 7 · Resistors',
@@ -385,10 +385,21 @@ opener(7, 'Thick-film resistor design', '15:15 · 90 min with Lab 5', ['Explain 
   table(s, [['Stage', 'R (Ω)', 'Sens. (Ω/µm)'], ['As printed', '793', '–'], ['Plunge 25 %', '913', '0.42'], ['L-cut 400 µm', '995', '0.09']], 6.6, 1.3, 2.95, [1.35, 0.7, 0.9], 11.5, 0.4);
   T(s, 'Plunge: fast but sensitivity rises. L-cut: slow, controllable final approach.', { x: 6.6, y: 3.0, w: 2.95, h: 1.0, fontSize: 12, color: MUTED });
 }
-lab(5, 'Size, place and trim resistors', '15:55 · 40 min', 'Size four resistors with the Resistor Designer, check them by hand, place them and trim one.', 'File → New, then Setup → Load Technology File… alu8_tech.json',
-  ['Tools → Thick-Film Resistor Designer…. Check Design Rules…: aim 75 %, aspect 0.25–4.', 'Add R1 1 kΩ 5 % 50 mW, R2 10 kΩ 1 % 100 mW, R3 47 Ω 5 % 200 mW, R4 220 kΩ 10 % 10 mW, with Auto from power.', 'Fill in the handout table by hand first, then compare with the Solutions tab.', 'Auto-Select All, then Place All in Layout…. Look at each resistor\'s layers.', 'Select R1 and open Trim Simulator…: plunge 25 % depth, 40 µm kerf; then Add L-Cut 400 µm.', 'Read resistance and sensitivity at each stage.'],
-  ['Your hand sizes match the Designer', 'Four resistors placed with glaze and keep-out', 'R1 trims to about 995 Ω'], 'Lab 5',
-  'Answers: R1 1.4 mm, aim 800 Ω, 1 kΩ/□, 0.80 sq, 1.12 mm. R2 1.8 mm, aim 7.6 kΩ, 10 kΩ/□, 0.76 sq, 1.37 mm. R3 2.8 mm (2.4 mm is only 187.5 mW after trim), aim 37.6 Ω, 30 Ω/□, 1.25 sq, 3.51 mm. R4 1.0 mm, aim 187 kΩ, 300 kΩ/□, 0.62 sq, 0.62 mm. The trim simulator needs numpy and scipy, which the installers include. Discuss why R3 needs a long body: low-value inks and high power.');
+{
+  const s = content('Beyond the rectangle', 'Resistor Designer → Add/Edit → Shape: seven more thick-film shapes', 'Module 7 · Resistors',
+    'A rectangle sized for a high value is long and thin, needs pads at both ends and has a limited trim range. The Designer now sizes seven other shapes. Top-hat: a crown on the middle of the bar; the plunge runs up through the bar into the crown, so the crown adds trim range. Top-hat with roof: a conductor roof caps the crown; once the plunge has cut the bar, current goes up one side of the crown, across the roof and down the other, so the cut can run almost to the roof and never opens the resistor. U-shape: both pads side by side. U with roof: a roofed skirt under the U for the same safe trim. Angle, double angle, three-sided angle: pads on adjacent or opposite sides to suit the routing. Sizing: squares are still aim / Rsh, but a shape is solved as a resistive sheet, so each right-angle corner counts as about 0.56 of a square and a crown or roof is counted exactly; the Designer then adjusts the shape length for each ink inside the aspect rules. Placing draws pin 1 and 2 terminations to A, B, C, a pin-less roof, glaze grown by D and keep-out grown by E, and the resistor DRC checks the real outlines.');
+  const r = img(s, 'resistor_shapes.png', 0.45, 1.25, 5.6, 3.45); cap(s, 'The eight shapes, each sized to the squares shown', r);
+  bullets(s, [['Top-hat', 'crown adds trim range'], ['With roof', 'cut never opens the resistor'], ['U-shape', 'pads side by side'], ['Angles', 'pads where the routing needs them'], ['Sizing', 'solved as a sheet: a corner is about 0.56 sq'], ['Checks', 'DRC on the real outline']], 6.25, 1.35, 3.3, 3.4, 12);
+}
+{
+  const s = content('Trimming a shaped resistor', 'Trim Simulator… cuts along the shape\'s own plunge path', 'Module 7 · Resistors',
+    'For a shaped resistor the Trim Simulator opens a simpler window: kerf, plunge depth (pre-filled with the deepest safe cut) and steps. The example is a 4.7 kOhm 5 % resistor drawn as a top-hat with roof: 1 kOhm/sq ink, 3.76 squares, bar 6.06 mm. Printed at about 3750 Ohm, the plunge reaches 4.7 kOhm at about 1.55 mm and could go on to about 5530 Ohm at the full 2.66 mm without opening, because the roof keeps a path round the cut; the hot spots are the crown corners. In the lab students do the same with R1 (1 kOhm): 300 Ohm/sq, 2.67 squares, printed about 797 Ohm, value at about 1.24 mm. Compare an angle of the same squares: its plunge across one arm tops out at about 935 Ohm, so it cannot reach value; the window says so. That is the point of the crown and the roof: trim range.');
+  const r = img(s, 'shape_trim.png', 0.45, 1.3, 9.1, 3.2, false); cap(s, 'A 4.7 kΩ top-hat with roof (1 kΩ/□, 3.76 squares): power map after the plunge, and the trim curve', r);
+}
+lab(5, 'Size, place and trim resistors', '16:00 · 40 min', 'Size four resistors with the Resistor Designer, check them by hand, place them and trim one.', 'File → New, then Setup → Load Technology File… alu8_tech.json',
+  ['Tools → Thick-Film Resistor Designer…. Check Design Rules…: aim 75 %, aspect 0.25–4.', 'Add R1 1 kΩ 5 % 50 mW, R2 10 kΩ 1 % 100 mW, R3 47 Ω 5 % 200 mW, R4 220 kΩ 10 % 10 mW, with Auto from power.', 'Fill in the handout table by hand first, then compare with the Solutions tab.', 'Auto-Select All, then Place All in Layout…. Look at each resistor\'s layers.', 'Select R1 and open Trim Simulator…: plunge 25 % depth, 40 µm kerf; then Add L-Cut 400 µm.', 'Edit R1: Shape Top-hat with roof. Note ink, squares and L; trim it and find where it reaches 1 kΩ.'],
+  ['Your hand sizes match the Designer', 'Four resistors placed with glaze and keep-out', 'R1 trims to about 995 Ω; as a roofed top-hat it never opens'], 'Lab 5',
+  'Answers: R1 1.4 mm, aim 800 Ω, 1 kΩ/□, 0.80 sq, 1.12 mm. R2 1.8 mm, aim 7.6 kΩ, 10 kΩ/□, 0.76 sq, 1.37 mm. R3 2.8 mm (2.4 mm is only 187.5 mW after trim), aim 37.6 Ω, 30 Ω/□, 1.25 sq, 3.51 mm. R4 1.0 mm, aim 187 kΩ, 300 kΩ/□, 0.62 sq, 0.62 mm. The trim simulator needs numpy and scipy, which the installers include. Discuss why R3 needs a long body: low-value inks and high power. Shape step: R1 as a top-hat with roof takes 300 Ohm/sq ink, 2.67 squares, bar 4.53 mm; printed about 797 Ohm, reaches 1000 Ohm at about 1.24 mm of plunge and never opens.');
 
 {
   const s = content('Day 1 review', 'Five questions before we go', 'Day 1 review',

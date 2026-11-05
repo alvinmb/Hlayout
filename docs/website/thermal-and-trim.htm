@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Thermal Analysis and Laser Trim Simulation for Thick-Film Hybrids | HLayout</title>
-<meta name="description" content="Free thermal analysis and laser trim simulation for thick-film hybrid circuits: die and resistor temperatures from the real film stack, and plunge and L-cut trims with resistance, sensitivity and heat maps.">
+<title>Thermal Analysis, Resistor Shapes and Laser Trim for Thick-Film Hybrids | HLayout</title>
+<meta name="description" content="Free thermal analysis, thick-film resistor shapes and laser trim simulation for hybrid circuits: die and resistor temperatures, top-hat, U and angle resistors sized by sheet solve, and plunge and L-cut trims.">
 <link rel="canonical" href="https://www.h-layout.co.uk/thermal-and-trim.htm">
 <meta name="robots" content="index, follow, max-image-preview:large">
 <meta name="theme-color" content="#16202E">
@@ -14,21 +14,21 @@
 <meta property="og:site_name" content="HLayout">
 <meta property="og:locale" content="en_GB">
 <meta property="og:url" content="https://www.h-layout.co.uk/thermal-and-trim.htm">
-<meta property="og:title" content="Thermal analysis and laser trim simulation for thick-film hybrids">
-<meta property="og:description" content="Free thermal analysis and laser trim simulation for thick-film hybrid circuits: die and resistor temperatures from the real film stack, and plunge and L-cut trims with resistance, sensitivity and heat maps.">
+<meta property="og:title" content="Thermal analysis, resistor shapes and laser trim for thick-film hybrids">
+<meta property="og:description" content="Free thermal analysis, thick-film resistor shapes and laser trim simulation for hybrid circuits: die and resistor temperatures, top-hat, U and angle resistors sized by sheet solve, and plunge and L-cut trims.">
 <meta property="og:image" content="https://www.h-layout.co.uk/img/thermal-map.jpg">
 <meta property="og:image:alt" content="Temperature map of a thick-film hybrid from HLayout's thermal analysis">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Thermal analysis and laser trim simulation for thick-film hybrids">
-<meta name="twitter:description" content="Free thermal analysis and laser trim simulation for thick-film hybrid circuits: die and resistor temperatures from the real film stack, and plunge and L-cut trims with resistance, sensitivity and heat maps.">
+<meta name="twitter:title" content="Thermal analysis, resistor shapes and laser trim for thick-film hybrids">
+<meta name="twitter:description" content="Free thermal analysis, thick-film resistor shapes and laser trim simulation for hybrid circuits: die and resistor temperatures, top-hat, U and angle resistors sized by sheet solve, and plunge and L-cut trims.">
 <meta name="twitter:image" content="https://www.h-layout.co.uk/img/thermal-map.jpg">
 <script type="application/ld+json">
 {
  "@context": "https://schema.org",
  "@type": "WebPage",
- "name": "Thermal Analysis and Laser Trim Simulation for Thick-Film Hybrids | HLayout",
+ "name": "Thermal Analysis, Resistor Shapes and Laser Trim for Thick-Film Hybrids | HLayout",
  "url": "https://www.h-layout.co.uk/thermal-and-trim.htm",
- "description": "Free thermal analysis and laser trim simulation for thick-film hybrid circuits: die and resistor temperatures from the real film stack, and plunge and L-cut trims with resistance, sensitivity and heat maps.",
+ "description": "Free thermal analysis, thick-film resistor shapes and laser trim simulation for hybrid circuits: die and resistor temperatures, top-hat, U and angle resistors sized by sheet solve, and plunge and L-cut trims.",
  "isPartOf": {
   "@type": "WebSite",
   "name": "HLayout",
@@ -63,7 +63,7 @@
   {
    "@type": "ListItem",
    "position": 2,
-   "name": "Thermal analysis and laser trim",
+   "name": "Thermal analysis, resistor shapes and laser trim",
    "item": "https://www.h-layout.co.uk/thermal-and-trim.htm"
   }
  ]
@@ -96,6 +96,14 @@
    "acceptedAnswer": {
     "@type": "Answer",
     "text": "For a resistor from the Resistor Designer it cuts a plunge in from one edge and, optionally, turns it into an L-cut. At every step it solves the resistor as a resistive sheet and reports the resistance, the sensitivity in ohms per micron of cut, and a map of where the current and power crowd."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Which resistor shapes can HLayout design?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "Besides the rectangle: top-hat, top-hat with roof, U-shape, U-shape with roof, angle, double angle and angle three-sided. Each is sized by solving its ink as a resistive sheet, placed with numbered terminations, glaze and keep-out, checked by the resistor DRC and trimmed in the trim simulator."
    }
   },
   {
@@ -353,7 +361,7 @@ figure.tile figcaption{margin-top:10px}
       <a class="hide-sm" href="/#example">Example</a>
       <a class="hide-sm" href="/#three-d">3D</a>
       <a class="hide-sm" href="/#services">Services</a>
-      <a class="hide-sm" href="/thermal-and-trim.htm">Thermal &amp; trim</a>
+      <a class="hide-sm" href="/thermal-and-trim.htm">Thermal &amp; resistors</a>
       <a class="hide-sm" href="/#faq">FAQ</a>
       <a class="btn btn-gold btn-sm" href="/#download">Download</a>
     </nav>
@@ -364,11 +372,12 @@ figure.tile figcaption{margin-top:10px}
   <section class="pg-hero">
     <div class="wrap">
       <span class="crumb"><a href="/">HLayout</a> / Analysis tools</span>
-      <h1>Thermal analysis and laser trim simulation</h1>
-      <p class="lede">Two design-stage checks built into HLayout for thick-film hybrids: how hot every die, resistor and part will run on the real printed film stack, and how a laser trim will bring each printed resistor up to value.</p>
+      <h1>Thermal analysis, resistor shapes and laser trim</h1>
+      <p class="lede">Two design-stage checks built into HLayout for thick-film hybrids: how hot every die, resistor and part will run on the real printed film stack, and how each printed resistor is shaped and laser-trimmed up to value.</p>
       <div class="cta">
         <a class="btn btn-gold" href="/#download">Download HLayout</a>
         <a class="btn btn-line" href="#thermal">Thermal analysis</a>
+        <a class="btn btn-line" href="#shapes">Resistor shapes</a>
         <a class="btn btn-line" href="#trim">Laser trim simulator</a>
       </div>
       <span class="hint">Free and open source · GPL-3.0 · Windows, Linux and macOS</span>
@@ -408,6 +417,36 @@ figure.tile figcaption{margin-top:10px}
     </div>
   </section>
 
+  <section id="shapes">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="eyebrow">Tools → Thick-Film Resistor Designer… → Shape</span>
+        <h2>Eight thick-film resistor shapes</h2>
+        <p class="lede">A rectangle sized for a high value comes out long and thin, needs its pads at both ends and trims over a limited range. Choose a top-hat, a U or an angle instead and HLayout sizes it, draws it and checks it.</p>
+      </div>
+      <figure class="tile"><img src="img/resistor-shapes.jpg" alt="The eight thick-film resistor shapes drawn by HLayout: rectangle, top-hat, top-hat with roof, U-shape, U-shape with roof, angle, double angle and angle three-sided, each with gold terminations, light blue glaze and a red dielectric keep-out" width="1680" height="806" loading="lazy" decoding="async"><figcaption><b>Each sized to the squares shown.</b> Ink dark, pin 1 and pin 2 terminations and the roof gold, glaze light blue, dielectric keep-out red.</figcaption></figure>
+      <div class="two" style="margin-top:28px">
+        <div class="prose">
+          <h3>The shapes</h3>
+          <table class="facts">
+            <tr><th>Shape</th><th>Why use it</th></tr>
+            <tr><td>Top-hat</td><td>A crown on the bar gives the trim plunge more range without widening the whole bar.</td></tr>
+            <tr><td>Top-hat with roof</td><td>A conductor roof on the crown: the plunge can run almost to the roof and the resistor never opens.</td></tr>
+            <tr><td>U-shape</td><td>Both pads side by side; a long resistor in a short space.</td></tr>
+            <tr><td>U-shape with roof</td><td>A roofed skirt under the U for the same safe, wide trim.</td></tr>
+            <tr><td>Angle, double angle</td><td>Pads on adjacent sides, or facing opposite ways and offset, to suit the routing.</td></tr>
+            <tr><td>Angle three-sided</td><td>Two leads joined by a raised loop: a long path in a compact footprint.</td></tr>
+          </table>
+        </div>
+        <div class="prose">
+          <h3>Sized from the real outline</h3>
+          <p>The squares are aim value ÷ ink sheet resistance, as for a rectangle, but a shape's resistance is found by solving its ink as a resistive sheet, so every corner (about 0.56 of a square), crown and roof counts. HLayout then adjusts the shape's length for each ink and offers the ones that stay inside your aspect-ratio rules.</p>
+          <p>Placing draws the ink outline, numbered pin 1 and pin 2 terminations to your overlap, length and clearance rules, a pin-less roof, the glaze and the dielectric keep-out. The resistor DRC checks all of it on the real outlines.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section id="trim">
     <div class="wrap">
       <div class="sec-head">
@@ -429,6 +468,7 @@ figure.tile figcaption{margin-top:10px}
           <p>A plunge is fast, but its sensitivity climbs as the remaining path narrows, so a small overrun means a large overshoot. Turning the cut through 90° keeps the remaining path a fixed width: the resistance rises slowly and the trim stops accurately on value. Use the simulator to choose the plunge depth and L length for each resistor before writing the trim program.</p>
         </div>
       </div>
+      <figure class="tile" style="margin-top:28px"><img src="img/shape-trim.jpg" alt="Trim of a top-hat resistor with a roof: the plunge runs up through the bar into the crown, current crowds at the crown corners, and the resistance rises from 3749 to 5530 ohms without opening" width="1320" height="528" loading="lazy" decoding="async"><figcaption><b>Shaped resistors trim too.</b> For a top-hat, U or angle the simulator cuts along the shape's own plunge path and shows the curve, the power map and the depth at which it reaches value. With a roof the cut never opens the resistor.</figcaption></figure>
     </div>
   </section>
 
@@ -465,6 +505,7 @@ print(round(steps[-1].resistance_ohm), "ohm")</pre></div>
         <details><summary>How does HLayout calculate hybrid temperatures?</summary><p>It turns the layout into a stack of slices on a grid: the substrate, each printed film where it is actually printed, the attach layers and the parts. Steady-state heat conduction is solved with each part's power put where it sits, and heat leaves through the base at a fixed temperature or through a heat-transfer coefficient to ambient.</p></details>
         <details><summary>Which materials does the thermal analysis know?</summary><p>It starts from reference conductivities for 96% and 99.6% alumina, aluminium nitride, beryllia, thick-film conductor, dielectric, resistor ink and glaze, silicon and gallium arsenide dies, ceramic chip parts, conductive and non-conductive epoxy and solder. Any value can be replaced with a measured figure.</p></details>
         <details><summary>What does the laser trim simulator show?</summary><p>For a resistor from the Resistor Designer it cuts a plunge in from one edge and, optionally, turns it into an L-cut. At every step it solves the resistor as a resistive sheet and reports the resistance, the sensitivity in ohms per micron of cut, and a map of where the current and power crowd.</p></details>
+        <details><summary>Which resistor shapes can HLayout design?</summary><p>Besides the rectangle: top-hat, top-hat with roof, U-shape, U-shape with roof, angle, double angle and angle three-sided. Each is sized by solving its ink as a resistive sheet, placed with numbered terminations, glaze and keep-out, checked by the resistor DRC and trimmed in the trim simulator.</p></details>
         <details><summary>Why finish a trim with an L-cut?</summary><p>A plunge raises the resistance quickly, but its sensitivity climbs as the remaining path narrows, so the laser can overshoot. Turning the cut through 90 degrees keeps the remaining path a fixed width, so the resistance creeps up slowly and the trim can stop accurately on value.</p></details>
       </div>
     </div>

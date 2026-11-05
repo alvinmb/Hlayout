@@ -130,5 +130,13 @@
  "wiz_chip.png": [
   700,
   700
+ ],
+ "shape_trim.png": [
+  1320,
+  528
+ ],
+ "resistor_shapes.png": [
+  1680,
+  806
  ]
 }

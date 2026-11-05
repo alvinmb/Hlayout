@@ -100,7 +100,7 @@
    "name": "Can HLayout design thick-film printed resistors?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "Yes. The Resistor Designer sizes each resistor from its value, tolerance and power: it picks the body width for the power, an aim value below target for laser trimming, the ink and the number of squares, then places the ink, terminations, glaze and dielectric keep-out. A trim simulator shows plunge and L-cut trims."
+    "text": "Yes. The Resistor Designer sizes each resistor from its value, tolerance and power: it picks the body width for the power, an aim value below target for laser trimming, the ink and the number of squares, then places the ink, terminations, glaze and dielectric keep-out. Besides the rectangle it designs top-hat, top-hat with roof, U-shape, U-shape with roof, angle, double angle and angle three-sided resistors, sized by solving their ink as a resistive sheet. A trim simulator shows plunge and L-cut trims."
    }
   },
   {
@@ -368,7 +368,7 @@ td:first-child{font-weight:600;white-space:nowrap}
       <a class="hide-sm" href="#example">Example</a>
       <a class="hide-sm" href="#three-d">3D</a>
       <a class="hide-sm" href="#services">Services</a>
-      <a class="hide-sm" href="/thermal-and-trim.htm">Thermal &amp; trim</a>
+      <a class="hide-sm" href="/thermal-and-trim.htm">Thermal &amp; resistors</a>
       <a class="hide-sm" href="#faq">FAQ</a>
       <a class="btn btn-gold btn-sm" href="#download">Download</a>
     </nav>
@@ -449,7 +449,7 @@ td:first-child{font-weight:600;white-space:nowrap}
         <div><span class="tag">BOND</span><h3>Chip-and-wire router</h3><p>Single-conductor hybrids routed with wire-bond jumpers, plus a bond diagram CSV in bonding order for the wire bonder.</p></div>
         <div><span class="tag">PLACE</span><h3>Auto Place</h3><p>Shortest weighted net length with power and ground counted, hot parts kept apart, and straight-line interconnects that follow every drag.</p></div>
         <div><span class="tag">CHECK</span><h3>DRC and netlist extraction</h3><p>Widths, spacings, substrate-edge clearance and wire-bond length and angle, then copper connectivity compared against your nets.</p></div>
-        <div><span class="tag">HEAT</span><h3>Thermal analysis and laser trim</h3><p>Steady-state conduction through substrate and films gives each resistor, die and part a temperature against its limit, and a trim simulator shows plunge and L-cut trims step by step. <a href="/thermal-and-trim.htm">See both tools</a></p></div>
+        <div><span class="tag">HEAT</span><h3>Thermal, resistor shapes and trim</h3><p>Die and resistor temperatures against their limits; top-hat, U and angle resistors sized from their real outline; plunge and L-cut trims step by step. <a href="/thermal-and-trim.htm">See the tools</a></p></div>
         <div><span class="tag">CAM</span><h3>Manufacturing outputs</h3><p>Gerber per print layer, DXF, pick-and-place centroids, test netlists and a one-step assembly drawing with pin, resistor and bond tables.</p></div>
       </div>
     </div>
@@ -540,7 +540,7 @@ td:first-child{font-weight:600;white-space:nowrap}
         <details><summary>What is HLayout?</summary><p>HLayout is free, open-source layout CAD for thick-film hybrid circuits and chip-and-wire microelectronic modules. It draws the printed conductors, dielectric, resistor inks and glaze on a ceramic substrate, places packaged parts and bare dies, routes them, checks the design and writes the manufacturing files.</p></details>
         <details><summary>What is a thick-film hybrid circuit?</summary><p>A thick-film hybrid is a circuit whose conductors, insulating dielectric and resistors are screen-printed as pastes on a ceramic substrate, usually alumina, and fired. Chip components, packaged parts and bare semiconductor dies are then attached; bare dies are connected with wire bonds, which is called chip-and-wire assembly.</p></details>
         <details><summary>Does HLayout work with KiCad?</summary><p>Yes. Draw the schematic in KiCad and export the netlist; HLayout reads it, places the parts with Auto Place and routes with Freerouting through a Specctra DSN/SES round trip. Die pads and pins can be numbered or named, such as E, B and C for a transistor die.</p></details>
-        <details><summary>Can HLayout design thick-film printed resistors?</summary><p>Yes. The Resistor Designer sizes each resistor from its value, tolerance and power: it picks the body width for the power, an aim value below target for laser trimming, the ink and the number of squares, then places the ink, terminations, glaze and dielectric keep-out. A trim simulator shows plunge and L-cut trims.</p></details>
+        <details><summary>Can HLayout design thick-film printed resistors?</summary><p>Yes. The Resistor Designer sizes each resistor from its value, tolerance and power: it picks the body width for the power, an aim value below target for laser trimming, the ink and the number of squares, then places the ink, terminations, glaze and dielectric keep-out. Besides the rectangle it designs top-hat, top-hat with roof, U-shape, U-shape with roof, angle, double angle and angle three-sided resistors, sized by solving their ink as a resistive sheet. A trim simulator shows plunge and L-cut trims.</p></details>
         <details><summary>Which manufacturing outputs does it produce?</summary><p>Gerber RS-274X for every print layer, DXF, pick-and-place files, bond lists for the wire bonder, test netlists, an assembly drawing with title block and pin table, and a 3D model of the fired substrate and parts for FreeCAD with STEP models.</p></details>
         <details><summary>Does it check wire bonds and design rules?</summary><p>Yes. Design rule checks cover track widths, spacing, substrate-edge clearance and wire-bond length and departure angle. Netlist extraction compares the drawn copper and bonds with the schematic, and a thermal analysis estimates die and resistor temperatures.</p></details>
         <details><summary>Is HLayout really free, and which systems does it run on?</summary><p>HLayout is free software under the GNU GPL v3.0 or later, with the full source on GitHub. Installers are available for Windows, Linux (Debian/Ubuntu) and macOS, and it can also run from source with Python.</p></details>
