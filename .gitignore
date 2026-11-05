@@ -34,3 +34,4 @@ hlayout_project.zip
 *.bak[0-9].gds.hlaux
 example5/_frtest/
 hang_traceback.txt
+_upload/
