@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """View panning: canvas.pan_by/pan_to/pan_step, the Pan tool (left-drag),
 Esc out of it, the PAN command and the View menu entries. Needs a real
 Tk display; skips otherwise."""

@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Generate a GDSII library of standard EIA-case surface-mount tantalum
 capacitor footprints, one Cell per case code, plus an "INDEX" cell that
 places every case in a labelled row for browsing.

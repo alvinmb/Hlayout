@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Analytic checks of the thermal solver core (hlayout.core.thermal).
 
 Every case here has a closed-form answer, so these test the physics of

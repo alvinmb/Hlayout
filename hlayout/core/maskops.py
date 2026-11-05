@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Layer-based mask operations: OVERSIZE, UNDERSIZE, AND, OR.
 
 Similar to the "resize"/boolean layer operations found in GDSII layout

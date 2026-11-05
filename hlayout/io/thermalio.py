@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Thermal analysis outputs: a CSV of the parts table and a
 self-contained HTML report (setup, stack, temperature maps, parts
 table, energy balance) in the same spirit as hlayout.io.printio's

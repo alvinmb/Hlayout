@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """HLayout chip-and-wire parts: coloured 3D STEP models for the
 chip_wire library's ceramic chip capacitors (CAP_0201 ... CAP_2512),
 the LM741 (uA741) bare die and the 20-, 30- and 40-pin hybrid header

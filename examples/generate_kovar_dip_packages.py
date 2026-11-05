@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Generate a GDSII library of Kovar dual-in-line hybrid packages
 (20, 30 and 40 pins by default): 0.1 in (2.54 mm) pin pitch, 0.9 in
 (22.86 mm) row to row, each pin in a glass-to-metal seal through the

@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Automatic FreeCAD component-model matching.
 
 Guesses which placed cells are surface-mounted parts matching a known

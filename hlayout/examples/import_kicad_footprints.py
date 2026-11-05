@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Convert one or more KiCad `.pretty` footprint libraries into GDSII --
 one .gds file per library, with one Cell per footprint (pads, drill
 holes, silkscreen/fab/courtyard outlines -- see hlayout/io/kicadio.py

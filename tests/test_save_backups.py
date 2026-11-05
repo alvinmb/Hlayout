@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Saving keeps the versions it overwrites: NAME.bak1.gds (newest) ..
 NAME.bak3.gds, each with its sidecar."""
 import os

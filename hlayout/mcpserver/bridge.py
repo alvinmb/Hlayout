@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """GUI-side half of the MCP connection: a loopback-only socket through
 which the MCP server (server.py, a separate process started by the MCP
 client) runs operations inside the running HLayout window.

@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Example 5 -- bare-die components for the ALU8 netlist.
 
 Builds one die cell per part in alu8_netlist/alu8.net (everything except the

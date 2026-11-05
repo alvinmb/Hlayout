@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """File > 3D View in SolidCraft... -- build the current cell as a 3D model
 in SolidCraft (github.com/bherbruck/solidcraft) through its MCP server.
 

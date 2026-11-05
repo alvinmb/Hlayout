@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Tools > Thermal Analysis... window: opens against the live session,
 persists setup edits into the technology parameters, and shows a
 solved run as a map plus a parts table."""

@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Edit > Continue Path works from a clicked track (an edge or vertex
 grab, not only a whole-path selection) and carries on from the end
 nearer the click."""

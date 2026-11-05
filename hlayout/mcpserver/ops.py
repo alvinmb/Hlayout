@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """The operations the MCP server exposes, written once against a small
 ``Context`` so the exact same code runs headless (inside the MCP server
 process) and live (inside the GUI, via bridge.py).

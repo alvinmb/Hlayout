@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Design sidecar: bundles everything a saved design needs to fully
 restore a working session -- alongside the plain GDSII file, not
 inside it.

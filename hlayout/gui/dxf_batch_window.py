@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """DXF Export Sets tool -- Tools > DXF Export Sets...
 
 A job table (name, layers, output file) persisted into the current

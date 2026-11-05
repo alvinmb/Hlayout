@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Netlist file export: write the nets from Session.extract_netlist() /
 hlayout.core.netlist.extract_netlist() in a format another tool can
 read.

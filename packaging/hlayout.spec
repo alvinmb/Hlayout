@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # PyInstaller spec for HLayout, built per-OS in CI (see
 # .github/workflows/build-installers.yml) with:
 #   pyinstaller packaging/hlayout.spec

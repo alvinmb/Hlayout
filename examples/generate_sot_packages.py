@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Generate a GDSII library of common SOT (Small-Outline Transistor)
 package footprints, one Cell per package, plus an "INDEX" cell that
 places every package in a labelled row for browsing.

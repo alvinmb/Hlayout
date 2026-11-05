@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """DRC demo/validation for HLayout using the 2-Layer_solder_Build tech file.
 
 Checks performed:

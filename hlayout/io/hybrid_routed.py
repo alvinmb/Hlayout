@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Hybrid router results (Phase 5): read a ``*.routed.json`` written by the
 chip-and-wire router (``app.freerouting.cli.hybrid.HybridRouterCli``) and
 work out its bond diagram.

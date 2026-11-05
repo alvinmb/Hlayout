@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Pick-and-place (centroid) output: hlayout.io.pnpio / Session.export_pick_and_place."""
 import csv
 import os

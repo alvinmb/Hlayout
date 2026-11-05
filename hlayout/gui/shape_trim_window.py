@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Laser-trim simulator for shaped thick-film resistors (top-hat, U,
 angle, ...) -- reached from the Thick-Film Resistor Designer's "Trim
 Simulator..." button when the selected resistor is not a plain

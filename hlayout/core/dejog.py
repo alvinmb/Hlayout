@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Remove jogs from routed tracks.
 
 A jog is a short sideways step in an otherwise straight run -- the track

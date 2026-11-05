@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Via optimisation for a routed two-conductor thick-film hybrid.
 
 Runs after the autorouter. Every via costs a dielectric window, a print

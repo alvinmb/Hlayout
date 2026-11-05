@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """ALU16 placement plan -- run on the design open in HLayout.
 
 Tools > Run Script File... (or exec() in the Script Console), with the

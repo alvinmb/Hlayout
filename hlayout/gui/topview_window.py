@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Top View tool -- Tools > Top View...
 
 Same layout as the Extract Netlist window: a layer table (Layers-panel

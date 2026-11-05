@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Steady-state thermal analysis of a thick-film hybrid.
 
 Models the hybrid as a stack of flat SLICES on one regular X/Y grid --

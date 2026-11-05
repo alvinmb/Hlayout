@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Optimised I/O pinout (Session.assign_io_pads / IOPADS)."""
 import os
 import sys

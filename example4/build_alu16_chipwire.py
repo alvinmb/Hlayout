@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Example 4 -- ALU16 MCM as a chip-and-wire hybrid.
 
 Starts from example2/alu16_MCM.gds (LCC packaged parts) and replaces every

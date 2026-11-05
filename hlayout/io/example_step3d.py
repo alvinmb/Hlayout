@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """FreeCAD 3D STEP export for the standalone example/practice package
 generators in ``examples/generate_*.py`` -- SOT (incl. the 8/16/18/
 20/24/28-pin gull-wing IC variants), LCC, tantalum capacitors, ceramic

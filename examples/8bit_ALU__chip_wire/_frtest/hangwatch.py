@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Hang watchdog: when the Tk main loop stops turning over for
 ``stall_s`` seconds (the window shows "Not responding"), write every
 thread's Python stack to ``hang_traceback.txt`` -- next to hlayout_app.py

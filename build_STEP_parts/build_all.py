@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Build every HLayout STEP model in one go and put them all in one folder.
 
 Runs every FreeCAD macro in this folder (build_*.FCMacro) with FreeCAD's

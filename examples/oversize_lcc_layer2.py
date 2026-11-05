@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Oversize LAYER 2 (the LCC pad/land geometry) by 0.1mm on all sides
 and write the result onto LAYER 3, for every package cell in
 lcc_packages.gds.

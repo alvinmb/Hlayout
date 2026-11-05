@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Shorten routed tracks: straighten detours and pull corners tight.
 
 Runs after the autorouter (and the via optimisation), and works even when

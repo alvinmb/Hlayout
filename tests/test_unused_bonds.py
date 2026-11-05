@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Remove Unused Bonds: a die pad the design doesn't use loses its wire
 bond and bond finger -- on that die only (its own copy of the part)."""
 import os

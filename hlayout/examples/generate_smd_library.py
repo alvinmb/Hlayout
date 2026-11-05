@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Generate a GDSII library of standard SMD component footprints.
 
 Produces one Cell per package: standard EIA chip resistor/capacitor

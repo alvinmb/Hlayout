@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Cell date/time stamps: stored in each GDSII BGNSTR, kept through
 attached-library placement, moved on save only when a cell changed."""
 

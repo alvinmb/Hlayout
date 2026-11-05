@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Generate a GDSII library of Kyocera-style co-fired ceramic packages
 (CFP) with a metal lid -- dual-row, side-braze style, pins along the
 two long edges only -- for pin counts --start to --stop in steps of

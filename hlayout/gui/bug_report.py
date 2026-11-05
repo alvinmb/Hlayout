@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Help > Report Bug...: collect what's needed to reproduce and fix a
 problem, let the user describe it, and package it up.
 

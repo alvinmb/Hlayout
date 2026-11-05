@@ -1,3 +1,7 @@
+; HLayout - thick-film hybrid circuit layout
+; Copyright (C) 2026 Alvin Brown
+; SPDX-License-Identifier: GPL-3.0-or-later
+
 ; Inno Setup script for HLayout. Built in CI (see
 ; .github/workflows/build-installers.yml) against the PyInstaller onedir
 ; build at dist/hlayout/, after that step has run:

@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Build a 2-layer hybrid circuit into hlayout/examples/test.gds.
 
 Stack (per the technology -- the layer NAMES in older tech files are

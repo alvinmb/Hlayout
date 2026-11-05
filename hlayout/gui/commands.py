@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Text command-line interpreter for the GUI's command bar.
 
 This gives the tool an AutoCAD-style command line as an alternative to

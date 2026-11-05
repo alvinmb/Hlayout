@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Thin-film resistor sizing and geometry: serpentine (meander) and
 top-hat (dog-bone) styles, both laser-trimmable.
 

@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Dragging a routed track's segment carries the via at its end: the via's
 pads on both conductors, its dielectric window, and the tracks meeting it."""
 import os

@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """MCP (Model Context Protocol) server for HLayout.
 
 Lets an MCP client such as Claude drive HLayout as a set of tools:

@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Help > Report Bug...: the activity log, the report contents and the
 .zip bundle (hlayout/gui/bug_report.py)."""
 

@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """KiCad footprint library import -- one GDS Cell per footprint.
 
 Reads a KiCad `.pretty` directory (a folder of `.kicad_mod` files, each

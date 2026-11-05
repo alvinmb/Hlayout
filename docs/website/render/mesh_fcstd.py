@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 import zipfile,os,numpy as np, sys
 from OCP.BRepTools import BRepTools
 from OCP.TopoDS import TopoDS_Shape, TopoDS

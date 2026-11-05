@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """A busy/progress box for long-running jobs.
 
 run_with_progress() runs ``work`` on a worker thread while a small

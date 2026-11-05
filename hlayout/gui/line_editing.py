@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """PowerShell/cmd.exe-style line editing for Tk Entry widgets.
 
 Tk's default Entry bindings cover the basics (Home/End, Left/Right,

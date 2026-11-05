@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Generate the dielectric fill (with windows/cutouts around each
 component pad) for every package cell in lcc_packages.gds.
 

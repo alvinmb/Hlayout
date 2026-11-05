@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Thick-film resistor shapes (hlayout.core.tf_shapes): geometry, sheet
 solve, sizing, trim, drawing, DRC and the Resistor Designer."""
 

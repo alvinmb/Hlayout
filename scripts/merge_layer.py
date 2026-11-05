@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """merge_layer.py -- merge every Polygon, Rectangle and Path on one layer.
 
 Everything drawn directly in the cell on the given layer is unioned:

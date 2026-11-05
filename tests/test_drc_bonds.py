@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Wire-bond DRC: BOND_MIN_LENGTH, BOND_MAX_LENGTH, BOND_MAX_ANGLE."""
 import math
 import os

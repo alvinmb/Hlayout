@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Net tracing for Highlight Net: starting from one pad, trace or point,
 find everything electrically connected to it -- every piece of copper on
 every conductor layer, and every numbered pad (RefDes.Pin) it reaches.

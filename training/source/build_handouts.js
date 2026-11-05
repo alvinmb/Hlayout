@@ -1,3 +1,7 @@
+// HLayout - thick-film hybrid circuit layout
+// Copyright (C) 2026 Alvin Brown
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Student handout + trainer guide for the HLayout ALU8 course (Word).
 const fs = require('fs');
 const path = require('path');

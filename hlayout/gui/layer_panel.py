@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """LayerPanel: scrollable list of all 64 layers with visibility,
 colour swatch, and stipple selection."""
 

@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Canvas hooks for the chip-and-wire editing tools (hybrid router Phase 6).
 
 The canvas knows nothing about sessions; LayoutCanvas.hybrid_hooks is an

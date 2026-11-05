@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Gerber RS-274X export -- one file per visible layer.
 
 GDSII (hlayout/io/gdsio.py) is the tool's native on-disk database

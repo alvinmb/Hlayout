@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Local Linux build: freezes HLayout with PyInstaller and packages it
 # as a .deb.
 #

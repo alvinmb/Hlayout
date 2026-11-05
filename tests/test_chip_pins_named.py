@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Chip Wizard pins are real pins (SRef.pin), may be names (E, B), and a
 die whose back is a contact gets a pinned die-attach pad with a tab."""
 

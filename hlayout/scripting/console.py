@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """A minimal in-process Python console for driving a Session interactively.
 
 Used by the GUI's Script Console dock, but works standalone too:

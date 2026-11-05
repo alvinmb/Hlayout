@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Generate the KiCad netlist (and CSV / text listings) for ALU8, an 8-bit
 54-series ALU in TI FK ceramic LCCs -- the 8-bit sibling of example2's ALU16.
 

@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Connector/header ref-des beside pin 1 (hlayout.core.refdes,
 Session.refdes_to_pin1, REFDES PIN1, auto on placement)."""
 import os

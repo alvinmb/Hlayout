@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """DXF export -- a single ASCII DXF (AutoCAD R12 / AC1009) file, with one
 DXF layer per hlayout layer.
 

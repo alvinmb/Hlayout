@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """FreeCAD 3D component library builder.
 
 Writes a ``.FCMacro`` -- a plain Python script -- that, run inside

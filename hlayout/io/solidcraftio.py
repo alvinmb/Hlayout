@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """3D view of a design in SolidCraft, built live over its MCP server.
 
 The same stack the FreeCAD export builds (hlayout.io.freecadio): a white

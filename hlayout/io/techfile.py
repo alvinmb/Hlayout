@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Technology file: save/load the layer stack (and open-ended global
 parameters) as a separate JSON file from the design itself.
 

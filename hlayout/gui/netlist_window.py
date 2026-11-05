@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Extract Netlist tool -- Tools > Extract Netlist...
 
 A layer table in the same style as the Layers panel: one row per layer

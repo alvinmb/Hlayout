@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Apply the ALU16 module plan (alu16_placement.csv + alu16_module_pinout.csv)
 to the design open in HLayout.
 

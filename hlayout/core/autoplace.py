@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Auto Place engine: put parts where their nets are shortest.
 
 Pure geometry -- no Tk, no Library: hlayout.scripting.api builds the parts,

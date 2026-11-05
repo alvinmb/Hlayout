@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Assembly Drawing tool -- Tools > Assembly Drawing...
 
 One window that drives Session.generate_assembly_drawing(): the drawing

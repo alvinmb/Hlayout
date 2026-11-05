@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """MCP server (hlayout/mcpserver): the shared operations, the stdio
 JSON-RPC server, and the GUI bridge (driven here by a stand-in app, so
 no display is needed)."""

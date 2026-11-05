@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Layout primitives: Polygon, Path, Rectangle, Text, SRef.
 
 All coordinates are integer (x, y) pairs in database units (1 DBU = 1 micron = 0.001 mm).

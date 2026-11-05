@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Stdio MCP server for HLayout (``python -m hlayout.mcpserver``).
 
 Speaks MCP's JSON-RPC 2.0 over stdin/stdout, one message per line,

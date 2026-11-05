@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Thin-Film Resistor Designer -- Tools > Thin-Film Resistor Designer...
 
 A thin-film design has ONE sheet resistivity for the whole design (see

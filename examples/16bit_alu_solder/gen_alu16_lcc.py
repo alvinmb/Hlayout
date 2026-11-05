@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Generate KiCad 8 schematic + bare-die pad map for a 16-bit 54LS ALU."""
 import uuid, csv, os, sys, collections
 

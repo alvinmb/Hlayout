@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Minimal Model Context Protocol (MCP) client for SolidCraft.
 
 SolidCraft (github.com/bherbruck/solidcraft, MIT/Apache-2.0) is a

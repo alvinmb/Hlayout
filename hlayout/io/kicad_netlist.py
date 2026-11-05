@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Netlist readers for placement: KiCad (.net), CSV and Tango (.tng).
 
 read_netlist(path) -> Netlist with

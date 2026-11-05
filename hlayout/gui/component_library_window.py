@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Component Library Manager -- File > Component Library Manager...
 
 Lists every placed component cell in the current cell's hierarchy

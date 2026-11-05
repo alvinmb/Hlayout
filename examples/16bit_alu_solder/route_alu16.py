@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Net-aware router for the ALU16 module on the design open in HLayout (TOP).
 
 Every pad and every piece of routed copper carries its net; a trace may only

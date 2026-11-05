@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Generate a range of SMD ceramic-capacitor footprint cells and add
 them to hlayout/examples/chip_wire.gds.
 

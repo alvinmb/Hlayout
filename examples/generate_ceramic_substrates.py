@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Generate a GDSII library of dual-row ceramic hybrid package
 substrates -- DIP-style, pins along the two long edges only (not all
 four, unlike an LCC) -- for pin counts --start to --stop in steps of

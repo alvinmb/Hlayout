@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Thermal analysis from a real layout: the model builder
 (hlayout.core.thermal_build), the thermal rules in the technology
 file, the Session methods and the THERMAL command family."""

@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 r"""make_topview.py -- build the annotated assembly top view in cell TOPVIEW.
 
 Draws a hidden-line top view of the main design cell into the TOPVIEW

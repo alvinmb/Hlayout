@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Percent-complete estimate for a running Freerouting job, worked out
 from its log lines (the Freerouting CLI reports no progress of its own).
 

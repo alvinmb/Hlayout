@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Design Rule Check (DRC) tool -- Tools > DRC...
 
 A rule table (kind, layer(s), value, name, colour) persisted into the

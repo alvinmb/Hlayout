@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 from .cell import Cell
 from .errors import BoundsError, CellError, GeometryError, LayerError, LayoutError
 from .layers import NUM_LAYERS, NUM_STIPPLES, STIPPLE_NAMES, Layer, LayerTable

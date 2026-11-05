@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Generate a GDSII library of square Leadless Chip Carrier (LCC)
 package footprints, one Cell per pin count from --start to --stop in
 steps of --step (default: 8, 12, 16, 20, 24, 28, 32), plus an "INDEX"

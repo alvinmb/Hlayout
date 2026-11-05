@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Pick-and-place (centroid) file: where each placed part's centre is and
 how it is turned, for the assembly machine.
 

@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """A single-stroke ("stick"/plotter-style) vector font, used to convert
 a Text shape into line-segment geometry for output formats that have no
 native text primitive -- currently Gerber RS-274X (see

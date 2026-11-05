@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Small font helpers shared across the GUI.
 
 Bold section-header labels (e.g. "RULES"/"VIOLATIONS" in the DRC

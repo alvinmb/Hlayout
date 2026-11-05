@@ -1,3 +1,7 @@
+// HLayout - thick-film hybrid circuit layout
+// Copyright (C) 2026 Alvin Brown
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 const pptxgen = require('pptxgenjs');
 const pres = new pptxgen();
 pres.layout = 'LAYOUT_16x9';

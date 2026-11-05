@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Assign I/O pads: which net goes on which module I/O pad.
 
 A chip-and-wire module's I/O pads sit where its header (package) bonds

@@ -1,3 +1,7 @@
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Print output -- renders a cell as a to-scale SVG drawing embedded in
 a printable HTML page, since Tkinter has no native print dialog of its
 own (the same constraint hlayout.gui.resistor_designer's

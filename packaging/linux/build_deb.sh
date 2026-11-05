@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Package the PyInstaller onedir build (dist/hlayout/) produced on Linux
 # into a .deb. Run from the repo root:
 #   packaging/linux/build_deb.sh <version>

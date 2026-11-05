@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# HLayout - thick-film hybrid circuit layout
+# Copyright (C) 2026 Alvin Brown
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Launch the HLayout GUI.
 
 Usage:
