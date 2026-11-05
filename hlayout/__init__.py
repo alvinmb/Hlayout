@@ -14,4 +14,4 @@ Core package. See spec.odt (project spec) for the original requirements:
   - Python scripting to read/write layout data
 """
 
-__version__ = "0.8.0"
+__version__ = "0.8.1"
