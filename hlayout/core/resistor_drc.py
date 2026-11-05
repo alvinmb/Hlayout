@@ -153,6 +153,9 @@ def check_resistor_cell(cell, rules: dict) -> List[ResistorViolation]:
     ink_shapes = [s for s in cell.shapes if s.layer in ink_layers]
     if not ink_shapes:
         return violations
+    if _is_shaped(cell, ink_shapes, conductor_layer):
+        return _check_shaped_cell(cell, ink_shapes, rules, conductor_layer, glaze_layer,
+                                  keepout_layer, a, b, c, d, e)
     ink_bbox = _union_bbox([s.bbox() for s in ink_shapes])
     ix0, iy0, ix1, iy1 = ink_bbox
 
@@ -239,6 +242,115 @@ def check_resistor_cell(cell, rules: dict) -> List[ResistorViolation]:
     return violations
 
 
+# --- shaped resistors (hlayout.core.tf_shapes) -----------------------------
+
+def _is_axis_rect(shape) -> bool:
+    pts = getattr(shape, "points", None)
+    if not pts or len(pts) != 4:
+        return False
+    xs = {round(p[0], 6) for p in pts}
+    ys = {round(p[1], 6) for p in pts}
+    return len(xs) == 2 and len(ys) == 2
+
+
+def _is_shaped(cell, ink_shapes, conductor_layer) -> bool:
+    """A resistor drawn as a top-hat, U, angle... (not a plain
+    rectangle): ink that is not one axis-aligned rectangle, or a
+    conductor roof besides the two pins."""
+    conductors = [s for s in cell.shapes if s.layer == conductor_layer]
+    pins = {getattr(s, "pin", "") for s in conductors} & {"1", "2"}
+    if pins != {"1", "2"}:
+        return False
+    if len(conductors) > 2:
+        return True
+    return not (len(ink_shapes) == 1 and _is_axis_rect(ink_shapes[0]))
+
+
+def _poly(shape):
+    from shapely.geometry import Polygon as SPoly
+    return SPoly(shape.points).buffer(0)
+
+
+def _cover_margin(inner, outer, want: float) -> float:
+    """Largest k (to want) such that outer shrunk by k still contains
+    inner -- i.e. the smallest margin of outer around inner, capped."""
+    if inner.is_empty:
+        return want
+    tol = 1e-6 * max(1.0, inner.area) ** 0.5
+    if outer.buffer(-want, join_style=2).buffer(tol).contains(inner):
+        return want
+    lo, hi = -want, want
+    if not outer.buffer(tol).contains(inner):
+        return min(0.0, -inner.difference(outer).area ** 0.5)
+    lo = 0.0
+    for _ in range(30):
+        mid = (lo + hi) / 2
+        if outer.buffer(-mid, join_style=2).buffer(tol).contains(inner):
+            lo = mid
+        else:
+            hi = mid
+    return lo
+
+
+def _check_shaped_cell(cell, ink_shapes, rules, conductor_layer, glaze_layer,
+                       keepout_layer, a, b, c, d, e) -> List[ResistorViolation]:
+    """The same five rules for a shaped resistor, measured on the real
+    outlines rather than bounding boxes: each pin pad against the ink
+    arm that runs into it; the glaze and keep-out against the ink
+    outline (the keep-out against the ink not under a conductor)."""
+    from shapely.ops import unary_union
+    out: List[ResistorViolation] = []
+    ink = unary_union([_poly(s) for s in ink_shapes])
+    conductors = [s for s in cell.shapes if s.layer == conductor_layer]
+    for pad in conductors:
+        px0, py0, px1, py1 = pad.bbox()
+        pp = _poly(pad)
+        inside = ink.intersection(pp)
+        if inside.is_empty:
+            continue
+        ix0, iy0, ix1, iy1 = inside.bounds
+        # the arm enters across the pad edge that the ink reaches
+        eps = 1e-6
+        enters = {
+            "left": ix0 <= px0 + eps, "right": ix1 >= px1 - eps,
+            "bottom": iy0 <= py0 + eps, "top": iy1 >= py1 - eps,
+        }
+        horiz = enters["left"] or enters["right"]
+        if horiz:
+            overlap = ix1 - ix0
+            beyond = (px1 - px0) - overlap
+            space = min(iy0 - py0, py1 - iy1)
+        else:
+            overlap = iy1 - iy0
+            beyond = (py1 - py0) - overlap
+            space = min(ix0 - px0, px1 - ix1)
+        marker = _marker(px0, py0, px1, py1)
+        if overlap < a - 1e-6:
+            out.append(ResistorViolation("PAD_OVERLAP", cell.name, a, overlap, marker))
+        if beyond < b - 1e-6:
+            out.append(ResistorViolation("PAD_LENGTH", cell.name, b, beyond, marker))
+        if space < c - 1e-6:
+            out.append(ResistorViolation("PAD_SPACE", cell.name, c, space, marker))
+    glaze = [s for s in cell.shapes if s.layer == glaze_layer]
+    if glaze:
+        g = unary_union([_poly(s) for s in glaze])
+        m = _cover_margin(ink, g, d)
+        if m < d - 1e-6:
+            gx0, gy0, gx1, gy1 = g.bounds
+            out.append(ResistorViolation("GLAZE_COVER", cell.name, d, m, _marker(gx0, gy0, gx1, gy1)))
+    if keepout_layer >= 0:
+        ko = [s for s in cell.shapes if s.layer == keepout_layer]
+        if ko:
+            k = unary_union([_poly(s) for s in ko])
+            resistive = ink.difference(unary_union([_poly(s) for s in conductors]))
+            m = _cover_margin(resistive, k, e)
+            if m < e - 1e-6:
+                kx0, ky0, kx1, ky1 = k.bounds
+                out.append(ResistorViolation("KEEPOUT_COVER", cell.name, e, m,
+                                             _marker(kx0, ky0, kx1, ky1)))
+    return out
+
+
 @dataclass
 class ResistorDrcResult:
     violations: List[ResistorViolation]
@@ -261,9 +373,13 @@ def check_all_resistors(library, rules: dict, cell_names: Optional[List[str]] = 
     violations: List[ResistorViolation] = []
     checked: List[str] = []
     skipped: List[str] = []
+    ink_layers = _ink_layers(rules)
     for cell in candidates:
         pads = [s for s in cell.shapes if s.layer == conductor_layer]
-        if _pair_pads(pads) is None:
+        inks = [s for s in cell.shapes if s.layer in ink_layers]
+        if _is_shaped(cell, inks, conductor_layer):
+            checked.append(cell.name)
+        elif _pair_pads(pads) is None:
             skipped.append(cell.name)
         else:
             checked.append(cell.name)

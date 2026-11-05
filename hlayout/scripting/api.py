@@ -1417,7 +1417,8 @@ class Session:
                            space_c=None, glaze_oversize=None, resistor_layer=None,
                            conductor_layer=None, glaze_layer=None, doc_layer=None,
                            keepout_layer=None, keepout_oversize=None,
-                           label_height=None, cell_name=None, n_folds: int = 1) -> str:
+                           label_height=None, cell_name=None, n_folds: int = 1,
+                           shape: str = "rect", shape_params=None) -> str:
         """Build a complete thick-film resistor structure -- the resistor
         ink body, its protective glaze overprint, its two end conductor
         pads, and (if ``ref_des`` is given) a reference-designator label
@@ -1491,12 +1492,27 @@ class Session:
         rectangle-only for now and always passes ``n_folds`` = 1 (native
         top-hat sizing is not yet implemented).
 
+        ``shape`` draws one of the thick-film shapes in
+        hlayout.core.tf_shapes instead of the plain rectangle: "tophat",
+        "tophat_roof", "u", "u_roof", "angle", "double_angle" or
+        "angle3" ("rect", the default, is the rectangle above). For a
+        shape, ``body_length`` is that shape's sized length L (the bar
+        gap of a top-hat, the arm length of a U or an angle, the lead
+        length of a three-sided angle -- normally a Resistor Designer
+        solution's ``body_length``) and ``shape_params`` its secondary
+        dimensions (crown_w/crown_h, gap, skirt_h, rise, loop_w/loop_h;
+        defaults from the ink width). The pin "1"/"2" terminations
+        follow A/B/C at each end of the ink, a roof is a pin-less
+        conductor, the glaze is the ink outline grown by D and the
+        keep-out the ink outside the conductors grown by E.
+
         Building the device cell and placing its Sref are both part of
         a single undo step."""
         parent_cell_name = self.current_cell_name
         if parent_cell_name is None:
             raise LayoutError("no current cell; call new_cell()/use_cell() first")
         n_folds = max(1, int(n_folds))
+        shape = (shape or "rect").strip().lower()
 
         rules = load_resistor_geometry_rules(self.library)
         a = float(overlap_a) if overlap_a is not None else rules["overlap_a"]
@@ -1520,6 +1536,21 @@ class Session:
 
         base_name = cell_name or (str(ref_des) if ref_des else "RESISTOR")
         device_name = self.library._unique_cell_name(base_name)
+
+        if shape != "rect":
+            from ..core import tf_shapes
+            try:
+                geom = tf_shapes.build(shape, float(body_width), float(body_length), a, b, c,
+                                       shape_params)
+            except tf_shapes.ShapeError as ex:
+                raise LayoutError(str(ex)) from None
+            with self._batch():
+                self.new_cell(device_name)
+                self._draw_shaped_resistor(geom, r_layer, c_layer, g_layer, k_layer, d, e)
+                self.use_cell(parent_cell_name)
+                self.sref(device_name, (x, y), rotation=rotation,
+                          label=str(ref_des) if ref_des else "")
+            return device_name
 
         with self._batch():
             self.new_cell(device_name)  # also switches current_cell_name
@@ -1572,6 +1603,35 @@ class Session:
             # netlist extraction. Nothing is baked into the device cell.
             self.sref(device_name, (x, y), rotation=rotation, label=str(ref_des) if ref_des else "")
         return device_name
+
+    def _draw_shaped_resistor(self, geom, r_layer, c_layer, g_layer, k_layer, d, e) -> None:
+        """Draw a hlayout.core.tf_shapes.ShapeGeometry into the current
+        cell (see generate_resistor)."""
+        from shapely.geometry import MultiPolygon
+
+        def pts(poly):
+            return [(int(round(px)), int(round(py))) for px, py in list(poly.exterior.coords)[:-1]]
+
+        def polys(g):
+            if g.is_empty:
+                return []
+            return list(g.geoms) if isinstance(g, MultiPolygon) else [g]
+
+        ink = geom.ink_polygons()
+        for poly in ink:
+            self.polygon(r_layer, pts(poly))
+        from shapely.ops import unary_union
+        ink_u = unary_union(ink)
+        for poly in polys(ink_u.buffer(d, join_style=2)):
+            self.polygon(g_layer, pts(poly))
+        for (x1, y1, x2, y2), pin in geom.pads:
+            self.rect(c_layer, int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2)), pin=pin)
+        for (x1, y1, x2, y2) in geom.roofs:
+            self.rect(c_layer, int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2)))
+        if k_layer is not None and int(k_layer) >= 0:
+            res = unary_union(geom.resistive_polygons())
+            for poly in polys(res.buffer(e, join_style=2)):
+                self.polygon(int(k_layer), pts(poly))
 
     def generate_serpentine_resistor(self, x, y, sol, rotation: float = 0.0,
                                       ref_des=None, resistor_layer=None, pad_layer=None,

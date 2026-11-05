@@ -459,8 +459,14 @@ def _make_resistor(session, comp, o, S, info):
         return None
     power = _f(o.get("power_mw") or comp.fields.get("HL_Power_mW"), 50.0)
     tol = comp.fields.get("Tolerance") or comp.fields.get("HL_Tolerance") or "5%"
+    # optional resistor shape from the schematic (HL_Shape = tophat, u,
+    # angle, ... or its label); default rectangle
+    from ..core import tf_shapes
+    shape = str(o.get("shape") or comp.fields.get("HL_Shape") or "rect").strip()
+    shape = shape.lower() if shape.lower() in tf_shapes.SHAPE_KEYS else \
+        tf_shapes.SHAPE_BY_LABEL.get(shape, "rect")
     r = Resistor(ref_des=comp.ref, value=value, tolerance=tol, power_mw=power,
-                 body_width=width_for_power(power))
+                 body_width=width_for_power(power), shape=shape)
     r.compute_solutions(DesignRules.from_library(session.library))
     sol = r.selected
     if sol is None:
@@ -474,7 +480,8 @@ def _make_resistor(session, comp, o, S, info):
     if layer is None:
         raise LayoutError(f"{comp.ref}: no resistor conductor layer in the tech file or the job settings")
     cn = session.generate_resistor(0, 0, sol.body_width, sol.body_length, ink_rsh=sol.ink_rsh,
-                                   ref_des=comp.ref, conductor_layer=int(layer))
+                                   ref_des=comp.ref, conductor_layer=int(layer),
+                                   shape=sol.shape, shape_params=sol.shape_params)
     for ref in session.library.cells[session.current_cell_name].srefs:
         if ref.cell_name == cn and not ref.label:
             ref.label = comp.ref

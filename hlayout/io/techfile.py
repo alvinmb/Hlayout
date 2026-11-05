@@ -221,7 +221,7 @@ RESISTOR_LIST_KEY = "resistor_list"
 
 def load_resistor_list(library: Library) -> list:
     """Read the saved resistor-designer rows. Returns a list of dicts
-    (ref_des, value, tolerance, power_mw, body_width, selected_ink);
+    (ref_des, value, tolerance, power_mw, body_width, selected_ink, shape);
     an empty list when nothing is saved or the entry is malformed."""
     raw = library.tech_params.get(RESISTOR_LIST_KEY)
     if not raw:
@@ -245,6 +245,7 @@ def load_resistor_list(library: Library) -> list:
                 "power_mw": float(d.get("power_mw", 0.0)),
                 "body_width": float(d.get("body_width", 0.0)),
                 "selected_ink": (float(sel) if sel is not None else None),
+                "shape": str(d.get("shape", "rect") or "rect"),
             })
         except (KeyError, TypeError, ValueError):
             continue
@@ -264,6 +265,7 @@ def save_resistor_list(library: Library, rows) -> None:
             "power_mw": float(r.get("power_mw", 0.0)),
             "body_width": float(r.get("body_width", 0.0)),
             "selected_ink": (float(sel) if sel is not None else None),
+            "shape": str(r.get("shape", "rect") or "rect"),
         })
     library.tech_params[RESISTOR_LIST_KEY] = json.dumps(payload)
 

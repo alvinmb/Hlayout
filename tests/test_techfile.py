@@ -155,10 +155,11 @@ def test_resistor_list_defaults_empty_and_round_trips():
         {"ref_des": "R1", "value": 1000.0, "tolerance": "5%",
          "power_mw": 125.0, "body_width": 1000.0, "selected_ink": 100.0},
         {"ref_des": "R2", "value": 47000.0, "tolerance": "1%",
-         "power_mw": 62.5, "body_width": 625.0, "selected_ink": None},
+         "power_mw": 62.5, "body_width": 625.0, "selected_ink": None, "shape": "tophat"},
     ]
     save_resistor_list(lib, rows)
-    assert load_resistor_list(lib) == rows
+    # rows saved without a shape come back as the rectangle
+    assert load_resistor_list(lib) == [dict(rows[0], shape="rect"), rows[1]]
 
 
 def test_resistor_list_is_not_carried_by_a_technology_file(tmp_path):

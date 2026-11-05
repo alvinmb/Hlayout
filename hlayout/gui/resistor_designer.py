@@ -42,6 +42,7 @@ from tkinter import filedialog, ttk
 from . import dialogs
 from .fonts import section_header_font
 from .trim_sim_window import open_trim_simulator
+from ..core import tf_shapes
 from ..core.errors import LayoutError
 from ..io.techfile import (
     load_resistor_design_rules,
@@ -187,12 +188,26 @@ class DesignRules:
         #: resistor's selected solution (see ResistorDesignerWindow).
         self.select_mode = select_mode if select_mode in ("aspect", "inks", "area") else "aspect"
 
+    #: termination rules (A, B, C in DBU) used to draw shaped resistors in
+    #: the solutions preview; the real values come from the library's
+    #: resistor geometry rules (from_library)
+    overlap_a = 300.0
+    pad_b = 500.0
+    space_c = 300.0
+
     @classmethod
     def from_library(cls, library) -> "DesignRules":
         data = load_resistor_design_rules(library)
-        return cls(aim_pct=data["aim_pct"], ar_min=data["ar_min"],
-                    ar_max=data["ar_max"], available_inks=data["available_inks"],
-                    select_mode=data.get("select_mode", "aspect"))
+        r = cls(aim_pct=data["aim_pct"], ar_min=data["ar_min"],
+                ar_max=data["ar_max"], available_inks=data["available_inks"],
+                select_mode=data.get("select_mode", "aspect"))
+        try:
+            g = load_resistor_geometry_rules(library)
+            r.overlap_a, r.pad_b, r.space_c = (float(g["overlap_a"]), float(g["pad_b"]),
+                                               float(g["space_c"]))
+        except Exception:
+            pass
+        return r
 
     def save_to_library(self, library) -> None:
         save_resistor_design_rules(library, {
@@ -217,29 +232,52 @@ class Solution:
     #: (total ink run); the drawn footprint is body_length / n_folds
     #: long. aspect_ratio is the folded footprint's per-leg aspect.
     n_folds: int = 1
+    #: hlayout.core.tf_shapes shape key ("rect", "tophat", "u", ...). For
+    #: a shape other than "rect", body_length is the shape's sized length
+    #: L (bar gap / arm / lead length), shape_params its secondary
+    #: dimensions and geom the drawn geometry (terminations included).
+    shape: str = "rect"
+    shape_params: dict = field(default_factory=dict)
+    geom: object = None
 
     @property
     def is_top_hat(self) -> bool:
         return self.n_folds > 1
 
     @property
+    def is_shaped(self) -> bool:
+        return self.shape != "rect"
+
+    @property
     def footprint_length(self) -> float:
+        """Resistive length of a rectangle; for a shape, the X extent of
+        the whole structure (terminations included)."""
+        if self.is_shaped and self.geom is not None:
+            x0, _y0, x1, _y1 = self.geom.bbox()
+            return x1 - x0
         return self.body_length / self.n_folds
 
     @property
     def area(self) -> float:
-        """Resistor ink area (DBU^2) -- electrical, so folding doesn't
-        change it: squares x body_width^2. Lower for a higher-rsh ink."""
+        """Resistive ink area (DBU^2): squares x body_width^2 -- the
+        same for a rectangle and a shape of the same squares. Lower for
+        a higher-rsh ink."""
+        if self.is_shaped:
+            return self.squares * self.body_width * self.body_width
         return self.body_width * self.body_length
 
     @property
     def geom_code(self) -> str:
-        """Compact geometry tag: "R" (rectangle) or "T<n>" (top-hat,
-        n legs)."""
+        """Compact geometry tag: "R" (rectangle), a shape code (TH, THR,
+        U, UR, A, AA, A3) or "T<n>" (legacy folded top-hat)."""
+        if self.is_shaped:
+            return tf_shapes.SHAPE_CODES.get(self.shape, self.shape)
         return f"T{self.n_folds}" if self.is_top_hat else "R"
 
     @property
     def geom_label(self) -> str:
+        if self.is_shaped:
+            return f"{tf_shapes.SHAPE_LABELS.get(self.shape, self.shape).lower()} ({self.geom_code})"
         return f"top-hat, {self.n_folds}-fold (T{self.n_folds})" if self.is_top_hat \
             else "rectangle (R)"
 
@@ -262,6 +300,8 @@ class Resistor:
     body_width: float
     solutions: List[Solution] = field(default_factory=list)
     selected_idx: Optional[int] = None
+    #: hlayout.core.tf_shapes shape key the solutions are sized for
+    shape: str = "rect"
 
     @property
     def value_label(self) -> str:
@@ -299,7 +339,10 @@ class Resistor:
         return None
 
     def compute_solutions(self, rules: DesignRules):
-        # Rectangle only. An ink is a solution when the resistor fits as a
+        if self.shape != "rect":
+            self._compute_shape_solutions(rules)
+            return
+        # Rectangle. An ink is a solution when the resistor fits as a
         # single rectangle inside the aspect-ratio window -- for a
         # rectangle, squares == footprint length / width, so ar_min <= sq
         # <= ar_max IS the min/max length rule. An ink that would need
@@ -320,6 +363,39 @@ class Resistor:
                 ink_rsh=rsh, squares=sq,
                 body_width=self.body_width, body_length=sq * self.body_width,
                 aspect_ratio=sq, score=abs(math.log(sq)),
+            ))
+        self.solutions.sort(key=lambda s: s.score)
+        if self.solutions:
+            self.solutions[0].recommended = True
+            self.selected_idx = 0
+        else:
+            self.selected_idx = None
+
+    def _compute_shape_solutions(self, rules: DesignRules):
+        """Size ``self.shape`` for every available ink: the squares are
+        aim / Rsh as for a rectangle, but a shape's resistance is found
+        by solving its ink as a resistive sheet (hlayout.core.tf_shapes),
+        so corners, crowns and roofs are counted. An ink is a solution
+        when its sized length L stays inside the aspect window --
+        between ar_min and ar_max ink widths (a top-hat's bar may be
+        longer by its crown width) -- so no arm is shorter or longer
+        than a rectangle of the same ink would be allowed to be.
+        Recommended: the solution whose L is closest to one width."""
+        self.solutions.clear()
+        aim = self.aim_value(rules)
+        w = float(self.body_width)
+        for rsh in rules.available_inks:
+            sq = aim / rsh
+            geom = tf_shapes.size(self.shape, w, sq, rules.overlap_a, rules.pad_b,
+                                  rules.space_c,
+                                  max_length=tf_shapes.max_length(self.shape, w, rules.ar_max))
+            if geom is None or geom.length < rules.ar_min * w - 1e-6:
+                continue
+            ratio = geom.length / w
+            self.solutions.append(Solution(
+                ink_rsh=rsh, squares=sq, body_width=w, body_length=geom.length,
+                aspect_ratio=ratio, score=abs(math.log(ratio)),
+                shape=self.shape, shape_params=dict(geom.params), geom=geom,
             ))
         self.solutions.sort(key=lambda s: s.score)
         if self.solutions:
@@ -401,6 +477,13 @@ class ResistorDialog(tk.Toplevel):
         pwr_spin.grid(row=3, column=1, columnspan=2, sticky="w", padx=4, pady=4)
 
         ttk.Separator(form).grid(row=4, column=0, columnspan=3, sticky="ew", pady=8)
+
+        ttk.Label(form, text="Shape:").grid(row=7, column=0, sticky="e", padx=4, pady=4)
+        self.shape_var = tk.StringVar(
+            value=tf_shapes.SHAPE_LABELS.get(getattr(r, "shape", "rect") if r else "rect", "Rectangle"))
+        ttk.Combobox(form, textvariable=self.shape_var, width=22, state="readonly",
+                     values=[lbl for _k, lbl, _c in tf_shapes.SHAPES]).grid(
+            row=7, column=1, sticky="w", padx=4, pady=4)
 
         ttk.Label(form, text="Body Width:").grid(row=5, column=0, sticky="e", padx=4, pady=4)
         self._width_choices = [
@@ -491,6 +574,7 @@ class ResistorDialog(tk.Toplevel):
             self.tol_var.get(),
             power,
             float(self._current_width()),
+            tf_shapes.SHAPE_BY_LABEL.get(self.shape_var.get(), "rect"),
         )
         self.destroy()
 
@@ -759,7 +843,7 @@ class DesignRulesDialog(tk.Toplevel):
 
 class ARDiagram(tk.Canvas):
     def __init__(self, master, **kwargs):
-        kwargs.setdefault("height", 120)
+        kwargs.setdefault("height", 170)
         kwargs.setdefault("bg", PANEL)
         kwargs.setdefault("highlightthickness", 0)
         super().__init__(master, **kwargs)
@@ -782,6 +866,9 @@ class ARDiagram(tk.Canvas):
             self.create_text(w / 2, h / 2, text="No solution selected", fill=MUTED)
             return
         sol = self._sol
+        if getattr(sol, "is_shaped", False) and sol.geom is not None:
+            self._draw_shape(sol, w, h)
+            return
         ar = sol.aspect_ratio
         mg, lh = 12, 26
         aw, ah = w - 2 * mg, h - 2 * mg - lh
@@ -800,6 +887,46 @@ class ARDiagram(tk.Canvas):
             w / 2, ry + rh + lh / 2,
             text=f"L = {dbu_to_mm(sol.body_length):.3f} mm   W = {sol.body_width / 1000:.1f} mm"
                  f"   ({sol.ar_label})",
+            fill=TEXT)
+
+
+    def _draw_shape(self, sol, w, h):
+        """Preview of a shaped resistor: ink, pin pads (gold), roof
+        (gold, dashed outline) and the suggested trim plunge (white)."""
+        g = sol.geom
+        x0, y0, x1, y1 = g.bbox()
+        mg, lh = 12, 26
+        aw, ah = w - 2 * mg, h - 2 * mg - lh
+        sc = min(aw / max(x1 - x0, 1), ah / max(y1 - y0, 1))
+        ox = mg + (aw - (x1 - x0) * sc) / 2
+        oy = mg + (ah - (y1 - y0) * sc) / 2
+
+        def tx(x, y):
+            return ox + (x - x0) * sc, oy + (y1 - y) * sc
+
+        def rect(r, **kw):
+            a_ = tx(r[0], r[3])
+            b_ = tx(r[2], r[1])
+            self.create_rectangle(a_[0], a_[1], b_[0], b_[1], **kw)
+
+        color = _ar_color(sol.aspect_ratio, self._ar_min, self._ar_max)
+        for r in g.ink:
+            rect(r, fill=color, outline=color)
+        for r, _pin in g.pads:
+            rect(r, fill=GOLD, outline=GOLD)
+        for r in g.roofs:
+            rect(r, fill=GOLD, outline=TEXT, dash=(3, 2))
+        if g.cut is not None:
+            (sx, sy), (dx, dy) = g.cut.start, g.cut.dir
+            d = g.cut.max_depth
+            a_ = tx(sx, sy)
+            b_ = tx(sx + dx * d, sy + dy * d)
+            self.create_line(a_[0], a_[1], b_[0], b_[1], fill=TEXT, width=2, arrow="last")
+        self.create_text(
+            w / 2, h - mg - lh / 2,
+            text=f"{tf_shapes.SHAPE_LABELS.get(sol.shape, sol.shape)}   "
+                 f"L = {dbu_to_mm(sol.body_length):.3f} mm   W = {sol.body_width / 1000:.1f} mm   "
+                 f"{sol.squares:.3f} sq",
             fill=TEXT)
 
 
@@ -1112,7 +1239,7 @@ class ResistorDesignerWindow(tk.Toplevel):
             width = d["body_width"] or float(width_for_power(d["power_mw"]))
             res = Resistor(ref_des=d["ref_des"], value=d["value"],
                            tolerance=d["tolerance"], power_mw=d["power_mw"],
-                           body_width=width)
+                           body_width=width, shape=d.get("shape", "rect"))
             res.compute_solutions(self.rules)
             if d["selected_ink"] is not None:
                 for i, sol in enumerate(res.solutions):
@@ -1128,7 +1255,7 @@ class ResistorDesignerWindow(tk.Toplevel):
         list."""
         save_resistor_list(self.library, [
             {"ref_des": r.ref_des, "value": r.value, "tolerance": r.tolerance,
-             "power_mw": r.power_mw, "body_width": r.body_width,
+             "power_mw": r.power_mw, "body_width": r.body_width, "shape": r.shape,
              "selected_ink": (r.selected.ink_rsh if r.selected else None)}
             for r in self.resistors
         ])
@@ -1247,8 +1374,9 @@ class ResistorDesignerWindow(tk.Toplevel):
         dlg = ResistorDialog(self)
         self.wait_window(dlg)
         if dlg.result:
-            ref, val, tol, pwr, w = dlg.result
-            res = Resistor(ref_des=ref, value=val, tolerance=tol, power_mw=pwr, body_width=w)
+            ref, val, tol, pwr, w, shape = dlg.result
+            res = Resistor(ref_des=ref, value=val, tolerance=tol, power_mw=pwr, body_width=w,
+                           shape=shape)
             res.compute_solutions(self.rules)
             self.resistors.append(res)
             self._refresh_all()
@@ -1262,9 +1390,9 @@ class ResistorDesignerWindow(tk.Toplevel):
         dlg = ResistorDialog(self, resistor=res)
         self.wait_window(dlg)
         if dlg.result:
-            ref, val, tol, pwr, w = dlg.result
+            ref, val, tol, pwr, w, shape = dlg.result
             res.ref_des, res.value, res.tolerance = ref, val, tol
-            res.power_mw, res.body_width = pwr, w
+            res.power_mw, res.body_width, res.shape = pwr, w, shape
             res.compute_solutions(self.rules)
             self._refresh_row(row)
             self._on_res_selected(row)
@@ -1387,6 +1515,10 @@ class ResistorDesignerWindow(tk.Toplevel):
                 "Solutions tab (Use This Solution) first.",
                 parent=self)
             return
+        if getattr(sol, "is_shaped", False):
+            from .shape_trim_window import open_shape_trim_simulator
+            open_shape_trim_simulator(self, res, sol, self.rules)
+            return
         open_trim_simulator(self, res, sol)
 
     # -- generate into the actual layout ------------------------------------
@@ -1414,13 +1546,19 @@ class ResistorDesignerWindow(tk.Toplevel):
         """Total pad-to-pad (outer edge to outer edge) length of a
         solution's resistor structure -- footprint_length + 2*A + 2*B --
         used to space consecutive placements apart. For a top-hat the
-        footprint is body_length / n_folds long."""
+        footprint is body_length / n_folds long; a shaped resistor's
+        footprint already includes its terminations."""
+        if getattr(sol, "is_shaped", False) and sol.geom is not None:
+            return sol.footprint_length
         return sol.footprint_length + 2 * geom_rules["overlap_a"] + 2 * geom_rules["pad_b"]
 
     def _default_place_x(self, sol, geom_rules) -> float:
         """Default centre X for the next placement: half this
         resistor's own footprint to the right of the next available
-        left edge."""
+        left edge. A shaped resistor's cell is not centred on its origin,
+        so its origin goes where its own left edge lands on the cursor."""
+        if getattr(sol, "is_shaped", False) and sol.geom is not None:
+            return self._next_place_x - sol.geom.bbox()[0]
         return self._next_place_x + self._footprint_length(sol, geom_rules) / 2.0
 
     def _advance_place_cursor(self, x, sol, geom_rules, margin=None):
@@ -1431,6 +1569,9 @@ class ResistorDesignerWindow(tk.Toplevel):
         already-configured gap between adjacent parts."""
         if margin is None:
             margin = geom_rules["pad_b"]
+        if getattr(sol, "is_shaped", False) and sol.geom is not None:
+            self._next_place_x = x + sol.geom.bbox()[2] + margin
+            return
         self._next_place_x = x + self._footprint_length(sol, geom_rules) / 2.0 + margin
 
     def _place_in_layout(self):
@@ -1479,7 +1620,7 @@ class ResistorDesignerWindow(tk.Toplevel):
             self.app.session.generate_resistor(
                 x, y, sol.body_width, sol.body_length, rotation=rotation,
                 ink_rsh=sol.ink_rsh, ref_des=res.ref_des, conductor_layer=conductor_layer,
-                n_folds=sol.n_folds)
+                n_folds=sol.n_folds, shape=sol.shape, shape_params=sol.shape_params)
         except LayoutError as e:
             dialogs.show_error("Place in Layout", str(e), parent=self)
             return
@@ -1525,7 +1666,8 @@ class ResistorDesignerWindow(tk.Toplevel):
             try:
                 self.app.session.generate_resistor(
                     x, y, sol.body_width, sol.body_length,
-                    ink_rsh=sol.ink_rsh, ref_des=res.ref_des, n_folds=sol.n_folds)
+                    ink_rsh=sol.ink_rsh, ref_des=res.ref_des, n_folds=sol.n_folds,
+                    shape=sol.shape, shape_params=sol.shape_params)
             except LayoutError as e:
                 dialogs.show_error("Place All in Layout",
                                       f"{res.ref_des}: {e}", parent=self)
@@ -1560,8 +1702,11 @@ class ResistorDesignerWindow(tk.Toplevel):
                     tol = row.get("tolerance", "5%").strip()
                     pwr = float(row.get("power_mw", 125.0))
                     w = float(row.get("body_width", width_for_power(pwr)))
+                    shape = (row.get("shape") or "rect").strip().lower()
+                    if shape not in tf_shapes.SHAPE_KEYS:
+                        shape = tf_shapes.SHAPE_BY_LABEL.get(row.get("shape", "").strip(), "rect")
                     res = Resistor(ref_des=ref, value=val, tolerance=tol,
-                                   power_mw=pwr, body_width=w)
+                                   power_mw=pwr, body_width=w, shape=shape)
                     res.compute_solutions(self.rules)
                     self.resistors.append(res)
                     added += 1
@@ -1581,7 +1726,7 @@ class ResistorDesignerWindow(tk.Toplevel):
                 cw = csv.writer(f)
                 cw.writerow(["ref_des", "value", "tolerance", "power_mw", "body_width",
                              "ink_rsh", "squares", "body_length", "aspect_ratio",
-                             "n_solutions", "power_ok"])
+                             "n_solutions", "power_ok", "shape"])
                 for res in self.resistors:
                     sol = res.selected
                     cw.writerow([
@@ -1593,6 +1738,7 @@ class ResistorDesignerWindow(tk.Toplevel):
                         f"{sol.aspect_ratio:.4f}" if sol else "",
                         len(res.solutions),
                         "YES" if res.power_ok else "NO",
+                        res.shape,
                     ])
             self.status_var.set(f"Exported to {path}")
         except OSError as ex:
@@ -1617,6 +1763,7 @@ class ResistorDesignerWindow(tk.Toplevel):
                 f'Power:&nbsp;<span style="{p_style}">{res.power_mw:.1f}&nbsp;mW'
                 f'{"" if pok else "&nbsp;(!)"}</span>&nbsp;&nbsp;'
                 f'Width:&nbsp;{res.width_label}&nbsp;&nbsp;'
+                f'Shape:&nbsp;{tf_shapes.SHAPE_LABELS.get(res.shape, res.shape)}&nbsp;&nbsp;'
                 f'({sol_count} solution{"s" if sol_count != 1 else ""})'
                 f'</td></tr>'
             )

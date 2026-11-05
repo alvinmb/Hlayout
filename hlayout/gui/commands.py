@@ -334,6 +334,7 @@ a resistor; this draws it):
     RESGEN <x,y> <body_width> <body_length> [rotation=<deg>] [ink=<rsh>]
            [ref=<designator>] [a=<dbu>] [b=<dbu>] [c=<dbu>] [d=<dbu>]
            [rlayer=<n|name>] [clayer=<n|name>] [glayer=<n|name>] [kolayer=<n|name>]
+           [shape=tophat|tophat_roof|u|u_roof|angle|double_angle|angle3]
                                        build a resistor -- ink body + glaze overprint +
                                        its two end conductor pads -- as its own new
                                        cell, and place one instance (Sref) of it
@@ -1535,7 +1536,9 @@ class CommandInterpreter:
         usage = ("usage: RESGEN <x,y> <body_width> <body_length> [rotation=<deg>] "
                  "[ink=<rsh>] [ref=<designator>] [a=<dbu>] [b=<dbu>] [c=<dbu>] "
                  "[d=<dbu>] [e=<dbu>] [rlayer=<n|name>] [clayer=<n|name>] "
-                 "[glayer=<n|name>] [kolayer=<n|name>] [dlayer=<n|name> (ignored)]")
+                 "[glayer=<n|name>] [kolayer=<n|name>] [dlayer=<n|name> (ignored)] "
+                 "[shape=rect|tophat|tophat_roof|u|u_roof|angle|double_angle|angle3] "
+                 "[crown_w=|crown_h=|gap=|skirt_h=|rise=|loop_w=|loop_h=<dbu>]")
         if len(args) < 3:
             raise CommandError(usage)
         origin = _parse_point(args[0])
@@ -1577,6 +1580,10 @@ class CommandInterpreter:
                 kwargs["doc_layer"] = self.session.library.layers.resolve(v)
             elif k == "kolayer":
                 kwargs["keepout_layer"] = self.session.library.layers.resolve(v)
+            elif k == "shape":
+                kwargs["shape"] = v.lower()
+            elif k in ("crown_w", "crown_h", "gap", "skirt_h", "rise", "loop_w", "loop_h"):
+                kwargs.setdefault("shape_params", {})[k] = float(v)
             else:
                 raise CommandError(f"unknown RESGEN option {k!r}")
         device_name = self.session.generate_resistor(
