@@ -20,12 +20,14 @@ from ..io.printio import hidden_layers_with_data, send_to_system_printer
 from ..io.sidecar import backup_path as _backup_path, load_design, sidecar_path
 from ..io.techfile import (
     default_layer_thickness,
+    load_allowed_resistor_shapes,
     load_bond_rules,
     load_dielectric_rules,
     load_layer_thickness,
     load_refdes_annotation_layer,
     load_resistor_geometry_rules,
     load_route_rules,
+    save_allowed_resistor_shapes,
     save_bond_rules,
     save_dielectric_rules,
     save_layer_thickness,
@@ -1612,6 +1614,104 @@ class App(tk.Tk):
         return self._setting_window("Resistor Geometry Rules",
                                     self._build_resistor_geometry_form)
 
+    #: picture lengths (x W) for each shape's thumbnail in the
+    #: Resistor Shapes tab
+    _SHAPE_THUMB_L = {"rect": 2.0, "tophat": 4.0, "tophat_roof": 4.5, "u": 1.5,
+                      "u_roof": 1.5, "angle": 1.5, "double_angle": 1.5, "angle3": 1.2}
+
+    def _build_resistor_shapes_form(self, parent):
+        """Setup > Technology Properties > Resistor Shapes: a picture of
+        each thick-film resistor shape (hlayout.core.tf_shapes) with a
+        check box. Only ticked shapes are offered by the Resistor
+        Designer and accepted by RESGEN / generate_resistor(). Saved via
+        hlayout.io.techfile.save_allowed_resistor_shapes()."""
+        from ..core import tf_shapes
+        allowed = set(load_allowed_resistor_shapes(self.session.library))
+
+        ttk.Label(
+            parent,
+            text="Tick the resistor shapes this process supports. Only ticked\n"
+                 "shapes are offered by the Thick-Film Resistor Designer and\n"
+                 "accepted by RESGEN. Click a picture to toggle it.",
+            justify="left", foreground="#555",
+        ).pack(anchor="w", padx=12, pady=(12, 8))
+
+        grid = ttk.Frame(parent)
+        grid.pack(padx=12)
+        cw, ch = 168, 118
+        w, a, b, c = 1000.0, 250.0, 350.0, 150.0
+        vars_ = {}
+
+        def draw(canvas, key):
+            on = vars_[key].get()
+            canvas.delete("all")
+            canvas.configure(background="#ffffff" if on else "#f0f0f0",
+                             highlightbackground="#2e7d32" if on else "#c8c8c8")
+            try:
+                g = tf_shapes.build(key, w, self._SHAPE_THUMB_L[key] * w, a, b, c)
+            except tf_shapes.ShapeError:
+                return
+            rects = ([(r, "ink") for r in g.ink] + [(r, "pad") for r, _pin in g.pads]
+                     + [(r, "roof") for r in g.roofs])
+            x0 = min(r[0] for r, _ in rects); y0 = min(r[1] for r, _ in rects)
+            x1 = max(r[2] for r, _ in rects); y1 = max(r[3] for r, _ in rects)
+            pad = 12
+            k = min((cw - 2 * pad) / (x1 - x0), (ch - 2 * pad) / (y1 - y0))
+            ox = (cw - (x1 - x0) * k) / 2
+            oy = (ch - (y1 - y0) * k) / 2
+            colours = ({"ink": "#34495e", "pad": "#d4a017", "roof": "#e0b84a"} if on else
+                       {"ink": "#b8bec4", "pad": "#ddd3b4", "roof": "#e4dcc4"})
+            # pads first, ink over them -- the ink runs A under each pad
+            for kind in ("pad", "roof", "ink"):
+                for r, kd in rects:
+                    if kd != kind:
+                        continue
+                    canvas.create_rectangle(
+                        ox + (r[0] - x0) * k, ch - oy - (r[3] - y0) * k,
+                        ox + (r[2] - x0) * k, ch - oy - (r[1] - y0) * k,
+                        fill=colours[kind], outline="")
+            if not on:
+                canvas.create_text(cw - 6, 6, text="not allowed", anchor="ne",
+                                   fill="#999999", font=("TkDefaultFont", 8))
+
+        canvases = {}
+        for i, (key, label, code) in enumerate(tf_shapes.SHAPES):
+            cell = ttk.Frame(grid)
+            cell.grid(row=i // 4, column=i % 4, padx=6, pady=6)
+            cv = tk.Canvas(cell, width=cw, height=ch, highlightthickness=2,
+                           cursor="hand2")
+            cv.pack()
+            var = tk.BooleanVar(value=key in allowed)
+            vars_[key] = var
+            canvases[key] = cv
+            ttk.Checkbutton(cell, text=f"{label} ({code})", variable=var,
+                            command=lambda k_=key: draw(canvases[k_], k_)).pack(pady=(3, 0))
+
+            def toggle(_e, k_=key):
+                vars_[k_].set(not vars_[k_].get())
+                draw(canvases[k_], k_)
+            cv.bind("<Button-1>", toggle)
+            draw(cv, key)
+
+        def set_all(keys):
+            for k_, v in vars_.items():
+                v.set(k_ in keys)
+                draw(canvases[k_], k_)
+
+        row = ttk.Frame(parent)
+        row.pack(anchor="w", padx=12, pady=(4, 8))
+        ttk.Button(row, text="Allow all", command=lambda: set_all(set(vars_))).pack(side="left", padx=(0, 6))
+        ttk.Button(row, text="Rectangle only", command=lambda: set_all({"rect"})).pack(side="left")
+
+        def apply():
+            keys = [k_ for k_, v in vars_.items() if v.get()]
+            if not keys:
+                return "Tick at least one resistor shape."
+            save_allowed_resistor_shapes(self.session.library, keys)
+            return None
+
+        return apply
+
     def _build_resistor_geometry_form(self, parent):
         rules = load_resistor_geometry_rules(self.session.library)
         win = parent
@@ -1848,6 +1948,7 @@ class App(tk.Tk):
         for label, builder in (
             ("Route", self._build_route_form),
             ("Resistors", self._build_resistor_geometry_form),
+            ("Resistor Shapes", self._build_resistor_shapes_form),
             ("Ref-Des", self._build_refdes_form),
             ("Wire Bonds", self._build_wire_bond_form),
             ("I/O Pads", self._build_io_pad_form),

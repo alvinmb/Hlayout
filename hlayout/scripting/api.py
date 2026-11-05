@@ -1492,6 +1492,9 @@ class Session:
         rectangle-only for now and always passes ``n_folds`` = 1 (native
         top-hat sizing is not yet implemented).
 
+        Only shapes ticked in Setup > Technology Properties > Resistor
+        Shapes (techfile.load_allowed_resistor_shapes) are accepted.
+
         ``shape`` draws one of the thick-film shapes in
         hlayout.core.tf_shapes instead of the plain rectangle: "tophat",
         "tophat_roof", "u", "u_roof", "angle", "double_angle" or
@@ -1513,6 +1516,12 @@ class Session:
             raise LayoutError("no current cell; call new_cell()/use_cell() first")
         n_folds = max(1, int(n_folds))
         shape = (shape or "rect").strip().lower()
+        from ..io.techfile import load_allowed_resistor_shapes
+        from ..core.tf_shapes import SHAPE_KEYS
+        allowed = load_allowed_resistor_shapes(self.library)
+        if shape in SHAPE_KEYS and shape not in allowed:
+            raise LayoutError(f"resistor shape {shape!r} is not allowed by this technology; "
+                              f"allowed: {', '.join(allowed)}")
 
         rules = load_resistor_geometry_rules(self.library)
         a = float(overlap_a) if overlap_a is not None else rules["overlap_a"]

@@ -45,6 +45,7 @@ from .trim_sim_window import open_trim_simulator
 from ..core import tf_shapes
 from ..core.errors import LayoutError
 from ..io.techfile import (
+    load_allowed_resistor_shapes,
     load_resistor_design_rules,
     load_resistor_geometry_rules,
     load_resistor_list,
@@ -440,9 +441,14 @@ class ResistorDialog(tk.Toplevel):
     QDialog, following the same OK/Cancel + Return/Escape convention as
     hlayout's own dialogs (see App.show_path_style_dialog)."""
 
-    def __init__(self, parent, resistor: Optional[Resistor] = None):
+    def __init__(self, parent, resistor: Optional[Resistor] = None, allowed_shapes=None):
         super().__init__(parent)
         self.title("Add Resistor" if resistor is None else "Edit Resistor")
+        #: shape keys the technology allows (Setup > Technology
+        #: Properties > Resistor Shapes); only these are offered.
+        self.allowed_shapes = [k for k in tf_shapes.SHAPE_KEYS
+                               if allowed_shapes is None or k in allowed_shapes] \
+            or list(tf_shapes.SHAPE_KEYS)
         self.transient(parent)
         self.grab_set()
         self.resizable(False, False)
@@ -479,11 +485,20 @@ class ResistorDialog(tk.Toplevel):
         ttk.Separator(form).grid(row=4, column=0, columnspan=3, sticky="ew", pady=8)
 
         ttk.Label(form, text="Shape:").grid(row=7, column=0, sticky="e", padx=4, pady=4)
-        self.shape_var = tk.StringVar(
-            value=tf_shapes.SHAPE_LABELS.get(getattr(r, "shape", "rect") if r else "rect", "Rectangle"))
+        cur = getattr(r, "shape", "rect") if r else "rect"
+        note = ""
+        if cur not in self.allowed_shapes:
+            if r is not None:
+                note = (f"{tf_shapes.SHAPE_LABELS.get(cur, cur)} is not allowed by the "
+                        f"technology")
+            cur = "rect" if "rect" in self.allowed_shapes else self.allowed_shapes[0]
+        self.shape_var = tk.StringVar(value=tf_shapes.SHAPE_LABELS[cur])
         ttk.Combobox(form, textvariable=self.shape_var, width=22, state="readonly",
-                     values=[lbl for _k, lbl, _c in tf_shapes.SHAPES]).grid(
+                     values=[tf_shapes.SHAPE_LABELS[k] for k in self.allowed_shapes]).grid(
             row=7, column=1, sticky="w", padx=4, pady=4)
+        if note:
+            ttk.Label(form, text=note, foreground=WARN).grid(
+                row=8, column=0, columnspan=3, sticky="w", padx=4)
 
         ttk.Label(form, text="Body Width:").grid(row=5, column=0, sticky="e", padx=4, pady=4)
         self._width_choices = [
@@ -574,7 +589,7 @@ class ResistorDialog(tk.Toplevel):
             self.tol_var.get(),
             power,
             float(self._current_width()),
-            tf_shapes.SHAPE_BY_LABEL.get(self.shape_var.get(), "rect"),
+            tf_shapes.SHAPE_BY_LABEL.get(self.shape_var.get(), self.allowed_shapes[0]),
         )
         self.destroy()
 
@@ -1215,6 +1230,11 @@ class ResistorDesignerWindow(tk.Toplevel):
         self._build()
         self._load_resistors()
         self._refresh_all()
+        if self._shape_changed:
+            self.status_var.set(
+                "Shape not allowed by the technology, set to "
+                f"{tf_shapes.SHAPE_LABELS[self._coerce_shape('?', [])]}: "
+                + ", ".join(self._shape_changed))
         # Persist on close too, belt-and-braces -- every list change
         # already saves via _refresh_all()/_refresh_row(), but this
         # guarantees the last state is stored even if some path missed
@@ -1228,6 +1248,23 @@ class ResistorDesignerWindow(tk.Toplevel):
             pass
         self.destroy()
 
+    # -- technology-allowed shapes -----------------------------------------
+    def _allowed_shapes(self) -> list:
+        """Shape keys the technology allows -- re-read every time, since
+        Technology Properties can change while this window is open."""
+        if self.library is None:
+            return list(tf_shapes.SHAPE_KEYS)
+        return load_allowed_resistor_shapes(self.library)
+
+    def _coerce_shape(self, shape: str, changed: list, ref: str = "") -> str:
+        """``shape`` if the technology allows it, else the rectangle (or
+        the first allowed shape); records ``ref`` in ``changed``."""
+        allowed = self._allowed_shapes()
+        if shape in allowed:
+            return shape
+        changed.append(ref or "?")
+        return "rect" if "rect" in allowed else allowed[0]
+
     # -- persistence of the working resistor list -------------------------
     def _load_resistors(self):
         """Rebuild the resistor list from what was saved with the design
@@ -1235,11 +1272,13 @@ class ResistorDesignerWindow(tk.Toplevel):
         or the app and coming back doesn't lose the work. Solutions are
         recomputed here from the current design rules; the previously
         chosen ink is re-selected by sheet resistance."""
+        self._shape_changed = []
         for d in load_resistor_list(self.library):
             width = d["body_width"] or float(width_for_power(d["power_mw"]))
+            shape = self._coerce_shape(d.get("shape", "rect"), self._shape_changed, d["ref_des"])
             res = Resistor(ref_des=d["ref_des"], value=d["value"],
                            tolerance=d["tolerance"], power_mw=d["power_mw"],
-                           body_width=width, shape=d.get("shape", "rect"))
+                           body_width=width, shape=shape)
             res.compute_solutions(self.rules)
             if d["selected_ink"] is not None:
                 for i, sol in enumerate(res.solutions):
@@ -1371,7 +1410,7 @@ class ResistorDesignerWindow(tk.Toplevel):
 
     # -- CRUD --------------------------------------------------------------
     def _add_resistor(self):
-        dlg = ResistorDialog(self)
+        dlg = ResistorDialog(self, allowed_shapes=self._allowed_shapes())
         self.wait_window(dlg)
         if dlg.result:
             ref, val, tol, pwr, w, shape = dlg.result
@@ -1387,7 +1426,7 @@ class ResistorDesignerWindow(tk.Toplevel):
         if row < 0 or row >= len(self.resistors):
             return
         res = self.resistors[row]
-        dlg = ResistorDialog(self, resistor=res)
+        dlg = ResistorDialog(self, resistor=res, allowed_shapes=self._allowed_shapes())
         self.wait_window(dlg)
         if dlg.result:
             ref, val, tol, pwr, w, shape = dlg.result
@@ -1695,6 +1734,7 @@ class ResistorDesignerWindow(tk.Toplevel):
             return
         try:
             added = 0
+            changed = []
             with open(path, newline="") as f:
                 for row in csv.DictReader(f):
                     ref = row.get("ref_des", "R?").strip()
@@ -1705,13 +1745,19 @@ class ResistorDesignerWindow(tk.Toplevel):
                     shape = (row.get("shape") or "rect").strip().lower()
                     if shape not in tf_shapes.SHAPE_KEYS:
                         shape = tf_shapes.SHAPE_BY_LABEL.get(row.get("shape", "").strip(), "rect")
+                    shape = self._coerce_shape(shape, changed, ref)
                     res = Resistor(ref_des=ref, value=val, tolerance=tol,
                                    power_mw=pwr, body_width=w, shape=shape)
                     res.compute_solutions(self.rules)
                     self.resistors.append(res)
                     added += 1
             self._refresh_all()
-            self.status_var.set(f"Imported {added} resistors.")
+            msg = f"Imported {added} resistors."
+            if changed:
+                msg += (f"  Shape not allowed by the technology, set to "
+                        f"{tf_shapes.SHAPE_LABELS[self._coerce_shape('?', [])]}: "
+                        f"{', '.join(changed)}")
+            self.status_var.set(msg)
         except (OSError, ValueError, KeyError) as ex:
             dialogs.show_error("Import Error", str(ex), parent=self)
 

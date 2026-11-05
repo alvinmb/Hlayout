@@ -418,6 +418,49 @@ def save_resistor_geometry_rules(library: Library, rules: dict) -> None:
     library.tech_params[RESISTOR_GEOMETRY_KEY] = json.dumps(payload)
 
 
+# --- Setup > Technology Properties > Resistor Shapes ------------------------
+#
+# Which thick-film resistor shapes (hlayout.core.tf_shapes.SHAPES) this
+# process supports. Only these are offered by the Resistor Designer and
+# accepted by RESGEN / Session.generate_resistor(). Stored as a JSON list
+# of shape keys; missing means every shape is allowed.
+
+RESISTOR_SHAPES_KEY = "resistor_shapes"
+
+
+def load_allowed_resistor_shapes(library: Library) -> list:
+    """Shape keys this technology allows, in tf_shapes.SHAPES order.
+    Every shape when nothing is set (or the stored value is unusable)."""
+    from ..core.tf_shapes import SHAPE_KEYS
+    raw = library.tech_params.get(RESISTOR_SHAPES_KEY)
+    if not raw:
+        return list(SHAPE_KEYS)
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return list(SHAPE_KEYS)
+    if not isinstance(data, list):
+        return list(SHAPE_KEYS)
+    wanted = {str(k).strip().lower() for k in data}
+    keys = [k for k in SHAPE_KEYS if k in wanted]
+    return keys or list(SHAPE_KEYS)
+
+
+def save_allowed_resistor_shapes(library: Library, keys) -> None:
+    """Store the allowed shape keys (unknown keys dropped). At least one
+    shape must remain."""
+    from ..core.tf_shapes import SHAPE_KEYS
+    wanted = {str(k).strip().lower() for k in keys}
+    out = [k for k in SHAPE_KEYS if k in wanted]
+    if not out:
+        raise LayoutError("at least one resistor shape must be allowed")
+    library.tech_params[RESISTOR_SHAPES_KEY] = json.dumps(out)
+
+
+def resistor_shape_allowed(library: Library, shape: str) -> bool:
+    return (shape or "rect").strip().lower() in load_allowed_resistor_shapes(library)
+
+
 # --- Tools > Thin-Film Resistor Designer... settings -------------------------
 #
 # Unlike the thick-film ink-print resistor above (a different ink, and
