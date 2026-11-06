@@ -320,6 +320,8 @@ footer .wrap{display:flex;flex-wrap:wrap;gap:16px 28px;justify-content:space-bet
 .plat .os svg{width:30px;height:30px;flex:none;fill:var(--ink)}
 .file{font:400 .82rem var(--f-mono);color:var(--muted);overflow-wrap:anywhere}
 .plat ol{margin:0;padding-left:20px;color:var(--muted);font-size:.93rem;display:grid;gap:6px}
+.alt{font-size:.88rem;color:var(--muted);margin:0}
+.alt a{color:inherit;font-weight:600}
 .req{font-size:.85rem;color:var(--muted);border-top:1px solid var(--rule);padding-top:12px}
 @media (max-width:900px){.plats{grid-template-columns:1fr}}
 
@@ -581,6 +583,7 @@ td:first-child{font-weight:600;white-space:nowrap}
         <p class="file" data-file></p>
         <a class="btn btn-gold" data-link target="_blank" rel="noopener">Download for Windows <small>.exe</small></a>
         <ol><li>Run the setup file and follow the installer.</li><li>If your browser or SmartScreen warns about the file, choose <b>Keep</b>, then <b>More info → Run anyway</b>. Releases are not yet code-signed.</li><li>Start HLayout from the Start menu.</li></ol>
+        <p class="alt" data-portable-row hidden>No admin rights? <a data-portable target="_blank" rel="noopener">Portable 64-bit .zip</a> &ndash; unzip anywhere (even a USB stick) and run <span class="mono">hlayout.exe</span>. Settings stay in the folder.</p>
         <p class="req">Windows 10 or 11, 64-bit.</p>
       </article>
 
@@ -694,7 +697,7 @@ python hlayout_app.py hlayout/examples/notch_filter.gds</pre>
   var REPO = "https://github.com/alvinmb/Hlayout";
   var API = "https://api.github.com/repos/alvinmb/Hlayout/releases/latest";
   var names = {windows:"Windows", linux:"Linux", mac:"macOS"};
-  var patterns = {windows: /-windows-setup\.exe$/i, linux: /_amd64\.deb$/i, mac: /-macos\.dmg$/i};
+  var patterns = {windows: /-windows-setup\.exe$/i, linux: /_amd64\.deb$/i, mac: /-macos\.dmg$/i, portable: /-windows-x64-portable\.zip$/i};
 
   function fileNames(v){
     return {
@@ -725,6 +728,12 @@ python hlayout_app.py hlayout/examples/notch_filter.gds</pre>
       card.querySelector("[data-link]").href = url;
       var f = card.querySelector("[data-fname]"); if (f) f.textContent = file;
     });
+    // portable zip: only offered when the release actually has one
+    var pr = document.querySelector("[data-portable-row]");
+    if (pr){
+      pr.hidden = !(urls && urls.portable);
+      if (urls && urls.portable) pr.querySelector("[data-portable]").href = urls.portable;
+    }
   }
 
   apply(FALLBACK_VERSION);

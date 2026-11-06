@@ -2,8 +2,9 @@
 # Copyright (C) 2026 Alvin Brown
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Local Windows build: freezes HLayout with PyInstaller and, if Inno
-# Setup is installed, wraps it into an installer .exe too.
+# Local Windows build: freezes HLayout with PyInstaller, zips a portable
+# 64-bit copy and, if Inno Setup is installed, wraps it into an
+# installer .exe too.
 #
 # Run from the repo root in PowerShell:
 #   .\packaging\windows\build.ps1
@@ -33,6 +34,18 @@ python -m PyInstaller packaging\hlayout.spec
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed" }
 
 Write-Host "==> Onedir build ready: dist\hlayout\hlayout.exe" -ForegroundColor Green
+
+Write-Host "==> Building portable 64-bit zip" -ForegroundColor Cyan
+$PortableName = "HLayout-$Version-windows-x64-portable"
+$PortableDir = "build\$PortableName"
+Remove-Item -Recurse -Force $PortableDir -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force dist-installers, $PortableDir | Out-Null
+Copy-Item -Recurse dist\hlayout\* "$PortableDir\"
+Copy-Item packaging\windows\portable.txt "$PortableDir\portable.txt"
+Copy-Item LICENSE "$PortableDir\LICENSE.txt"
+Remove-Item -Force "dist-installers\$PortableName.zip" -ErrorAction SilentlyContinue
+Compress-Archive -Path $PortableDir -DestinationPath "dist-installers\$PortableName.zip" -CompressionLevel Optimal
+Write-Host "==> Portable zip ready: dist-installers\$PortableName.zip" -ForegroundColor Green
 
 # Sanity check: fail loudly (instead of shipping a bloated build) if
 # matplotlib or a Qt binding snuck back in -- see packaging/hlayout.spec

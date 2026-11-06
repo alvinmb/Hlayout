@@ -28,12 +28,16 @@ somewhere to go without a new file format.
 import json
 import os
 
+from ..userdir import user_dir
+
 #: ~/.hlayout/settings.json -- deliberately NOT next to the hlayout
 #: package itself (which may be read-only, e.g. installed site-wide),
 #: and NOT an OS-specific "app data" path (no extra dependency to
 #: locate one) -- os.path.expanduser("~") is the simplest thing that
 #: works the same way on Windows/macOS/Linux.
-SETTINGS_PATH = os.path.join(os.path.expanduser("~"), ".hlayout", "settings.json")
+#: (The portable Windows build puts it in data\ beside hlayout.exe --
+#: see hlayout.userdir.)
+SETTINGS_PATH = os.path.join(user_dir(), "settings.json")
 _REAL_SETTINGS_PATH = SETTINGS_PATH
 
 COMPONENT_LIBRARY_DIR_KEY = "component_library_dir"

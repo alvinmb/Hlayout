@@ -33,11 +33,14 @@ def _dump(paths, stalled_for):
             pass
 
 
+from ..userdir import user_dir as _user_dir
+
+
 def start(app, stall_s: float = 15.0, paths=None):
     if paths is None:
         root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         paths = [os.path.join(root, "hang_traceback.txt"),
-                 os.path.join(os.path.expanduser("~"), ".hlayout", "hang_traceback.txt")]
+                 os.path.join(_user_dir(), "hang_traceback.txt")]
     state = {"beat": time.monotonic(), "dumped": False}
 
     def beat():

@@ -1,0 +1,16 @@
+HLayout portable (Windows 64-bit)
+=================================
+
+Unzip this folder anywhere - a USB stick, a network share, your
+Desktop - and run hlayout.exe. Nothing is installed and no admin
+rights are needed.
+
+Because this file (portable.txt) sits next to hlayout.exe, HLayout
+keeps its settings, bug reports and hang logs in the "data" folder
+beside it instead of in your user profile. Delete this file to make
+the copy behave like an installed one (settings in %USERPROFILE%\.hlayout).
+
+To update, unzip the new version and copy your "data" folder across.
+
+HLayout is free software under the GNU GPL v3 or later (LICENSE.txt).
+https://www.h-layout.co.uk/

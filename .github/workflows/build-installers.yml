@@ -5,13 +5,24 @@
 # GUI bundling has to run on the target OS, it can't be cross-compiled.
 #
 # Push a tag like "v0.1.0" to build and attach installers to a GitHub
-# Release automatically. Or run this manually (workflow_dispatch) to
-# just get build artifacts without cutting a release.
+# Release automatically. Or run this manually (workflow_dispatch): with
+# no release_tag it just builds artifacts; with release_tag (e.g.
+# v0.8.2) it builds that version from the chosen branch and creates the
+# tag and release itself.
+#
+# Windows gets two downloads: the Inno Setup installer and a portable
+# 64-bit zip (HLayout-<v>-windows-x64-portable.zip) that runs from any
+# folder and keeps its settings beside hlayout.exe (hlayout/userdir.py).
 on:
   push:
     tags:
       - "v*.*.*"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Create this release/tag (e.g. v0.8.2); leave empty for a test build"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -24,7 +35,10 @@ jobs:
     steps:
       - id: v
         run: |
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+          if [[ -n "${{ github.event.inputs.release_tag }}" ]]; then
+            t="${{ github.event.inputs.release_tag }}"
+            echo "version=${t#v}" >> "$GITHUB_OUTPUT"
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
           else
             echo "version=0.0.0-dev${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
@@ -40,8 +54,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          architecture: x64
       - run: pip install -r requirements.txt pyinstaller
       - run: pyinstaller packaging/hlayout.spec
+      - name: Build portable 64-bit zip
+        shell: pwsh
+        run: |
+          $v = "${{ needs.version.outputs.version }}"
+          $name = "HLayout-$v-windows-x64-portable"
+          New-Item -ItemType Directory -Force dist-installers, "build\$name" | Out-Null
+          Copy-Item -Recurse dist\hlayout\* "build\$name\"
+          Copy-Item packaging\windows\portable.txt "build\$name\portable.txt"
+          Copy-Item LICENSE "build\$name\LICENSE.txt"
+          Compress-Archive -Path "build\$name" -DestinationPath "dist-installers\$name.zip" -CompressionLevel Optimal
       - name: Build installer with Inno Setup
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.5
         with:
@@ -50,7 +75,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: hlayout-windows-installer
-          path: dist-installers/*.exe
+          path: |
+            dist-installers/*.exe
+            dist-installers/*.zip
 
   linux:
     needs: version
@@ -100,7 +127,7 @@ jobs:
           path: dist-installers/*.dmg
 
   release:
-    if: github.ref_type == 'tag'
+    if: github.ref_type == 'tag' || github.event.inputs.release_tag != ''
     needs: [version, windows, linux, macos]
     runs-on: ubuntu-latest
     steps:
@@ -110,8 +137,11 @@ jobs:
       - name: Create/update release with installers attached
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
+          target_commitish: ${{ github.sha }}
           files: |
             artifacts/hlayout-windows-installer/*.exe
+            artifacts/hlayout-windows-installer/*.zip
             artifacts/hlayout-linux-deb/*.deb
             artifacts/hlayout-macos-dmg/*.dmg
           generate_release_notes: true

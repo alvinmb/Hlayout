@@ -60,7 +60,8 @@ from . import dialogs
 #: Where new issues are opened.
 ISSUES_URL = "https://github.com/alvinmb/Hlayout/issues/new"
 #: Where saved report bundles go.
-REPORT_DIR = os.path.join(os.path.expanduser("~"), ".hlayout", "bug_reports")
+from ..userdir import user_dir as _user_dir
+REPORT_DIR = os.path.join(_user_dir(), "bug_reports")
 #: Browsers and GitHub start refusing very long URLs well before 8 KB.
 MAX_ISSUE_URL = 7000
 
@@ -348,7 +349,7 @@ def _hang_files(max_age_days: float = 7.0):
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     out = []
     for p in (os.path.join(root, "hang_traceback.txt"),
-              os.path.join(_HOME, ".hlayout", "hang_traceback.txt")):
+              os.path.join(_user_dir(), "hang_traceback.txt")):
         try:
             if os.path.isfile(p) and time.time() - os.path.getmtime(p) < max_age_days * 86400:
                 if not any(os.path.samefile(p, q) for q in out):
