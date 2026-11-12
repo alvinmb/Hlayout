@@ -34,9 +34,43 @@ _STIPPLE_BITMAPS = {
 }
 
 
+#: how much of a layer's colour a stipple pattern shows -- for drawing it as a
+#: solid blend instead (View > Solid Layer Fills)
+_STIPPLE_DENSITY = {"gray12": 0.30, "gray25": 0.45, "gray50": 0.60, "gray75": 0.80}
+
+
 class LayoutCanvas(tk.Canvas):
     """Renders a single Cell from a Library. Coordinates are DBU; the
     canvas keeps its own pixel-per-DBU scale and pan offset."""
+
+    #: View > Solid Layer Fills: draw each stippled layer as a solid colour
+    #: (the layer colour blended into the background by the pattern's
+    #: density). Tk on Windows repaints a stipple from the corner of whatever
+    #: patch it is redrawing, not the canvas origin, so after a partial
+    #: repaint a small pad can come out (nearly) empty until a full redraw;
+    #: a solid fill can't. Default on for Windows (App sets it).
+    solid_fills = False
+    _blend_cache = None
+
+    def _blend(self, color, stipple):
+        """``color`` mixed into the canvas background as densely as the
+        stipple ``stipple`` would show it."""
+        key = (color, stipple)
+        cache = self._blend_cache
+        if cache is None:
+            cache = self._blend_cache = {}
+        if key in cache:
+            return cache[key]
+        try:
+            r, g, b = (v // 257 for v in self.winfo_rgb(color))
+            br, bg, bb = (v // 257 for v in self.winfo_rgb(self.cget("bg") or "#1e1e1e"))
+            a = _STIPPLE_DENSITY.get(stipple, 0.5)
+            out = "#%02x%02x%02x" % (round(br + (r - br) * a), round(bg + (g - bg) * a),
+                                     round(bb + (b - bb) * a))
+        except tk.TclError:
+            out = color
+        cache[key] = out
+        return out
 
     GRID_MINOR_DBU = mm_to_dbu(0.1)   # 0.1 mm, in DBU (DBU-size independent)
     GRID_MAJOR_EVERY = 10  # every 10 minor lines -> 1 mm
@@ -3730,6 +3764,9 @@ class LayoutCanvas(tk.Canvas):
         # doesn't blot out everything underneath it.
         color = self.SELECTED_COLOR if selected else layer.color
         stipple = None if selected else _STIPPLE_BITMAPS.get(layer.stipple)
+        if stipple and self.solid_fills:
+            color = self._blend(color, stipple)     # a solid blend, no stipple
+            stipple = None
         item = None
 
         if isinstance(shape, (Polygon, Rectangle)):

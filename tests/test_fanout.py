@@ -185,3 +185,37 @@ def test_a_finger_whose_bond_was_moved_off_it_still_moves_and_rebonds():
     assert r["rebonded"] and r["wires"]
     ends = [tuple(b.points[k]) for b in _bonds(s) for k in (0, -1)]
     assert (round(cx - 400), round(cy)) in ends                  # back on the finger's new centre
+
+
+def test_moving_a_bonded_die_takes_its_bonds_and_fingers_with_it():
+    """Auto Place's apply(): a die that has been fanned out keeps its wire
+    bonds and bond fingers -- they move and turn with it."""
+    from types import SimpleNamespace
+    from hlayout.scripting.autoplace_session import apply
+    s = _die_board(0)
+    s.fan_out_die_bonds()
+    rel = lambda pt, o, rot: (lambda x, y: (round(x), round(y)))(
+        *({0: (pt[0] - o[0], pt[1] - o[1]),
+           90: (pt[1] - o[1], -(pt[0] - o[0]))}[rot]))
+    before = sorted(tuple(rel(p, (0, 0), 0) for p in b.points) for b in _bonds(s))
+    fb = sorted(tuple(sorted(rel(p, (0, 0), 0) for p in f.points)) for f in _fingers(s))
+    ballc = len([sh for sh in s.cell.shapes if sh.layer == 59])
+    placer = SimpleNamespace(parts=[SimpleNamespace(ref="U1", cell="DIE", x=5000, y=-3000, rot=90)])
+    info = {"cell": "TOP", "netlist": SimpleNamespace(pad_nets=lambda: {})}
+    with s._batch():
+        apply(s, placer, info)
+    assert info["carried"] == {"bonds": 7, "fingers": 7}
+    after = sorted(tuple(rel(p, (5000, -3000), 90) for p in b.points) for b in _bonds(s))
+    assert after == before
+    fa = sorted(tuple(sorted(rel(p, (5000, -3000), 90) for p in f.points)) for f in _fingers(s))
+    assert fa == fb
+    assert len([sh for sh in s.cell.shapes if sh.layer == 59]) == ballc
+    # every bond still starts on one of the die's pads where the die now is
+    from hlayout.scripting.fanout import die_pads
+    from hlayout.scripting.autoplace_session import _xf
+    r = next(r for r in s.cell.srefs if r.label == "U1")
+    pads = [_xf(r)(v) for v in die_pads(s.library, "DIE", [58]).values()]
+    for b in _bonds(s):
+        assert any(abs(b.points[0][0] - x) <= 1 and abs(b.points[0][1] - y) <= 1 for x, y in pads) or \
+            any(abs(b.points[1][0] - x) <= 1 and abs(b.points[1][1] - y) <= 1 for x, y in pads)
+

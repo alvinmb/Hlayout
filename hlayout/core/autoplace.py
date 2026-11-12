@@ -131,6 +131,9 @@ class Placer:
     def __init__(self, parts: List[Part], nets: List[PNet], region, grid: float = 50.0,
                  thermal: float = 0.0, obstacles=(), seed: int = 0):
         self._stop = None
+        #: what run() is doing now, for a progress display (read from another
+        #: thread; only ever replaced, never mutated)
+        self.phase = ""
         self.parts = parts
         self.nets = [n for n in nets if len(n.members) + len(n.anchors) >= 2 and n.weight > 0]
         self.region = tuple(region)
@@ -314,6 +317,15 @@ class Placer:
             step = max(g, g * math.ceil(size / 8.0 / g))
         snap = lambda v, o: o + round((v - o) / g) * g
         x0, y0 = self.region[0], self.region[1]
+        R = self.region
+        # where the part's origin can go and still sit inside the region:
+        # spots outside that are skipped without the (costly) overlap test
+        wb = rot_bbox(self.parts[i].bbox, self.parts[i].rot)
+        xlo, xhi = R[0] - wb[0] - 1, R[2] - wb[2] + 1
+        ylo, yhi = R[1] - wb[1] - 1, R[3] - wb[3] + 1
+        if xlo > xhi or ylo > yhi:
+            return None                               # bigger than the region this way round
+        span = max(R[2] - R[0], R[3] - R[1])
         tx, ty = snap(tx, x0), snap(ty, y0)
         if self._legal(i, tx, ty):
             return tx, ty
@@ -327,20 +339,25 @@ class Placer:
             pts.sort(key=lambda d: math.hypot(*d))
             for dx, dy in pts:
                 x, y = snap(tx + dx * step, x0), snap(ty + dy * step, y0)
+                if x < xlo or x > xhi or y < ylo or y > yhi:
+                    continue
                 if self._legal(i, x, y):
                     return x, y
-            if ring * step > 2 * max(self.region[2] - self.region[0], self.region[3] - self.region[1]):
+            if ring * step > span:                    # the whole region searched
                 break
         return None
 
-    def start(self):
+    def start(self, on_progress=None):
         """Fixed and already-placed parts stay; the rest go in order of how
         many connections they have to what is already placed, each at the
         centroid of those connections, at the nearest free grid spot."""
         cx = (self.region[0] + self.region[2]) / 2.0
         cy = (self.region[1] + self.region[3]) / 2.0
         todo = [i for i in self.movable if not self.parts[i].placed]
+        n0 = max(1, len(todo))
         while todo:
+            if on_progress:
+                on_progress(1.0 - len(todo) / n0)
             def links(i):
                 pts = []
                 for k in self.part_nets[i]:
@@ -360,6 +377,7 @@ class Placer:
                 spot = (tx, ty)
             p.x, p.y = spot
             p.placed = True
+            self.phase = f"First placement: {p.ref}"
             todo.remove(best)
         self.net_len = [self._net_length(k) for k in range(len(self.nets))]
 
@@ -399,7 +417,10 @@ class Placer:
             p.x, p.y, p.rot = x, y, r
         self.net_len = [self._net_length(k) for k in range(len(self.nets))]
 
-    def legalise(self):
+    def legalise(self, on_progress=None):
+        """Snap to the grid and move every overlapping / out-of-region part to
+        the nearest legal spot. A part with no legal spot anywhere is left
+        where it is (and not searched for again in a later pass)."""
         g = self.grid
         x0, y0 = self.region[0], self.region[1]
         for i in self.movable:
@@ -408,14 +429,21 @@ class Placer:
             p.y = y0 + round((p.y - y0) / g) * g
         cx = (self.region[0] + self.region[2]) / 2.0
         cy = (self.region[1] + self.region[3]) / 2.0
+        stuck = set()
+        self.stuck = []
         for _pass in range(6):
-            bad = [i for i in self.movable if not self._legal(i, self.parts[i].x, self.parts[i].y)]
+            bad = [i for i in self.movable if i not in stuck and
+                   not self._legal(i, self.parts[i].x, self.parts[i].y)]
             if not bad:
                 break
             bad.sort(key=lambda i: -(self.parts[i].bbox[2] - self.parts[i].bbox[0]) *
                      (self.parts[i].bbox[3] - self.parts[i].bbox[1]))
-            for i in bad:
+            for k, i in enumerate(bad):
                 p = self.parts[i]
+                self.phase = f"Legalising {p.ref} ({k + 1}/{len(bad)}, pass {_pass + 1})"
+                if on_progress:
+                    on_progress((_pass + k / len(bad)) / 6.0)
+                self._check_stop()
                 if self._legal(i, p.x, p.y):
                     continue
                 spot = self._spiral(i, p.x, p.y) or self._spiral(i, cx, cy)
@@ -429,6 +457,9 @@ class Placer:
                         p.rot = old
                 if spot:
                     p.x, p.y = spot
+                else:
+                    stuck.add(i)                     # nowhere legal: don't search again
+        self.stuck = [self.parts[i].ref for i in stuck]
         self.net_len = [self._net_length(k) for k in range(len(self.nets))]
 
     def orient(self, sweeps=3):
@@ -445,6 +476,7 @@ class Placer:
                 p = self.parts[i]
                 if not self.part_nets[i]:
                     continue
+                self._check_stop()
                 best = None
                 for r in (90, 180, 270):
                     o, n = p.rot, (p.rot + r) % 360
@@ -475,27 +507,40 @@ class Placer:
         """Place. ``cancel`` -- a callable -- is polled all through, so Stop
         works in the first placement and legalising passes too; a stop
         there raises Stopped (nothing placed), one in the annealing keeps
-        the best placement so far."""
+        the best placement so far. ``on_progress`` gets 0..1 across every
+        phase; ``self.phase`` names the one running."""
         self._stop = cancel
+
+        def span(a, b):
+            return (lambda f: on_progress(a + (b - a) * max(0.0, min(1.0, f)))) if on_progress else None
         if not improve:
-            self.start()
+            self.phase = "First placement"
+            self.start(on_progress=span(0.0, 0.05))
         else:
             for p in self.parts:
                 p.placed = True
         bad, out = self.overlaps()
         if bad or out or not improve:
-            self.legalise()
+            self.phase = "Legalising"
+            self.legalise(on_progress=span(0.05, 0.15))
             bad, out = self.overlaps()
         self.legal_only = not bad and not out
         if improve:
-            self.anneal(effort, on_progress=on_progress, cancel=cancel, hot=0.05)
+            self.phase = "Improving"
+            self.anneal(effort, on_progress=span(0.15, 0.9), cancel=cancel, hot=0.05)
         else:
             # explore, then refine (the refine pass is what makes it repeatable)
-            half = (lambda f: on_progress(f * 0.6)) if on_progress else None
-            rest = (lambda f: on_progress(0.6 + f * 0.4)) if on_progress else None
-            self.anneal(effort, on_progress=half, cancel=cancel, hot=1.0)
-            self.anneal(effort * 0.7, on_progress=rest, cancel=cancel, hot=0.05)
-        self.legalise()
-        self.orient()
+            self.phase = "Annealing (explore)"
+            self.anneal(effort, on_progress=span(0.15, 0.6), cancel=cancel, hot=1.0)
+            self.phase = "Annealing (refine)"
+            self.anneal(effort * 0.7, on_progress=span(0.6, 0.9), cancel=cancel, hot=0.05)
+        self.phase = "Legalising"
+        try:
+            self.legalise(on_progress=span(0.9, 0.97))
+            self.phase = "Turning parts to face their nets"
+            self.orient()
+        except Stopped:
+            pass                          # stopped late: keep what the annealing found
+        self.phase = "Done"
         if on_progress:
             on_progress(1.0)

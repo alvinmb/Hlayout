@@ -5,6 +5,7 @@
 """Main application window for the Thick-Film Hybrid Layout CAD tool."""
 
 import os
+import sys
 import time
 import webbrowser
 import zipfile
@@ -448,6 +449,15 @@ class App(tk.Tk):
         self.show_pins_var = tk.BooleanVar(value=self.canvas.show_pin_numbers)
         viewm.add_checkbutton(label="Show Pin Numbers", variable=self.show_pins_var,
                                command=self._on_show_pins_change)
+        try:
+            from ..io.app_settings import get_setting as _gs
+            _sf = _gs("solid_fills")
+        except Exception:
+            _sf = None
+        self.canvas.solid_fills = (sys.platform == "win32") if _sf is None else bool(_sf)
+        self.solid_fills_var = tk.BooleanVar(value=self.canvas.solid_fills)
+        viewm.add_checkbutton(label="Solid Layer Fills", variable=self.solid_fills_var,
+                              command=self._on_solid_fills_change)
         self.show_sli_var = tk.BooleanVar(value=False)
         viewm.add_checkbutton(label="Straight-Line Interconnects", variable=self.show_sli_var,
                                command=self._on_show_sli_change)
@@ -2335,6 +2345,18 @@ class App(tk.Tk):
             return
         self.refresh_all()
         self.status.set(f"removed {removed} dielectric polygon(s)")
+
+    def _on_solid_fills_change(self):
+        """View > Solid Layer Fills: solid blended colours instead of stipple
+        patterns (Tk on Windows can leave a stippled pad looking empty after a
+        partial repaint). Remembered for next time."""
+        self.canvas.solid_fills = bool(self.solid_fills_var.get())
+        try:
+            from ..io.app_settings import set_setting
+            set_setting("solid_fills", self.canvas.solid_fills)
+        except Exception:
+            pass
+        self.canvas.redraw()
 
     def _on_show_pins_change(self):
         self.canvas.show_pin_numbers = self.show_pins_var.get()

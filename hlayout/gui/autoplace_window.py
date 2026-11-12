@@ -475,6 +475,7 @@ class AutoPlaceWindow(tk.Toplevel):
             prog["f"] = f
 
         self._result = None
+        job = {}
 
         def tick():
             # the worker never touches Tk: it leaves its result here and
@@ -483,8 +484,9 @@ class AutoPlaceWindow(tk.Toplevel):
                 self._done(*self._result)
                 return
             if self._running:
-                self._say(f"Placing {int(100 * prog['f'])}% -- {time.monotonic() - t0:.0f} s", "run",
-                          100 * prog["f"])
+                ph = getattr(job.get("placer"), "phase", "") or "Placing"
+                self._say(f"{ph} -- {int(100 * prog['f'])}% -- {time.monotonic() - t0:.0f} s",
+                          "run", 100 * prog["f"])
                 self.after(150, tick)
         self.after(150, tick)
 
@@ -497,6 +499,7 @@ class AutoPlaceWindow(tk.Toplevel):
         except Exception as e:
             self._result = (None, None, e, 0)
             return
+        job["placer"] = placer
 
         def work():
             from ..core.autoplace import Stopped
@@ -556,6 +559,12 @@ class AutoPlaceWindow(tk.Toplevel):
             notes.append("no cell for: " + ", ".join(info["unmapped"]))
         if bad or out:
             notes.append(f"{len(bad)} overlap(s), {len(out)} outside")
+        cb = info.get("carried") or {}
+        if cb.get("bonds"):
+            notes.append(f"{cb['bonds']} wire bond(s) and {cb.get('fingers', 0)} bond finger(s) "
+                         "moved with their dies")
+        if getattr(placer, "stuck", None):
+            notes.append("no legal spot (left where they were): " + ", ".join(placer.stuck))
         if info["missing_pins"]:
             notes.append(f"{len(info['missing_pins'])} netlist pin(s) not on the footprint")
         if alive:

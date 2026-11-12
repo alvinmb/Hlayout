@@ -92,6 +92,7 @@ def test_a_thick_path_is_stippled_with_its_layers_fill_pattern():
         s.path(3, [(0, 5000), (8000, 5000)], width=2)    # thin  -> no stipple
         app.canvas.set_cell("TOP")
         app.canvas.scale = 0.05
+        app.canvas.solid_fills = False      # the stipple patterns (View > Solid Layer Fills off)
         app.canvas.redraw()
 
         polys, lines = {}, {}
@@ -168,3 +169,24 @@ def test_aref_nested_inside_a_placed_cell_still_draws():
         assert len(polys) >= 9
     finally:
         app.destroy()
+
+
+def test_solid_layer_fills_draw_a_blended_colour_and_no_stipple():
+    app = _make_app()
+    try:
+        s = app.session
+        s.library.layers.set_style(3, fill=True, stipple=3, visible=True)
+        s.rect(3, 0, 0, 4000, 400)
+        app.canvas.set_cell("TOP")
+        app.canvas.scale = 0.05
+        app.canvas.solid_fills = True
+        app.canvas.redraw()
+        items = [i for i in app.canvas.find_all()
+                 if (app.canvas._item_to_shape.get(i) or ("",))[0] == "shape"]
+        assert items
+        for i in items:
+            assert app.canvas.itemcget(i, "stipple") == ""
+            assert app.canvas.itemcget(i, "fill") not in ("", s.library.layers[3].color)
+    finally:
+        app.destroy()
+

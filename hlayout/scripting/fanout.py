@@ -264,3 +264,109 @@ def fan_out(session, cell_name: Optional[str] = None, refs=None, all_pads: bool 
             report["fingers"] += len(made)
     session._notify()
     return report
+
+
+# --- keeping a die's bonds with it when it moves -------------------------------------
+
+def _inverse(f):
+    """The inverse of an instance transform f (an affine map: rotation,
+    mirror, magnification, offset)."""
+    t = f((0.0, 0.0))
+    a = f((1.0, 0.0))
+    b = f((0.0, 1.0))
+    ax, ay = a[0] - t[0], a[1] - t[1]
+    bx, by = b[0] - t[0], b[1] - t[1]
+    det = ax * by - bx * ay
+
+    def g(p):
+        x, y = p[0] - t[0], p[1] - t[1]
+        return ((x * by - y * bx) / det, (ax * y - ay * x) / det)
+    return g
+
+
+def carry_bonds(session, cell_name: str, moved: dict, tol: float = 2.0) -> dict:
+    """A die has moved: bring its fan-out with it. ``moved`` = {ref: (f_old,
+    f_new, part_cell)} -- the instance transforms before and after. Every
+    wire bond (bond-layer path, with its end balls) that has an end on one of
+    the die's pads, and the bond finger (an unpinned rectangle on a routing
+    conductor) under its other end, are moved by the same change of place
+    and turn, so they stay where they were relative to the die. A bond whose
+    other end is on another die is left alone. Call inside the caller's
+    undo step. Returns {"bonds", "fingers"} moved."""
+    from ..io.techfile import load_bond_rules
+    from ..core.shapes import Polygon
+    lib = session.library
+    cell = lib.cells[cell_name]
+    br = load_bond_rules(lib)
+    pad_layers = [int(l) for l in (br.get("die_pad_layers") or []) if int(l) >= 0]
+    blay = int(br.get("layer", -1))
+    out = {"bonds": 0, "fingers": 0}
+    if not pad_layers or blay < 0 or not moved:
+        return out
+    try:
+        route = set(session._route_layers())
+    except LayoutError:
+        route = set()
+    bonds = [sh for sh in cell.shapes if isinstance(sh, Path) and sh.layer == blay
+             and len(sh.points) == 2]
+    balls = [sh for sh in cell.shapes if isinstance(sh, Polygon) and sh.layer == blay]
+    fingers = [sh for sh in cell.shapes if isinstance(sh, Rectangle) and sh.layer in route
+               and not getattr(sh, "pin", "")]
+    # every die pad in the cell, where it was before anything moved
+    old_pads = []
+    for r in cell.srefs:
+        if not r.label:
+            continue
+        f_old = moved[r.label][0] if r.label in moved else _xf(r)
+        cname = moved[r.label][2] if r.label in moved else r.cell_name
+        for v in die_pads(lib, cname, pad_layers).values():
+            old_pads.append((r.label, f_old(v)))
+
+    def near(p, q):
+        return abs(p[0] - q[0]) <= tol and abs(p[1] - q[1]) <= tol
+
+    def owner(p):
+        for ref, w in old_pads:
+            if near(p, w):
+                return ref
+        return None
+    done = set()
+    for ref, (f_old, f_new, _cname) in moved.items():
+        inv = _inverse(f_old)
+
+        def mv(p, inv=inv, f_new=f_new):
+            x, y = f_new(inv(p))
+            return (int(round(x)), int(round(y)))
+        if all(near(f_old(q), f_new(q)) for q in ((0.0, 0.0), (1000.0, 0.0), (0.0, 1000.0))):
+            continue                                  # didn't move
+        for sh in bonds:
+            if id(sh) in done:
+                continue
+            a, b = sh.points[0], sh.points[1]
+            oa, ob = owner(a), owner(b)
+            if ref not in (oa, ob):
+                continue
+            other = ob if oa == ref else oa
+            if other is not None and other != ref:
+                continue                              # die to die: not this one's alone
+            land = b if oa == ref else a
+            for ball in balls:
+                if id(ball) in done:
+                    continue
+                x0, y0, x1, y1 = ball.bbox()
+                c = ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
+                if near(c, a) or near(c, b):
+                    ball.points = [mv(p) for p in ball.points]
+                    done.add(id(ball))
+            for fg in fingers:
+                if id(fg) in done:
+                    continue
+                x0, y0, x1, y1 = fg.bbox()
+                if x0 - tol <= land[0] <= x1 + tol and y0 - tol <= land[1] <= y1 + tol:
+                    fg.points = [mv(p) for p in fg.points]
+                    done.add(id(fg))
+                    out["fingers"] += 1
+            sh.points = [mv(a), mv(b)]
+            done.add(id(sh))
+            out["bonds"] += 1
+    return out

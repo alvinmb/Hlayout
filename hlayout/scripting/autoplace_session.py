@@ -687,13 +687,19 @@ def apply(session, placer, info):
     lib = session.library
     cell = lib.cells[info["cell"]]
     by = {r.label: r for r in cell.srefs if r.label}
+    moved = {}
     for p in placer.parts:
         r = by.get(p.ref)
         if r is None:
             cell.add_sref(p.cell, (int(round(p.x)), int(round(p.y))), rotation=float(p.rot), label=p.ref)
         else:
+            f_old = _xf(r)
             r.origin = (int(round(p.x)), int(round(p.y)))
             r.rotation = float(p.rot)
+            moved[p.ref] = (f_old, _xf(r), r.cell_name)
+    # a bonded die's wire bonds and bond fingers move with it
+    from .fanout import carry_bonds
+    info["carried"] = carry_bonds(session, info["cell"], moved)
     refs = {p.ref for p in placer.parts}
     pads = {k: v for k, v in info["netlist"].pad_nets().items() if k.split(".")[0] in refs}
     # the netlist is the truth for the parts it places: their old pad names
