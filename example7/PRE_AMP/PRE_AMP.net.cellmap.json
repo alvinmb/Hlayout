@@ -1,0 +1,24 @@
+{
+  "netlist": "PRE_AMP.net",
+  "footprint_map": {
+    "ref:C1": "CAP_1210",
+    "ref:C10": "CAP_0805",
+    "ref:C11": "CAP_0805",
+    "ref:C12": "CAP_0805",
+    "ref:C13": "CAP_0805",
+    "ref:C15": "CAP_1210",
+    "ref:C16": "CAP_1210",
+    "ref:C17": "CAP_0805",
+    "ref:C2": "CAP_1210",
+    "ref:C3": "CAP_1210",
+    "ref:C4": "CAP_1210",
+    "ref:C5": "CAP_0805",
+    "ref:C6": "CAP_0805",
+    "ref:C8": "CAP_0805",
+    "ref:C9": "CAP_0805",
+    "ref:D1": "ZENER_5V1",
+    "ref:J30": "30_PIN_pkg",
+    "ref:L1": "L_1206_3216Metric",
+    "ref:U1": "OP249"
+  }
+}

@@ -1,0 +1,428 @@
+(session TOP
+  (base_design TOP)
+  (placement
+    (resolution um 1)
+    (component "IMG_C1"
+      (place C1 11220 -16650 front 0)
+    )
+    (component "IMG_C2"
+      (place C2 27520 -16700 front 0)
+    )
+    (component "IMG_C3"
+      (place C3 19170 -6850 front 0)
+    )
+    (component "IMG_C4"
+      (place C4 14920 -6500 front 0)
+    )
+    (component "IMG_C5"
+      (place C5 22895 -7000 front 0)
+    )
+    (component "IMG_C6"
+      (place C6 43645 -6200 front 0)
+    )
+    (component "IMG_C8"
+      (place C8 41695 -13450 front 0)
+    )
+    (component "IMG_C9"
+      (place C9 35895 -11250 front 0)
+    )
+    (component "IMG_C10"
+      (place C10 39195 -13500 front 0)
+    )
+    (component "IMG_C11"
+      (place C11 43895 -8950 front 0)
+    )
+    (component "IMG_C12"
+      (place C12 39145 -16800 front 0)
+    )
+    (component "IMG_C13"
+      (place C13 37995 -5700 front 0)
+    )
+    (component "IMG_C15"
+      (place C15 11320 -6550 front 0)
+    )
+    (component "IMG_C16"
+      (place C16 23170 -16450 front 0)
+    )
+    (component "IMG_C17"
+      (place C17 19770 -9975 front 0)
+    )
+    (component "IMG_D1"
+      (place D1 36520 -8550 front 0)
+    )
+    (component "IMG_IO"
+      (place IO 0 0 front 0)
+    )
+    (component "IMG_R1"
+      (place R1 10820 -11950 front 0)
+    )
+    (component "IMG_R2"
+      (place R2 32020 -17050 front 0)
+    )
+    (component "IMG_R3"
+      (place R3 35670 -16600 front 0)
+    )
+    (component "IMG_R4"
+      (place R4 39820 -10750 front 0)
+    )
+    (component "IMG_R5"
+      (place R5 20170 -12600 front 0)
+    )
+    (component "IMG_R6"
+      (place R6 15520 -12600 front 0)
+    )
+    (component "IMG_R7"
+      (place R7 34670 -13850 front 0)
+    )
+    (component "IMG_R8"
+      (place R8 44070 -12350 front 0)
+    )
+    (component "IMG_R9"
+      (place R9 41870 -17050 front 0)
+    )
+    (component "IMG_R10"
+      (place R10 44220 -16650 front 0)
+    )
+    (component "IMG_R11"
+      (place R11 25970 -7450 front 0)
+    )
+    (component "IMG_R12"
+      (place R12 29470 -6700 front 0)
+    )
+    (component "IMG_R14"
+      (place R14 40970 -6600 front 0)
+    )
+    (component "IMG_R15"
+      (place R15 34970 -6250 front 0)
+    )
+    (component "IMG_R16"
+      (place R16 18820 -17250 front 0)
+    )
+    (component "IMG_L1"
+      (place L1 24470 -11600 front 0)
+    )
+    (component "IMG_BOND"
+      (place BOND 30656 -11121 front 0)
+    )
+    (component "IMG_HL_KEEP"
+      (place "HL_KEEP" 0 0 front 0)
+    )
+  )
+  (was_is
+  )
+  (routes 
+    (resolution um 1)
+    (parser
+      (host_cad HLayout)
+      (host_version "1")
+    )
+    (library_out 
+      (padstack "VIA_SIG"
+        (shape
+          (rect L3 -300 -300 300 300)
+        )
+        (attach off)
+      )
+      (padstack "VIA_PWR"
+        (shape
+          (rect L3 -450 -450 450 450)
+        )
+        (attach off)
+      )
+    )
+    (network_out 
+      (net "Net-(C8-Pad1)"
+        (wire
+          (path L3 300
+            34393 -12300
+            34393 -11900
+            35895 -11900
+          )
+        )
+        (wire
+          (path L3 300
+            34393 -16600
+            34393 -12300
+          )
+        )
+      )
+      (net "Net-(U1B-+)"
+        (wire
+          (path L3 300
+            44220 -15317
+            44220 -13683
+            44070 -13683
+          )
+        )
+      )
+      (net "Net-(C11-Pad2)"
+        (wire
+          (path L3 300
+            26068 -12171
+            27418 -12171
+          )
+        )
+        (wire
+          (path L3 300
+            30430 -4325
+            9460 -4325
+            9460 -8904
+            12272 -8904
+            12272 -10862
+            16173 -10862
+            16173 -14067
+            19804 -14067
+            19804 -11100
+            22780 -11100
+            22780 -11454
+            26068 -11454
+            26068 -12171
+          )
+        )
+        (wire
+          (path L3 300
+            26068 -12171
+            26068 -13852
+            25468 -13852
+            25468 -15250
+            23170 -15250
+          )
+        )
+        (wire
+          (path L3 300
+            30430 -4325
+            30430 -4225
+            39072 -4225
+            39072 -4495
+            45010 -4495
+            45010 -8300
+            43895 -8300
+          )
+        )
+        (wire
+          (path L3 300
+            30430 -6700
+            30430 -4325
+          )
+        )
+      )
+      (net "Net-(C1-Pad1)"
+        (wire
+          (path L3 300
+            10820 -13227
+            11220 -13227
+            11220 -15450
+          )
+        )
+      )
+      (net "Net-(C10-Pad1)"
+        (wire
+          (path L3 300
+            41870 -16090
+            40445 -16090
+            40445 -12850
+          )
+        )
+        (wire
+          (path L3 300
+            39195 -12850
+            40445 -12850
+          )
+        )
+        (wire
+          (path L3 300
+            40445 -12850
+            41695 -12850
+            41695 -12800
+          )
+        )
+      )
+      (net "Net-(C10-Pad2)"
+        (wire
+          (path L3 300
+            36003 -13850
+            39195 -13850
+            39195 -14150
+          )
+        )
+      )
+      (net "Net-(C11-Pad1)"
+        (wire
+          (path L3 300
+            44070 -11017
+            43895 -11017
+            43895 -9600
+          )
+        )
+      )
+      (net "Net-(C12-Pad1)"
+        (wire
+          (path L3 300
+            41870 -18010
+            39145 -18010
+            39145 -17450
+          )
+        )
+        (wire
+          (path L3 300
+            44220 -17983
+            41870 -17983
+            41870 -18010
+          )
+        )
+      )
+      (net "Net-(C12-Pad2)"
+        (wire
+          (path L3 300
+            28510 -6700
+            28500 -6700
+          )
+        )
+        (wire
+          (path L3 300
+            28500 -6700
+            25970 -6700
+            25970 -6117
+          )
+        )
+      )
+      (net +5V
+        (wire
+          (path L3 300
+            37995 -6350
+            37995 -7061
+            34970 -7061
+          )
+        )
+        (wire
+          (path L3 300
+            22895 -6350
+            19170 -6350
+            19170 -5650
+          )
+        )
+      )
+      (net "Net-(C15-Pad1)"
+        (wire
+          (path L3 300
+            22895 -7650
+            19170 -7650
+            19170 -7750
+          )
+        )
+        (wire
+          (path L3 300
+            19170 -7750
+            19170 -8050
+          )
+        )
+        (wire
+          (path L3 300
+            11320 -7750
+            14158 -7750
+          )
+        )
+        (wire
+          (path L3 300
+            14158 -7750
+            14920 -7750
+            14920 -7700
+          )
+        )
+        (wire
+          (path L3 300
+            14158 -7750
+            19170 -7750
+          )
+        )
+        (wire
+          (path L3 300
+            18650 -12600
+            18650 -9975
+          )
+        )
+        (wire
+          (path L3 300
+            19120 -9975
+            18650 -9975
+          )
+        )
+        (wire
+          (path L3 300
+            40970 -5640
+            42422 -5640
+            42422 -6850
+            42771 -6850
+          )
+        )
+        (wire
+          (path L3 300
+            42771 -6850
+            43645 -6850
+          )
+        )
+        (wire
+          (path L3 300
+            42771 -6850
+            42771 -8412
+            42618 -8412
+            42618 -10750
+            41097 -10750
+          )
+        )
+        (wire
+          (path L3 300
+            17040 -12600
+            18650 -12600
+          )
+        )
+        (wire
+          (path L3 300
+            18650 -9975
+            14158 -9975
+            14158 -7750
+          )
+        )
+      )
+      (net "Net-(C16-Pad1)"
+        (wire
+          (path L3 300
+            20097 -17250
+            23170 -17250
+            23170 -17650
+          )
+        )
+      )
+      (net MIC
+        (wire
+          (path L3 300
+            24470 -10250
+            24470 -9975
+            20420 -9975
+          )
+        )
+      )
+      (net "Net-(C2-Pad1)"
+        (wire
+          (path L3 300
+            32020 -18327
+            28720 -18327
+            28720 -16700
+          )
+        )
+      )
+      (net "Net-(L1-Pad2)"
+        (wire
+          (path L3 300
+            24470 -12950
+            24470 -14225
+            21468 -14225
+            21468 -14925
+            17543 -14925
+            17543 -17250
+          )
+        )
+      )
+    )
+  )
+)

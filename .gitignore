@@ -35,3 +35,6 @@ hlayout_project.zip
 example5/_frtest/
 hang_traceback.txt
 _upload/
+
+# KiCad local history (its own git repo)
+.history/

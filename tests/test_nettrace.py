@@ -155,3 +155,20 @@ def test_a_via_cell_dropped_after_the_fill_still_joins_the_layers():
     assert s.highlight_net("IO.1").pins == ["IO.1"]      # fill already generated
     s.sref("VIA35", (4000, 0))
     assert s.highlight_net("IO.1").pins == ["IO.1", "U1.2"]
+
+
+def test_the_highlight_follows_a_moved_part():
+    s = Session.new("FOLLOW")
+    s.new_cell("PART")
+    s.rect(3, -200, -200, 200, 200, pin="1")
+    s.new_cell("TOP")
+    rr = load_route_rules(s.library); rr["layer_a"] = 3; rr["layer_b"] = 5
+    save_route_rules(s.library, rr)
+    ref = s.sref("PART", (0, 0))
+    ref.label = "U1"
+    s.set_net_names({"U1.1": "SIG"})
+    tr = s.highlight_net("U1.1")
+    assert tr.pad_boxes[0][0] == -200
+    ref.origin = (5000, 0)                         # dragged
+    tr2 = s.retrace_net_highlight()
+    assert tr2.pad_boxes[0][0] == 4800 and s.net_highlight is tr2 and tr2.name == "SIG"

@@ -1232,6 +1232,9 @@ class ResistorDesignerWindow(tk.Toplevel):
         self._next_place_x = 0.0
         self._next_place_y = 0.0
         self._build()
+        if app is not None:          # Undo / Redo work from this window too
+            self.bind("<Control-z>", lambda e: (app._undo(), "break")[1])
+            self.bind("<Control-y>", lambda e: (app._redo(), "break")[1])
         self._load_resistors()
         self._refresh_all()
         if self._shape_changed:
@@ -1332,9 +1335,15 @@ class ResistorDesignerWindow(tk.Toplevel):
         ttk.Separator(toolbar, orient="vertical").pack(side="left", fill="y", padx=8)
         ttk.Button(toolbar, text="Design Rules...", command=self._open_design_rules).pack(
             side="left", padx=2)
+        # a second row: the first is already as wide as the window, and
+        # anything past its edge was cut off (Place All, Import/Export ...)
+        toolbar = ttk.Frame(self, padding=(6, 0, 6, 6))
+        toolbar.pack(fill="x")
         ttk.Button(toolbar, text="Place in Layout...", command=self._place_in_layout).pack(
             side="left", padx=2)
         ttk.Button(toolbar, text="Place All in Layout...", command=self._place_all_in_layout).pack(
+            side="left", padx=2)
+        ttk.Button(toolbar, text="Remove Placed...", command=self._remove_placed).pack(
             side="left", padx=2)
         ttk.Separator(toolbar, orient="vertical").pack(side="left", fill="y", padx=8)
         ttk.Button(toolbar, text="Trim Simulator...", command=self._open_trim_simulator).pack(
@@ -1450,6 +1459,12 @@ class ResistorDesignerWindow(tk.Toplevel):
             self.sol_panel.clear()
 
     def _auto_select_all(self):
+        """Give every resistor the best solution for the Optimise mode,
+        and say what changed -- often nothing: a resistor already gets its
+        recommended solution when it is added or loaded, which is what
+        "aspect" picks."""
+        before = {id(r): (r.selected.ink_rsh, r.selected.body_length) if r.selected else None
+                  for r in self.resistors}
         for res in self.resistors:
             res.compute_solutions(self.rules)
         self._apply_selection_criteria()
@@ -1457,6 +1472,18 @@ class ResistorDesignerWindow(tk.Toplevel):
         r = self.res_table.current_row()
         if r >= 0:
             self._on_res_selected(r)
+        changed = [x.ref_des for x in self.resistors
+                   if before.get(id(x)) != ((x.selected.ink_rsh, x.selected.body_length)
+                                            if x.selected else None)]
+        none = [x.ref_des for x in self.resistors if not x.solutions]
+        mode = {"aspect": "nearest to square", "inks": "fewest inks",
+                "area": "smallest area"}.get(self.rules.select_mode, self.rules.select_mode)
+        msg = (f"Auto-Select All ({mode}): {len(self.resistors) - len(none)} resistor(s) "
+               f"selected -- " + (f"changed: {', '.join(changed)}" if changed else
+                                  "no change, each already had that solution"))
+        if none:
+            msg += f"  |  no solution (check the inks / design rules): {', '.join(none)}"
+        self.status_var.set(msg)
 
     def _on_select_mode_change(self):
         self.rules.select_mode = self.select_mode_var.get()
@@ -1703,25 +1730,62 @@ class ResistorDesignerWindow(tk.Toplevel):
 
         geom_rules = load_resistor_geometry_rules(self.library)
         placed = 0
-        for res in sized:
-            sol = res.selected
-            x, y = self._default_place_x(sol, geom_rules), self._next_place_y
-            try:
-                self.app.session.generate_resistor(
-                    x, y, sol.body_width, sol.body_length,
-                    ink_rsh=sol.ink_rsh, ref_des=res.ref_des, n_folds=sol.n_folds,
-                    shape=sol.shape, shape_params=sol.shape_params)
-            except LayoutError as e:
-                dialogs.show_error("Place All in Layout",
-                                      f"{res.ref_des}: {e}", parent=self)
-                break
-            self._advance_place_cursor(x, sol, geom_rules)
-            placed += 1
+        # the whole row is ONE undo step: Edit > Undo (Ctrl+Z) takes every
+        # resistor it placed back out
+        with self.app.session._batch():
+            for res in sized:
+                sol = res.selected
+                x, y = self._default_place_x(sol, geom_rules), self._next_place_y
+                try:
+                    self.app.session.generate_resistor(
+                        x, y, sol.body_width, sol.body_length,
+                        ink_rsh=sol.ink_rsh, ref_des=res.ref_des, n_folds=sol.n_folds,
+                        shape=sol.shape, shape_params=sol.shape_params)
+                except LayoutError as e:
+                    dialogs.show_error("Place All in Layout",
+                                          f"{res.ref_des}: {e}", parent=self)
+                    break
+                self._advance_place_cursor(x, sol, geom_rules)
+                placed += 1
         self.app.refresh_all()
-        msg = f"placed {placed} resistor(s) in a row, starting after the last placement"
+        msg = (f"placed {placed} resistor(s) in a row, starting after the last placement "
+               "(one undo step; Remove Placed... takes them out)")
         if skipped:
             msg += f"  |  skipped (no solution): {', '.join(r.ref_des for r in skipped)}"
         self.status_var.set(msg)
+
+    def _remove_placed(self):
+        """Take every resistor in the list that was placed in the layout
+        (Place / Place All) back out of the current cell, and its device
+        cell -- one undo step."""
+        if self.app is None:
+            return
+        refs = [r.ref_des for r in self.resistors]
+        cell = self.app.session.library.cells.get(self.app.session.current_cell_name)
+        there = sorted({x.label for x in (cell.srefs if cell else [])
+                        if x.label in refs and (x.cell_name == x.label
+                                                or x.cell_name.startswith(x.label + "_"))})
+        if not there:
+            dialogs.show_info("Remove Placed Resistors",
+                              "None of the resistors in the list is placed in this cell.",
+                              parent=self)
+            return
+        if not dialogs.ask_yes_no(
+                "Remove Placed Resistors",
+                f"Remove the {len(there)} placed resistor(s) from "
+                f"{self.app.session.current_cell_name}?\n\n{', '.join(there)}\n\n"
+                "Their designs stay in the list. One undo step (Ctrl+Z puts them back).",
+                parent=self):
+            return
+        try:
+            gone = self.app.session.remove_placed_resistors(refs)
+        except LayoutError as e:
+            dialogs.show_error("Remove Placed Resistors", str(e), parent=self)
+            return
+        self._next_place_x = 0.0
+        self._next_place_y = 0.0
+        self.app.refresh_all()
+        self.status_var.set(f"removed {len(gone)} placed resistor(s): {', '.join(gone)}")
 
     # -- I/O -----------------------------------------------------------------
     def _new(self):

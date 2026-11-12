@@ -69,6 +69,13 @@ class AutoPlaceWindow(tk.Toplevel):
         files.columnconfigure(1, weight=1)
         self.summary = ttk.Label(files, text="", foreground="#555")
         self.summary.grid(row=2, column=1, sticky="w")
+        # the flow: Read Netlist -> design the resistors -> place
+        self.flow = ttk.Label(files, text="", foreground="#555")
+        self.flow.grid(row=3, column=1, sticky="w")
+        fb = ttk.Frame(files)
+        fb.grid(row=3, column=2, sticky="e")
+        ttk.Button(fb, text="Read Netlist...", command=self._read_netlist).pack(side="left", padx=2)
+        ttk.Button(fb, text="Resistor Designer...", command=self._open_designer).pack(side="left")
 
         nb = ttk.Notebook(f)
         nb.pack(fill="both", expand=True, pady=(8, 0))
@@ -88,9 +95,15 @@ class AutoPlaceWindow(tk.Toplevel):
         side.pack(side="left", fill="y", padx=6)
         ttk.Label(side, text="Cell for the selected footprint:").pack(anchor="w")
         self.cell_var = tk.StringVar()
-        self.cell_box = ttk.Combobox(side, textvariable=self.cell_var, width=24, state="readonly")
+        self.cell_box = ttk.Combobox(side, textvariable=self.cell_var, width=24, state="readonly",
+                                     postcommand=self.refresh_cells)
         self.cell_box.pack(anchor="w")
+        self.cell_box.bind("<<ComboboxSelected>>", lambda e: self._map_footprint())
         ttk.Button(side, text="Map footprint", command=self._map_footprint).pack(anchor="w", pady=4)
+        ttk.Label(side, text="Choosing a cell maps it at once;\nthe map is saved with the design\n"
+                             "and next to the netlist\n(<netlist>.cellmap.json).",
+                  foreground="#666", justify="left").pack(anchor="w", pady=(6, 0))
+        self.parts.bind("<<TreeviewSelect>>", self._part_selected, add="+")
         # nets
         nf = ttk.Frame(nb, padding=4)
         nb.add(nf, text="Net weights")
@@ -139,6 +152,8 @@ class AutoPlaceWindow(tk.Toplevel):
         self.imp_btn.pack(side="left", padx=4)
         self.sel_btn = ttk.Button(bf, text="Place Selection", command=lambda: self.run("selection"))
         self.sel_btn.pack(side="left")
+        self.spread_btn = ttk.Button(bf, text="Spread", command=self._spread)
+        self.spread_btn.pack(side="left", padx=(4, 0))
         self.stop_btn = ttk.Button(bf, text="Stop", command=self._stop, state="disabled")
         self.stop_btn.pack(side="left", padx=4)
         self.sli_var = tk.BooleanVar(value=True)
@@ -158,7 +173,8 @@ class AutoPlaceWindow(tk.Toplevel):
         self._fill_res_layers(S)
         for cls, var in self.cw.items():
             var.set(f"{float(S['class_weights'].get(cls, 1.0)):g}")
-        self.cell_box["values"] = sorted(self.session.library.cells)
+        from ..scripting.autoplace_session import library_cells
+        self.cell_box["values"] = sorted(library_cells(self.session))
         last = S.get("last_netlist") if isinstance(S, dict) else None
         if last and not self.v["netlist"].get():
             self.v["netlist"].set(last)
@@ -188,6 +204,12 @@ class AutoPlaceWindow(tk.Toplevel):
             self._res_map[self._layer_name(n)] = n
         self.res_box["values"] = list(self._res_map)
         self.v["res_layer"].set(first if cur in (None, "") else self._layer_name(int(cur)))
+
+    def refresh_cells(self):
+        """The cells offered: the design's and every attached library's,
+        re-read each time the list opens (a library attached since)."""
+        from ..scripting.autoplace_session import library_cells
+        self.cell_box["values"] = sorted(library_cells(self.session))
 
     def _settings(self):
         out = {}
@@ -225,7 +247,8 @@ class AutoPlaceWindow(tk.Toplevel):
 
     def _load_netlist(self):
         from ..io.kicad_netlist import read_netlist
-        from ..scripting.autoplace_session import _family, _net_class, match_footprint
+        from ..scripting.autoplace_session import (_Cells, _family, _is_header, _net_class,
+                                                   library_cells, match_footprint)
         path = self.v["netlist"].get().strip()
         try:
             self.nl = read_netlist(path)
@@ -233,15 +256,21 @@ class AutoPlaceWindow(tk.Toplevel):
             self.summary.config(text=f"Can't read the netlist: {e}")
             self.nl = None
             return
+        from ..scripting.autoplace_session import merged_footprint_map
+        merged_footprint_map(self.session, path)
         S = self.session.autoplace_settings()
         lib = self.session.library
+        avail = _Cells(self.session)
         cell = lib.cells.get(self.session.current_cell_name)
         placed = {r.label: r.cell_name for r in (cell.srefs if cell else []) if r.label}
         self.parts.delete(*self.parts.get_children())
         natural = lambda r: [int(t) if t.isdigit() else t for t in re.findall(r"\d+|\D+", r)]
         for ref, c in sorted(self.nl.components.items(), key=lambda kv: natural(kv[0])):
-            cn = placed.get(ref) or match_footprint(lib, c.footprint, S["footprint_map"]) or ""
-            fam = _family(lib, c, cn or None, set()) or ("connector (not placed)" if not cn else "")
+            cn = placed.get(ref) or match_footprint(avail, c.footprint, S["footprint_map"],
+                                                    ref=ref) or ""
+            fam = _family(avail, c, cn or None, set()) or ("no cell -- map one" if not cn else "")
+            if fam != "die" and ref not in placed and _is_header(ref, c, cn or ""):
+                fam = "header (not placed)"
             self.parts.insert("", "end", iid=ref, values=(ref, c.value, c.footprint, cn, fam))
         self.nets.delete(*self.nets.get_children())
         for n in self.nl.nets:
@@ -249,6 +278,45 @@ class AutoPlaceWindow(tk.Toplevel):
             w = S["weights"].get(n.name, S["class_weights"].get(cls, 1.0))
             self.nets.insert("", "end", iid=n.name, values=(n.name, cls, len(n.nodes), f"{float(w):g}"))
         self.summary.config(text=f"{len(self.nl.components)} parts, {len(self.nl.nets)} nets")
+        self._show_flow(placed)
+
+    def _show_flow(self, placed=None):
+        """Where the flow stands: resistors designed / still to design."""
+        from ..scripting.netlist_flow import resistor_status
+        if self.nl is None:
+            self.flow.config(text="")
+            return
+        try:
+            st = resistor_status(self.session, self.nl, placed=set(placed or {}))
+        except Exception as e:
+            self.flow.config(text=f"Resistors: can't check ({e})", foreground="#c5221f")
+            return
+        d, u = st["designed"], st["undesigned"]
+        if not d and not u:
+            self.flow.config(text="No printed resistors in this netlist.", foreground="#555")
+        elif u:
+            self.flow.config(text=f"Resistors: {len(d)} designed, {len(u)} to design before "
+                                  f"placing ({', '.join(u[:8])}{'...' if len(u) > 8 else ''})",
+                             foreground="#c5221f")
+        else:
+            self.flow.config(text=f"Resistors: all {len(d)} designed -- ready to place.",
+                             foreground="#1e8e3e")
+
+    def _read_netlist(self):
+        self.app.read_netlist()
+        S = self.session.autoplace_settings()
+        if S.get("last_netlist"):
+            self.v["netlist"].set(S["last_netlist"])
+        self._load_netlist()
+
+    def _open_designer(self):
+        from .resistor_designer import open_resistor_designer
+        win = open_resistor_designer(self.app)
+        try:                          # re-check the resistors when it closes
+            win.bind("<Destroy>", lambda e: self.after(100, self._load_netlist)
+                     if e.widget is win else None, add="+")
+        except Exception:
+            pass
 
     def _map_footprint(self):
         cell = self.cell_var.get()
@@ -257,12 +325,87 @@ class AutoPlaceWindow(tk.Toplevel):
             return
         S = self.session.autoplace_settings()
         fmap = dict(S["footprint_map"])
+        placed = []
         for ref in sel:
             fp = self.parts.set(ref, "footprint")
-            if fp:
-                fmap[fp] = cell
+            # by footprint name -- every part with that footprint follows;
+            # a part the netlist gives no footprint is mapped on its own
+            fmap[fp if fp else f"ref:{ref}"] = cell
+            if self.parts.set(ref, "cell") and self.parts.set(ref, "cell") != cell:
+                placed.append(ref)
         self.session.set_autoplace_settings(footprint_map=fmap)
+        self._save_cellmap(fmap)
         self._load_netlist()
+        keep = [r for r in sel if self.parts.exists(r)]
+        if keep:
+            self.parts.selection_set(keep)
+            self.parts.see(keep[-1])
+        still = [r for r in placed if self.parts.exists(r) and self.parts.set(r, "cell") != cell]
+        if still:
+            self.summary.config(text=f"{', '.join(still)} already placed as another cell -- "
+                                     "delete the placed part to remap it")
+
+    def _save_cellmap(self, fmap=None):
+        from ..scripting.autoplace_session import save_cellmap
+        path = self.v["netlist"].get().strip()
+        if fmap is None:
+            fmap = self.session.autoplace_settings()["footprint_map"]
+        return save_cellmap(path, fmap) if path and fmap else None
+
+    def _part_selected(self, _e=None):
+        """Show the selected part's cell in the cell box."""
+        sel = self.parts.selection()
+        if len(sel) == 1:
+            self.cell_var.set(self.parts.set(sel[0], "cell") or "")
+
+    def _save_all(self):
+        """Save everything entered in the window: the settings, the
+        netlist path and the cell map (design + next to the netlist)."""
+        try:
+            out = self._settings()
+        except Exception:
+            out = {}
+        path = self.v["netlist"].get().strip()
+        if path:
+            out["last_netlist"] = path
+        try:
+            self.session.set_autoplace_settings(**out)
+        except Exception:
+            pass
+        self._save_cellmap()
+
+    SPREAD_FILL = 0.6        # Spread: the parts (with clearance) cover this much of the area
+
+    def _spread(self):
+        """Spread the parts apart: the largest clearance (50 um steps) at
+        which the parts, clearance included, still fill only SPREAD_FILL
+        of the placement area -- set in the Clearance box -- then Improve."""
+        from ..scripting.autoplace_session import build_job
+        path = self.v["netlist"].get().strip()
+        if not path:
+            self._say("Pick the netlist first", "err")
+            return
+        try:
+            st = self._settings()
+            st["clearance"] = 0.0
+            self.session.set_autoplace_settings(**st)
+            placer, info = build_job(self.session, path,
+                                     overrides=self.v["overrides"].get().strip() or None)
+        except Exception as e:
+            self._say(str(e), "err")
+            return
+        r = info["region"]
+        area = (r[2] - r[0]) * (r[3] - r[1])
+        dims = [(p.bbox[2] - p.bbox[0], p.bbox[3] - p.bbox[1]) for p in placer.parts]
+        fill = lambda c: sum((a + c) * (b + c) for a, b in dims) / area
+        c = 0.0
+        while c < 20000 and fill(c + 50) <= self.SPREAD_FILL:
+            c += 50
+        self.v["clearance"].set(f"{c:g}")
+        self.session.set_autoplace_settings(clearance=c)
+        self._say(f"Spreading: clearance {c:g} um (parts fill {fill(c) * 100:.0f}% of the area)",
+                  "run")
+        self.run("improve")
 
     def _set_weight(self):
         try:
@@ -321,7 +464,7 @@ class AutoPlaceWindow(tk.Toplevel):
                 return
         ov = self.v["overrides"].get().strip() or None
         self._running, self._cancel = True, False
-        for b in (self.run_btn, self.imp_btn, self.sel_btn):
+        for b in (self.run_btn, self.imp_btn, self.sel_btn, self.spread_btn):
             b.config(state="disabled")
         self.stop_btn.config(state="normal")
         self._say("Placing 0%", "run", 0)
@@ -356,11 +499,15 @@ class AutoPlaceWindow(tk.Toplevel):
             return
 
         def work():
+            from ..core.autoplace import Stopped
             try:
                 placer.run(effort=float(info["settings"]["effort"]), improve=(mode != "run"),
                            on_progress=progress, cancel=lambda: self._cancel)
                 self._result = (placer, info, None, time.monotonic() - t0)
-            except Exception as e:
+            except Stopped:
+                self._result = (None, None, LayoutError("stopped before anything was placed"),
+                                time.monotonic() - t0)
+            except BaseException as e:            # never leave the window stuck 'running'
                 self._result = (None, None, e, time.monotonic() - t0)
         threading.Thread(target=work, daemon=True).start()
 
@@ -381,7 +528,7 @@ class AutoPlaceWindow(tk.Toplevel):
         except tk.TclError:
             alive = False
         if alive:
-            for b in (self.run_btn, self.imp_btn, self.sel_btn):
+            for b in (self.run_btn, self.imp_btn, self.sel_btn, self.spread_btn):
                 b.config(state="normal")
             self.stop_btn.config(state="disabled")
         if err is not None:
@@ -402,6 +549,9 @@ class AutoPlaceWindow(tk.Toplevel):
         notes = []
         if info["skipped"]:
             notes.append("not placed: " + ", ".join(info["skipped"]))
+        if info.get("header"):
+            notes.append("header / connector, not placed on the substrate: "
+                         + ", ".join(info["header"]))
         if info["unmapped"]:
             notes.append("no cell for: " + ", ".join(info["unmapped"]))
         if bad or out:
@@ -422,6 +572,7 @@ class AutoPlaceWindow(tk.Toplevel):
     def close(self):
         if self._running:
             self._cancel = True
+        self._save_all()
         self.destroy()
 
 

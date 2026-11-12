@@ -9,6 +9,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 
+from hlayout.core.errors import LayoutError
+
 pytest.importorskip("shapely")
 
 from hlayout.core.autoplace import PNet, Part, Placer, mst, rot_pt
@@ -232,6 +234,20 @@ def test_printed_resistor_is_generated_from_its_value(tmp_path):
     net = net.replace('(node (ref "U2") (pin "2")))))', '(node (ref "U2") (pin "2")) (node (ref "R1") (pin "1")))))')
     p = tmp_path / "r.net"
     p.write_text(net)
+    # the flow: read the netlist, design the resistor, then place
+    from hlayout.io.techfile import load_resistor_list, save_resistor_list
+    from hlayout.scripting.netlist_flow import designed_solution
+    s.read_netlist(str(p))
+    with pytest.raises(LayoutError, match="design the printed resistors first: R1"):
+        s.auto_place(str(p), effort=0.3, seed=1)
+    rows = load_resistor_list(s.library)
+    from hlayout.gui.resistor_designer import DesignRules, Resistor, width_for_power
+    res = Resistor(ref_des="R1", value=rows[0]["value"], tolerance=rows[0]["tolerance"],
+                   power_mw=rows[0]["power_mw"], body_width=width_for_power(rows[0]["power_mw"]))
+    res.compute_solutions(DesignRules.from_library(s.library))
+    rows[0]["selected_ink"] = res.solutions[0].ink_rsh
+    save_resistor_list(s.library, rows)
+    assert designed_solution(s.library, "R1") is not None
     r = s.auto_place(str(p), effort=0.3, seed=1)
     assert r["generated"] == ["R1"]
     refs = {x.label: x for x in s.library.cells["TOP"].srefs if x.label}
@@ -251,6 +267,7 @@ def test_resistor_conductor_comes_from_the_tech_file(tmp_path):
     net = net.replace('(node (ref "U2") (pin "2")))))', '(node (ref "U2") (pin "2")) (node (ref "R1") (pin "1")))))')
     p = tmp_path / "r.net"
     p.write_text(net)
+    s.set_autoplace_settings(auto_size_resistors=True)        # the old shortcut still works
     s.auto_place(str(p), effort=0.3, seed=1)
     rc = next(x.cell_name for x in s.library.cells["TOP"].srefs if x.label == "R1")
     assert {sh.layer for sh in s.library.cells[rc].shapes if getattr(sh, "pin", None)} == {7}
@@ -316,7 +333,11 @@ def test_sli_leaves_out_connections_the_copper_already_makes():
 
 
 def test_auto_place_replaces_the_placed_parts_old_pad_names():
+    from hlayout.io.techfile import load_route_rules, save_route_rules
     s = Session.new("NAMES")
+    rr = load_route_rules(s.library)
+    rr.update(boundary_layer=57)                              # the substrate is the area
+    save_route_rules(s.library, rr)
     s.new_cell("SO4")
     for i, (x, y) in enumerate([(0, 0), (1270, 0), (1270, 4000), (0, 4000)], start=1):
         s.rect(3, x - 200, y - 300, x + 200, y + 300, pin=str(i))
@@ -345,3 +366,45 @@ def test_sli_runs_from_the_end_of_a_partly_routed_trace():
     ends = {(round(seg[0]), round(seg[1])), (round(seg[2]), round(seg[3]))}
     assert (6000, 3150) in ends or any(abs(x - 6000) <= 150 and abs(y - 3150) <= 150 for x, y in ends)
     assert s.sli()["total"] < 6000                           # not the 11 mm pad-to-pad line
+
+
+def test_no_substrate_or_too_small_an_area_fails_at_once(tmp_path):
+    """Auto Place refuses at once when there is nothing to place inside, or
+    the parts can't fit it -- it used to search for room for ever."""
+    from hlayout.io.techfile import load_route_rules, save_route_rules
+    s = Session.new("AP")
+    s.new_cell("PART")
+    s.rect(61, -1000, -600, 1000, 600)
+    s.cell.add_rectangle(5, -1000, -300, -600, 300).pin = "1"
+    s.cell.add_rectangle(5, 600, -300, 1000, 300).pin = "2"
+    s.new_cell("TOP")
+    rr = load_route_rules(s.library)
+    rr.update(layer_a=3, layer_b=5, boundary_layer=57)
+    save_route_rules(s.library, rr)
+    s.cell.add_rectangle(61, 0, 0, 30000, 2000)                 # something drawn, no substrate
+    p = tmp_path / "a.net"
+    p.write_text(NET)
+    with pytest.raises(LayoutError, match="no substrate outline"):
+        s.auto_place(str(p))
+    s.rect(57, 0, 0, 3000, 3000)                                 # a substrate far too small
+    with pytest.raises(LayoutError, match="placement area is"):
+        s.auto_place(str(p))
+
+
+def test_stop_works_in_the_first_placement_pass():
+    from hlayout.core.autoplace import Stopped
+    pl = Placer(_two_parts(), [PNet("N", 1.0, members=[(0, "1"), (1, "1")])],
+                region=(-10000, -10000, 10000, 10000), grid=50, seed=3)
+    with pytest.raises(Stopped):
+        pl.run(cancel=lambda: True)
+
+
+def test_orient_turns_a_part_to_face_its_net():
+    a = Part("A", "X", "smd", (-500, -200, 500, 200), {"1": (-500, 0), "2": (500, 0)})
+    b = Part("B", "X", "smd", (-200, -200, 200, 200), {"1": (0, 0)},
+             x=0, y=5000, placed=True, fixed=True)
+    a.x, a.y, a.placed = 0, 0, True
+    pl = Placer([a, b], [PNet("N", 1.0, members=[(0, "2"), (1, "1")])],
+                region=(-10000, -10000, 10000, 10000), grid=50, seed=1)
+    before = pl.wirelength()
+    assert pl.orient() >= 1 and a.rot == 90 and pl.wirelength() < before

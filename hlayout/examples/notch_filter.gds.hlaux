@@ -51,7 +51,7 @@
         "color": "#911eb4",
         "stipple": 5,
         "fill": true,
-        "visible": true
+        "visible": false
       },
       {
         "number": 6,
@@ -59,7 +59,7 @@
         "color": "#46f0f0",
         "stipple": 6,
         "fill": true,
-        "visible": true
+        "visible": false
       },
       {
         "number": 7,
@@ -67,7 +67,7 @@
         "color": "#f032e6",
         "stipple": 7,
         "fill": true,
-        "visible": true
+        "visible": false
       },
       {
         "number": 8,
@@ -75,7 +75,7 @@
         "color": "#bcf60c",
         "stipple": 8,
         "fill": true,
-        "visible": true
+        "visible": false
       },
       {
         "number": 9,
@@ -83,7 +83,7 @@
         "color": "#fabebe",
         "stipple": 8,
         "fill": true,
-        "visible": true
+        "visible": false
       },
       {
         "number": 10,
@@ -91,7 +91,7 @@
         "color": "#008080",
         "stipple": 8,
         "fill": true,
-        "visible": true
+        "visible": false
       },
       {
         "number": 11,
@@ -99,7 +99,7 @@
         "color": "#e6beff",
         "stipple": 8,
         "fill": true,
-        "visible": true
+        "visible": false
       },
       {
         "number": 12,
@@ -107,7 +107,7 @@
         "color": "#9a6324",
         "stipple": 7,
         "fill": true,
-        "visible": true
+        "visible": false
       },
       {
         "number": 13,
@@ -115,7 +115,7 @@
         "color": "#fffac8",
         "stipple": 7,
         "fill": true,
-        "visible": true
+        "visible": false
       },
       {
         "number": 14,
@@ -123,7 +123,7 @@
         "color": "#800000",
         "stipple": 8,
         "fill": true,
-        "visible": true
+        "visible": false
       },
       {
         "number": 15,
@@ -131,7 +131,7 @@
         "color": "#aaffc3",
         "stipple": 8,
         "fill": true,
-        "visible": true
+        "visible": false
       },
       {
         "number": 16,
@@ -139,7 +139,7 @@
         "color": "#e6194b",
         "stipple": 7,
         "fill": true,
-        "visible": true
+        "visible": false
       },
       {
         "number": 17,
@@ -155,7 +155,7 @@
         "color": "#ffe119",
         "stipple": 7,
         "fill": true,
-        "visible": true
+        "visible": false
       },
       {
         "number": 19,
@@ -529,11 +529,13 @@
       "drc_rules": "[{\"kind\": \"MIN_WIDTH\", \"layer_a\": 3, \"layer_b\": null, \"value\": 300.0, \"name\": \"1st con min_width\", \"color\": \"#e6194b\"}, {\"kind\": \"MIN_SPACE_BETWEEN\", \"layer_a\": 3, \"layer_b\": 3, \"value\": 300.0, \"name\": \"1st con metal_2_metal\", \"color\": \"#3cb44b\"}]",
       "mask_op_steps": "[{\"kind\": \"XOR\", \"layer_a\": 3, \"result_layer\": 55, \"layer_b\": 3, \"amount\": 0.0, \"name\": \"\", \"flatten\": true, \"simplify\": 0}]",
       "thermal": "{\"materials\": {}, \"powers\": {\"R1\": 2000.0, \"R2\": 500.0, \"R3\": 2000.0, \"R4\": 4000.0, \"R6\": 4000.0}, \"parts\": {}, \"boundary\": {\"substrate_layer\": -1, \"substrate_material\": \"alumina_96\", \"substrate_um\": 635.0, \"base_mode\": \"fixed\", \"base_temp_c\": 25.0, \"ambient_c\": 25.0, \"base_htc\": 0.0, \"top_htc\": 10.0, \"mount_material\": \"\", \"mount_um\": 0.0, \"grid_um\": 0.0}, \"limits\": {\"resistor_max_c\": 150.0, \"die_max_c\": 125.0, \"component_max_c\": 125.0, \"resistor_max_w_mm2\": 0.08}, \"display\": {\"style\": \"banded\", \"bands\": 10, \"quantity\": \"temperature\", \"spacing\": \"cool\"}}",
-      "gerber_export_jobs": "[{\"name\": \"NF_\", \"out_prefix\": \"gerber_\", \"layers\": null}]",
+      "gerber_export_jobs": "[{\"name\": \"NF\", \"out_prefix\": \"NF\", \"layers\": null}]",
       "gerber_output_scale": "5.0",
       "netlist_settings": "{\"conductor_layers\": [3], \"include_bonds\": true, \"used_only\": true}",
       "component_models": "{\"CAP_0805\": {\"mode\": \"model\", \"height_um\": 1000.0, \"z_offset_um\": 0.0, \"model_path\": \"C:\\\\dev\\\\hlayout\\\\examples\\\\step_models\\\\chip_wire\\\\CAP_0805.step\", \"rotation_deg\": 0.0, \"z_ref\": \"surface\"}, \"CAP_1210\": {\"mode\": \"model\", \"height_um\": 1000.0, \"z_offset_um\": 0.0, \"model_path\": \"C:\\\\dev\\\\hlayout\\\\examples\\\\step_models\\\\chip_wire\\\\CAP_1210.step\", \"rotation_deg\": 0.0, \"z_ref\": \"surface\"}, \"LM741\": {\"mode\": \"model\", \"height_um\": 1000.0, \"z_offset_um\": 0.0, \"model_path\": \"C:\\\\dev\\\\hlayout\\\\examples\\\\step_models\\\\chip_wire\\\\LM741.step\", \"rotation_deg\": 0.0, \"z_ref\": \"surface\"}, \"20_PIN_pkg\": {\"mode\": \"model\", \"height_um\": 1000.0, \"z_offset_um\": 0.0, \"model_path\": \"C:\\\\dev\\\\hlayout\\\\examples\\\\step_models\\\\chip_wire\\\\20_PIN_pkg.step\", \"rotation_deg\": 0.0, \"z_ref\": \"substrate_bottom\"}}",
-      "topview_settings": "{\"result_layer\": 50, \"out_cell\": \"TOPVIEW\", \"excluded\": [4, 18], \"line_width_um\": 100.0, \"hatch\": true, \"hatch_pitch_um\": 300.0, \"hatch_angles\": [45.0], \"flatten\": true, \"simplify_um\": 0.0, \"used_only\": true, \"refdes\": true, \"refdes_height_um\": 600.0}"
+      "topview_settings": "{\"result_layer\": 50, \"out_cell\": \"TOPVIEW\", \"excluded\": [4, 18], \"line_width_um\": 100.0, \"hatch\": true, \"hatch_pitch_um\": 300.0, \"hatch_angles\": [45.0], \"flatten\": true, \"simplify_um\": 0.0, \"used_only\": true, \"refdes\": true, \"refdes_height_um\": 600.0}",
+      "dxf_export_jobs": "[{\"name\": \"NF\", \"path\": \"NF\", \"layers\": null}]",
+      "assembly_drawing": "{\"cell_name\": \"ASSEMBLY\", \"design_cell\": \"TOP\", \"layer\": 50, \"line_layer\": null, \"size\": \"A3\", \"orientation\": \"portrait\", \"margin_mm\": 10.0, \"title_block_height_mm\": 45.0, \"title_text_mm\": 3.0, \"sheet_line_mm\": 0.5, \"gap_mm\": 8.0, \"title\": \"\", \"dwg_no\": \"\", \"issue\": \"\", \"drawn_by\": \"amb\", \"drawn_date\": \"\", \"checked_by\": \"\", \"checked_date\": \"\", \"approved_by\": \"\", \"approved_date\": \"\", \"scale\": null, \"view_line_mm\": 0.2, \"view_hatch_mm\": 0.3, \"view_refdes_mm\": 2.5, \"view_label\": true, \"label_text_mm\": 3.5, \"table_text_mm\": 2.5, \"table_line_mm\": 0.25, \"layout\": \"bottom\", \"pin_table\": true, \"pin_count\": null, \"pins_per_group\": 10, \"pin_functions\": null, \"resistor_table\": false, \"bond_table\": true}"
     }
   },
   "attached_libraries": []

@@ -333,7 +333,7 @@ def test_a_die_part_with_its_own_numbered_bond_fingers(tmp_path):
         s.rect(5, b[0] - 150, b[1] - 150, b[0] + 150, b[1] + 150, pin=pin)
     s.use_cell("DIE")
     s.new_cell("TOP")
-    rr = load_route_rules(s.library); rr["layer_a"] = 3; rr["layer_b"] = 5
+    rr = load_route_rules(s.library); rr["layer_a"] = 3; rr["layer_b"] = 5; rr["boundary_layer"] = SUB
     save_route_rules(s.library, rr)
     s.rect(SUB, -10000, -10000, 10000, 10000)
     s.rect(3, -8000, 300, -7000, 700, pin="1")

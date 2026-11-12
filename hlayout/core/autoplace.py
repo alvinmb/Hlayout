@@ -123,9 +123,14 @@ def _outside(b, region):
     return area - _ov(b, region)
 
 
+class Stopped(Exception):
+    """Placer.run() was stopped before any placement was complete."""
+
+
 class Placer:
     def __init__(self, parts: List[Part], nets: List[PNet], region, grid: float = 50.0,
                  thermal: float = 0.0, obstacles=(), seed: int = 0):
+        self._stop = None
         self.parts = parts
         self.nets = [n for n in nets if len(n.members) + len(n.anchors) >= 2 and n.weight > 0]
         self.region = tuple(region)
@@ -295,6 +300,10 @@ class Placer:
                 return False
         return True
 
+    def _check_stop(self):
+        if self._stop is not None and self._stop():
+            raise Stopped("stopped")
+
     def _spiral(self, i, tx, ty, step=None, limit=400):
         """Nearest legal grid spot to (tx, ty), searched in square rings
         of ``step`` (default: an eighth of the part's size, on the grid)."""
@@ -309,6 +318,8 @@ class Placer:
         if self._legal(i, tx, ty):
             return tx, ty
         for ring in range(1, limit):
+            if ring % 8 == 0:
+                self._check_stop()
             pts = []
             for k in range(-ring, ring + 1):
                 pts += [(k, -ring), (k, ring), (-ring, k), (ring, k)]
@@ -338,6 +349,7 @@ class Placer:
                     pts += [self.parts[j].pin_xy(p) for j, p in n.members
                             if j != i and self.parts[j].placed]
                 return pts
+            self._check_stop()
             best = max(todo, key=lambda i: (len(links(i)), len(self.part_nets[i])))
             pts = links(best)
             tx = sum(p[0] for p in pts) / len(pts) if pts else cx
@@ -419,7 +431,52 @@ class Placer:
                     p.x, p.y = spot
         self.net_len = [self._net_length(k) for k in range(len(self.nets))]
 
+    def orient(self, sweeps=3):
+        """Final orientation pass: turn each movable part to whichever of
+        0 / 90 / 180 / 270 degrees gives its nets the shortest weighted
+        length -- its pads facing the parts they connect to -- where it
+        still fits. Annealing tries turns at random; this makes sure no
+        part is left a quarter turn from its best. Returns how many turns
+        were kept."""
+        kept = 0
+        for _ in range(sweeps):
+            better = 0
+            for i in self.movable:
+                p = self.parts[i]
+                if not self.part_nets[i]:
+                    continue
+                best = None
+                for r in (90, 180, 270):
+                    o, n = p.rot, (p.rot + r) % 360
+
+                    def apply(p=p, n=n):
+                        p.rot = n
+
+                    def undo(p=p, o=o):
+                        p.rot = o
+                    d, ok = self._try([i], apply, undo, 0.0, legal_only=True)
+                    if ok:                      # kept: undo and remember it
+                        if d < -1e-6 and (best is None or d < best[0]):
+                            best = (d, n)
+                        undo()
+                        self.net_len = [self._net_length(k) if k in self.part_nets[i] else v
+                                        for k, v in enumerate(self.net_len)]
+                if best is not None:
+                    p.rot = best[1]
+                    for k in self.part_nets[i]:
+                        self.net_len[k] = self._net_length(k)
+                    better += 1
+            kept += better
+            if not better:
+                break
+        return kept
+
     def run(self, effort=1.0, improve=False, on_progress=None, cancel=None):
+        """Place. ``cancel`` -- a callable -- is polled all through, so Stop
+        works in the first placement and legalising passes too; a stop
+        there raises Stopped (nothing placed), one in the annealing keeps
+        the best placement so far."""
+        self._stop = cancel
         if not improve:
             self.start()
         else:
@@ -439,5 +496,6 @@ class Placer:
             self.anneal(effort, on_progress=half, cancel=cancel, hot=1.0)
             self.anneal(effort * 0.7, on_progress=rest, cancel=cancel, hot=0.05)
         self.legalise()
+        self.orient()
         if on_progress:
             on_progress(1.0)
