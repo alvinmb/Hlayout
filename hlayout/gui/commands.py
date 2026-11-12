@@ -250,9 +250,11 @@ Attached libraries:
                                        AUTOPLACE WEIGHT <net> <w> sets a net weight.
                                        Also Tools > Auto Place... and
                                        Session.auto_place()
-    SLI [ON|OFF]                       straight-line interconnects: total and longest
+    SLI [ON|OFF|RECALC]                straight-line interconnects: total and longest
                                        nets; ON/OFF shows them (View > Straight-Line
-                                       Interconnects). Session.sli()
+                                       Interconnects); RECALC works them out again from
+                                       the design as it is now and redraws them (View >
+                                       Recalculate SLI, F5). Session.sli()
     UNUSEDBONDS [LIST|REMOVE]          bonds/fingers on die pads no net uses: list / take off
     UNROUTED [<net>|NEXT|PREV|CLEAR]   list unrouted nets / zoom to one and show its SLI
     IOPADS [PLAN|APPLY] [w=<um>] [l=<um>] [inset=<um>] [csv=<file>]
@@ -269,6 +271,26 @@ Attached libraries:
                                        header bond for each pin with an I/O net (all=1:
                                        every pin). Also Tools > Bond Header Pins... and
                                        Session.bond_header()
+    EDGEPADS [sides=TB|T|B] [n=<per side>] [pitch=<um>] [align=auto|header|pitch]
+             [w=<um>] [l=<um>] [margin=<um>] [start=<pin>] [layer=<n>]
+                                       create and place numbered I/O pads along the
+                                       bottom / top edge of the selected substrate
+                                       (rectangle, polygon or placed substrate cell;
+                                       else the boundary layer). align=header: one at
+                                       each package pin, its number; pitch: n a side
+                                       (default as many as fit) centred, pin 1 bottom
+                                       left, bottom row L->R then top row R->L.
+                                       Session.edge_io_pads()
+    FANOUT [refs=U1,U2] [all=1] [w=<um>] [l=<um>] [spacing=<um>] [gap=<um>] [layer=<n>]
+                                       fan out the placed bare dies: a bond finger and a
+                                       wire bond for every die pad with a net (all=1:
+                                       every pad), no bonds crossing, within the bond
+                                       rules; re-running replaces them. After Auto Place,
+                                       before routing. Also Tools > Fan Out Die Bonds...
+                                       and Session.fan_out_die_bonds()
+    RESCROSS                           tracks that run through or under a printed resistor
+                                       (its ink / glaze), which the router keeps out of.
+                                       Session.resistor_crossings()
     SHORTS                             copper joining two or more named nets (a short
                                        circuit spacing DRC can't see) and where they meet.
                                        Session.find_shorts()
@@ -292,6 +314,20 @@ Attached libraries:
                                        new cell and keeps its bond diagram; BONDS lists
                                        the bond diagram or writes it as CSV. Also
                                        Session.import_routed_hybrid()
+    HYBRID ROUTE [layers=1|2] [jumpers=<max>] [cost=<mm>] [grid=<um>] [keep=1]
+             [ortho=0|1] [passes=<n>] [shorten=0|1] [dejog=0|1]
+                                       route this cell with the hybrid router: layers=1
+                                       one conductor, wire-bond jumpers the only
+                                       crossings (jumpers=0: no limit; cost = a jumper
+                                       in mm of track); layers=2 with dielectric
+                                       crossovers. Tracks, windows, new fingers, jumper
+                                       lands and bonds drawn into the cell, old tracks
+                                       taken out (keep=1 keeps them). ortho=1 90-degree
+                                       tracks only, passes = rip-up passes (3), shorten /
+                                       dejog the Autoroute clean-ups (default: its rules).
+                                       One undo step for the route.
+                                       Also Tools > Hybrid Route... and
+                                       Session.hybrid_route()
     MOVEFINGER <pad|x,y> <x,y>         move a bond finger / jumper land of an imported
                                        routed hybrid to a new centre; its wires follow
                                        and are checked against the bond rules. Also
@@ -305,6 +341,12 @@ Attached libraries:
                                        draw the stored bond diagram as a table cell
                                        (SEQ, WIRE, NET, FIRST/SECOND BOND, LENGTH,
                                        WIRE, LOOP); also in the assembly drawing
+    READNETLIST <file> [resistors=0|1]
+                                       the design flow's first step: read the netlist
+                                       (KiCad .net, CSV, Tango) -- net names stored,
+                                       printed resistors into the Resistor Designer
+                                       to design before AUTOPLACE. Also Tools > Read
+                                       Netlist... and Session.read_netlist()
     NETNAMES IMPORT <file.csv> [merge=1] | NETNAMES CLEAR | NETNAMES
                                        the design net names Highlight Net reports: a CSV
                                        with net + pad (or ref + pin) columns
@@ -2392,6 +2434,9 @@ class CommandInterpreter:
         return f"wire bond {p1} -> {p2}  (span {span:.0f} DBU)"
 
     def _cmd_autoroute(self, args):
+        if args and args[0].upper() == "ALL":
+            # AUTOROUTE ALL ...: the autorouter (the same as HYBRID ROUTE)
+            return self._cmd_hybrid(["ROUTE"] + list(args[1:]))
         args = _join_points(args, 0, 2)
         usage = (
             "usage: AUTOROUTE <x1,y1> <x2,y2> [layer=<n|name>] [grid=<dbu>] "
@@ -2614,6 +2659,95 @@ class CommandInterpreter:
         return (f"I/O pinout {'applied' if sub == 'APPLY' else 'plan'}: pad-to-die "
                 f"{p['before'] / 1000:.0f} -> {p['after'] / 1000:.0f} mm, {moved} pin(s) change; {pins}")
 
+    def _cmd_edgepads(self, args):
+        """EDGEPADS -- I/O pads along the bottom / top edge of the selected substrate."""
+        usage = ("usage: EDGEPADS [sides=TB|T|B] [n=<per side>] [pitch=<um>] "
+                 "[align=auto|header|pitch] [w=<um>] [l=<um>] [margin=<um>] [start=<pin>] "
+                 "[layer=<n>]")
+        kw = {}
+        for a in args:
+            k, eq, v = a.partition("=")
+            k = k.lower()
+            if not eq:
+                if k.upper() in ("T", "B", "TB", "BT"):
+                    kw["sides"] = k.upper()
+                    continue
+                raise CommandError(usage)
+            try:
+                if k == "sides":
+                    kw["sides"] = v.upper()
+                elif k == "n":
+                    kw["n"] = int(v)
+                elif k == "pitch":
+                    kw["pitch"] = float(v)
+                elif k == "align":
+                    kw["align"] = v.lower()
+                elif k in ("w", "l", "margin"):
+                    kw[{"w": "pad_w", "l": "pad_l", "margin": "edge_margin"}[k]] = float(v)
+                elif k == "start":
+                    kw["start"] = int(v)
+                elif k == "layer":
+                    kw["layer"] = int(v) if v.lstrip("-").isdigit() else v
+                else:
+                    raise CommandError(usage)
+            except ValueError:
+                raise CommandError(usage)
+        sel = getattr(self.view, "selected", None) if self.view is not None else None
+        if sel and sel[0] in ("shape", "sref"):
+            kw["shape"] = sel[1]
+        r = self.session.edge_io_pads(**kw)
+        out = (f"EDGEPADS: {r['pads']} I/O pads on layer {r['layer']} ("
+               + ("at the header pins" if r["align"] == "header"
+                  else f"{r['pitch'] / 1000:.3f} mm pitch") + f"), pins {', '.join(r['pins'])}")
+        if r["skipped"]:
+            out += "; skipped " + "; ".join(f"pin {p}: {w}" for p, w in r["skipped"].items())
+        return out
+
+    def _cmd_fanout(self, args):
+        """FANOUT -- bond fingers and wire bonds round the placed bare dies."""
+        usage = ("usage: FANOUT [refs=U1,U2] [all=1] [w=<um>] [l=<um>] [spacing=<um>] "
+                 "[gap=<um>] [layer=<n>]")
+        kw = {}
+        for a in args:
+            k, eq, v = a.partition("=")
+            k = k.lower()
+            if not eq:
+                raise CommandError(usage)
+            try:
+                if k == "refs":
+                    kw["refs"] = [t.strip() for t in v.replace(";", ",").split(",") if t.strip()]
+                elif k == "all":
+                    kw["all_pads"] = v.lower() not in ("0", "false", "no")
+                elif k in ("w", "l", "spacing", "gap"):
+                    kw[{"w": "finger_w", "l": "finger_l"}.get(k, k)] = float(v)
+                elif k == "layer":
+                    kw["layer"] = int(v) if v.lstrip("-").isdigit() else v
+                else:
+                    raise CommandError(usage)
+            except ValueError:
+                raise CommandError(usage)
+        r = self.session.fan_out_die_bonds(**kw)
+        out = f"FANOUT: {r['fingers']} fingers + bonds on layer {r['layer']} (" + ", ".join(
+            f"{d} {len(p)}" for d, p in r["dies"].items()) + ")"
+        if r["skipped"]:
+            out += "; skipped " + "; ".join(f"{p}: {w}" for p, w in r["skipped"].items())
+        if r["overlaps"]:
+            out += "; fingers over other parts (move them): " + ", ".join(r["overlaps"])
+        return out
+
+    def _cmd_rescross(self, args):
+        """RESCROSS -- tracks through or under a printed resistor."""
+        hits = self.session.resistor_crossings()
+        if not hits:
+            return "RESCROSS: no track runs through a resistor"
+        refs = {}
+        for h in hits:
+            refs.setdefault(h["ref"], []).append(h)
+        return (f"RESCROSS: {len(hits)} track(s) through {len(refs)} resistor(s): "
+                + "; ".join(f"{r} at " + ", ".join(f"({x / 1000:.2f}, {y / 1000:.2f}) L{h['layer']}"
+                                                   for h in hs for x, y in [h["at"]])
+                            for r, hs in sorted(refs.items())))
+
     def _cmd_shorts(self, args):
         """SHORTS -- copper joining two or more named nets, and where."""
         shorts = self.session.find_shorts()
@@ -2686,12 +2820,19 @@ class CommandInterpreter:
         return f"{net}: {len(entry['segments'])} gap(s), {entry['length'] / 1000:.2f} mm unrouted"
 
     def _cmd_sli(self, args):
-        """SLI [ON|OFF] -- straight-line interconnects; no argument: report."""
+        """SLI [ON|OFF|RECALC] -- straight-line interconnects; no argument: report."""
+        sub = args[0].upper() if args else ""
+        if sub not in ("", "ON", "OFF", "RECALC", "UPDATE", "REFRESH"):
+            raise CommandError("usage: SLI [ON|OFF|RECALC]")
+        if sub in ("RECALC", "UPDATE", "REFRESH") and self.view is not None:
+            self.view.recalc_sli()
         d = self.session.sli()
-        if args and args[0].upper() in ("ON", "OFF"):
+        if sub in ("ON", "OFF"):
             if self.view is not None:
-                self.view.show_sli = args[0].upper() == "ON"
+                self.view.show_sli = sub == "ON"
                 self.view.redraw()
+        if sub in ("RECALC", "UPDATE", "REFRESH") and self.view is not None:
+            self.view.sli_last = d
         top = ", ".join(f"{n['net']} {n['length'] / 1000:.1f}" for n in d["nets"][:5])
         return (f"{len(d['nets'])} net(s), total {d['total'] / 1000:.1f} mm"
                 + (f"; longest: {top}" if top else ""))
@@ -2817,10 +2958,53 @@ class CommandInterpreter:
 
     def _cmd_hybrid(self, args):
         usage = ("usage: HYBRID IMPORT <file.routed.json> [cell=<name>] [fill=0|1] | "
-                 "HYBRID BONDS [<file.csv>]")
+                 "HYBRID BONDS [<file.csv>] | HYBRID ROUTE [layers=1|2] [jumpers=<max>] "
+                 "[cost=<mm>] [grid=<um>] [keep=1] [ortho=0|1] [passes=<n>] [shorten=0|1] "
+                 "[dejog=0|1]")
         if not args:
             raise CommandError(usage)
         sub = args[0].upper()
+        if sub == "ROUTE":
+            kw = {}
+            for a in args[1:]:
+                k, eq, v = a.partition("=")
+                k = k.lower()
+                try:
+                    if k == "layers":
+                        kw["layers"] = int(v)
+                    elif k == "jumpers":
+                        kw["max_jumpers"] = int(v)
+                    elif k == "cost":
+                        kw["jumper_cost"] = float(v)
+                    elif k == "grid":
+                        kw["grid"] = int(v)
+                    elif k == "keep":
+                        kw["remove_existing"] = v.lower() in ("0", "no", "false")
+                    elif k in ("ortho", "shorten", "dejog"):
+                        kw[{"ortho": "orthogonal"}.get(k, k)] = v.lower() not in ("0", "no", "false")
+                    elif k == "passes":
+                        kw["ripup_passes"] = int(v)
+                    elif k == "cap":
+                        self.session.set_freerouting_rules(track_cap=v.lower())
+                    else:
+                        raise CommandError(usage)
+                except ValueError:
+                    raise CommandError(usage)
+            from ..scripting.hybridroute import unrouted_text
+            st = self.session.hybrid_route(**kw)
+            rs = st["stats"]
+            msg = (f"HYBRID ROUTE ({st['layers']} conductor{'s' if st['layers'] > 1 else ''}): "
+                   f"{rs.get('routed', '?')}/{rs.get('connections', '?')} connections, "
+                   f"{st['traces']} tracks, {st['jumpers']} jumper(s), {st['windows']} crossover(s), "
+                   f"{st['bonds']} new bond(s)")
+            if st["unrouted"]:
+                msg += "\n  unrouted: " + "; ".join(unrouted_text(u) for u in st["unrouted"][:12])
+            if st["issues"]:
+                msg += f"\n  post-route DRC: {len(st['issues'])} issue(s)"
+            if st.get("refused_jumpers"):
+                msg += "\n  jumpers refused (over a part): " + ", ".join(
+                    f"{x['net']} over {x['over']}" for x in st["refused_jumpers"])
+            return msg
         if sub == "IMPORT" and len(args) >= 2:
             kw = {}
             for a in args[2:]:
@@ -2949,6 +3133,26 @@ class CommandInterpreter:
         layer = int(pos[1]) if pos[1].lstrip("-").isdigit() else pos[1]
         name = self.session.generate_bond_table(pos[0], layer, **kw)
         return f"generated bond diagram table cell {name!r}"
+
+    def _cmd_readnetlist(self, args):
+        usage = "usage: READNETLIST <file> [resistors=0|1]"
+        if not args:
+            raise CommandError(usage)
+        res = True
+        for a in args[1:]:
+            k, _, v = a.partition("=")
+            if k.lower() != "resistors":
+                raise CommandError(usage)
+            res = v.lower() not in ("0", "no", "false")
+        r = self.session.read_netlist(args[0], resistors=res)
+        out = f"netlist read: {r['parts']} parts, {r['nets']} nets, {r['names']} pad names"
+        if res:
+            out += (f"; resistors: {len(r['resistors'])} ({len(r['added'])} new, "
+                    f"{len(r['changed'])} changed, {len(r['kept'])} kept) -- design them in "
+                    "the Resistor Designer, then AUTOPLACE")
+            if r["bad_values"]:
+                out += f"; unreadable values: {', '.join(r['bad_values'])}"
+        return out
 
     def _cmd_netnames(self, args):
         usage = "usage: NETNAMES IMPORT <file.csv> [merge=1] | NETNAMES CLEAR | NETNAMES"

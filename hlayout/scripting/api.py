@@ -1310,6 +1310,9 @@ class Session:
     # replace self.library wholesale with an unrelated document) clear
     # the history instead of trying to undo into it -- see
     # clear_undo_history().
+    #: tech_params entries undo / redo leave as they are (see _restore)
+    UNDO_KEEPS_PARAMS = ("autoplace_settings", "resistor_list")
+
     def _checkpoint(self) -> None:
         if self._suspend_checkpoint:
             return
@@ -1616,6 +1619,42 @@ class Session:
             # netlist extraction. Nothing is baked into the device cell.
             self.sref(device_name, (x, y), rotation=rotation, label=str(ref_des) if ref_des else "")
         return device_name
+
+    def remove_placed_resistors(self, refs=None, cell_name: Optional[str] = None) -> list:
+        """Take the printed resistors placed by generate_resistor() (the
+        Resistor Designer's Place / Place All) back out of the current (or
+        named) cell: every instance labelled with one of ``refs`` (default:
+        every ref-des in the resistor list) whose cell is that resistor's
+        generated device cell (R5, R5_1, ...), and each device cell nothing
+        uses any more. One undo step. Returns the ref-des removed."""
+        from ..io.techfile import load_resistor_list
+        name = cell_name or self.current_cell_name
+        if name is None:
+            raise LayoutError("no current cell")
+        cell = self.library.get_cell(name)
+        if refs is None:
+            refs = [str(r.get("ref_des", "")) for r in load_resistor_list(self.library)]
+        want = {str(r).strip() for r in refs if str(r).strip()}
+
+        def generated(ref):
+            lab = str(ref.label or "")
+            return lab in want and (ref.cell_name == lab or ref.cell_name.startswith(lab + "_"))
+
+        hit = [r for r in cell.srefs if generated(r)]
+        if not hit:
+            return []
+        with self._batch():
+            for r in hit:
+                cell.srefs.remove(r)
+            for cn in {r.cell_name for r in hit}:
+                if cn in self.library.cells and not any(
+                        x.cell_name == cn for c in self.library.cells.values()
+                        for x in list(c.srefs) + list(c.arefs)):
+                    del self.library.cells[cn]
+        self._notify()
+        return sorted({str(r.label) for r in hit},
+                      key=lambda t: [int(p) if p.isdigit() else p
+                                     for p in __import__("re").findall(r"\d+|\D+", t)])
 
     def _draw_shaped_resistor(self, geom, r_layer, c_layer, g_layer, k_layer, d, e) -> None:
         """Draw a hlayout.core.tf_shapes.ShapeGeometry into the current
@@ -2274,7 +2313,13 @@ class Session:
             dst.selectable = src.selectable
         self.library.cells = snapshot.cells
         self.library.top_cell_name = snapshot.top_cell_name
-        self.library.tech_params = snapshot.tech_params
+        # what the user has entered in the design's tools -- the Auto
+        # Place settings and cell map, the resistor list and designs -- is
+        # not geometry: undo / redo of an edit must not throw it away
+        keep = {k: self.library.tech_params[k] for k in self.UNDO_KEEPS_PARAMS
+                if k in self.library.tech_params}
+        self.library.tech_params = dict(snapshot.tech_params)
+        self.library.tech_params.update(keep)
         if self.current_cell_name not in self.library.cells:
             self.current_cell_name = self.library.top_cell_name
         self._notify()
@@ -4037,8 +4082,8 @@ class Session:
         pads takes the substrate edge. None without I/O pads."""
         from shapely.geometry import box as _box
         from ..core.shapes import Rectangle
-        pads = [sh.bbox() for sh in cell.shapes
-                if isinstance(sh, Rectangle) and getattr(sh, "pin", "")]
+        from .autoplace_session import io_pads
+        pads = [b for _pin, b in io_pads(self.library, cell, self._boundary_layer())]
         if len(pads) < 2:
             return None
         sub = self._substrate_box(cell)
@@ -4571,9 +4616,12 @@ class Session:
         return info
 
     def _hybrid_pad_at(self, cell, point, tol=0.0):
-        """(shape, pad id) of the numbered substrate pad (a pin-labelled
-        rectangle drawn in ``cell`` itself) under ``point``."""
-        from ..core.shapes import Rectangle
+        """(shape, pad id) of the bond finger / jumper land under ``point``:
+        a numbered substrate pad drawn in ``cell`` itself (an imported
+        hybrid route), else a plain conductor rectangle a wire bond lands
+        on (Fan Out Die Bonds, Hybrid Route, one drawn by hand) -- id
+        "x,y" of its centre."""
+        from ..core.shapes import Path as _P, Rectangle
         px, py = point
         best = None
         for sh in cell.shapes:
@@ -4584,7 +4632,40 @@ class Session:
                 area = (x1 - x0) * (y1 - y0)
                 if best is None or area < best[2]:
                     best = (sh, sh.pin, area)
+        if best:
+            return best[0], best[1]
+        try:
+            blay = self._bond_layer()
+        except Exception:
+            blay = -1
+        ends = [tuple(p) for sh in cell.shapes
+                if isinstance(sh, _P) and sh.layer == blay and len(sh.points) == 2
+                for p in sh.points]
+        la, lb = self._route_layers()
+        for sh in cell.shapes:
+            if not isinstance(sh, Rectangle) or sh.layer not in (la, lb) or getattr(sh, "pin", ""):
+                continue
+            x0, y0, x1, y1 = sh.bbox()
+            if not (x0 - tol <= px <= x1 + tol and y0 - tol <= py <= y1 + tol):
+                continue
+            # a bond lands on it -- or did, and was moved just off it
+            # (Move Wire Bond): a bond end within the finger's own size
+            reach = self._finger_reach(sh)
+            if not any(x0 - reach <= ex <= x1 + reach and y0 - reach <= ey <= y1 + reach
+                       for ex, ey in ends):
+                continue
+            area = (x1 - x0) * (y1 - y0)
+            if best is None or area < best[2]:
+                best = (sh, f"{round((x0 + x1) / 2)},{round((y0 + y1) / 2)}", area)
         return (best[0], best[1]) if best else (None, None)
+
+    @staticmethod
+    def _finger_reach(pad) -> float:
+        """How far off a bond finger a bond end may lie and still count as
+        its own (moved off it by hand): the finger's larger side, at least
+        0.3 mm."""
+        x0, y0, x1, y1 = pad.bbox()
+        return max(300.0, x1 - x0, y1 - y0)
 
     def move_bond_finger(self, at, to, cell_name: Optional[str] = None,
                          dry_run: bool = False, tol: float = 0.0) -> dict:
@@ -4610,12 +4691,38 @@ class Session:
         dx, dy = nx - cx, ny - cy
         layer = self._bond_layer()
         moved = []
-        for sh in cell.shapes:
-            if isinstance(sh, _Path) and sh.layer == layer and len(sh.points) == 2:
+        balls = []
+        rebond = {}                 # (shape, end) -> new point: ends that were off the finger
+        bonds = [sh for sh in cell.shapes
+                 if isinstance(sh, _Path) and sh.layer == layer and len(sh.points) == 2]
+        for sh in bonds:
+            for k in (0, 1):
+                ex, ey = sh.points[k]
+                if x0 - 1 <= ex <= x1 + 1 and y0 - 1 <= ey <= y1 + 1:
+                    moved.append((sh, k))
+        if not moved:
+            # its bond was moved just off it: the nearest end within reach
+            # comes back onto the finger, at its new centre
+            reach = self._finger_reach(pad)
+            near = []
+            for sh in bonds:
                 for k in (0, 1):
                     ex, ey = sh.points[k]
-                    if abs(ex - cx) <= 1 and abs(ey - cy) <= 1:
-                        moved.append((sh, k))
+                    d = max(x0 - ex, ex - x1, y0 - ey, ey - y1, 0)
+                    if d <= reach:
+                        near.append((d, sh, k))
+            if near:
+                _d, sh, k = min(near, key=lambda t: t[0])
+                moved.append((sh, k))
+                rebond[(id(sh), k)] = (nx, ny)
+        ends = {tuple(sh.points[k]) for sh, k in moved}
+        for sh in cell.shapes:
+            # the bond's ball / stitch discs at those ends go with it
+            if sh.layer == layer and not isinstance(sh, _Path) and hasattr(sh, "points"):
+                bx0, by0, bx1, by1 = sh.bbox()
+                c = ((bx0 + bx1) / 2.0, (by0 + by1) / 2.0)
+                if any(abs(c[0] - e[0]) <= 2 and abs(c[1] - e[1]) <= 2 for e in ends):
+                    balls.append(sh)
         rules = self._hybrid_bond_rules()
         st = self._hybrid_state()
         design = (st or {}).get("design")
@@ -4631,8 +4738,10 @@ class Session:
             d2 = None
             for sh, k in moved:
                 other = sh.points[1 - k]
+                end = rebond.get((id(sh), k), (sh.points[k][0] + dx, sh.points[k][1] + dy))
                 rows.append({"wire": None, "first_bond": "?", "second_bond": pid,
-                             "length_um": round(math.hypot(other[0] - nx, other[1] - ny)),
+                             "length_um": round(math.hypot(other[0] - end[0],
+                                                           other[1] - end[1])),
                              "first_angle_deg": None, "second_angle_deg": None})
         warnings = []
         for r in rows:
@@ -4652,16 +4761,30 @@ class Session:
         out = {"pad": pid, "from": (round(cx), round(cy)), "to": (nx, ny),
                "box": (nx - w / 2.0, ny - h / 2.0, nx + w / 2.0, ny + h / 2.0),
                "old_box": (x0, y0, x1, y1),
-               "wires": [{"a": tuple(sh.points[1 - k]), "b": (nx, ny)} for sh, k in moved],
+               "wires": [{"a": tuple(sh.points[1 - k]),
+                          "b": rebond.get((id(sh), k),
+                                          (round(sh.points[k][0] + dx), round(sh.points[k][1] + dy)))}
+                         for sh, k in moved],
+               "rebonded": bool(rebond),
                "rows": rows, "warnings": warnings, "on_trace": on_trace}
         if dry_run:
             return out
         with self._batch():
             pad.points = [(p[0] + dx, p[1] + dy) for p in pad.points]
+            shift = {}
             for sh, k in moved:
                 pts = list(sh.points)
-                pts[k] = (nx, ny)
+                old = tuple(pts[k])
+                new = rebond.get((id(sh), k), (round(pts[k][0] + dx), round(pts[k][1] + dy)))
+                shift[old] = (new[0] - old[0], new[1] - old[1])
+                pts[k] = new
                 sh.points = pts
+            for b in balls:
+                bx0, by0, bx1, by1 = b.bbox()
+                c = ((bx0 + bx1) / 2.0, (by0 + by1) / 2.0)
+                sx, sy = next((v for e, v in shift.items()
+                               if abs(c[0] - e[0]) <= 2 and abs(c[1] - e[1]) <= 2), (dx, dy))
+                b.points = [(round(p[0] + sx), round(p[1] + sy)) for p in b.points]
             if d2 is not None:
                 st = dict(st)              # never mutate the cached parse
                 st["design"] = d2
@@ -4986,7 +5109,10 @@ class Session:
         package spanning most of the board excepted) and, with
         keepout_bodies, the body of every part with two or more pads on
         the routing layers (the hull of its pads and any resistor ink /
-        glaze, less the pads grown by the clearance)."""
+        glaze, less the pads grown by the clearance). A printed resistor's
+        ink and glaze are ALWAYS kept out -- keepout_bodies or not -- less
+        its own terminations grown by the clearance: no track may run
+        through or under a resistor, on either conductor."""
         from shapely.geometry import MultiPolygon
         from shapely.ops import unary_union
         from ..core.maskops import (_compose_transforms, _sref_point_transform,
@@ -5037,6 +5163,19 @@ class Session:
             return list(g.geoms) if isinstance(g, MultiPolygon) else \
                 [p for p in getattr(g, "geoms", [g]) if p.geom_type == "Polygon"]
 
+        own = [(sh.layer, bool(getattr(sh, "pin", "")), shape_to_shapely(sh))
+               for sh in cell.shapes if sh.layer in ink or getattr(sh, "pin", "")]
+        own_res = [g for l, _p, g in own if l in ink and g is not None and not g.is_empty]
+        if own_res:
+            region = unary_union(own_res)
+            pins_c = [g for l, p, g in own if p and l in route and g is not None]
+            if pins_c:
+                region = region.difference(unary_union(pins_c).buffer(gap, join_style=2))
+            for p in polys(region):
+                if p.area > 1.0:
+                    pts = [(round(x), round(y)) for x, y in list(p.exterior.coords)[:-1]]
+                    for lay in layers:
+                        out.append((lay, pts))
         for r in cell.srefs:
             acc = []
             collect(r.cell_name, _sref_point_transform(r), acc)
@@ -5048,6 +5187,14 @@ class Session:
             if (b[2] - b[0]) * (b[3] - b[1]) > 0.4 * board:
                 continue                          # enclosing package / header
             shapes = []
+            # a printed resistor (ink / glaze): never routed through or under
+            res = [g for l, _p, g in acc if l in ink]
+            if res and not any(l in pad_layers for l, _p, _g in acc):
+                region = unary_union(res)
+                pins_r = [g for l, p, g in acc if p and l in route]
+                if pins_r:
+                    region = region.difference(unary_union(pins_r).buffer(gap, join_style=2))
+                shapes.extend(p for p in polys(region) if p.area > 1.0)
             # a bare die: pads on a die-pad layer and no PINS on the routing
             # layers (plain copper there -- a die-attach pad -- is part of it)
             if any(l in pad_layers for l, _p, _g in acc):
@@ -5055,18 +5202,69 @@ class Session:
                 # may carry round it, which are where the tracks must go
                 body = [g for l, p, g in acc if not (p and l in route)]
                 if body:
-                    shapes = [unary_union(body).envelope.buffer(die_m, join_style=2)]
+                    ko = unary_union(body).envelope.buffer(die_m, join_style=2)
+                    # a backside contact (a diode's cathode, a transistor's
+                    # collector: the numbered attach pad under the die) is
+                    # where its net's track must reach -- keep out of the
+                    # rest only
+                    own = [g for l, p, g in acc if p and l in route]
+                    if own:
+                        ko = ko.difference(unary_union(own).buffer(gap, join_style=2))
+                    shapes += [p for p in polys(ko) if p.area > 1.0]
             elif R.get("keepout_bodies", True):
                 pins = [g for l, p, g in acc if p and l in route]
                 if len(pins) >= 2:
                     body = unary_union(pins + [g for l, _p, g in acc if l in ink]).convex_hull
                     rest = body.difference(unary_union(pins).buffer(gap, join_style=2))
-                    shapes = [p for p in polys(rest) if p.area > 0.02 * body.area]
+                    shapes += [p for p in polys(rest) if p.area > 0.02 * body.area]
             for g in shapes:
                 for p in polys(g):
                     pts = [(round(x), round(y)) for x, y in list(p.exterior.coords)[:-1]]
                     for lay in layers:
                         out.append((lay, pts))
+        return out
+
+    def resistor_crossings(self, cell_name: Optional[str] = None) -> list:
+        """Tracks that run through or under a printed resistor -- copper on
+        a route layer crossing a resistor's ink / glaze, its own
+        terminations excepted (the router keeps out of these areas; this
+        finds tracks drawn by hand or routed before). Returns
+        [{"ref", "layer", "at": (x, y)}], one per track and resistor."""
+        from shapely.geometry import Polygon as SPoly
+        from ..core.maskops import shape_to_shapely
+        from ..core.shapes import Path as _P
+        name = cell_name or self.current_cell_name
+        cell = self.library.get_cell(name)
+        la, lb = self._route_layers()
+        R = self.freerouting_rules()
+        R = dict(R, keepout_bodies=False, die_keepout=0)
+        kos = [(lay, SPoly(pts)) for lay, pts in self._route_keepouts(cell, (la, lb), R)]
+        kos = [(lay, g) for lay, g in kos if g.is_valid and g.area > 0]
+        refs = []
+        for r in cell.srefs:
+            b = self.library.cell_bbox(r.cell_name)
+            if b:
+                from ..core.library import _transform_bbox
+                if r.label:
+                    refs.append((r.label, _transform_bbox(b, r)))
+        out = []
+        for sh in cell.shapes:
+            if sh.layer not in (la, lb) or getattr(sh, "pin", "") or not isinstance(sh, _P):
+                continue
+            g = shape_to_shapely(sh)
+            if g is None:
+                continue
+            for lay, k in kos:
+                if lay != sh.layer or not g.intersects(k):
+                    continue
+                hit = g.intersection(k)
+                if hit.area < 1.0:
+                    continue
+                c = hit.representative_point()
+                inside = [(abs((b[2] - b[0]) * (b[3] - b[1])), n) for n, b in refs
+                          if b[0] <= c.x <= b[2] and b[1] <= c.y <= b[3]]
+                ref = min(inside)[1] if inside else "?"
+                out.append({"ref": ref, "layer": sh.layer, "at": (round(c.x), round(c.y))})
         return out
 
     def _boundary_bbox(self, cell, layer):
@@ -5146,11 +5344,24 @@ class Session:
             own = [_Poly(pts) for _r, _p, _l, pts in
                    _collect_pins(self.library, cell, {la, lb}) if len(pts) >= 3]
             k = 0
+            # a finger drawn as copper (Fan Out Die Bonds, or by hand) is
+            # the pin as it is -- not a bond_finger square that may reach
+            # its neighbour
+            drawn = [sh.bbox() for sh in cell.shapes
+                     if sh.layer == flayer and not getattr(sh, "pin", "")
+                     and type(sh).__name__ in ("Rectangle", "Polygon")]
             for x, y, net in self._bond_nets(self.bond_landings(name), names):
                 if any(g.covers(_Pt(x, y)) for g in own):
                     continue
                 k += 1
-                bond_pins.append((f"B{k}", x, y, finger, flayer))
+                hit = [b for b in drawn if b[0] <= x <= b[2] and b[1] <= y <= b[3]
+                       and (b[2] - b[0]) * (b[3] - b[1]) <= 4 * finger * finger]
+                if hit:
+                    b = min(hit, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
+                    bond_pins.append((f"B{k}", (b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0,
+                                      finger, flayer, (b[2] - b[0], b[3] - b[1])))
+                else:
+                    bond_pins.append((f"B{k}", x, y, finger, flayer))
                 names[f"BOND.B{k}"] = net
         keepouts = self._route_keepouts(cell, (la,) if single else (la, lb), R)
         return export_dsn(self.library, name, path, layers=(la, lb), rules=R,
@@ -5291,9 +5502,17 @@ class Session:
                 from ..io.specctra import _collect_pins
                 own = [_Poly(pts) for _r, _p, _l, pts in
                        _collect_pins(self.library, cell, {la, lb}) if len(pts) >= 3]
+                # a finger already drawn there (Fan Out Die Bonds, or by hand)
+                drawn = [sh.bbox() for sh in cell.shapes
+                         if sh.layer == flayer and not getattr(sh, "pin", "")
+                         and type(sh).__name__ in ("Rectangle", "Polygon")
+                         and (sh.bbox()[2] - sh.bbox()[0]) * (sh.bbox()[3] - sh.bbox()[1])
+                         <= 4 * finger * finger]
                 for x, y, _net in self._bond_nets(self.bond_landings(name), load_net_names(self.library)):
                     sq = _box(x - h, y - h, x + h, y + h)
                     if cu is not None and not cu.is_empty and cu.buffer(1).contains(sq):
+                        continue
+                    if any(b[0] <= x <= b[2] and b[1] <= y <= b[3] for b in drawn):
                         continue
                     if any(g.covers(_Pt(x, y)) for g in own):
                         continue
@@ -5708,6 +5927,107 @@ class Session:
         self._notify()
         return r
 
+    def edge_io_pads(self, cell_name: Optional[str] = None, shape=None, n: Optional[int] = None,
+                     pitch: float = 2540.0, sides: str = "TB", pad_w: Optional[float] = None,
+                     pad_l: Optional[float] = None, edge_margin: Optional[float] = None,
+                     start: int = 1, layer=None, align: str = "auto") -> dict:
+        """Create and place numbered I/O pads along the substrate's bottom
+        and / or top edge (``sides`` "B", "T" or "TB"). The substrate is
+        ``shape`` (a selected rectangle / polygon / placed substrate cell)
+        or the boundary layer. ``align`` "header" puts a pad at each header
+        pin above / below the substrate, numbered as that pin; "pitch" puts
+        ``n`` a side (default: as many as fit) at ``pitch`` um, centred,
+        numbered DIP style from ``start``; "auto" (default) = header when a
+        package is placed. Size and edge margin default to the I/O pad rules
+        (I/O Pads tab). Pads with the same numbers are replaced. One undo
+        step. See iopads.edge_pads()."""
+        from . import iopads
+        from ..io.techfile import load_io_pad_rules
+        pr = load_io_pad_rules(self.library)
+        r = iopads.edge_pads(self, cell_name=cell_name, shape=shape, n=n, pitch=float(pitch),
+                             sides=sides,
+                             pad_w=float(pr["width"] if pad_w is None else pad_w),
+                             pad_l=float(pr["length"] if pad_l is None else pad_l),
+                             edge_margin=float(pr["edge_margin"] if edge_margin is None
+                                               else edge_margin),
+                             start=int(start), layer=layer, align=align)
+        self._notify()
+        return r
+
+    def fan_out_die_bonds(self, cell_name: Optional[str] = None, refs=None,
+                          all_pads: bool = False, finger_w: Optional[float] = None,
+                          finger_l: Optional[float] = None, spacing: Optional[float] = None,
+                          gap: Optional[float] = None, layer=None) -> dict:
+        """Fan out the placed bare dies: a bond finger on the substrate and
+        a wire bond to it for every die pad with a design net (all_pads:
+        every pad), in the pads' order round the die so no bonds cross,
+        within the bond length and departure-angle rules. ``refs``: just
+        these dies. Re-running replaces a die's fan-out. Run it after Auto
+        Place, before routing. One undo step. Returns {"dies": {ref:
+        [pins]}, "fingers", "skipped": {pad: why}, "overlaps", "layer"}.
+        The dielectric fill is redone if there is one. See
+        hlayout.scripting.fanout."""
+        from . import fanout
+        with self._batch():
+            r = fanout.fan_out(self, cell_name=cell_name, refs=refs, all_pads=all_pads,
+                               finger_w=finger_w, finger_l=finger_l, spacing=spacing,
+                               gap=gap, layer=layer)
+            try:
+                diel = int(load_dielectric_rules(self.library)["layer"])
+            except Exception:
+                diel = -1
+            cell = self.library.get_cell(r["cell"])
+            if r["fingers"] and diel >= 0 and any(
+                    s.layer == diel and getattr(s, "datatype", 0) == self.DIELECTRIC_FILL_DATATYPE
+                    for s in cell.shapes):
+                try:
+                    self.generate_dielectric(cell_name=r["cell"])
+                except Exception:
+                    pass
+        self._notify()
+        return r
+
+    def hybrid_route(self, cell_name: Optional[str] = None, layers: Optional[int] = None,
+                     max_jumpers: Optional[int] = None, jumper_cost: Optional[float] = None,
+                     crossover_cost: Optional[float] = None, grid: Optional[int] = None,
+                     remove_existing: Optional[bool] = None, timeout: Optional[float] = 600,
+                     on_line=None, cancel=None, out_dir: Optional[str] = None,
+                     orthogonal: Optional[bool] = None, ripup_passes: Optional[int] = None,
+                     exclude_nets=None, shorten: Optional[bool] = None,
+                     dejog: Optional[bool] = None,
+                     via_optimize: Optional[bool] = None) -> dict:
+        """Route the cell with the chip-and-wire hybrid router (router/,
+        HybridRouterCli): ``layers`` 1 = one conductor, wire-bond jumpers
+        the only crossings (``max_jumpers`` 0 = no limit, ``jumper_cost`` in
+        mm of track); 2 = both conductors with dielectric crossovers.
+        ``orthogonal`` 90-degree tracks only and ``exclude_nets`` default to
+        the Autoroute rules (snap_90, exclude_nets); ``ripup_passes``
+        rip-up-and-reroute passes; ``shorten`` / ``dejog`` (default: the
+        Autoroute rules) shorten the tracks and remove jogs after. The
+        tracks, crossover windows, the fingers and jumper lands it adds and
+        Power nets are routed at the power width; each conductor takes its
+        preferred direction; a crossover is the design's via (via_spec()).
+        remove_existing=False keeps the tracks, vias and jumpers already
+        drawn: the router joins on to them and routes only what is open.
+        Anything left None comes from the Autoroute rules / saved settings.
+        This is THE autorouter (Tools > Autoroute...); ``autoroute`` is the
+        same method. Otherwise the tracks, crossovers, fingers, lands and
+        its bonds and jumpers are drawn into the cell, the old tracks (and
+        the last Hybrid Route's additions) taken out first -- one undo
+        step. Returns counts, the router's stats, its unrouted connections
+        and post-route DRC issues. See hlayout.scripting.hybridroute."""
+        from . import hybridroute
+        return hybridroute.hybrid_route(self, cell_name=cell_name, layers=layers,
+                                        max_jumpers=max_jumpers, jumper_cost=jumper_cost,
+                                        crossover_cost=crossover_cost, grid=grid,
+                                        remove_existing=remove_existing, timeout=timeout,
+                                        on_line=on_line, cancel=cancel, out_dir=out_dir,
+                                        orthogonal=orthogonal, ripup_passes=ripup_passes,
+                                        exclude_nets=exclude_nets, shorten=shorten, dejog=dejog,
+                                        via_optimize=via_optimize)
+
+    autoroute = hybrid_route
+
     def assign_io_pads(self, cell_name: Optional[str] = None, apply: bool = True,
                        csv_path: Optional[str] = None, pad_w: Optional[float] = None,
                        pad_l: Optional[float] = None,
@@ -5752,6 +6072,71 @@ class Session:
                     pass
         p["csv"] = r["csv"]
         return p
+
+    def header_pinout(self, cell_name: Optional[str] = None) -> list:
+        """The module's current header pinout: [{"pin", "net"}] for every
+        I/O pad (header pin), in pin order, from the IO.<pin> net names.
+        These are the pins assign_io_pads() optimises; swap or set them by
+        hand with swap_header_pins() / set_header_pins() to steer routing."""
+        from ..io.techfile import load_net_names
+        names = load_net_names(self.library)
+
+        def order(pn):
+            try:
+                return (0, int(pn), "")
+            except ValueError:
+                return (1, 0, pn)
+        pins = set()
+        try:
+            from .autoplace_session import io_pads
+            cell = self.library.get_cell(cell_name or self.current_cell_name)
+            pins = {str(pin) for pin, _b in io_pads(self.library, cell, self._boundary_layer())}
+        except Exception:
+            pass
+        pins |= {k[3:] for k in names if k.startswith("IO.")}   # include any assigned pin
+        return [{"pin": pn, "net": names.get(f"IO.{pn}", "")}
+                for pn in sorted(pins, key=order)]
+
+    def set_header_pins(self, mapping: dict, cell_name: Optional[str] = None) -> int:
+        """Put a net on header pins: ``mapping`` {pin: net} (net "" clears the
+        pin). Rewrites the IO.<pin> net names so that net routes to that pin's
+        I/O pad; the geometry is untouched. Re-run SLI / the router to see the
+        new routing. Returns how many pins changed."""
+        from ..io.techfile import load_net_names, save_net_names
+        names = load_net_names(self.library)
+        changed = 0
+        for pin, net in (mapping or {}).items():
+            k = f"IO.{pin}"
+            new = str(net or "").strip()
+            if (names.get(k) or "") == new:
+                continue
+            if new:
+                names[k] = new
+            else:
+                names.pop(k, None)
+            changed += 1
+        if changed:
+            save_net_names(self.library, names)
+            self._notify()
+        return changed
+
+    def swap_header_pins(self, a, b, cell_name: Optional[str] = None) -> dict:
+        """Swap the nets on two header pins: the signal that entered at pin
+        ``a`` now enters at pin ``b`` and vice versa (the IO.<pin> net names
+        are exchanged; no geometry moves). Re-run SLI / the router to see the
+        new routing. Returns {"a", "b", "net_a", "net_b"} after the swap."""
+        from ..io.techfile import load_net_names, save_net_names
+        names = load_net_names(self.library)
+        ka, kb = f"IO.{a}", f"IO.{b}"
+        va, vb = names.get(ka), names.get(kb)
+        for k, v in ((ka, vb), (kb, va)):
+            if v is None:
+                names.pop(k, None)
+            else:
+                names[k] = v
+        save_net_names(self.library, names)
+        self._notify()
+        return {"a": str(a), "b": str(b), "net_a": vb or "", "net_b": va or ""}
 
     def find_shorts(self, cell_name: Optional[str] = None) -> list:
         """Short circuits: copper that joins pads of two or more design
@@ -5934,7 +6319,7 @@ class Session:
                          fill_datatype=self.DIELECTRIC_FILL_DATATYPE)
 
     def highlight_net(self, target, layers=None, cell_name: Optional[str] = None,
-                      prefer_layer=None, tol: float = 0.0):
+                      prefer_layer=None, tol: float = 0.0, notify: bool = True):
         """Trace the net of ``target`` -- an (x, y) DBU point on a pad or
         trace, a pad name "RefDes.Pin" (a pad drawn directly in the cell
         is "IO.<pin>"), or a design net name (see set_net_names() /
@@ -5988,9 +6373,33 @@ class Session:
         tr.missing = missing
         tr.cell_name = cell_name or self.current_cell_name
         tr.pad_boxes = [tracer.pin_box(p) for p in tr.pins if tracer.pin_box(p)]
+        tr.trace_layers = layers
         self.net_highlight = tr
-        self._notify()
+        if notify:
+            self._notify()
         return tr
+
+    def retrace_net_highlight(self):
+        """Trace the highlighted net again on the design as it is now -- a
+        part moved, a track added -- so the highlight follows the copper
+        and pads it shows: by its design net name when it has one, else by
+        one of its pads (which moves with its part). Keeps the old
+        highlight if the net is gone. Returns the current highlight."""
+        tr = getattr(self, "net_highlight", None)
+        if tr is None:
+            return None
+        name = tr.name
+        if len(tr.net_names) == 1:
+            target = name
+        elif tr.pins:
+            target = tr.pins[0]
+        else:
+            return tr
+        try:
+            return self.highlight_net(target, layers=getattr(tr, "trace_layers", None),
+                                      cell_name=getattr(tr, "cell_name", None), notify=False)
+        except Exception:
+            return tr
 
     def set_net_names(self, pad_nets: dict, replace: bool = True) -> int:
         """Store the design's intended netlist as {"RefDes.Pin": net}
@@ -6002,6 +6411,15 @@ class Session:
         cur.update({str(k): str(v) for k, v in pad_nets.items()})
         save_net_names(self.library, cur)
         return len(cur)
+
+    def read_netlist(self, path: str, resistors: bool = True) -> dict:
+        """Step 1 of the design flow: read the design's netlist (KiCad .net,
+        CSV or Tango) -- every pad's net name stored, and every printed
+        resistor put in the Resistor Designer's list to be designed before
+        Auto Place lays the parts out. See
+        hlayout.scripting.netlist_flow.read_design_netlist()."""
+        from .netlist_flow import read_design_netlist
+        return read_design_netlist(self, path, resistors=resistors)
 
     def import_net_names(self, path: str, replace: bool = True) -> int:
         """Read pad -> net names from a CSV with a header row: either a

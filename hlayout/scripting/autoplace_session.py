@@ -25,6 +25,7 @@ bare die's pins are pushed out by bond_reach to where its bond fingers will
 be, and its footprint grows by the same ring, so wire-bond room is kept.
 """
 import json
+import os
 import math
 import re
 from typing import Dict, Optional
@@ -45,6 +46,9 @@ DEFAULTS = {
     "seed": 0,
     "resistor_layer": None,    # conductor for generated resistors (None: tech file)
     "footprint_map": {},       # KiCad "Lib:Name" -> cell
+    #: False (the flow): printed resistors must be designed in the Resistor
+    #: Designer first; True: Auto Place sizes undesigned ones itself
+    "auto_size_resistors": False,
     "weights": {},             # net name -> weight
     "class_weights": {"signal": 1.0, "power": 1.0, "ground": 1.0, "clock": 1.0, "analog": 1.0},
     "two_pin_weight": 1.2,
@@ -108,6 +112,57 @@ def save_settings(library, settings: dict) -> dict:
     return cur
 
 
+CELLMAP_SUFFIX = ".cellmap.json"
+
+
+def cellmap_path(netlist_path: str) -> str:
+    """The cell map kept next to a netlist: <netlist>.cellmap.json."""
+    return str(netlist_path) + CELLMAP_SUFFIX
+
+
+def load_cellmap(netlist_path) -> dict:
+    """The footprint / ref -> cell map saved next to ``netlist_path``
+    ({} when there is none or it can't be read)."""
+    if not netlist_path:
+        return {}
+    try:
+        with open(cellmap_path(netlist_path), "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    m = data.get("footprint_map", data) if isinstance(data, dict) else {}
+    return {str(k): str(v) for k, v in m.items() if v} if isinstance(m, dict) else {}
+
+
+def save_cellmap(netlist_path, fmap: dict) -> Optional[str]:
+    """Write the cell map next to the netlist, so the cells chosen for
+    the parts survive closing the window, an undo, or quitting without
+    saving the design. Returns the path, or None if it can't be written."""
+    if not netlist_path:
+        return None
+    path = cellmap_path(netlist_path)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"netlist": os.path.basename(str(netlist_path)),
+                       "footprint_map": dict(sorted(fmap.items()))}, f, indent=2)
+            f.write("\n")
+    except OSError:
+        return None
+    return path
+
+
+def merged_footprint_map(session, netlist_path) -> dict:
+    """The design's footprint map with any entries only the netlist's
+    cell map file has added back in (and saved into the design)."""
+    S = load_settings(session.library)
+    fmap = dict(S["footprint_map"])
+    extra = {k: v for k, v in load_cellmap(netlist_path).items() if k not in fmap}
+    if extra:
+        fmap.update(extra)
+        save_settings(session.library, {"footprint_map": fmap})
+    return fmap
+
+
 # --- cells and pins ----------------------------------------------------------------
 
 def _xf(ref):
@@ -123,6 +178,35 @@ def _xf(ref):
         x, y = x * m, y * m
         return (x * c - y * s + ox, x * s + y * c + oy)
     return f
+
+
+def io_pads(library, cell, boundary=None, _depth=0, _xform=None) -> list:
+    """[(pin, (x0, y0, x1, y1))] of the module's I/O pads in ``cell``: the
+    numbered pads drawn in the cell itself and those inside placed
+    instances with no ref-des label -- a substrate cell carrying its pad
+    row (SUBSTRATE_40): one with geometry on the ``boundary`` (substrate)
+    layer. Pads of labelled parts (R1, U1) are the parts' own, and an
+    unlabelled package (30_PIN_pkg) holds header pins, not I/O pads."""
+    out = []
+    if cell is None or _depth > 16:
+        return out
+    f = _xform or (lambda p: p)
+    for sh in cell.shapes:
+        pin = getattr(sh, "pin", "")
+        if pin and isinstance(sh, (Rectangle, Polygon)):
+            pts = [f(p) for p in sh.points]
+            xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+            out.append((str(pin), (min(xs), min(ys), max(xs), max(ys))))
+    if boundary is None or int(boundary) < 0:
+        return out
+    for r in cell.srefs:
+        child = library.cells.get(r.cell_name)
+        if r.label or child is None or not any(sh.layer == boundary for sh in child.shapes):
+            continue
+        g = _xf(r)
+        out.extend(io_pads(library, child, boundary, _depth + 1,
+                           (lambda f, g: (lambda p: f(g(p))))(f, g)))
+    return out
 
 
 def cell_pins(library, cell_name, _depth=0, _xform=None) -> Dict[str, tuple]:
@@ -182,9 +266,46 @@ def _tokens(name):
     return [t.lower() for t in re.findall(r"[A-Za-z]+|\d+", name or "")]
 
 
-def match_footprint(library, footprint, fmap) -> Optional[str]:
+def library_cells(session) -> dict:
+    """{cell name: source library} of every cell Auto Place can use: the
+    design's own, then the attached libraries' (a name the design already
+    has is the design's)."""
+    out = {n: session.library for n in session.library.cells}
+    for att in getattr(session, "attached_libraries", None) or []:
+        for n in att.cells:
+            out.setdefault(n, att)
+    return out
+
+
+def use_cell(session, name: str) -> str:
+    """Make sure cell ``name`` is in the design: copy it -- with the cells
+    it places -- from the attached library that has it. Returns its name
+    in the design (the same unless that name was taken)."""
+    lib = session.library
+    if name in lib.cells:
+        return name
+    for att in getattr(session, "attached_libraries", None) or []:
+        if name in att.cells:
+            return lib.import_cell_closure(att, name)
+    raise LayoutError(f"no cell {name!r} in the design or its attached libraries")
+
+
+class _Cells:
+    """A library-like view (``.cells``: name -> Cell) over the design's and
+    the attached libraries' cells together."""
+
+    def __init__(self, session):
+        self.cells = {n: src.cells[n] for n, src in library_cells(session).items()}
+
+
+def match_footprint(library, footprint, fmap, ref: Optional[str] = None) -> Optional[str]:
     """KiCad footprint -> design cell: the map, an exact cell name, else the
-    cell sharing all the footprint name's numbers and most of its words."""
+    cell sharing all the footprint name's numbers and most of its words.
+    A part whose netlist gives no footprint can still be mapped by its
+    reference designator (footprint_map key "ref:<REF>", set by Auto
+    Place's Map footprint)."""
+    if ref and fmap.get(f"ref:{ref}") in library.cells:
+        return fmap[f"ref:{ref}"]
     if not footprint:
         return None
     if footprint in fmap and fmap[footprint] in library.cells:
@@ -288,6 +409,17 @@ def build_job(session, netlist, cell_name=None, overrides=None, settings=None, o
     except Exception:
         bond_layers = set()
     placed = {r.label: r for r in cell.srefs if r.label}
+    avail = _Cells(session)                      # the design's cells + the attached ones
+    # the flow: netlist read, resistors designed (Resistor Designer), then
+    # place -- a printed resistor not yet designed stops the job here
+    from .netlist_flow import resistor_status
+    todo = [r for r in resistor_status(session, nl, placed=set(placed))["undesigned"]
+            if (only is None or r in only) and not (ov.get(r, {}).get("cell"))]
+    if todo and not S.get("auto_size_resistors"):
+        raise LayoutError(
+            f"design the printed resistors first: {', '.join(todo)} -- Tools > Read "
+            "Netlist... puts them in the Resistor Designer, where each needs an ink and "
+            "a size (Use This Solution) before Auto Place can lay them out")
     clr = float(S["clearance"])
     reach = float(S["bond_reach"])
     parts, info = [], {"skipped": [], "generated": [], "unmapped": [], "missing_pins": []}
@@ -298,16 +430,24 @@ def build_job(session, netlist, cell_name=None, overrides=None, settings=None, o
         forced = o.get("cell") or comp.fields.get("HL_Cell")
         if sref is not None:
             cellname = sref.cell_name
-        elif forced and forced in lib.cells:
-            cellname = forced
+        elif forced and forced in avail.cells:
+            cellname = use_cell(session, forced)
         else:
-            cellname = match_footprint(lib, comp.footprint, S["footprint_map"])
+            cellname = match_footprint(avail, comp.footprint, S["footprint_map"], ref=ref)
+            if cellname is not None:
+                cellname = use_cell(session, cellname)  # from an attached library: copy it in
         fam = (o.get("family") or "").lower() or _family(lib, comp, cellname, die_layers)
         if cellname is None and fam == "resistor":
             cellname = _make_resistor(session, comp, o, S, info)
             sref = next((r for r in cell.srefs if r.cell_name == cellname), None)
         if cellname is None:
             (info["unmapped"] if comp.footprint else info["skipped"]).append(ref)
+            continue
+        if sref is None and fam != "die" and _is_header(ref, comp, cellname):
+            # the module's header / package (J30 -> 30_PIN_pkg): the
+            # substrate sits inside it, so it is no part to place on the
+            # substrate -- its pins reach the circuit through the I/O pads
+            info.setdefault("header", []).append(ref)
             continue
         pins = cell_pins(lib, cellname)
         # wire bonds a die part carries are not its body (bond_reach
@@ -368,13 +508,10 @@ def build_job(session, netlist, cell_name=None, overrides=None, settings=None, o
     # anchors: the design's own named pads that no placed part owns (I/O pads)
     names = load_net_names(lib)
     anchors = {}
-    for sh in cell.shapes:
-        pin = getattr(sh, "pin", "")
-        if pin and isinstance(sh, (Rectangle, Polygon)):
-            net = names.get(f"IO.{pin}")
-            if net:
-                b = sh.bbox()
-                anchors.setdefault(net, []).append(((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0))
+    for pin, b in io_pads(lib, cell, session._boundary_layer()):
+        net = names.get(f"IO.{pin}")
+        if net:
+            anchors.setdefault(net, []).append(((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0))
     for r in cell.srefs:
         if r.label and r.label not in idx:
             f = _xf(r)
@@ -426,11 +563,39 @@ def build_job(session, netlist, cell_name=None, overrides=None, settings=None, o
 
     region = _region(session, cell, float(S["edge"]))
     rw, rh = region[2] - region[0], region[3] - region[1]
+    if rw <= 0 or rh <= 0:
+        raise LayoutError(f"the placement area is empty ({rw / 1000:.1f} x {rh / 1000:.1f} mm "
+                          "inside the edge margin) -- check the substrate outline and the "
+                          "Auto Place edge setting")
+    # the parts must fit: their footprints (clearance included) against the area
+    area = lambda p: (p.bbox[2] - p.bbox[0]) * (p.bbox[3] - p.bbox[1])
+    need = sum(area(p) for p in parts)
+    if need > rw * rh:
+        big = sorted(parts, key=area, reverse=True)[:3]
+        raise LayoutError(
+            f"the parts need {need / 1e6:.0f} mm\u00b2 (clearance {clr:g} um included) but "
+            f"the placement area is {rw / 1000:.1f} x {rh / 1000:.1f} mm = "
+            f"{rw * rh / 1e6:.0f} mm\u00b2. Largest: "
+            + ", ".join(f"{p.ref} ({p.cell}) {(p.bbox[2] - p.bbox[0]) / 1000:.1f} x "
+                        f"{(p.bbox[3] - p.bbox[1]) / 1000:.1f} mm" for p in big)
+            + " -- a bigger substrate, a smaller clearance, or fewer parts")
     obstacles = [o for o in obstacles if (o[2] - o[0]) * (o[3] - o[1]) < 0.4 * rw * rh]
     placer = Placer(parts, nets, region, grid=float(S["grid"]), thermal=float(S["thermal"]),
                     seed=int(S["seed"]), obstacles=obstacles)
     info.update(settings=S, netlist=nl, cell=name, region=region)
     return placer, info
+
+
+_HEADER_REF = re.compile(r"^(J|P|CN|CON|HDR)\d", re.I)
+_HEADER_WORDS = ("pkg", "package", "header", "conn", "socket", "dip_kovar", "kovar")
+
+
+def _is_header(ref, comp, cellname):
+    """A part that is the module's header / package or a connector (J30,
+    Conn_01x30_Socket, 30_PIN_pkg) -- not something placed on the substrate."""
+    text = " ".join(str(t or "") for t in (cellname, getattr(comp, "value", ""),
+                                           getattr(comp, "footprint", ""))).lower()
+    return bool(_HEADER_REF.match(str(ref))) or any(w in text for w in _HEADER_WORDS)
 
 
 def _region(session, cell, edge):
@@ -443,17 +608,40 @@ def _region(session, cell, edge):
     if sub is not None:
         b = sub.bounds
         return (b[0] + edge, b[1] + edge, b[2] - edge, b[3] - edge)
-    bb = session.library.cell_bbox(cell.name)
-    if bb is None:
-        raise LayoutError("no substrate outline or I/O pads to place inside -- draw the substrate first")
-    return bb
+    # no substrate and no I/O pads: there is nothing to place inside (the
+    # outline of whatever is already drawn -- a row of resistors, say --
+    # is no placement area, and a search for room in it never ends)
+    raise LayoutError("no substrate outline or I/O pads to place inside -- draw the substrate "
+                      "outline (its layer: Setup > Technology Properties, Route tab, boundary "
+                      "layer) and the I/O pads first")
 
 
 def _make_resistor(session, comp, o, S, info):
-    """A printed resistor from its value: sized by the Resistor Designer,
-    generated as a cell + one instance (moved later)."""
+    """A printed resistor: built from its design in the Resistor Designer
+    (the flow: Read Netlist, design, place) -- or, with the job setting
+    auto_size_resistors, sized here from its value -- generated as a cell
+    + one instance (moved later)."""
     from ..gui.resistor_designer import DesignRules, Resistor, width_for_power
     from ..io.hybrid_routed import parse_ohms
+    from .netlist_flow import designed_solution
+    designed = designed_solution(session.library, comp.ref)
+    if designed is not None:
+        sol = designed[1]
+        layer = o.get("layer") or comp.fields.get("HL_Layer")
+        layer = session.library.layers.resolve(layer) if layer not in (None, "") else \
+            resistor_conductor(session.library, S)
+        if layer is None:
+            raise LayoutError(f"{comp.ref}: no resistor conductor layer in the tech file or "
+                              "the job settings")
+        cn = session.generate_resistor(0, 0, sol.body_width, sol.body_length, ink_rsh=sol.ink_rsh,
+                                       ref_des=comp.ref, conductor_layer=int(layer),
+                                       n_folds=sol.n_folds, shape=sol.shape,
+                                       shape_params=sol.shape_params)
+        for ref in session.library.cells[session.current_cell_name].srefs:
+            if ref.cell_name == cn and not ref.label:
+                ref.label = comp.ref
+        info["generated"].append(comp.ref)
+        return cn
     try:
         value = parse_ohms(comp.value)
     except Exception:
@@ -546,13 +734,10 @@ def sli(session, cell_name=None, nets=None, unrouted_only=True):
     if not names:
         return {"nets": [], "total": 0.0}
     pts = {}
-    for sh in cell.shapes:
-        pin = getattr(sh, "pin", "")
-        if pin and isinstance(sh, (Rectangle, Polygon)):
-            net = names.get(f"IO.{pin}")
-            if net:
-                b = sh.bbox()
-                pts.setdefault(net, []).append(((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0))
+    for pin, b in io_pads(lib, cell, session._boundary_layer()):
+        net = names.get(f"IO.{pin}")
+        if net:
+            pts.setdefault(net, []).append(((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0))
     # "REF.PIN" -> where its wire bond lands on the substrate
     landing = {}
     try:

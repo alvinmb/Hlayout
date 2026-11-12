@@ -17,6 +17,7 @@ import app.freerouting.board.hybrid.Segments;
 import app.freerouting.board.hybrid.SubstratePad;
 import app.freerouting.board.hybrid.SubstratePadRole;
 import app.freerouting.board.hybrid.TwoPinComponent;
+import app.freerouting.board.hybrid.TwoPinKind;
 import app.freerouting.board.hybrid.UnroutedConnection;
 import app.freerouting.board.hybrid.WireMaterial;
 import app.freerouting.board.hybrid.WireSpec;
@@ -50,7 +51,7 @@ import java.util.TreeMap;
  * jumpers are the only way across.
  *
  * <p>If any connection fails, the whole design is routed again with the failed nets first, and the
- * better of the two runs is kept (fewest unrouted, then fewest jumpers, then shortest). Everything
+ * best of the runs is kept (fewest unrouted, then fewest jumpers, then shortest). Everything
  * is deterministic: same input, same output, independent of time budget or threads.
  */
 public final class HybridRouter {
@@ -74,23 +75,37 @@ public final class HybridRouter {
     Attempt first = new Attempt(problem, problem.defaultOrder());
     first.run();
     Attempt best = first;
-    if (!first.failedNets.isEmpty()) {
-      List<String> order = new ArrayList<>(first.failedNets);
+    Attempt last = first;
+    int passes = problem.options.ripupPasses();
+    java.util.Random shuffle = new java.util.Random(1);
+    for (int pass = 1; pass <= passes && !last.failedNets.isEmpty(); pass++) {
+      // rip up: the nets that failed go first, the rest after (shuffled after the first pass,
+      // so each pass tries a different order)
+      List<String> rest = new ArrayList<>();
       for (String net : problem.defaultOrder()) {
-        if (!first.failedNets.contains(net)) {
-          order.add(net);
+        if (!last.failedNets.contains(net)) {
+          rest.add(net);
         }
       }
-      Attempt second = new Attempt(problem, order);
-      second.run();
-      if (second.isBetterThan(first)) {
-        best = second;
+      if (pass > 1) {
+        java.util.Collections.shuffle(rest, shuffle);
       }
+      List<String> order = new ArrayList<>(last.failedNets);
+      order.addAll(rest);
+      Attempt next = new Attempt(problem, order);
+      next.run();
+      if (next.isBetterThan(best)) {
+        best = next;
+      }
+      last = next;
     }
     return best.result(bonds);
   }
 
   // --- static problem description ------------------------------------------------------------
+
+  /** A fixed trace segment run: existing copper of a net, joined to a terminal group or loose. */
+  private record Fixed(String net, int layer, List<PointUm> points, int width, String joinId) {}
 
   /** A copper terminal the router must connect: substrate pad or component pin. */
   private record Terminal(String id, String net, int layer, RectUm rect, String key) {}
@@ -126,8 +141,14 @@ public final class HybridRouter {
     final List<String> nets = new ArrayList<>();
     final Map<String, Integer> netIds = new HashMap<>();
     final List<RectUm> obstacles = new ArrayList<>();
+    /**
+     * Where no jumper wire may fly: every die, a chip part's whole outline (body and terminations
+     * -- it stands proud of the substrate), a printed resistor's body.
+     */
+    final List<RectUm> noFly = new ArrayList<>();
     final List<WireSeg> wires = new ArrayList<>();
     final List<RoutedTrace> escapes = new ArrayList<>();
+    final List<Fixed> fixed = new ArrayList<>();
 
     Problem(HybridDesign design) {
       this.design = design;
@@ -173,6 +194,7 @@ public final class HybridRouter {
           markHard(l, r);
         }
         obstacles.add(die.bounds());
+        noFly.add(die.bounds());
       }
       List<TwoPinComponent> comps = design.components();
       for (int ci = 0; ci < comps.size(); ci++) {
@@ -186,6 +208,19 @@ public final class HybridRouter {
         }
         zoneNets.add(pinNets);
         obstacles.add(comp.bodyBounds());
+        RectUm fly = comp.bodyBounds();
+        if (comp.kind() == TwoPinKind.CHIP) {
+          for (ComponentPin pin : comp.pins()) {
+            RectUm pr = comp.pinBounds(pin);
+            fly =
+                new RectUm(
+                    Math.min(fly.minX(), pr.minX()),
+                    Math.min(fly.minY(), pr.minY()),
+                    Math.max(fly.maxX(), pr.maxX()),
+                    Math.max(fly.maxY(), pr.maxY()));
+          }
+        }
+        noFly.add(fly);
         RectUm zoneRect = comp.bodyBounds().grow(comp.keepoutUm());
         double reach = traceWidth / 2.0 + slack;
         for (String layer : comp.obstacleLayers()) {
@@ -204,6 +239,18 @@ public final class HybridRouter {
               });
         }
       }
+      for (Map.Entry<String, List<List<Integer>>> e : options.keepouts().entrySet()) {
+        int l = layers.indexOf(e.getKey());
+        if (l < 0 || e.getValue() == null) {
+          continue;
+        }
+        for (List<Integer> r : e.getValue()) {
+          if (r != null && r.size() == 4) {
+            markHard(l, new RectUm(r.get(0), r.get(1), r.get(2), r.get(3)));
+          }
+        }
+      }
+      collectFixed();
       hardDist = new float[count][];
       for (int l = 0; l < count; l++) {
         final boolean[] hard = rawHard[l];
@@ -211,6 +258,50 @@ public final class HybridRouter {
       }
       collectTerminals();
       collectWires();
+    }
+
+    /**
+     * Existing traces that stay: those of a net with terminals become that net's copper; the rest
+     * (no net, or a net nothing else is on) block every net.
+     */
+    private void collectFixed() {
+      Set<String> terminalNets = new HashSet<>();
+      for (SubstratePad pad : design.substratePads()) {
+        if (pad.net() != null && !pad.net().isBlank()) {
+          terminalNets.add(pad.net());
+        }
+      }
+      for (TwoPinComponent comp : design.components()) {
+        for (ComponentPin pin : comp.pins()) {
+          if (pin.net() != null && !pin.net().isBlank()) {
+            terminalNets.add(pin.net());
+          }
+        }
+      }
+      List<RoutedTrace> traces = options.fixedTraces();
+      List<String> joins = options.fixedJoins();
+      for (int i = 0; i < traces.size(); i++) {
+        RoutedTrace t = traces.get(i);
+        int l = layers.indexOf(t.layer());
+        if (l < 0 || t.points().size() < 2) {
+          continue;
+        }
+        int width = Math.max(1, t.widthUm());
+        if (t.net() == null || !terminalNets.contains(t.net())) {
+          double reach = width / 2.0;
+          for (int k = 1; k < t.points().size(); k++) {
+            grid.forNearSegment(
+                t.points().get(k - 1), t.points().get(k), reach, c -> rawHard[l][c] = true);
+          }
+          continue;
+        }
+        String join = i < joins.size() ? joins.get(i) : "";
+        fixed.add(new Fixed(t.net(), l, t.points(), width, join));
+      }
+    }
+
+    int widthOf(String net) {
+      return options.widthOf(net, traceWidth);
     }
 
     private void markEdgeBand(int w, int h) {
@@ -262,6 +353,25 @@ public final class HybridRouter {
         String b = key(w.to());
         if (a != null && b != null) {
           uf.union(a, b);
+        }
+      }
+      // Terminals existing copper already joins.
+      Map<String, String> keyOfId = new HashMap<>();
+      for (Terminal t : terminals) {
+        keyOfId.putIfAbsent(t.id(), t.key());
+      }
+      for (List<String> group : options.connected()) {
+        String first = null;
+        for (String id : group) {
+          String k = keyOfId.get(id);
+          if (k == null) {
+            continue;
+          }
+          if (first == null) {
+            first = k;
+          } else {
+            uf.union(first, k);
+          }
         }
       }
       Map<String, Map<String, List<Terminal>>> byNet = new TreeMap<>();
@@ -509,6 +619,12 @@ public final class HybridRouter {
     // Per-net state.
     int netId;
     String net;
+    int width;
+    double traceClearance;
+    double traceHardClearance;
+    int windowPad;
+    double windowClearance;
+    double windowHardClearance;
     float[][] foreign;
     byte[][] landCache;
     byte[][] windowCache;
@@ -539,6 +655,15 @@ public final class HybridRouter {
         Integer id = pb.netIds.get(t.net());
         if (id != null) {
           rasterRect(t.layer(), t.rect(), id);
+          if (!t.id().endsWith("~esc")) {
+            // A pad -- a part's termination, a bond finger, an I/O pad -- is bare through the
+            // whole stack: no other net's trace may cross over it on another conductor.
+            for (int l = 0; l < layerCount; l++) {
+              if (l != t.layer()) {
+                rasterRect(l, t.rect(), id);
+              }
+            }
+          }
         }
       }
       // Escapes are traces with round ends: record their full copper, not just the terminal box.
@@ -551,6 +676,17 @@ public final class HybridRouter {
       for (RoutedTrace e : pb.escapes) {
         traces.add(e);
         traceLength += e.lengthUm();
+      }
+      for (Fixed f : pb.fixed) {
+        Integer id = pb.netIds.get(f.net());
+        if (id == null) {
+          continue;
+        }
+        double fr = f.width() / 2.0 + grid.slack;
+        for (int k = 1; k < f.points().size(); k++) {
+          grid.forNearSegment(
+              f.points().get(k - 1), f.points().get(k), fr, c -> claim(f.layer(), c, id));
+        }
       }
       this.obstacles = new ArrayList<>(pb.obstacles);
       this.wires = new ArrayList<>(pb.wires);
@@ -632,6 +768,14 @@ public final class HybridRouter {
       }
       net = netName;
       netId = pb.netIds.get(netName);
+      width = pb.widthOf(netName);
+      traceClearance = (width / 2.0 + pb.space + grid.slack) * RoutingGrid.OCTILE_FACTOR;
+      traceHardClearance = (width / 2.0 + grid.slack) * RoutingGrid.OCTILE_FACTOR;
+      Integer ownWindow = pb.options.netWindows().get(netName);
+      windowPad = ownWindow == null ? pb.windowPad : Math.max(pb.windowPad, ownWindow);
+      double windowReach = windowPad * Math.sqrt(2) / 2;
+      windowClearance = (windowReach + pb.space + grid.slack) * RoutingGrid.OCTILE_FACTOR;
+      windowHardClearance = (windowReach + grid.slack) * RoutingGrid.OCTILE_FACTOR;
       foreign = new float[layerCount][];
       landCache = new byte[layerCount][grid.cells];
       windowCache = new byte[layerCount][grid.cells];
@@ -648,8 +792,25 @@ public final class HybridRouter {
           grid.forInterior(t.rect(), c -> own[t.layer()][c] = true);
         }
       }
+      // This net's fixed copper: its own, and part of the group of the terminal it reaches.
+      Map<List<Terminal>, List<Fixed>> fixedOf = new java.util.IdentityHashMap<>();
+      for (Fixed f : pb.fixed) {
+        if (!f.net().equals(netName)) {
+          continue;
+        }
+        markFixed(f, own);
+        for (List<Terminal> group : netGroups) {
+          if (group.stream().anyMatch(t -> t.id().equals(f.joinId()))) {
+            fixedOf.computeIfAbsent(group, g -> new ArrayList<>()).add(f);
+            break;
+          }
+        }
+      }
       for (Terminal t : netGroups.get(0)) {
         grid.forInterior(t.rect(), c -> tree[t.layer()][c] = true);
+      }
+      for (Fixed f : fixedOf.getOrDefault(netGroups.get(0), List.of())) {
+        markFixed(f, tree);
       }
       String treeId = netGroups.get(0).get(0).id();
       List<List<Terminal>> remaining = new ArrayList<>(netGroups.subList(1, netGroups.size()));
@@ -661,6 +822,15 @@ public final class HybridRouter {
           final int index = gi;
           for (Terminal t : remaining.get(gi)) {
             grid.forInterior(t.rect(), c -> target[t.layer()][c] = index);
+          }
+          for (Fixed f : fixedOf.getOrDefault(remaining.get(gi), List.of())) {
+            for (int k = 1; k < f.points().size(); k++) {
+              grid.forNearSegment(
+                  f.points().get(k - 1),
+                  f.points().get(k),
+                  grid.pitch * 0.75,
+                  c -> target[f.layer()][c] = index);
+            }
           }
         }
         int[] path = search(false);
@@ -680,8 +850,22 @@ public final class HybridRouter {
         for (Terminal t : remaining.get(reached)) {
           grid.forInterior(t.rect(), c -> tree[t.layer()][c] = true);
         }
+        for (Fixed f : fixedOf.getOrDefault(remaining.get(reached), List.of())) {
+          markFixed(f, tree);
+        }
         remaining.remove(reached);
         routed++;
+      }
+    }
+
+    /** Marks the cells along a fixed trace's centre-line. */
+    private void markFixed(Fixed f, boolean[][] map) {
+      for (int k = 1; k < f.points().size(); k++) {
+        grid.forNearSegment(
+            f.points().get(k - 1),
+            f.points().get(k),
+            grid.pitch * 0.75,
+            c -> map[f.layer()][c] = true);
       }
     }
 
@@ -772,6 +956,9 @@ public final class HybridRouter {
         int ci = grid.col(c);
         int cj = grid.row(c);
         for (int nd = 0; nd < 8; nd++) {
+          if (pb.options.orthogonal() && (nd & 1) == 1) {
+            continue; // 90-degree routing: no diagonal steps
+          }
           double bend = bendCost(d, nd);
           if (bend < 0) {
             continue;
@@ -792,6 +979,13 @@ public final class HybridRouter {
             }
           }
           double step = (DX[nd] != 0 && DY[nd] != 0) ? grid.pitch * Math.sqrt(2) : grid.pitch;
+          // A layer's preferred direction: a step across it costs more.
+          List<String> prefer = pb.options.directions();
+          String want = l < prefer.size() ? prefer.get(l) : "";
+          if (("H".equalsIgnoreCase(want) && DY[nd] != 0)
+              || ("V".equalsIgnoreCase(want) && DX[nd] != 0)) {
+            step *= pb.options.againstDirectionCost();
+          }
           relax(s, state(l, n, nd), gs + step + bend, MOVE_STEP, goalBox, n);
         }
         if (layerCount > 1) {
@@ -859,8 +1053,8 @@ public final class HybridRouter {
         return true;
       }
       if (pb.rawHard[l][c]
-          || pb.hardDist[l][c] < pb.traceHardClearance
-          || foreign[l][c] < pb.traceClearance) {
+          || pb.hardDist[l][c] < traceHardClearance
+          || foreign[l][c] < traceClearance) {
         return false;
       }
       return zoneAllows(l, c);
@@ -902,7 +1096,7 @@ public final class HybridRouter {
     boolean windowFits(int l, int c) {
       if (windowCache[l][c] == 0) {
         boolean fits =
-            padFits(l, c, pb.windowPad, pb.windowHardClearance, pb.windowClearance, false);
+            padFits(l, c, windowPad, windowHardClearance, windowClearance, false);
         windowCache[l][c] = (byte) (fits ? 1 : 2);
       }
       return windowCache[l][c] == 1;
@@ -911,7 +1105,11 @@ public final class HybridRouter {
     /** Jumper lands keep out of every keep-out ring, like the pads HLayout supplies. */
     boolean landFits(int l, int c) {
       if (landCache[l][c] == 0) {
-        boolean fits = padFits(l, c, pb.landSize, pb.landHardClearance, pb.landClearance, true);
+        // A land is bare through the whole stack: it must be clear on every conductor.
+        boolean fits = true;
+        for (int k = 0; k < layerCount && fits; k++) {
+          fits = padFits(k, c, pb.landSize, pb.landHardClearance, pb.landClearance, true);
+        }
         landCache[l][c] = (byte) (fits ? 1 : 2);
       }
       return landCache[l][c] == 1;
@@ -1007,6 +1205,12 @@ public final class HybridRouter {
     private boolean jumperClear(int l, int from, int to) {
       PointUm a = grid.centre(from);
       PointUm b = grid.centre(to);
+      // A jumper never flies over a die or a part.
+      for (RectUm r : pb.noFly) {
+        if (Segments.toRect(a, b, r) <= 0) {
+          return false;
+        }
+      }
       int capillary = pb.rules.bondWire().capillaryClearanceUm();
       for (RectUm r : obstacles) {
         if (r.distanceTo(b) < capillary) {
@@ -1084,8 +1288,13 @@ public final class HybridRouter {
             int hi = Math.max(currentLayer, layer(s));
             windows.add(
                 new CrossoverWindow(
-                    net, p, pb.windowOpening, pb.windowPad, pb.layers.get(lo), pb.layers.get(hi)));
-            RectUm padRect = RectUm.centred(p, pb.windowPad, pb.windowPad);
+                    net,
+                    p,
+                    pb.windowOpening + (windowPad - pb.windowPad),
+                    windowPad,
+                    pb.layers.get(lo),
+                    pb.layers.get(hi)));
+            RectUm padRect = RectUm.centred(p, windowPad, windowPad);
             for (int l : new int[] {lo, hi}) {
               rasterRect(l, padRect, netId);
               markOwnInterior(l, padRect);
@@ -1140,7 +1349,9 @@ public final class HybridRouter {
               spec,
               false));
       for (SubstratePad pad : List.of(padA, padB)) {
-        rasterRect(l, pad.bounds(), netId);
+        for (int k = 0; k < layerCount; k++) {
+          rasterRect(k, pad.bounds(), netId);
+        }
         markOwnInterior(l, pad.bounds());
         obstacles.add(pad.bounds());
       }
@@ -1152,10 +1363,10 @@ public final class HybridRouter {
       if (pts.size() < 2) {
         return;
       }
-      RoutedTrace trace = new RoutedTrace(net, pb.layers.get(l), pts, pb.traceWidth);
+      RoutedTrace trace = new RoutedTrace(net, pb.layers.get(l), pts, width);
       traces.add(trace);
       traceLength += trace.lengthUm();
-      double reach = pb.traceWidth / 2.0 + grid.slack;
+      double reach = width / 2.0 + grid.slack;
       for (int i = 1; i < pts.size(); i++) {
         grid.forNearSegment(pts.get(i - 1), pts.get(i), reach, c -> claim(l, c, netId));
       }

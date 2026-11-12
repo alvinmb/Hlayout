@@ -103,3 +103,70 @@ def test_io_pads_tab_saves_the_rules():
         assert "inset" in apply()
     finally:
         app.destroy()
+
+
+def _sub_session():
+    s = Session.new("EDGE")
+    s.new_cell("TOP")
+    rr = load_route_rules(s.library); rr["layer_a"] = 3; rr["layer_b"] = 5; rr["boundary_layer"] = 57
+    save_route_rules(s.library, rr)
+    return s
+
+
+def _pads(s):
+    return {sh.pin: sh.bbox() for sh in s.cell.shapes if getattr(sh, "pin", "") and sh.layer == 3}
+
+
+def test_edge_pads_at_a_pitch_numbered_dip_style():
+    s = _sub_session()
+    s.rect(57, 0, 0, 37600, 17500)
+    r = s.edge_io_pads(n=14, pitch=2540, pad_w=300, pad_l=600, edge_margin=250)
+    assert r["pads"] == 28 and r["align"] == "pitch"
+    p = _pads(s)
+    assert p["1"][0] < p["14"][0] and p["1"][1] == 250 and p["1"][3] == 850     # bottom, L->R
+    assert p["15"][0] > p["28"][0] and p["15"][3] == 17250                       # top, R->L
+    assert abs((p["1"][0] + p["14"][2]) / 2 - 18800) <= 1                        # centred
+    s.edge_io_pads(n=14, sides="B")                                              # re-run replaces
+    assert len(_pads(s)) == 28
+    with pytest.raises(Exception, match="at most"):
+        s.edge_io_pads(n=20)
+
+
+def test_edge_pads_follow_a_shaped_substrate_and_a_selected_cell():
+    s = _sub_session()
+    s.new_cell("SUB")
+    s.polygon(57, [(0, 0), (20000, 0), (20000, 8000), (10000, 10000), (0, 8000)])
+    s.use_cell("TOP")
+    ref = s.sref("SUB", (1000, 1000))
+    r = s.edge_io_pads(shape=ref, n=3, pitch=5000, sides="T", pad_w=300, pad_l=600,
+                       edge_margin=250)
+    p = _pads(s)
+    assert r["pads"] == 3
+    assert p["2"][3] == 11000 - 250                 # the peak, in TOP's coordinates
+    assert p["1"][3] < p["2"][3] and p["3"][3] < p["2"][3]
+
+
+def test_edge_pads_line_up_with_the_header_pins():
+    s = _sub_session()
+    s.new_cell("PKG")
+    for i in range(4):
+        s.rect(5, 2000 + i * 2540 - 100, -2000, 2000 + i * 2540 + 100, -1800, pin=str(i + 1))
+        s.rect(5, 2000 + i * 2540 - 100, 12000, 2000 + i * 2540 + 100, 12200, pin=str(8 - i))
+    s.use_cell("TOP")
+    s.rect(57, 0, 0, 12000, 10000)
+    s.sref("PKG", (0, 0))
+    r = s.edge_io_pads()
+    p = _pads(s)
+    assert r["align"] == "header" and sorted(p, key=int) == [str(i) for i in range(1, 9)]
+    assert (p["1"][0] + p["1"][2]) / 2 == 2000 and p["1"][1] == 250
+    assert (p["8"][0] + p["8"][2]) / 2 == 2000 and p["8"][3] == 9750
+
+
+def test_edge_pads_get_the_header_pins_nets():
+    from hlayout.io.techfile import load_net_names
+    s = _sub_session()
+    s.rect(57, 0, 0, 37600, 17500)
+    s.set_net_names({"J30.1": "VCC", "J30.2": "OUT", "U1.3": "OUT", "IO.2": "KEEP"})
+    s.edge_io_pads(n=3, sides="B")
+    names = load_net_names(s.library)
+    assert names["IO.1"] == "VCC" and names["IO.2"] == "KEEP" and "IO.3" not in names

@@ -465,6 +465,112 @@
           "minimum": 0,
           "default": 0,
           "description": "Routing grid pitch; 0 = half the smaller of min line and min space, at least 25."
+        },
+        "orthogonal": {
+          "type": "boolean",
+          "default": false,
+          "description": "Traces horizontal and vertical only (90-degree routing)."
+        },
+        "ripupPasses": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 1,
+          "description": "Rip-up-and-reroute passes: the nets that failed are routed first, the rest after in a new order; the best attempt is kept."
+        },
+        "netWidths": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "description": "Trace width per net (power nets wider); a net not listed takes conductor.minLineUm."
+        },
+        "fixedTraces": {
+          "type": "array",
+          "description": "Existing printed traces that stay: copper of their net the router may join, an obstacle to other nets; a blank net blocks all.",
+          "items": {
+            "type": "object",
+            "required": [
+              "layer",
+              "points",
+              "widthUm"
+            ],
+            "properties": {
+              "net": {
+                "type": "string"
+              },
+              "layer": {
+                "type": "string"
+              },
+              "points": {
+                "type": "array",
+                "minItems": 2,
+                "items": {
+                  "$ref": "#/$defs/point"
+                }
+              },
+              "widthUm": {
+                "$ref": "#/$defs/positiveUm"
+              }
+            }
+          }
+        },
+        "fixedJoins": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "For each fixed trace, in order: the id of a terminal (substrate pad id, or component pin \"R1.A\") its copper reaches, or \"\"."
+        },
+        "connected": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "description": "Groups of terminal ids existing copper already joins."
+        },
+        "directions": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "H",
+              "V",
+              ""
+            ]
+          },
+          "description": "Preferred track direction per routing layer, in order."
+        },
+        "againstDirectionCost": {
+          "type": "number",
+          "minimum": 1,
+          "default": 2.5,
+          "description": "Cost factor for a step across a layer's preferred direction."
+        },
+        "netWindows": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "description": "Crossover footprint (pad side) per net, for nets whose via is larger than conductor.windowMinUm (power nets)."
+        },
+        "keepouts": {
+          "type": "object",
+          "description": "Per conductor layer name: rectangles [minX, minY, maxX, maxY] no trace or crossover may enter.",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              },
+              "minItems": 4,
+              "maxItems": 4
+            }
+          }
         }
       },
       "additionalProperties": false

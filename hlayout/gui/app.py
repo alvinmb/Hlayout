@@ -218,8 +218,10 @@ class App(tk.Tk):
             self.session, self.console, on_change=self.refresh_all, view=self.canvas
         )
         self.session.on_change(self.refresh_all)
+        self.canvas.retrace_net_highlight = self.session.retrace_net_highlight
         self.session.on_change(self._update_undo_redo_menu_state)
         self._update_undo_redo_menu_state()
+        self.after_idle(self._restore_sli)
         # Help > Report Bug...: start recording commands, status
         # messages, uncaught exceptions and stderr for this session so a
         # report shows the lead-up to a problem (see gui/bug_report.py).
@@ -449,6 +451,7 @@ class App(tk.Tk):
         self.show_sli_var = tk.BooleanVar(value=False)
         viewm.add_checkbutton(label="Straight-Line Interconnects", variable=self.show_sli_var,
                                command=self._on_show_sli_change)
+        viewm.add_command(label="Recalculate SLI", command=self.recalc_sli, accelerator="F5")
         viewm.add_command(label="Unrouted Nets...", command=lambda: open_unrouted_window(self))
         viewm.add_separator()
         viewm.add_radiobutton(label="Zoom Window", value="zoomwin", variable=self.mode_var,
@@ -544,17 +547,28 @@ class App(tk.Tk):
         toolsm.add_command(label="Assembly Drawing...", command=lambda: open_assembly_window(self))
         toolsm.add_command(label="DRC...", command=lambda: open_drc_window(self))
         toolsm.add_command(label="Extract Netlist...", command=lambda: open_netlist_window(self))
+        toolsm.add_command(label="Read Netlist...", command=self.read_netlist)
         toolsm.add_command(label="Auto Place...",
                            command=lambda: __import__("hlayout.gui.autoplace_window",
                                                       fromlist=["x"]).open_autoplace_window(self))
-        toolsm.add_command(label="Autoroute (Freerouting)...",
-                           command=lambda: open_freerouting_window(self))
+        # one autorouter: the chip-and-wire hybrid router (the Freerouting
+        # window is no longer on the menu; FREEROUTE still runs it)
+        toolsm.add_command(label="Autoroute...",
+                           command=lambda: __import__("hlayout.gui.autoroute_window",
+                                                      fromlist=["x"]).open_autoroute_window(self))
         toolsm.add_command(label="Thermal Analysis...", command=lambda: open_thermal_window(self))
         toolsm.add_command(label="Generate Dielectric Fill...", command=self.show_dielectric_dialog)
         toolsm.add_command(label="Remove Dielectric Fill", command=self.remove_dielectric_fill)
         toolsm.add_command(label="Remove Unused Bonds...", command=self.remove_unused_bonds)
         toolsm.add_command(label="Bond Header Pins...", command=self.bond_header)
+        toolsm.add_command(label="Fan Out Die Bonds...", command=self.fan_out_die_bonds)
         toolsm.add_command(label="Assign I/O Pads...", command=self.assign_io_pads)
+        toolsm.add_command(label="Header Pinout...",
+                          command=lambda: __import__("hlayout.gui.header_pinout_window",
+                          fromlist=["x"]).open_header_pinout_window(self))
+        toolsm.add_command(label="I/O Pad Wizard...",
+                           command=lambda: __import__("hlayout.gui.iopad_wizard",
+                                                      fromlist=["x"]).open_iopad_wizard(self))
         toolsm.add_command(label="Fix Vias...", command=self.fix_vias)
 
         # --- Help ----------------------------------------------------------
@@ -573,6 +587,7 @@ class App(tk.Tk):
         self.bind("<Control-p>", lambda e: self.print_current_view())
         self.bind("<Control-z>", lambda e: self._undo())
         self.bind("<Control-y>", lambda e: self._redo())
+        self.bind("<F5>", lambda e: self.recalc_sli())
         self.bind("<Control-Shift-Z>", lambda e: self._redo())
         self.bind("f", lambda e: self.canvas.fit_view())
         self.bind("g", lambda e: self.canvas.toggle_grid())
@@ -2326,7 +2341,48 @@ class App(tk.Tk):
         pad along its shortest tree; total length on the status bar."""
         self.set_sli(self.show_sli_var.get())
 
+    def recalc_sli(self):
+        """View > Recalculate SLI (F5, SLI RECALC): work the straight-line
+        interconnects out again and report the total; turns them on."""
+        try:
+            from ..io.app_settings import set_setting
+            set_setting(self.SLI_SETTING_KEY, True)
+        except Exception:
+            pass
+        self.canvas.show_sli = True
+        if hasattr(self, "show_sli_var"):
+            self.show_sli_var.set(True)
+        self.canvas.recalc_sli()
+        d = self.canvas.sli_last or self.session.sli(cell_name=self.canvas.cell_name)
+        self.status.set(f"Straight-line interconnects recalculated: {len(d['nets'])} nets, "
+                        f"total {d['total'] / 1000:.1f} mm")
+
+    SLI_SETTING_KEY = "show_sli"
+
+    def _restore_sli(self, report: bool = True):
+        """Straight-line interconnects on or off as last chosen -- the
+        choice is remembered across opening a design and restarting."""
+        try:
+            from ..io.app_settings import get_setting
+            on = bool(get_setting(self.SLI_SETTING_KEY))
+        except Exception:
+            return
+        self.canvas.sli_last = None
+        self.canvas._sli_sig = None
+        if report:
+            self.set_sli(on)
+        else:
+            self.canvas.show_sli = on
+            if hasattr(self, "show_sli_var"):
+                self.show_sli_var.set(on)
+            self.canvas.redraw()
+
     def set_sli(self, on: bool):
+        try:
+            from ..io.app_settings import set_setting
+            set_setting(self.SLI_SETTING_KEY, bool(on))
+        except Exception:
+            pass
         self.canvas.show_sli = bool(on)
         if hasattr(self, "show_sli_var") and self.show_sli_var.get() != bool(on):
             self.show_sli_var.set(bool(on))
@@ -2910,6 +2966,7 @@ class App(tk.Tk):
                 + "\n".join(loaded.attach_errors),
                 parent=self,
             )
+        self._restore_sli(report=False)
         if loaded.had_sidecar:
             self.status.set(
                 f"opened {path} (restored technology + "
@@ -2997,6 +3054,63 @@ class App(tk.Tk):
                                             list(r["skipped"].items())[:4])
         self.status.set(msg)
         self.refresh_all()
+
+    def fan_out_die_bonds(self):
+        """Tools > Fan Out Die Bonds...: a bond finger and a wire bond for
+        every die pad with a net, round each placed bare die (see
+        Session.fan_out_die_bonds / FANOUT)."""
+        from ..scripting import fanout
+        from ..io.techfile import load_bond_rules, load_net_names
+        lib = self.session.library
+        cell = lib.get_cell(self.canvas.cell_name)
+        pad_layers = [int(l) for l in (load_bond_rules(lib).get("die_pad_layers") or [])
+                      if int(l) >= 0]
+        if not pad_layers:
+            dialogs.show_error(
+                "Fan Out Die Bonds",
+                "No die pad layers are set. Set the layer the bare dies' bond pads are on "
+                "(e.g. 58) in Setup > Technology Properties, Wire Bonds tab.", parent=self)
+            return
+        names = load_net_names(lib)
+        lines = []
+        for r in cell.srefs:
+            if not r.label:
+                continue
+            pads = fanout.die_pads(lib, r.cell_name, pad_layers)
+            if pads:
+                n = sum(1 for p in pads if not fanout._unconnected(names.get(f"{r.label}.{p}")))
+                lines.append(f"  {r.label} ({r.cell_name}): {n} of {len(pads)} pads have a net")
+        if not lines:
+            dialogs.show_error("Fan Out Die Bonds",
+                               "No bare dies are placed in this cell -- place the parts "
+                               "(Tools > Auto Place...) first.", parent=self)
+            return
+        if not dialogs.ask_yes_no(
+                "Fan Out Die Bonds",
+                "Draw a bond finger and a wire bond for every die pad with a net:\n\n"
+                + "\n".join(lines)
+                + "\n\nFingers 250 x 400 um, 150 um apart, 250 um clear of the die; a die's "
+                "earlier fan-out is replaced. One undo step. (FANOUT sets other sizes; "
+                "FANOUT all=1 bonds every pad.)", parent=self):
+            return
+        try:
+            r = self.session.fan_out_die_bonds(cell_name=self.canvas.cell_name)
+        except LayoutError as e:
+            dialogs.show_error("Fan Out Die Bonds", str(e), parent=self)
+            return
+        msg = (f"Fanned out: {r['fingers']} fingers + bonds ("
+               + ", ".join(f"{d} {len(p)}" for d, p in r["dies"].items()) + ")")
+        warn = []
+        if r["skipped"]:
+            warn.append("Not bonded:\n" + "\n".join(f"  {p}: {w}" for p, w in r["skipped"].items()))
+        if r["overlaps"]:
+            warn.append("Fingers over another part -- move the part or the finger (Edit > Move "
+                        "Bond Finger):\n  " + ", ".join(r["overlaps"]))
+        self.status.set(msg)
+        self.refresh_all()
+        if warn:
+            dialogs.show_warning("Fan Out Die Bonds", msg + "\n\n" + "\n\n".join(warn),
+                                 parent=self)
 
     def assign_io_pads(self):
         """Tools > Assign I/O Pads...: optimise the module pinout -- each
@@ -3601,7 +3715,43 @@ class App(tk.Tk):
             dialogs.show_error("Attach Library failed", str(e), parent=self)
             return
         idx = len(self.session.attached_libraries) - 1
-        self.status.set(f"attached library {idx}: {lib.name!r} ({len(lib.cells)} cells)")
+        kept = self._keep_attachments()
+        self.status.set(f"attached library {idx}: {lib.name!r} ({len(lib.cells)} cells)"
+                        + ("; kept with the design" if kept else ""))
+        self._refresh_cell_lists()
+
+    def _keep_attachments(self):
+        """Record the attached libraries in the open design's sidecar at
+        once, so re-opening the design (or quitting) before the next save
+        does not lose an attachment. Returns True when written."""
+        path = getattr(self, "current_path", None)
+        if not path:
+            return False
+        try:
+            from ..io.sidecar import read_sidecar, write_sidecar
+            from ..io.techfile import apply_techfile
+            from ..core.library import Library
+            # keep the saved technology as saved: only the attachments change
+            old = read_sidecar(path)
+            tech_lib = self.session.library
+            if old and isinstance(old.get("technology"), dict):
+                tech_lib = Library(self.session.library.name)
+                apply_techfile(tech_lib, old["technology"])
+            write_sidecar(tech_lib, list(self.session.attached_libraries),
+                          list(self.session._attached_paths), path)
+            return True
+        except Exception:
+            return False
+
+    def _refresh_cell_lists(self):
+        """Open windows that list the usable cells pick up a library just
+        attached or detached."""
+        w = getattr(self, "_autoplace_window", None)
+        try:
+            if w is not None and w.winfo_exists():
+                w.refresh_cells()
+        except Exception:
+            pass
 
     def load_technology_file(self):
         """Load a technology file (layer stack + global parameters,
@@ -3941,6 +4091,46 @@ class App(tk.Tk):
         view and pin/resistor tables in one cell. Kept by name for
         scripts/MCP."""
         return open_assembly_window(self)
+
+    def read_netlist(self):
+        """Tools > Read Netlist...: step 1 of the design flow -- read the
+        netlist (net names + printed resistors), then design the resistors
+        in the Resistor Designer, which opens with them; then Auto Place."""
+        from tkinter import filedialog
+        path = filedialog.askopenfilename(
+            parent=self, title="Read Netlist",
+            filetypes=[("Netlists", "*.net *.csv *.tng *.tan"), ("All files", "*.*")])
+        if not path:
+            return
+        try:
+            r = self.session.read_netlist(path)
+        except Exception as e:
+            dialogs.show_error("Read Netlist", str(e), parent=self)
+            return
+        self.refresh_all()
+        lines = [f"{r['parts']} parts, {r['nets']} nets -- {r['names']} pad net names stored.",
+                 "",
+                 f"Printed resistors: {len(r['resistors'])}"
+                 + (f" ({len(r['added'])} new, {len(r['changed'])} changed -- to design again, "
+                    f"{len(r['kept'])} kept with their design)" if r["resistors"] else "")]
+        if r["bad_values"]:
+            lines.append(f"Values I couldn't read (fix in the schematic): "
+                         f"{', '.join(r['bad_values'])}")
+        if r["resistors"]:
+            lines += ["", "Next: design each resistor in the Resistor Designer (pick an ink "
+                          "and Use This Solution), then Tools > Auto Place..."]
+        dialogs.show_info("Read Netlist", "\n".join(lines), parent=self)
+        if r["resistors"]:
+            from .resistor_designer import open_resistor_designer
+            win = open_resistor_designer(self)
+            try:                                    # an open designer: show the new list
+                win.resistors.clear()
+                win._load_resistors()
+                win._refresh_all()
+            except Exception:
+                pass
+        self.status.set(f"Netlist read: {r['parts']} parts, {len(r['resistors'])} resistor(s) "
+                        "to design")
 
     def show_extract_netlist_dialog(self):
         """Tools > Extract Netlist...: opens the checkbox-table window
@@ -4927,6 +5117,8 @@ class App(tk.Tk):
             ):
                 return
             self.session.detach_library(idx)
+            self._keep_attachments()
+            self._refresh_cell_lists()
             self.status.set(f"detached library {idx}: {name!r}")
             refresh()
 

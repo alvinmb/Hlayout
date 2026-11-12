@@ -48,6 +48,8 @@ public final class HybridRouteDrc {
   private final List<ValidationIssue> issues = new ArrayList<>();
   private final List<Rect> rects = new ArrayList<>();
   private final List<Seg> segs = new ArrayList<>();
+  private final Map<Integer, Integer> fixedSegOf = new HashMap<>();
+  private static final String FIXED = "fixed#";
 
   private HybridRouteDrc(RoutedHybrid routed) {
     this.routed = routed;
@@ -97,6 +99,19 @@ public final class HybridRouteDrc {
         segs.add(new Seg(ref, trace.net(), trace.layer(), p.get(i - 1), p.get(i), trace.widthUm()));
       }
     }
+    // Existing traces the router left as they were: checked against what it added, and part of
+    // the connectivity.
+    List<RoutedTrace> fixed = design.routing().fixedTraces();
+    for (int t = 0; t < fixed.size(); t++) {
+      RoutedTrace trace = fixed.get(t);
+      List<PointUm> p = trace.points();
+      for (int i = 1; i < p.size(); i++) {
+        fixedSegOf.put(segs.size(), t);
+        segs.add(
+            new Seg(
+                FIXED + t, trace.net(), trace.layer(), p.get(i - 1), p.get(i), trace.widthUm()));
+      }
+    }
   }
 
   private void addPin(TwoPinComponent comp, ComponentPin pin, String name) {
@@ -109,6 +124,9 @@ public final class HybridRouteDrc {
 
   private void checkTraces() {
     for (Seg s : segs) {
+      if (s.ref().startsWith(FIXED)) {
+        continue; // existing copper is HLayout's to check
+      }
       if (s.width() < conductor.minLineUm()) {
         error("TRACE_WIDTH", s.ref(), "width " + s.width() + " < " + conductor.minLineUm() + " µm");
       }
@@ -139,6 +157,9 @@ public final class HybridRouteDrc {
       for (int j = i + 1; j < segs.size(); j++) {
         Seg b = segs.get(j);
         if (!a.layer().equals(b.layer()) || !differentNets(a.net(), b.net())) {
+          continue;
+        }
+        if (a.ref().startsWith(FIXED) && b.ref().startsWith(FIXED)) {
           continue;
         }
         double gap = Segments.distance(a.a(), a.b(), b.a(), b.b()) - (a.width() + b.width()) / 2.0;
@@ -316,6 +337,33 @@ public final class HybridRouteDrc {
                 && a.rect().gap(b.rect()) <= EPS;
         if (sameWindow || touching) {
           union(parent, rectKeys.get(i), rectKeys.get(j));
+        }
+      }
+    }
+    // Existing copper: a fixed trace reaches its terminal, and listed terminals are joined.
+    List<String> joins = design.routing().fixedJoins();
+    for (Map.Entry<Integer, Integer> e : fixedSegOf.entrySet()) {
+      String join = e.getValue() < joins.size() ? joins.get(e.getValue()) : "";
+      if (join.isEmpty()) {
+        continue;
+      }
+      for (String key : rectKeys) {
+        if (key.startsWith("R:" + join + "@")) {
+          union(parent, "S:" + e.getKey(), key);
+        }
+      }
+    }
+    for (List<String> group : design.routing().connected()) {
+      String first = null;
+      for (String id : group) {
+        for (String key : rectKeys) {
+          if (key.startsWith("R:" + id + "@")) {
+            if (first == null) {
+              first = key;
+            } else {
+              union(parent, first, key);
+            }
+          }
         }
       }
     }

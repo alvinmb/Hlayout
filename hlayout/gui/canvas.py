@@ -2945,6 +2945,15 @@ class LayoutCanvas(tk.Canvas):
         return (self.cell_name, id(cell), len(cell.shapes), len(cell.srefs), h,
                 lib.tech_params.get("net_names"), lib.tech_params.get("route_rules"))
 
+    def recalc_sli(self):
+        """Throw the cached straight-line interconnects away and work them
+        out again from the design as it is now (SLI RECALC, View >
+        Recalculate SLI, F5) -- for a change the quick fingerprint can't
+        see, e.g. a pad moved inside a placed substrate cell."""
+        self.sli_last = None
+        self._sli_sig = None
+        self.redraw()
+
     @staticmethod
     def sli_class(net):
         n = (net or "").upper()
@@ -3054,6 +3063,7 @@ class LayoutCanvas(tk.Canvas):
         tr = getattr(self, "net_highlight", None)
         if tr is None or getattr(tr, "cell_name", self.cell_name) != self.cell_name:
             return
+        tr = self._follow_net_highlight(tr)
         tag = "net_highlight"
         col = self.NET_HIGHLIGHT_COLOR
         for _layer, poly in tr.pieces:
@@ -3073,6 +3083,38 @@ class LayoutCanvas(tk.Canvas):
             self.create_rectangle(min(p0[0], p1[0]) - 3, min(p0[1], p1[1]) - 3,
                                   max(p0[0], p1[0]) + 3, max(p0[1], p1[1]) + 3,
                                   outline=self.NET_HIGHLIGHT_PAD_COLOR, width=2, tags=tag)
+
+    #: set by the App: a callable returning the highlight traced again
+    retrace_net_highlight = None
+
+    def _layout_signature(self):
+        """Cheap fingerprint of the shown cell's geometry: where every
+        instance is and every shape's extent -- changes when a part or a
+        track moves, is added or is deleted."""
+        cell = self.library.cells.get(self.cell_name)
+        if cell is None:
+            return None
+        return (tuple((r.cell_name, tuple(r.origin), r.rotation, r.x_reflection)
+                      for r in cell.srefs),
+                tuple((sh.layer, tuple(sh.bbox())) for sh in cell.shapes))
+
+    def _follow_net_highlight(self, tr):
+        """The highlight follows the design: once a drag has ended, a
+        changed layout has the net traced again (a moved part's pads and
+        copper show where they now are)."""
+        if self.retrace_net_highlight is None or getattr(self, "_drag_start_mouse", None) \
+                is not None or getattr(self, "_group_drag", False):
+            return tr
+        sig = self._layout_signature()
+        if getattr(tr, "_sig", None) is None:
+            tr._sig = sig
+            return tr
+        if tr._sig == sig:
+            return tr
+        new = self.retrace_net_highlight() or tr
+        new._sig = sig
+        self.net_highlight = new
+        return new
 
     def start_highlight_net(self):
         """Edit > Highlight Net: each click traces the net under the

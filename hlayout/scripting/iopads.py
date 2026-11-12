@@ -321,3 +321,191 @@ def bond_header(session, cell_name: Optional[str] = None, pins=None, all_pins: b
             done.append(pin)
     session._notify()
     return {"pads": len(done), "pins": done, "layer": bl, "skipped": skipped, "cell": name}
+
+
+def header_nets(names: dict) -> Dict[str, str]:
+    """{pin: net} of the module's header as the netlist names it -- the
+    J30.<pin> / P1.<pin> entries of the design's net names (the header
+    ref with the most pins) -- so the I/O pad numbered <pin> carries it."""
+    from .autoplace_session import _HEADER_REF
+    by_ref: Dict[str, Dict[str, str]] = {}
+    for k, v in names.items():
+        ref, dot, pin = k.partition(".")
+        if dot and v and ref != "IO" and _HEADER_REF.match(ref):
+            by_ref.setdefault(ref, {})[pin] = v
+    return max(by_ref.values(), key=len) if by_ref else {}
+
+
+def fill_io_names(session, pins=None) -> int:
+    """Give each I/O pad number with no IO.<pin> net yet the header pin's
+    net from the netlist (J30.<pin>). ``pins``: just these numbers.
+    Names set by Assign I/O Pads (or by hand) are left alone. Returns how
+    many were added."""
+    from ..io.techfile import load_net_names
+    names = load_net_names(session.library)
+    hn = header_nets(names)
+    add = {f"IO.{p}": n for p, n in hn.items()
+           if f"IO.{p}" not in names and (pins is None or p in pins)}
+    if add:
+        names.update(add)
+        session.set_net_names(names)
+    return len(add)
+
+
+def substrate_outline(session, cell, shape=None):
+    """The substrate as a shapely polygon in ``cell``'s coordinates: the
+    given ``shape`` (a selected Rectangle / Polygon, or an SRef of a
+    substrate cell -- its boundary-layer geometry), else the cell's
+    boundary layer (placed instances included). The largest piece wins
+    when there are several."""
+    from shapely.geometry import Polygon as SPoly
+    from shapely.ops import transform
+    from ..core.maskops import layer_to_shapely_flattened
+    from ..core.shapes import SRef
+    lib = session.library
+    g = None
+    if isinstance(shape, (Rectangle, Polygon)):
+        g = SPoly(shape.points)
+    elif isinstance(shape, SRef):
+        lay = session._boundary_layer()
+        child = lib.cells.get(shape.cell_name)
+        if child is None or lay is None:
+            raise LayoutError("the selected instance has no substrate geometry")
+        cg = layer_to_shapely_flattened(lib, child, lay)
+        if cg is None or cg.is_empty:
+            raise LayoutError(f"{shape.cell_name} has nothing on the boundary layer {lay}")
+        f = _xf(shape)
+        g = transform(lambda x, y, z=None: f((x, y)), cg)
+    elif shape is not None:
+        raise LayoutError("select the substrate (a rectangle or polygon, or a placed substrate "
+                          "cell) first")
+    else:
+        lay = session._boundary_layer()
+        if lay is not None:
+            g = layer_to_shapely_flattened(lib, cell, lay)
+    if g is None or g.is_empty:
+        raise LayoutError("no substrate -- select it, or draw it on the boundary layer "
+                          "(Setup > Technology Properties, Route tab)")
+    if g.geom_type == "MultiPolygon":
+        g = max(g.geoms, key=lambda p: p.area)
+    if not g.is_valid:
+        g = g.buffer(0)
+    return g
+
+
+def _edge_y(outline, x, top):
+    """Where a vertical line at ``x`` crosses the substrate's top (or
+    bottom) edge, or None."""
+    from shapely.geometry import LineString
+    x0, y0, x1, y1 = outline.bounds
+    hit = outline.intersection(LineString([(x, y0 - 1), (x, y1 + 1)]))
+    if hit.is_empty:
+        return None
+    b = hit.bounds
+    return b[3] if top else b[1]
+
+
+def edge_pads(session, cell_name: Optional[str] = None, shape=None, n: Optional[int] = None,
+              pitch: float = 2540.0, sides: str = "TB", pad_w: float = 300.0,
+              pad_l: float = 600.0, edge_margin: float = 250.0, start: int = 1,
+              layer=None, align: str = "auto") -> dict:
+    """Draw a row of numbered I/O pads along the substrate's bottom and / or
+    top edge, in ``cell_name`` (default: the current cell).
+
+    The substrate: ``shape`` (the selected rectangle / polygon / placed
+    substrate cell), else the boundary layer. Each pad is ``pad_w`` wide
+    along the edge and ``pad_l`` long pointing in, its outer end
+    ``edge_margin`` in from the edge -- for a shaped substrate, from the
+    edge where it actually is at that pad.
+
+    Where the pads go (``align``): "header" -- at the x of each header
+    (package) pin below / above the substrate, numbered as that pin;
+    "pitch" -- ``n`` pads a side (default: as many as fit) at ``pitch``,
+    centred, numbered DIP style from ``start``: the bottom row left to
+    right, then the top row right to left; "auto" -- "header" when a
+    package is placed, else "pitch".
+
+    Pads with the same pin numbers on the 1st conductor (or ``layer``) are
+    replaced. One undo step. Returns {"pads", "pins", "align", "pitch",
+    "layer", "cell", "skipped"}."""
+    from shapely.geometry import box as _box
+    lib = session.library
+    name = cell_name or session.current_cell_name
+    if name is None:
+        raise LayoutError("no current cell")
+    cell = lib.get_cell(name)
+    sides = (sides or "TB").upper()
+    if not sides or any(c not in "TB" for c in sides):
+        raise LayoutError("sides must be T, B or TB")
+    if pad_w <= 0 or pad_l <= 0 or edge_margin < 0 or pitch <= 0:
+        raise LayoutError("pad width, length and pitch must be positive, the edge margin 0 or more")
+    outline = substrate_outline(session, cell, shape)
+    x0, y0, x1, y1 = outline.bounds
+    la = session._route_layers()[0] if layer is None else lib.layers.resolve(layer)
+    if la is None or la < 0:
+        raise LayoutError("no conductor layer -- set the Route layers or pass layer=")
+
+    rows = {"B": [], "T": []}                       # side -> [(pin, x)]
+    mode = (align or "auto").lower()
+    if mode not in ("auto", "header", "pitch"):
+        raise LayoutError("align must be auto, header or pitch")
+    hp = header_pins(session, cell, outline) if mode in ("auto", "header") else {}
+    if hp:
+        for pin, (px, py) in hp.items():
+            if x0 <= px <= x1:
+                side = "B" if py < y0 else ("T" if py > y1 else None)
+                if side:
+                    rows[side].append((str(pin), float(px)))
+    if mode == "header" and not any(rows.values()):
+        raise LayoutError("no header pins above or below the substrate -- place the package, "
+                          "or use align=pitch")
+    if mode == "pitch" or not any(rows[s] for s in sides):
+        mode = "pitch"
+        span = (x1 - x0) - 2.0 * edge_margin - pad_w
+        fit = int(span // pitch) + 1 if span >= 0 else 0
+        k = fit if n is None else int(n)
+        if k < 1:
+            raise LayoutError("no pads fit along the edge")
+        if k > fit:
+            raise LayoutError(f"{k} pads at {pitch / 1000:.3f} mm pitch need "
+                              f"{((k - 1) * pitch + pad_w + 2 * edge_margin) / 1000:.2f} mm; "
+                              f"the substrate is {(x1 - x0) / 1000:.2f} mm wide (at most {fit})")
+        cx = (x0 + x1) / 2.0
+        xs = [cx + (i - (k - 1) / 2.0) * pitch for i in range(k)]
+        num = int(start)
+        if "B" in sides:
+            rows["B"] = [(str(num + i), x) for i, x in enumerate(xs)]
+            num += k
+        if "T" in sides:
+            rows["T"] = [(str(num + i), x) for i, x in enumerate(reversed(xs))]
+    else:
+        mode = "header"
+
+    made, skipped = [], {}
+    with session._batch():
+        want = {p for s in sides for p, _x in rows[s]}
+        cell.shapes[:] = [sh for sh in cell.shapes
+                          if not (isinstance(sh, Rectangle) and sh.layer == la
+                                  and str(getattr(sh, "pin", "")) in want)]
+        for side in sides:
+            top = side == "T"
+            for pin, x in rows[side]:
+                ey = _edge_y(outline, x, top)
+                if ey is None:
+                    skipped[pin] = "off the substrate"
+                    continue
+                if top:
+                    ya, yb = ey - edge_margin - pad_l, ey - edge_margin
+                else:
+                    ya, yb = ey + edge_margin, ey + edge_margin + pad_l
+                r = (round(x - pad_w / 2.0), round(ya), round(x + pad_w / 2.0), round(yb))
+                if not outline.buffer(0.5).contains(_box(*r)):
+                    skipped[pin] = "pad would hang over the substrate edge"
+                    continue
+                cell.add_rectangle(la, *r, pin=pin)
+                made.append(pin)
+        io_named = fill_io_names(session, set(made)) if made else 0
+    session._notify()
+    return {"pads": len(made), "pins": made, "align": mode, "io_named": io_named,
+            "pitch": None if mode == "header" else pitch, "layer": la, "cell": name,
+            "skipped": skipped}

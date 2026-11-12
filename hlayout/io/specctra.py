@@ -107,6 +107,7 @@ DEFAULT_RULES = {
     #: no track between a part's own terminations (under a chip
     #: capacitor, across a printed resistor's ink)
     "keepout_bodies": True,
+    "track_cap": "round",
 }
 
 VIA_SIG = "VIA_SIG"
@@ -281,6 +282,10 @@ def export_dsn(library, cell_name: str, path: str, *, layers: Tuple[int, int],
         xs_all = [p[0] for _, _, _, pts in pins for p in pts]
         ys_all = [p[1] for _, _, _, pts in pins for p in pts]
         mx, my = (min(xs_all) + max(xs_all)) / 2.0, (min(ys_all) + max(ys_all)) / 2.0
+        # which edge a pad is on: measured against the board's half-size,
+        # or a wide board's bottom-row pads near a corner read as left-edge
+        hx = max((max(xs_all) - min(xs_all)) / 2.0, 1.0)
+        hy = max((max(ys_all) - min(ys_all)) / 2.0, 1.0)
         split = []
         for ref, pin, lay, pts in pins:
             if ref != "IO":
@@ -290,7 +295,7 @@ def export_dsn(library, cell_name: str, path: str, *, layers: Tuple[int, int],
             ys = [p[1] for p in pts]
             bx0, by0, bx1, by1 = min(xs), min(ys), max(xs), max(ys)
             cx, cy = (bx0 + bx1) / 2.0, (by0 + by1) / 2.0
-            dx, dy = cx - mx, cy - my
+            dx, dy = (cx - mx) / hx, (cy - my) / hy
             gap = float(R["clearance"])
             if abs(dy) >= abs(dx):          # top/bottom edge: inner edge faces the centre
                 if dy > 0:
@@ -329,9 +334,10 @@ def export_dsn(library, cell_name: str, path: str, *, layers: Tuple[int, int],
     for bp in (bond_pins or []):
         bid, bx, by, bsize = bp[:4]
         blay = la if single_layer or len(bp) < 5 or bp[4] is None else int(bp[4])
-        ps = f"PAD_{layer_name(blay)}_{_fmt(bsize)}x{_fmt(bsize)}"
-        h = bsize / 2.0
-        padstacks.setdefault(ps, f"(rect {layer_name(blay)} {_fmt(-h)} {_fmt(-h)} {_fmt(h)} {_fmt(h)})")
+        fw, fh = (bp[5] if len(bp) >= 6 and bp[5] else (bsize, bsize))
+        ps = f"PAD_{layer_name(blay)}_{_fmt(fw)}x{_fmt(fh)}"
+        padstacks.setdefault(ps, f"(rect {layer_name(blay)} {_fmt(-fw / 2)} {_fmt(-fh / 2)} "
+                                 f"{_fmt(fw / 2)} {_fmt(fh / 2)})")
         comps.setdefault("BOND", []).append((str(bid), ps, float(bx), float(by)))
 
     # Each component's image: its pins relative to the component's own
@@ -434,10 +440,24 @@ def export_dsn(library, cell_name: str, path: str, *, layers: Tuple[int, int],
             raise ValueError("nothing to route: no pads or copper on the routing layers")
         bb = (min(xs) - 1000, min(ys) - 1000, max(xs) + 1000, max(ys) + 1000)
     x0, y0, x1, y1 = bb
+    # every pad at least the clearance inside the outline: a pad the
+    # router sees closer to the board edge than that it treats as a
+    # violation it can't fix, and won't route to (I/O pads 250 um in from
+    # the edge with a 300 um clearance, say)
+    clr = float(R.get("clearance", 0) or 0)
+    for _ref, _pin, _lay, pts in pins:
+        for px, py in pts:
+            x0, y0 = min(x0, px - clr), min(y0, py - clr)
+            x1, y1 = max(x1, px + clr), max(y1, py + clr)
 
     if edge_band is not None:
         (kx0, ky0, kx1, ky1), elay = edge_band
-        bands = [(x0, y0, x1, ky0), (x0, ky1, x1, y1), (x0, ky0, kx0, ky1), (kx1, ky0, x1, ky1)]
+        # the side bands stop the clearance short of the top / bottom ones:
+        # touching netless pads are clearance violations the router can't
+        # fix (and the gap is too narrow for any track)
+        g = float(R.get("clearance", 0) or 0)
+        bands = [(x0, y0, x1, ky0), (x0, ky1, x1, y1), (x0, ky0 + g, kx0, ky1 - g),
+                 (kx1, ky0 + g, x1, ky1 - g)]
         lines = []
         for k, (bx0, by0, bx1, by1) in enumerate(bands):
             if bx1 - bx0 <= 0 or by1 - by0 <= 0:

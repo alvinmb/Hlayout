@@ -70,6 +70,60 @@ class HybridRouterTest {
   }
 
   @Test
+  void orthogonalRoutingHasNoDiagonalTraces() throws IOException {
+    HybridDesign op = Fixtures.load("single-die-op-amp");
+    HybridDesign design =
+        Fixtures.withRouting(
+            op,
+            new HybridRoutingOptions(null, null, null, null, null, null, true, 3));
+    RoutedHybrid r = HybridRouter.route(design);
+
+    for (RoutedTrace t : r.traces()) {
+      List<PointUm> pts = t.points();
+      for (int i = 1; i < pts.size(); i++) {
+        PointUm a = pts.get(i - 1);
+        PointUm b = pts.get(i);
+        assertTrue(a.x() == b.x() || a.y() == b.y(), "diagonal segment " + a + " - " + b);
+      }
+    }
+  }
+
+  @Test
+  void netWidthsAndExistingCopperAreHonoured() throws IOException {
+    HybridDesign base = Fixtures.load("single-layer-crossing");
+    int all = HybridRouter.route(base).stats().connections();
+    HybridDesign design =
+        Fixtures.withRouting(
+            base,
+            new HybridRoutingOptions(
+                null,
+                null,
+                null,
+                null,
+                List.of("COND1"),
+                null,
+                null,
+                null,
+                java.util.Map.of("VCC", 300),
+                null,
+                null,
+                List.of(List.of("F1", "X2")),
+                null,
+                null,
+                null,
+                null));
+    RoutedHybrid r = HybridRouter.route(design);
+
+    assertEquals(all - 1, r.stats().connections(), "F1 and X2 are already joined");
+    for (RoutedTrace t : r.traces()) {
+      if (t.net().equals("VCC") && t.points().size() > 2) {
+        assertEquals(300, t.widthUm());
+      }
+    }
+    assertTrue(r.traces().stream().noneMatch(t -> t.net().equals("A") && t.points().size() > 2));
+  }
+
+  @Test
   void jumperBudgetIsRespected() throws IOException {
     HybridDesign design =
         Fixtures.withRouting(
@@ -95,7 +149,9 @@ class HybridRouterTest {
 
     assertTrue(r.stats().isComplete(), () -> "unrouted: " + r.unrouted());
     assertTrue(r.stats().windows() >= 1);
-    assertEquals(0, r.stats().jumpersAdded(), "crossovers are cheaper than jumpers");
+    // Pads are bare through the whole stack, so the upper conductor cannot run over them: on
+    // this small substrate one crossing may still need a jumper.
+    assertTrue(r.stats().jumpersAdded() <= 1, "crossovers are cheaper than jumpers");
     assertEquals(List.of(), HybridRouteDrc.check(r));
   }
 
