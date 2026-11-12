@@ -170,3 +170,46 @@ def test_edge_pads_get_the_header_pins_nets():
     s.edge_io_pads(n=3, sides="B")
     names = load_net_names(s.library)
     assert names["IO.1"] == "VCC" and names["IO.2"] == "KEEP" and "IO.3" not in names
+
+
+# --- optimize_io_pins: header pins from the SLI, before routing --------------------
+
+def _sli_board():
+    """12 x 8 mm, I/O pads 1..6 along the bottom (pin 1 left), R1 at the left
+    with its pin 1 on net S -- which arrives on the far-right pin 5."""
+    from hlayout.io.techfile import (load_resistor_geometry_rules, load_route_rules,
+                                     save_resistor_geometry_rules, save_route_rules)
+    s = Session.new("IOP")
+    rr = load_route_rules(s.library); rr.update(layer_a=3, layer_b=5, boundary_layer=57)
+    save_route_rules(s.library, rr)
+    g = load_resistor_geometry_rules(s.library); g["conductor_layer"] = 3
+    save_resistor_geometry_rules(s.library, g)
+    s.new_cell("TOP")
+    s.rect(57, 0, 0, 12000, 8000)
+    for pin in range(1, 7):
+        x = 1000 + (pin - 1) * 2000
+        s.rect(3, x - 250, 300, x + 250, 900, pin=str(pin))
+    s.generate_resistor(1500, 4000, 600, 1200, ref_des="R1", ink_rsh=1000)
+    s.set_net_names({"IO.5": "S", "IO.3": "P", "R1.1": "S", "R1.2": "Q"})
+    return s
+
+
+def test_optimize_io_pins_moves_a_net_to_the_pin_nearest_its_copper():
+    s = _sli_board()
+    plan = s.optimize_io_pins(apply=False)
+    moved = {c["net"]: c["pin"] for c in plan["changes"] if c["net"]}
+    assert moved.get("S") in ("1", "2") and plan["after"] < plan["before"]
+    assert next(p["net"] for p in s.header_pinout() if p["pin"] == "5") == "S"   # plan only
+    s.optimize_io_pins()
+    pins = {p["pin"]: p.get("net") for p in s.header_pinout()}
+    assert pins.get(moved["S"]) == "S" and pins.get("5") in (None, "")
+    assert pins.get("3") == "P"                       # nothing else to reach: stays
+    assert s.optimize_io_pins(apply=False)["changes"] == []
+
+
+def test_optimize_io_pins_leaves_locked_pins_alone():
+    s = _sli_board()
+    r = s.optimize_io_pins(locked=["5"])
+    assert r["changes"] == []
+    assert {p["pin"]: p.get("net") for p in s.header_pinout()}.get("5") == "S"
+

@@ -100,6 +100,7 @@ def _random_board(seed):
 def _route(s, layers, **kw):
     d, m = H.export_design(s, layers=layers)
     kw.setdefault("local_dielectric", m["local_diel"] >= 0)
+    kw.setdefault("cond2_keepouts", m.get("local_keepouts"))
     r = SR.route(copy.deepcopy(d), **kw)
     return d, m, r
 

@@ -509,3 +509,90 @@ def edge_pads(session, cell_name: Optional[str] = None, shape=None, n: Optional[
     return {"pads": len(made), "pins": made, "align": mode, "io_named": io_named,
             "pitch": None if mode == "header" else pitch, "layer": la, "cell": name,
             "skipped": skipped}
+
+
+# --- pin optimisation from the SLI (before routing) -----------------------------
+
+def _io_pin(pid):
+    """'IO12' -> '12' for a header I/O pad id, else None."""
+    if isinstance(pid, str) and pid.startswith("IO") and pid[2:].isdigit():
+        return pid[2:]
+    return None
+
+
+def _real_net(n) -> bool:
+    return bool(n) and not str(n).startswith("~") and not str(n).lower().startswith("unconnected")
+
+
+def _xy(q):
+    return (float(q["x"]), float(q["y"]))
+
+
+def optimize_pins(session, cell_name: Optional[str] = None, locked=(), apply: bool = True) -> dict:
+    """Move the I/O nets to the header pins that shorten the SLI, before
+    routing. Every net on a header I/O pad (IO<pin>) may move to any free pin
+    or swap with another; the cost of a net on a pin is the Manhattan distance
+    from that pin's pad to the net's nearest other copper (part pins, bond
+    fingers, pads) -- what its SLI line runs to. The assignment with the least
+    total (Hungarian method) has no crossing lines, and a small bias keeps a
+    net where it is unless moving pays. ``locked`` pins stay put, and so does a
+    net with nothing else on the board to reach. ``apply`` renames IO.<pin>
+    (set_header_pins); no geometry moves. Works without header bonds (unlike
+    assign_io_pads). Returns {"changes": [{"pin", "was", "net"}], "before",
+    "after"} with the total pin-to-copper length in um."""
+    from . import hybridroute
+    try:
+        from scipy.optimize import linear_sum_assignment
+        import numpy as np
+    except ImportError as e:
+        raise LayoutError("optimising the I/O pins needs scipy and numpy") from e
+    design, _mapping = hybridroute.export_design(session, cell_name, layers=1)
+    pads = design.get("substratePads") or []
+    io = [p for p in pads if _io_pin(p.get("id")) and str(p.get("role", "")).upper() == "EXTERNAL"]
+    if len(io) < 2:
+        raise LayoutError("no header I/O pads (IO.<pin>) to optimise -- place the I/O pads first")
+    locked = {str(x) for x in (locked or ())}
+    reach: Dict[str, list] = {}
+    for p in pads:
+        if not _io_pin(p.get("id")) and _real_net(p.get("net")):
+            reach.setdefault(p["net"], []).append(_xy(p["position"]))
+    for c in design.get("components") or []:
+        cx, cy = _xy(c["centre"])
+        for k in ("pinA", "pinB"):
+            pin = c.get(k)
+            if pin and _real_net(pin.get("net")):
+                px, py = _xy(pin["position"])
+                reach.setdefault(pin["net"], []).append((cx + px, cy + py))
+
+    def cost(net, q):
+        x, y = _xy(q["position"])
+        return min(abs(x - a) + abs(y - b) for a, b in reach[net])
+    movable = [p for p in io if _real_net(p.get("net")) and _io_pin(p["id"]) not in locked
+               and reach.get(p["net"])]
+    before = sum(cost(p["net"], p) for p in movable)
+    slots = [p for p in io if _io_pin(p["id"]) not in locked and
+             (not _real_net(p.get("net")) or p in movable)]
+    out = {"changes": [], "before": round(before), "after": round(before)}
+    if not movable:
+        return out
+    bias = 50.0
+    C = np.zeros((len(movable), len(slots)))
+    for i, p in enumerate(movable):
+        for j, q in enumerate(slots):
+            C[i, j] = cost(p["net"], q) - (bias if q is p else 0.0)
+    rows, cols = linear_sum_assignment(C)
+    new = {id(q): None for q in slots}
+    after = 0.0
+    for i, j in zip(rows, cols):
+        new[id(slots[j])] = movable[i]["net"]
+        after += cost(movable[i]["net"], slots[j])
+    changes = []
+    for q in slots:
+        was = q.get("net") if _real_net(q.get("net")) else ""
+        net = new[id(q)] or ""
+        if net != was:
+            changes.append({"pin": _io_pin(q["id"]), "was": was, "net": net})
+    out.update(changes=sorted(changes, key=lambda c: int(c["pin"])), after=round(after))
+    if apply and changes:
+        session.set_header_pins({c["pin"]: c["net"] for c in changes}, cell_name=cell_name)
+    return out

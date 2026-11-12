@@ -257,6 +257,12 @@ Attached libraries:
                                        Recalculate SLI, F5). Session.sli()
     UNUSEDBONDS [LIST|REMOVE]          bonds/fingers on die pads no net uses: list / take off
     UNROUTED [<net>|NEXT|PREV|CLEAR]   list unrouted nets / zoom to one and show its SLI
+    IOPINS [PLAN|APPLY] [lock=<pin,pin,...>]
+                                       move the I/O nets to the header pins that
+                                       shorten the SLI (free pins too, no crossing
+                                       lines) -- run before Autoroute; PLAN only
+                                       reports. Also Tools > Header Pinout...
+                                       Auto-optimize and Session.optimize_io_pins()
     IOPADS [PLAN|APPLY] [w=<um>] [l=<um>] [inset=<um>] [csv=<file>]
                                        optimise the module pinout: each I/O net onto the
                                        header pin / I/O pad with the shortest, uncrossed
@@ -2599,6 +2605,27 @@ class CommandInterpreter:
         detail = "; ".join(f"{ref}: {','.join(p)}" for ref, p in sorted(r["dies"].items()))
         verb = "unused" if sub == "LIST" else "removed"
         return f"{r['bonds']} {verb} bond(s): {detail}"
+
+    def _cmd_iopins(self, args):
+        """IOPINS [PLAN|APPLY] [lock=<pins>] -- I/O nets to the pins with the shortest SLI."""
+        usage = "usage: IOPINS [PLAN|APPLY] [lock=<pin,pin,...>]"
+        sub, locked = "APPLY", []
+        for a in args:
+            k, eq, v = a.partition("=")
+            if not eq and k.upper() in ("PLAN", "APPLY"):
+                sub = k.upper()
+            elif eq and k.lower() == "lock":
+                locked = [t.strip() for t in v.replace(";", ",").split(",") if t.strip()]
+            else:
+                raise CommandError(usage)
+        r = self.session.optimize_io_pins(locked=locked, apply=(sub == "APPLY"))
+        if sub == "APPLY" and r["changes"] and self.view is not None:
+            self.view.recalc_sli()
+        moves = ", ".join(f"{c['net'] or '(free)'} -> pin {c['pin']}" for c in r["changes"]
+                          if c["net"])
+        return (f"I/O pins {'moved' if sub == 'APPLY' else 'plan'}: SLI pin-to-copper "
+                f"{r['before'] / 1000:.1f} -> {r['after'] / 1000:.1f} mm; "
+                + (moves if moves else "already the shortest"))
 
     def _cmd_iopads(self, args):
         """IOPADS [PLAN|APPLY] [w=<um>] [l=<um>] [inset=<um>] [csv=<file>] --

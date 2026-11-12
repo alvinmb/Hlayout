@@ -130,14 +130,21 @@ class HeaderPinoutWindow(tk.Toplevel):
         self._after_change(f"Pin {a} <-> {b}: {r['net_b']} now on {a}, {r['net_a']} on {b}.")
 
     def _optimize(self):
+        """Move the I/O nets to the pins that shorten the SLI (before routing)."""
         try:
-            p = self.session.assign_io_pads(apply=True)
+            p = self.session.optimize_io_pins(apply=True)
         except LayoutError as e:
             dialogs.show_error("Header Pinout", str(e), parent=self)
             return
-        moved = sum(1 for s in (p.get("sites") or []) if s.get("net") != s.get("was"))
-        self._after_change(f"Auto-optimized: {moved} pin(s) reassigned "
-                           f"({p.get('before', '?')} -> {p.get('after', '?')} um total).")
+        try:
+            self.app.canvas.recalc_sli()
+        except Exception:
+            pass
+        moved = [c for c in p["changes"] if c["net"]]
+        self._after_change(
+            f"Auto-optimized from the SLI: {len(moved)} net(s) moved, pin-to-copper "
+            f"{p['before'] / 1000:.1f} -> {p['after'] / 1000:.1f} mm"
+            + (": " + ", ".join(f"{c['net']} -> {c['pin']}" for c in moved) if moved else "."))
 
 
 def open_header_pinout_window(app):

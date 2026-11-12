@@ -297,6 +297,7 @@ class AutorouteWindow(tk.Toplevel):
                     self._lines.append("shape router: gridless planar + local-dielectric crossovers")
                     routed = SR.route(design, max_jumpers=own["max_jumpers"],
                                       local_dielectric=mapping.get("local_diel", -1) >= 0,
+                                      cond2_keepouts=mapping.get("local_keepouts"),
                                       passes=1 + max(0, int(own["ripup_passes"])))
                     self._result = ("ok", (0, routed, [], {}), mapping)
                 else:

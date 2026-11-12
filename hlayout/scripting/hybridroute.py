@@ -296,10 +296,15 @@ def export_design(session, cell_name: Optional[str] = None, layers: int = 1,
     pad_layers = [int(l) for l in (br.get("die_pad_layers") or []) if int(l) >= 0]
     blay = int(br["layer"])
     rg = load_resistor_geometry_rules(lib)
-    ink = {int(v) for v in (rg.get("ink_layers") or {}).values()}
-    for k in ("resistor_layer", "glaze_layer"):
-        if isinstance(rg.get(k), int) and rg[k] >= 0:
-            ink.add(rg[k])
+    # the resistor material itself (the inks); the glaze only marks a part as
+    # a printed resistor -- its keep-out is the ink between the terminals,
+    # not the larger overglaze rectangle
+    ink_only = {int(v) for v in (rg.get("ink_layers") or {}).values()}
+    if isinstance(rg.get("resistor_layer"), int) and rg["resistor_layer"] >= 0:
+        ink_only.add(rg["resistor_layer"])
+    ink = set(ink_only)
+    if isinstance(rg.get("glaze_layer"), int) and rg["glaze_layer"] >= 0:
+        ink.add(rg["glaze_layer"])
     lname = {la: "COND1", lb: "COND2"}
     P = lambda x, y: {"x": int(round(x - ox)), "y": int(round(y - oy))}
     clr = int(round(float(R.get("clearance", 150))))
@@ -422,25 +427,30 @@ def export_design(session, cell_name: Optional[str] = None, layers: int = 1,
         if _HEADER_REF.match(r.label) or _is_header(r.label, None, r.cell_name):
             continue
         res = _world_bbox(lib, r, ink) if ink else None
+        if res is not None and ink_only:
+            res = _world_bbox(lib, r, ink_only) or res
         if len(pins) == 2:
             (pa, ba), (pb, bb) = sorted(pins.items(), key=lambda kv: (len(kv[0]), kv[0]))
             ca = ((ba[0] + ba[2]) / 2, (ba[1] + ba[3]) / 2)
             cb = ((bb[0] + bb[2]) / 2, (bb[1] + bb[3]) / 2)
             horiz = abs(cb[0] - ca[0]) >= abs(cb[1] - ca[1])
-            # the body across: a resistor's ink / glaze, else the part's whole
+            # the body across: a resistor's ink (not its glaze), else the part's whole
             # outline (an SMD inductor or capacitor is wider than its pads)
             acr = res or _world_bbox(lib, r, [l for l in _part_layers(lib, r.cell_name)
                                                if l not in route])
+            # a printed resistor's body is just its ink across (the terminations
+            # are wider); any other part spans its pads and its outline
+            across = [] if res is not None else None
             if horiz:
                 lo, hi = sorted([ba, bb], key=lambda b: b[0])
                 bx0, bx1 = lo[2], hi[0]
-                by0 = min([ba[1], bb[1]] + ([acr[1]] if acr else []))
-                by1 = max([ba[3], bb[3]] + ([acr[3]] if acr else []))
+                by0 = min(([ba[1], bb[1]] if across is None else []) + ([acr[1]] if acr else [ba[1]]))
+                by1 = max(([ba[3], bb[3]] if across is None else []) + ([acr[3]] if acr else [ba[3]]))
             else:
                 lo, hi = sorted([ba, bb], key=lambda b: b[1])
                 by0, by1 = lo[3], hi[1]
-                bx0 = min([ba[0], bb[0]] + ([acr[0]] if acr else []))
-                bx1 = max([ba[2], bb[2]] + ([acr[2]] if acr else []))
+                bx0 = min(([ba[0], bb[0]] if across is None else []) + ([acr[0]] if acr else [ba[0]]))
+                bx1 = max(([ba[2], bb[2]] if across is None else []) + ([acr[2]] if acr else [ba[2]]))
             if bx1 - bx0 < 1:
                 bx0, bx1 = bx0 - 0.5, bx0 + 0.5
             if by1 - by0 < 1:
@@ -557,7 +567,8 @@ def export_design(session, cell_name: Optional[str] = None, layers: int = 1,
     pwr_keep = int(round(max(pwr["pad"], pwr["window"])))
     net_windows = {n: pwr_keep for n in all_nets if n.upper() in power and pwr_keep > via_keep}
     keepouts = {}
-    if two:
+    local_keepouts = []
+    if True:
         # Where the dielectric will be open the two conductors aren't
         # insulated: the 2nd may not go there (the band outside the
         # dielectric's boundary, where the I/O pads are; a resistor's
@@ -588,7 +599,7 @@ def export_design(session, cell_name: Optional[str] = None, layers: int = 1,
                         boundary, holes = biggest, rest
             fill = boundary if boundary is not None else session._io_ring_box(cell)
             rects = []
-            if fill is not None:
+            if fill is not None and two:
                 fb = fill.bounds
                 fb = (max(fb[0], sb[0]), max(fb[1], sb[1]), min(fb[2], sb[2]), min(fb[3], sb[3]))
                 rects += [(sb[0], sb[1], sb[2], fb[1]), (sb[0], fb[3], sb[2], sb[3]),
@@ -600,12 +611,23 @@ def export_design(session, cell_name: Optional[str] = None, layers: int = 1,
                     continue
                 if g is not None and not g.is_empty:
                     holes += list(getattr(g, "geoms", [g]))
+            hole_rects = []
             for g in holes:
                 b = g.bounds
-                rects.append((b[0] - dclr, b[1] - dclr, b[2] + dclr, b[3] + dclr))
-            keepouts["COND2"] = [[int(math.floor(r[0] - ox)), int(math.floor(r[1] - oy)),
-                                  int(math.ceil(r[2] - ox)), int(math.ceil(r[3] - oy))]
-                                 for r in rects if r[2] - r[0] > 0 and r[3] - r[1] > 0]
+                hole_rects.append((b[0] - dclr, b[1] - dclr, b[2] + dclr, b[3] + dclr))
+            rects += hole_rects
+
+            def _loc(rs):
+                return [[int(math.floor(r[0] - ox)), int(math.floor(r[1] - oy)),
+                         int(math.ceil(r[2] - ox)), int(math.ceil(r[3] - oy))]
+                        for r in rs if r[2] - r[0] > 0 and r[3] - r[1] > 0]
+            if two:
+                keepouts["COND2"] = _loc(rects)
+            # the shape router prints LOCAL dielectric strips, not a full fill:
+            # the band outside the fill boundary means nothing to it, only the
+            # holes do (each resistor's keep-out -- its ink between the
+            # terminals, oversized -- and any keep-out layer)
+            local_keepouts = _loc(hole_rects)
     edge_clr = int(max(0, min(clr, math.floor(edge)))) if edge < W + H else clr
     design["routing"] = {"routingLayers": ["COND1", "COND2"] if two else ["COND1"],
                          # jumpers are for one-conductor designs: under the
@@ -640,7 +662,7 @@ def export_design(session, cell_name: Optional[str] = None, layers: int = 1,
         local_diel = int(load_dielectric_rules(lib)["layer"])   # for local crossovers (printed jumpers), any mode
     except Exception:
         local_diel = diel
-    mapping = {"cell": name, "origin": [ox, oy], "layers": {"COND1": la, "COND2": lb},
+    mapping = {"local_keepouts": local_keepouts, "cell": name, "origin": [ox, oy], "layers": {"COND1": la, "COND2": lb},
                "dielectric": diel, "local_diel": local_diel, "bond_layer": blay,
                "pads": [p["id"] for p in pads], "wires": [w["id"] for w in wires],
                "unbonded": unbonded, "bond_width": int(round(float(br["width"]))),
@@ -967,6 +989,7 @@ def hybrid_route(session, cell_name: Optional[str] = None, layers: Optional[int]
             on_line("shape router: gridless planar + local-dielectric crossovers")
         routed = _shape.route(design, max_jumpers=max_jumpers,
                               local_dielectric=mapping.get("local_diel", -1) >= 0,
+                              cond2_keepouts=mapping.get("local_keepouts"),
                               passes=1 + max(0, int(ripup_passes)))
         code, tail, paths = 0, [], {}
     else:

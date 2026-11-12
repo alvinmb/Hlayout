@@ -6120,6 +6120,17 @@ class Session:
             self._notify()
         return changed
 
+    def optimize_io_pins(self, cell_name: Optional[str] = None, locked=(),
+                         apply: bool = True) -> dict:
+        """Before routing: move the I/O nets to the header pins that shorten
+        the SLI -- each net onto the pin nearest the copper it must reach,
+        free pins included, no crossing lines (Hungarian method). ``locked``
+        pins stay put; ``apply`` renames IO.<pin>, nothing moves on the board.
+        Needs no header bonds. Returns {"changes": [{"pin", "was", "net"}],
+        "before", "after"} (um). See hlayout.scripting.iopads.optimize_pins."""
+        from . import iopads
+        return iopads.optimize_pins(self, cell_name=cell_name, locked=locked, apply=apply)
+
     def swap_header_pins(self, a, b, cell_name: Optional[str] = None) -> dict:
         """Swap the nets on two header pins: the signal that entered at pin
         ``a`` now enters at pin ``b`` and vice versa (the IO.<pin> net names

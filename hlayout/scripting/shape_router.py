@@ -32,6 +32,10 @@ from typing import Dict, List, Optional, Tuple
 EPS = 0.5
 MAX_NODES = 80
 _PEN = None  # optional congestion penalty(a,b)->cost, set by route()
+_ORTHO = False  # 90-degree routing: _plan searches the orthogonal grid (set by _route_core)
+BEND_FACTOR = 2.0  # a bend costs this many track widths of extra length (fewer jogs)
+ORTHO_EXPAND = 40000  # node expansions per orthogonal search (bounds a failed one)
+_EXPAND_CAP = None  # a smaller per-call cap (short stubs), set around the call
 _DIRS = {}   # layer -> (axis 'H'/'V', againstDirectionCost); preferred-direction bias  # corner-node cap per connection (bounds failed-search cost)
 Rect = Tuple[float, float, float, float]
 Pt = Tuple[float, float]
@@ -151,6 +155,7 @@ class ShapeSpace:
         # adds no copper inside that pin, so only the part outside is checked
         # (a pin that abuts its part's body would otherwise be unreachable)
         self.term_rects = {}
+        self.term_nets = {}
 
     def add(self, layer: str, net: Optional[str], rect: Rect):
         self._by_layer.setdefault(layer, []).append((net or "", rect))
@@ -209,6 +214,9 @@ class ShapeSpace:
         pts = list(path)
         if len(pts) <= 2:
             return pts
+        if _ORTHO and all(abs(pts[i][0] - pts[i - 1][0]) < EPS or abs(pts[i][1] - pts[i - 1][1]) < EPS
+                          for i in range(1, len(pts))):
+            return _tighten_ortho(self, pts, net, margin, blockers)
         changed = True
         while changed and len(pts) > 2:
             changed = False
@@ -286,6 +294,8 @@ class ShapeProblem:
         self.space.exempt = {(round(t.centre[0]), round(t.centre[1])) for t in self.terminals}
         self.space.term_rects = {(round(t.centre[0]), round(t.centre[1])): t.rect
                                  for t in self.terminals}
+        self.space.term_nets = {(round(t.centre[0]), round(t.centre[1])): (t.net or "")
+                                for t in self.terminals}
         self.parts = [_die_rect(x) for x in (design.get("dies") or [])]
         for c in design.get("components") or []:
             self.parts.append(_comp_body_rect(c))
@@ -342,11 +352,18 @@ class ShapeProblem:
 
     def _build(self):
         d = self.design
+        pads = d.get("substratePads") or []
         for die in d.get("dies") or []:
             x0, y0, x1, y1 = _die_rect(die)
-            k = float(die.get("attachKeepoutUm", 0) or 0)
+            # the attach keep-out is the copper-to-die distance; the query
+            # margin already carries min_space, so grow only by the rest
+            k = max(0.0, float(die.get("attachKeepoutUm", 0) or 0) - self.min_space)
+            # a die sitting on a pad (its back contact / attach pad) does not
+            # wall that pad's own net off from it
+            under = {p.get("net") for p in pads if p.get("net") and _overlap(_rect_of_pad(p), (x0, y0, x1, y1))}
+            own = under.pop() if len(under) == 1 else None
             for L in self.layers:
-                self.space.add(L, None, (x0 - k, y0 - k, x1 + k, y1 + k))
+                self.space.add(L, own, (x0 - k, y0 - k, x1 + k, y1 + k))
         for p in d.get("substratePads") or []:
             rect = _rect_of_pad(p)
             self._pad_all(p.get("net"), rect)
@@ -365,7 +382,7 @@ class ShapeProblem:
                 layer = pin.get("layer") if pin.get("layer") in self.layers else self.layers[0]
                 self.terminals.append(Terminal(f"{comp['refdes']}.{nm}", pin.get("net"), layer, rect))
         for L, rects in ((d.get("routing") or {}).get("keepouts", {}) or {}).items():
-            if L in self.layers:
+            if L in self.layers or L == "COND2":    # COND2: crossover bridges, any mode
                 for r in rects or []:
                     if len(r) == 4:
                         self.space.add(L, None, tuple(float(v) for v in r))
@@ -412,6 +429,9 @@ def _plan(space: ShapeSpace, layer: str, net: str, margin: float,
     """A* over a visibility graph: start at any ``starts`` point, reach any
     ``target_rects``. Nodes = starts + targets + scoped foreign-blocker corners.
     ``blockers`` is the pre-scoped (net, rect) list. Returns the poly-line."""
+    if _ORTHO:
+        return _plan_ortho(space, layer, net, margin, starts, targets, target_rects,
+                           blockers, frontier=frontier)
     m = math.ceil(margin)
     nodes: List[Pt] = []
     seen = {}
@@ -504,12 +524,210 @@ def _plan(space: ShapeSpace, layer: str, net: str, margin: float,
     return None
 
 
+def _in_any_pad(space, p) -> bool:
+    """``p`` lies inside some terminal pad (a bend there would land a track
+    on the pad off its centre line)."""
+    for r in space.term_rects.values():
+        if r[0] + EPS < p[0] < r[2] - EPS and r[1] + EPS < p[1] < r[3] - EPS:
+            return True
+    return False
+
+
+def _plan_ortho(space, layer, net, margin, starts, targets, target_rects, blockers,
+                frontier=False):
+    """90-degree A*: the nodes are the grid of every x and y a track can
+    usefully turn at (each foreign blocker's edges offset by ``margin``, plus
+    the start and target centres), the moves horizontal or vertical only, and
+    each bend costs BEND_FACTOR track widths -- so the path has few jogs. A
+    track ends at a pad's centre and may not bend inside any pad, so it always
+    enters and leaves a pad straight along its centre line (no landing on a
+    corner). Same returns as _plan."""
+    hw = max(0.0, margin - space.min_space)
+    bend = BEND_FACTOR * max(2.0 * hw, 1.0)
+    bb = getattr(blockers, "bb", None)
+    xs, ys = set(), set()
+
+    def addx(v):
+        xs.add(round(v, 1))
+
+    def addy(v):
+        ys.add(round(v, 1))
+    for p in list(starts) + list(targets):
+        addx(p[0]); addy(p[1])
+    for n, r in blockers:
+        if n == (net or ""):
+            continue
+        for v in (r[0] - margin, r[2] + margin):
+            addx(v)
+        for v in (r[1] - margin, r[3] + margin):
+            addy(v)
+    if bb is not None:
+        xs = {v for v in xs if bb[0] + margin - EPS <= v <= bb[2] - margin + EPS}
+        ys = {v for v in ys if bb[1] + margin - EPS <= v <= bb[3] - margin + EPS}
+        for p in list(starts) + list(targets):
+            xs.add(round(p[0], 1)); ys.add(round(p[1], 1))
+    X = sorted(xs)
+    Y = sorted(ys)
+    xi = {v: i for i, v in enumerate(X)}
+    yi = {v: i for i, v in enumerate(Y)}
+    tset = {(xi[round(t[0], 1)], yi[round(t[1], 1)]) for t in targets}
+    # grid nodes strictly inside a pad (no bend there), worked out once
+    import bisect
+    padcells = set()
+    for r in space.term_rects.values():
+        a0, a1 = bisect.bisect_right(X, r[0] + EPS), bisect.bisect_left(X, r[2] - EPS)
+        b0, b1 = bisect.bisect_right(Y, r[1] + EPS), bisect.bisect_left(Y, r[3] - EPS)
+        for ix in range(a0, a1):
+            for iy in range(b0, b1):
+                padcells.add((ix, iy))
+    tpts = list(targets)
+    tx = sum(t[0] for t in targets) / len(targets)
+    ty = sum(t[1] for t in targets) / len(targets)
+
+    def h(ix, iy):
+        x, y = X[ix], Y[iy]
+        return min(abs(x - a) + abs(y - b) for a, b in tpts)
+    D = ((1, 0), (-1, 0), (0, 1), (0, -1))
+    edge_ok = {}
+    _dir = _DIRS.get(layer)
+    g = {}
+    prev = {}
+    pq = []
+    sid = set()
+    for p in starts:
+        k = (xi[round(p[0], 1)], yi[round(p[1], 1)], -1)
+        sid.add(k[:2])
+        g[k] = 0.0
+        prev[k] = None
+        heapq.heappush(pq, (h(k[0], k[1]), 0.0, k))
+    best, best_d = None, float("inf")
+    closed = set()
+    n_exp = 0
+
+    def trace(k):
+        out = []
+        while k is not None:
+            p = (X[k[0]], Y[k[1]])
+            if not out or out[-1] != p:
+                out.append(p)
+            k = prev[k]
+        out.reverse()
+        # drop collinear points
+        res = [out[0]]
+        for i in range(1, len(out) - 1):
+            a, b, c = res[-1], out[i], out[i + 1]
+            if (abs(a[0] - b[0]) < EPS and abs(b[0] - c[0]) < EPS) or \
+                    (abs(a[1] - b[1]) < EPS and abs(b[1] - c[1]) < EPS):
+                continue
+            res.append(b)
+        if len(out) > 1:
+            res.append(out[-1])
+        return res
+    while pq:
+        _f, gk, k = heapq.heappop(pq)
+        if k in closed:
+            continue
+        closed.add(k)
+        n_exp += 1
+        ix, iy, dk = k
+        if (ix, iy) in tset and (ix, iy) not in sid:
+            path = trace(k)
+            return (path, True) if frontier else path
+        if (ix, iy) not in sid:
+            dd = math.hypot(X[ix] - tx, Y[iy] - ty)
+            if dd < best_d:
+                best_d, best = dd, k
+        if n_exp > (_EXPAND_CAP or ORTHO_EXPAND):
+            break
+        p = (X[ix], Y[iy])
+        turn_ok = None
+        for di, (dx, dy) in enumerate(D):
+            if dk != -1 and di != dk and (dx, dy) == (-D[dk][0], -D[dk][1]):
+                continue                      # no U-turns
+            jx, jy = ix + dx, iy + dy
+            if not (0 <= jx < len(X) and 0 <= jy < len(Y)):
+                continue
+            bent = dk != -1 and di != dk
+            if bent:
+                if turn_ok is None:
+                    turn_ok = (ix, iy) not in padcells
+                if not turn_ok:
+                    continue
+            ek = (min(ix, jx), min(iy, jy), dx != 0)
+            ok = edge_ok.get(ek)
+            q = (X[jx], Y[jy])
+            if ok is None:
+                ok = space.segment_clear(p, q, net, margin, blockers)
+                edge_ok[ek] = ok
+            if not ok:
+                continue
+            L = abs(q[0] - p[0]) + abs(q[1] - p[1])
+            c = L + (bend if bent else 0.0)
+            if _dir is not None and _dir[1] > 1.0 and ((_dir[0] == "H") != (dx != 0)):
+                c += (_dir[1] - 1.0) * L
+            if _PEN is not None:
+                c += _PEN(p, q)
+            nk = (jx, jy, di)
+            ng = gk + c
+            if ng < g.get(nk, float("inf")):
+                g[nk] = ng
+                prev[nk] = k
+                heapq.heappush(pq, (ng + h(jx, jy), ng, nk))
+    if frontier:
+        return (trace(best), False) if best is not None else (None, False)
+    return None
+
+
+def _tighten_ortho(space, path, net, margin, blockers):
+    """Rubber-band for 90-degree tracks: replace a run of legs by one L where
+    both legs are clear and the corner is not on a pad; then drop collinear
+    points. Keeps every segment axis-aligned."""
+    pts = list(path)
+    changed = True
+    while changed and len(pts) > 3:
+        changed = False
+        for i in range(len(pts) - 3):
+            for j in range(len(pts) - 1, i + 2, -1):
+                a, b = pts[i], pts[j]
+                for c in ((a[0], b[1]), (b[0], a[1])):
+                    if _in_any_pad(space, c) and c not in (a, b):
+                        continue
+                    if space.segment_clear(a, c, net, margin, blockers) and \
+                            space.segment_clear(c, b, net, margin, blockers):
+                        pts = pts[:i + 1] + [c] + pts[j:]
+                        changed = True
+                        break
+                if changed:
+                    break
+            if changed:
+                break
+    out = [pts[0]]
+    for i in range(1, len(pts) - 1):
+        a, b, c = out[-1], pts[i], pts[i + 1]
+        if b == a or (abs(a[0] - b[0]) < EPS and abs(b[0] - c[0]) < EPS) or \
+                (abs(a[1] - b[1]) < EPS and abs(b[1] - c[1]) < EPS):
+            continue
+        out.append(b)
+    if len(pts) > 1:
+        out.append(pts[-1])
+    return out
+
+
+def _overlap(a: Rect, b: Rect) -> bool:
+    """Overlapping or touching (a ring of attach-pad strips abuts its die)."""
+    return a[0] <= b[2] + EPS and b[0] <= a[2] + EPS and a[1] <= b[3] + EPS and b[1] <= a[3] + EPS
+
+
 def _exit_t(ax, ay, bx, by, r, hw) -> float:
     """Fraction of segment a->b (a inside pad ``r``) that a track of
     half-width ``hw`` covers before its copper leaves the pad: the exit from
     ``r`` inset by hw. 0 when the pad is narrower than the track."""
     x0, y0, x1, y1 = r[0] + hw, r[1] + hw, r[2] - hw, r[3] - hw
-    if x0 > x1 or y0 > y1 or not (x0 - EPS <= ax <= x1 + EPS and y0 - EPS <= ay <= y1 + EPS):
+    if x0 > x1:                       # pad narrower than the track: its centre line
+        x0 = x1 = (r[0] + r[2]) / 2.0
+    if y0 > y1:
+        y0 = y1 = (r[1] + r[3]) / 2.0
+    if not (x0 - EPS <= ax <= x1 + EPS and y0 - EPS <= ay <= y1 + EPS):
         return 0.0
     ux, uy = bx - ax, by - ay
     t = 1.0
@@ -596,6 +814,16 @@ def _bridge_route(P, net, a, b, w):
     # a COND2 track / its dielectric cannot sit on a proud part (die or component
     # body) -- avoid them in every mode (in 1-conductor they aren't on COND2)
     infp = max(0.0, dhw - mB)
+    # pads stay bare (solder, bonds): the strip keeps min_space off every pad
+    # of any net -- the bridge's own ends sit on its via lands, not on pads
+    infpad = max(0.0, dhw + P.min_space - mB)
+    # (own-net pads: the via may sit by one with the bridge heading away --
+    # the exact strip check below judges those)
+    for kk, r in P.space.term_rects.items():
+        if P.space.term_nets.get(kk) == (net or ""):
+            continue
+        if r[2] >= raw2.bb[0] and r[0] <= raw2.bb[2] and r[3] >= raw2.bb[1] and r[1] <= raw2.bb[3]:
+            blk.append(("~PAD", (r[0] - infpad, r[1] - infpad, r[2] + infpad, r[3] + infpad)))
     pbb = (min(a[0], b[0]) - 4000, min(a[1], b[1]) - 4000,
            max(a[0], b[0]) + 4000, max(a[1], b[1]) + 4000)
     for box in P.parts:
@@ -605,7 +833,8 @@ def _bridge_route(P, net, a, b, w):
     path = _plan(P.space, "COND2", net, mB, [a], [b], [tgt], blk, max_nodes=60)
     if path is None:
         return None
-    return P.space.tighten(path, net, mB, blk)
+    path = P.space.tighten(path, net, mB, blk)
+    return path if _strip_leaves_pads_bare(P, path, w) else None
 
 
 def _polylen(pts):
@@ -637,7 +866,8 @@ def _shorten_crossover(P, layer, net, margin, starts, grp, blockers, bridge, a0,
     hl = P.land / 2.0
     vclr = hl + P.min_space
     samp = _polyline_points(bridge, max(100.0, P.min_line / 2.0))
-    clear = [_point_clear(P.space, pt[0], pt[1], vclr, net, blockers) for pt, _v in samp]
+    clear = [_point_clear(P.space, pt[0], pt[1], vclr, net, blockers) and _via_site_ok(P, net, *pt)
+             for pt, _v in samp]
     blocked = [i for i, c in enumerate(clear) if not c]
     if not blocked:
         return None                                   # crosses no COND1 copper
@@ -697,8 +927,14 @@ def _via_escape(P, layer, net, margin, term, blockers, toward):
     c2 = [(n, r) for n, r in P.space.layer_blockers("COND2")
           if r[2] >= bb[0] and r[0] <= bb[2] and r[3] >= bb[1] and r[1] <= bb[3]]
 
+    pads = [r for r in P.space.term_rects.values()
+            if r[2] >= bb[0] and r[0] <= bb[2] and r[3] >= bb[1] and r[1] <= bb[3]]
+    dclr = clr      # the via land off every pad; the strip's own pad clearance is _bridge_route's
+
     def via_ok(x, y):
         if not _point_clear(P.space, x, y, clr, net, blockers):
+            return False
+        if not _via_site_ok(P, net, x, y):
             return False
         for n, r in c2:
             if n == net:
@@ -711,7 +947,7 @@ def _via_escape(P, layer, net, margin, term, blockers, toward):
     base = math.atan2(toward[1] - term[1], toward[0] - term[0])
     step = max(150.0, P.min_line / 2.0)
     best = None
-    for k in range(0, 4):           # fan: toward target first, then a couple of side rays
+    for k in range(0, 8):           # fan: toward target first, then round to the back
         off = ((k + 1) // 2) * (math.pi / 4.0) * (1 if k % 2 else -1)
         ux, uy = math.cos(base + off), math.sin(base + off)
         for i in range(1, 40):
@@ -721,7 +957,12 @@ def _via_escape(P, layer, net, margin, term, blockers, toward):
             if not via_ok(x, y):
                 continue
             rect = (x - hl, y - hl, x + hl, y + hl)
-            path = _plan(P.space, layer, net, margin, [term], [(x, y)], [rect], blockers)
+            global _EXPAND_CAP
+            _EXPAND_CAP = 1500          # a stub to a nearby via: a small search
+            try:
+                path = _plan(P.space, layer, net, margin, [term], [(x, y)], [rect], blockers)
+            finally:
+                _EXPAND_CAP = None
             if path is not None:
                 path = P.space.tighten(path, net, margin, blockers)
                 L = _polylen(path) if len(path) >= 2 else 0.0
@@ -961,32 +1202,100 @@ def _jumper_search(P, layer, net, margin, starts, grp, blockers, tries: int = 24
     return None
 
 
-def _short_hop(P, layer, net, margin, F, grp, blockers):
+def _short_hop(P, layer, net, margin, F, grp, blockers, tries: int = 12):
     """From frontier point F, a short COND2 crossover over the wall ahead to a
-    clear COND1 landing G closer to the target. Dog-legs around resistors;
+    clear COND1 landing G closer to the target. Landings are looked for on a
+    fan of rays (straight at the target, then up to 90 degrees either side --
+    the straight line can run into a pad), ranked by bridge length plus what
+    is left to go, and the best few bridged. Dog-legs around resistors;
     bridge capped at cross_short. Returns (G, bridge) or None."""
     w = P.width_of(net)
     hl = P.land / 2.0
     vclr = hl + P.min_space
     b0 = min((t.centre for t in grp), key=lambda c: math.hypot(c[0] - F[0], c[1] - F[1]))
-    ux, uy = b0[0] - F[0], b0[1] - F[1]
-    dd = math.hypot(ux, uy) or 1.0
-    ux, uy = ux / dd, uy / dd
+    base = math.atan2(b0[1] - F[1], b0[0] - F[0])
     step = max(150.0, P.min_line / 2.0)
     dF = math.hypot(b0[0] - F[0], b0[1] - F[1])
-    i = 1
-    while i * step <= P.cross_short:
-        gx, gy = F[0] + ux * step * i, F[1] + uy * step * i
-        i += 1
-        if math.hypot(b0[0] - gx, b0[1] - gy) >= dF:
-            continue
-        if not _point_clear(P.space, gx, gy, vclr, net, blockers):
-            continue
+    cands = []
+    for deg in (0, 30, -30, 60, -60, 90, -90):
+        ux, uy = math.cos(base + math.radians(deg)), math.sin(base + math.radians(deg))
+        i = 1
+        while i * step <= P.cross_short:
+            gx, gy = F[0] + ux * step * i, F[1] + uy * step * i
+            i += 1
+            rest = math.hypot(b0[0] - gx, b0[1] - gy)
+            # across the wall is the progress: a landing may be a little
+            # further off than F (beside the target pad, say); ranking prefers
+            # nearer ones and multihop's hop cap stops any wandering
+            if rest >= dF + 4 * step:
+                continue
+            if not _point_clear(P.space, gx, gy, vclr, net, blockers) or \
+                    not _via_site_ok(P, net, gx, gy):
+                continue
+            cands.append((step * (i - 1) + rest, abs(deg), gx, gy))
+            break                                  # the first landing on this ray
+    cands.sort()
+    for _c, _deg, gx, gy in cands[:tries]:
         bridge = _bridge_route(P, net, F, (gx, gy), w)
         if bridge is None or _polylen(bridge) > P.cross_short:
             continue
         return (gx, gy), bridge
     return None
+
+
+def _via_site_ok(P, net, x, y) -> bool:
+    """A crossover via at (x, y) leaves every pad (any net) bare: its local
+    dielectric strip, diel_factor x the width wide, starts at the land's edge,
+    so the via keeps that half-width plus spacing from every pad."""
+    dclr = P.diel_factor * P.width_of(net) / 2.0 + P.min_space
+    lclr = P.land / 2.0 + P.min_space
+    own = net or ""
+    for k, r in P.space.term_rects.items():
+        c = lclr if P.space.term_nets.get(k) == own else dclr
+        if r[0] - c < x < r[2] + c and r[1] - c < y < r[3] + c and \
+                _seg_rect_dist(x, y, x, y, r) < c - EPS:
+            return False
+    return True
+
+
+def _trim_ends(pts, d):
+    """``pts`` cut back by ``d`` along its length at each end ([] if too short)."""
+    def cut(seq):
+        left = d
+        for i in range(1, len(seq)):
+            (x0, y0), (x1, y1) = seq[i - 1], seq[i]
+            sl = math.hypot(x1 - x0, y1 - y0)
+            if sl > left:
+                f = left / sl
+                return [(x0 + (x1 - x0) * f, y0 + (y1 - y0) * f)] + list(seq[i:])
+            left -= sl
+        return []
+    total = sum(math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1])
+                for i in range(1, len(pts)))
+    if len(pts) < 2 or total <= 2 * d:
+        return []
+    return cut(cut(list(pts))[::-1])[::-1]
+
+
+def _strip_leaves_pads_bare(P, bridge, w) -> bool:
+    """The local dielectric strip apply_routed will print for ``bridge`` (flat
+    ends at the via lands, diel_factor x w wide) keeps min_space off every pad."""
+    try:
+        from shapely.geometry import LineString, box
+    except ImportError:
+        return True
+    pts = _trim_ends(bridge, P.land / 2.0)
+    if len(pts) < 2:
+        return True
+    strip = LineString(pts).buffer(P.diel_factor * w / 2.0, cap_style=2, join_style=2)
+    bx = strip.bounds
+    for r in P.space.term_rects.values():
+        if r[2] < bx[0] - P.min_space or r[0] > bx[2] + P.min_space or \
+                r[3] < bx[1] - P.min_space or r[1] > bx[3] + P.min_space:
+            continue
+        if strip.distance(box(*r)) < P.min_space - EPS:
+            return False
+    return True
 
 
 def _backoff_land(P, net, path, blockers):
@@ -1003,11 +1312,12 @@ def _backoff_land(P, net, path, blockers):
         t = L
         while t > EPS:
             x, y = ax + (bx - ax) * t / L, ay + (by - ay) * t / L
-            if _point_clear(P.space, x, y, clr, net, blockers):
+            if _point_clear(P.space, x, y, clr, net, blockers) and _via_site_ok(P, net, x, y):
                 return pts[:-1] + [(x, y)] if t < L else pts
             t -= step
         pts.pop()
-    if pts and _point_clear(P.space, pts[0][0], pts[0][1], clr, net, blockers):
+    if pts and _point_clear(P.space, pts[0][0], pts[0][1], clr, net, blockers) \
+            and _via_site_ok(P, net, pts[0][0], pts[0][1]):
         return pts
     return None
 
@@ -1097,9 +1407,10 @@ def _route_core(design: dict, order=None, on_net=None, scope_pad: float = 6000.0
     one per connection). ``local_dielectric`` False (the design has no
     dielectric layer) turns crossovers off: a COND2 bridge with nothing under
     it would short whatever it crosses."""
-    global _DIRS
+    global _DIRS, _ORTHO
     P = ShapeProblem(design)
     _DIRS = {L: (ax, P.against) for L, ax in P.dir_axis.items()}
+    _ORTHO = P.orthogonal
     traces: List[dict] = []
     crossovers: List[dict] = []
     unrouted: List[dict] = []
@@ -1131,11 +1442,26 @@ def _route_core(design: dict, order=None, on_net=None, scope_pad: float = 6000.0
         return (max(xs) - min(xs)) + (max(ys) - min(ys))
 
     def add_copper(lay, net, pts, width):
+        # an axis-aligned leg is its exact rectangle; a slanted one is covered
+        # by a strip of small squares along it (its bounding box would wall
+        # off the whole box it spans)
         hw = width / 2.0
         for i in range(1, len(pts)):
             (ax, ay), (bx, by) = pts[i - 1], pts[i]
-            P.space.add(lay, net, (min(ax, bx) - hw, min(ay, by) - hw,
-                                   max(ax, bx) + hw, max(ay, by) + hw))
+            if abs(ax - bx) < EPS or abs(ay - by) < EPS:
+                P.space.add(lay, net, (min(ax, bx) - hw, min(ay, by) - hw,
+                                       max(ax, bx) + hw, max(ay, by) + hw))
+                continue
+            L = math.hypot(bx - ax, by - ay)
+            n = max(1, int(math.ceil(L / max(hw, 25.0))))
+            # a slice's box grown by hw contains the slice swept by the track
+            ex = hw
+            for k in range(n):
+                t0, t1 = k / n, (k + 1) / n
+                x0, x1 = ax + (bx - ax) * t0, ax + (bx - ax) * t1
+                y0, y1 = ay + (by - ay) * t0, ay + (by - ay) * t1
+                P.space.add(lay, net, (min(x0, x1) - ex, min(y0, y1) - ex,
+                                       max(x0, x1) + ex, max(y0, y1) + ex))
 
     def emit_trace(net, pts):
         pts = [q for i, q in enumerate(pts) if i == 0 or q != pts[i - 1]]
@@ -1303,7 +1629,7 @@ def _congestion_penalty(h, cell, k):
 def route(design: dict, on_net=None, scope_pad: float = 6000.0,
           max_jumpers: Optional[int] = None, allow_crossovers: bool = True,
           max_crossovers: Optional[int] = None, passes: Optional[int] = None,
-          local_dielectric: bool = True) -> dict:
+          local_dielectric: bool = True, cond2_keepouts=None) -> dict:
     """Route ``design`` with the gridless shape router, using negotiated
     congestion to raise coverage: each pass re-routes from scratch; where a
     connection failed, the region around its terminals gains a congestion cost,
@@ -1311,8 +1637,14 @@ def route(design: dict, on_net=None, scope_pad: float = 6000.0,
     freeing the corridor the stuck net needs. The still-unrouted nets are also
     moved to the front. The best pass is returned. ``passes`` (default 1; set
     >1 to negotiate) caps the passes. Planar -> short local crossover -> jumper."""
-    global _PEN
+    global _PEN, _ORTHO
     import copy
+    if cond2_keepouts is not None:
+        # the local-strip keep-outs (resistor ink + oversize, keep-out layers)
+        # in place of the full-fill ones the design carries for the Java engine
+        design = copy.deepcopy(design)
+        design.setdefault("routing", {}).setdefault("keepouts", {})["COND2"] = \
+            [list(r) for r in cond2_keepouts]
     npass = max(1, 1 if passes is None else int(passes))
     # terminal centres per net (fixed across passes)
     P0 = ShapeProblem(copy.deepcopy(design))
@@ -1354,5 +1686,6 @@ def route(design: dict, on_net=None, scope_pad: float = 6000.0,
             order = failed
     finally:
         _PEN = None
+        _ORTHO = False
     best["stats"]["passes"] = _i + 1
     return best
