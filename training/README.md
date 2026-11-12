@@ -13,4 +13,4 @@ Built around the ALU8 chip-and-wire example (8-bit ALU, six bare dies, Kovar DIP
 Day 1 foundations (shapes, SRef/ARef, technology, mask operations and dielectric, thick-film resistors) ·
 Day 2 netlist to routed design · Day 3 verification, outputs, 2D-to-3D STEP linking, capstone.
 
-Needs HLayout 0.8, Freerouting (Java build) and FreeCAD for the 3D labs.
+Needs HLayout 0.9, Freerouting (Java build) and FreeCAD for the 3D labs.
