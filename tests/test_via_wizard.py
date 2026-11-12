@@ -17,7 +17,7 @@ from hlayout.scripting import Session
 
 def _session_with_attached_library(tmp_path):
     """A Session on a fresh design, with an empty parts library attached
-    at index 0 -- the setup Tools > Via Wizard... (Session.create_via_cell())
+    at index 0 -- the setup Create > Via Wizard... (Session.create_via_cell())
     needs, same pattern the GUI wizard requires (Setup > Attach Library...
     first)."""
     design = Library("DESIGN")

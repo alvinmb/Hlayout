@@ -1216,7 +1216,7 @@ the saved GDSII.
 
 ### Via Wizard
 
-**Tools > Via Wizard...** creates a via cell and saves it directly
+**Create > Via Wizard...** creates a via cell and saves it directly
 into an attached reference library's own file — the way to add a new
 reusable part to a shared library, as opposed to drawing shapes that
 only ever live in the current design.

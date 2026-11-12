@@ -273,7 +273,7 @@ def test_load_resistor_geometry_rules_tolerates_malformed_entry():
 
 # --- Create > Route (2-Layer) settings --------------------------------------
 # Simplified to just the two conductor layers plus the name of a reusable
-# via cell (Tools > Via Wizard.../scripting's create_via_cell()) that Space
+# via cell (Create > Via Wizard.../scripting's create_via_cell()) that Space
 # places an instance of -- the via's own pad size/shape/dielectric window
 # live in that cell's own geometry instead of being duplicated here.
 

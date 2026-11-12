@@ -147,6 +147,10 @@ class ShapeSpace:
         # terminal centres: a pad sits where the designer put it, so a track
         # may start/end there even when the pad is nearer the edge than a track
         self.exempt = set()
+        # terminal centre -> its pad rect: a track leaving (or reaching) a pin
+        # adds no copper inside that pin, so only the part outside is checked
+        # (a pin that abuts its part's body would otherwise be unreachable)
+        self.term_rects = {}
 
     def add(self, layer: str, net: Optional[str], rect: Rect):
         self._by_layer.setdefault(layer, []).append((net or "", rect))
@@ -179,6 +183,16 @@ class ShapeSpace:
         net = net or ""
         ax, ay = a
         bx, by = b
+        if self.term_rects:
+            ra = self.term_rects.get((round(ax), round(ay)))
+            rb = self.term_rects.get((round(bx), round(by)))
+            if ra is not None or rb is not None:
+                t0 = _exit_t(ax, ay, bx, by, ra, hw) if ra is not None else 0.0
+                t1 = 1.0 - _exit_t(bx, by, ax, ay, rb, hw) if rb is not None else 1.0
+                if t0 >= t1:
+                    return True          # all of it inside the pins it joins
+                ux, uy = bx - ax, by - ay
+                ax, ay, bx, by = ax + ux * t0, ay + uy * t0, ax + ux * t1, ay + uy * t1
         lox, hix = (ax, bx) if ax <= bx else (bx, ax)
         loy, hiy = (ay, by) if ay <= by else (by, ay)
         lox -= margin; loy -= margin; hix += margin; hiy += margin
@@ -270,6 +284,8 @@ class ShapeProblem:
         self.terminals: List[Terminal] = []
         self._build()
         self.space.exempt = {(round(t.centre[0]), round(t.centre[1])) for t in self.terminals}
+        self.space.term_rects = {(round(t.centre[0]), round(t.centre[1])): t.rect
+                                 for t in self.terminals}
         self.parts = [_die_rect(x) for x in (design.get("dies") or [])]
         for c in design.get("components") or []:
             self.parts.append(_comp_body_rect(c))
@@ -486,6 +502,26 @@ def _plan(space: ShapeSpace, layer: str, net: str, margin: float,
     if frontier:
         return (trace(best_u), False) if best_u != -1 else (None, False)
     return None
+
+
+def _exit_t(ax, ay, bx, by, r, hw) -> float:
+    """Fraction of segment a->b (a inside pad ``r``) that a track of
+    half-width ``hw`` covers before its copper leaves the pad: the exit from
+    ``r`` inset by hw. 0 when the pad is narrower than the track."""
+    x0, y0, x1, y1 = r[0] + hw, r[1] + hw, r[2] - hw, r[3] - hw
+    if x0 > x1 or y0 > y1 or not (x0 - EPS <= ax <= x1 + EPS and y0 - EPS <= ay <= y1 + EPS):
+        return 0.0
+    ux, uy = bx - ax, by - ay
+    t = 1.0
+    if ux > 0:
+        t = min(t, (x1 - ax) / ux)
+    elif ux < 0:
+        t = min(t, (x0 - ax) / ux)
+    if uy > 0:
+        t = min(t, (y1 - ay) / uy)
+    elif uy < 0:
+        t = min(t, (y0 - ay) / uy)
+    return max(0.0, t)
 
 
 class _Scoped(list):

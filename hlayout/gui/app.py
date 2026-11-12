@@ -485,6 +485,15 @@ class App(tk.Tk):
         createm.add_separator()
         createm.add_command(label="Create Cell from Selection...", command=self._create_cell_from_selection)
         createm.add_command(label="Find && Place Cell...", command=self.find_and_place_cell)
+        # the wizards: each builds a new cell (a via, a pad, a chip footprint)
+        # or new I/O pads, so they live with the other ways of creating things
+        createm.add_separator()
+        createm.add_command(label="Via Wizard...", command=self.show_via_wizard)
+        createm.add_command(label="Pad Wizard...", command=self.show_pad_wizard)
+        createm.add_command(label="Chip Wizard...", command=self.show_chip_wizard)
+        createm.add_command(label="I/O Pad Wizard...",
+                            command=lambda: __import__("hlayout.gui.iopad_wizard",
+                                                       fromlist=["x"]).open_iopad_wizard(self))
 
         # --- Edit: selecting/editing/removing existing geometry -----------
         editm = add_menu("Edit")
@@ -538,9 +547,6 @@ class App(tk.Tk):
             label="Thick-Film Resistor Designer...",
             command=lambda: open_resistor_designer(self),
         )
-        toolsm.add_command(label="Via Wizard...", command=self.show_via_wizard)
-        toolsm.add_command(label="Pad Wizard...", command=self.show_pad_wizard)
-        toolsm.add_command(label="Chip Wizard...", command=self.show_chip_wizard)
         toolsm.add_command(label="Mask Operations...", command=self.show_mask_op_dialog)
         toolsm.add_command(label="Mask Operation Batch...", command=lambda: open_maskop_batch_window(self))
         toolsm.add_command(label="Top View...", command=lambda: open_topview_window(self))
@@ -566,9 +572,6 @@ class App(tk.Tk):
         toolsm.add_command(label="Header Pinout...",
                           command=lambda: __import__("hlayout.gui.header_pinout_window",
                           fromlist=["x"]).open_header_pinout_window(self))
-        toolsm.add_command(label="I/O Pad Wizard...",
-                           command=lambda: __import__("hlayout.gui.iopad_wizard",
-                                                      fromlist=["x"]).open_iopad_wizard(self))
         toolsm.add_command(label="Fix Vias...", command=self.fix_vias)
 
         # --- Help ----------------------------------------------------------
@@ -1456,7 +1459,7 @@ class App(tk.Tk):
 
         The via cell itself -- its pad size/shape, any dielectric window,
         anything else its own geometry carries -- is built once via
-        Tools > Via Wizard... (or scripting's create_via_cell()) and just
+        Create > Via Wizard... (or scripting's create_via_cell()) and just
         named here, the same "build the reusable part once, place
         instances of it" pattern as any other cell (Create > Cell
         Instance, Find && Place Cell...) -- this dialog used to also ask
@@ -1511,7 +1514,7 @@ class App(tk.Tk):
 
         ttk.Label(
             form,
-            text="Built once via Tools > Via Wizard... (\"New Via Cell…\" above)\n"
+            text="Built once via Create > Via Wizard... (\"New Via Cell…\" above)\n"
                  "or scripting's create_via_cell(); this just names which one\n"
                  "to place. Leave blank for now -- routing works, but Space\n"
                  "can't drop a via until one is set.",
@@ -1582,7 +1585,7 @@ class App(tk.Tk):
         on the layer being left -- committed in the same Session.batch()
         as the via so the whole space-press is one undo step. The via
         itself is an instance of `via_cell` (Setup > Route Layers...,
-        built via Tools > Via Wizard...) placed at (x, y) with
+        built via Create > Via Wizard...) placed at (x, y) with
         Session.place_cell() -- not raw pad/dielectric-window shapes --
         so its footprint is whatever that cell's own geometry says.
         `layer_a`/`layer_b` are only used for the error message; the
@@ -1591,7 +1594,7 @@ class App(tk.Tk):
         if not via_cell:
             dialogs.show_error(
                 "Route", "No via cell configured -- set one in Setup > Route Layers... "
-                "(build one first with Tools > Via Wizard... if none exists yet).",
+                "(build one first with Create > Via Wizard... if none exists yet).",
                 parent=self,
             )
             return
@@ -4138,7 +4141,7 @@ class App(tk.Tk):
         return open_netlist_window(self)
 
     def show_via_wizard(self, on_created=None):
-        """Tools > Via Wizard...: create a via cell -- a square or round
+        """Create > Via Wizard...: create a via cell -- a square or round
         pad drawn on two layers, representing the contact area where a
         via connects them, optionally with a dielectric via window cut
         between them -- and save it directly into an attached reference
@@ -4437,7 +4440,7 @@ class App(tk.Tk):
         win.protocol("WM_DELETE_WINDOW", _close)
 
     def show_pad_wizard(self):
-        """Tools > Pad Wizard...: create a rectangular pad cell -- a
+        """Create > Pad Wizard...: create a rectangular pad cell -- a
         conductor rectangle sized by length x width, plus a solder
         paste rectangle centred on it and undersized by a margin on
         every side -- and save it directly into an attached reference
@@ -4633,7 +4636,7 @@ class App(tk.Tk):
         return sorted(names)
 
     def show_chip_wizard(self):
-        """Tools > Chip Wizard...: build a bare-die / chip footprint
+        """Create > Chip Wizard...: build a bare-die / chip footprint
         interactively. Enter the body size, the outline (chip-graphics)
         layer, the epoxy die-attach pad size + layer, the pin count, and
         which cells to use for pin 1 and for the rest (picked from the

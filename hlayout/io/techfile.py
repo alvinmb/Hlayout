@@ -527,7 +527,7 @@ def save_thin_film_rules(library: Library, rules: dict) -> None:
 # --- Create > Route (2-Layer) settings ---------------------------------------
 #
 # Setup > Route Layers... configures the two conductor layers the Route
-# tool draws on, and which reusable via cell (Tools > Via Wizard.../
+# tool draws on, and which reusable via cell (Create > Via Wizard.../
 # scripting's create_via_cell()) Space places at the point where a route
 # switches between them. The via's own footprint -- pad size/shape,
 # dielectric window, anything else -- lives entirely in that cell's own

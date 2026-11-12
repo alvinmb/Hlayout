@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Alvin Brown
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Tools > I/O Pad Wizard...: create and place numbered I/O pads along the
+"""Create > I/O Pad Wizard...: create and place numbered I/O pads along the
 bottom and / or top edge of the selected substrate, a set distance in from
 the edge (Session.edge_io_pads, the EDGEPADS command)."""
 

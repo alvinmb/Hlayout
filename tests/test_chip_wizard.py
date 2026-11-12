@@ -131,7 +131,7 @@ def test_export_carries_the_placed_pin_cells_and_keeps_their_labels(tmp_path):
     assert "chip_pin_1" not in reloaded.cells and "chip_pin1_1" not in reloaded.cells
 
 
-# --- the Tools > Chip Wizard GUI flow -----------------------------------------
+# --- the Create > Chip Wizard GUI flow -----------------------------------------
 
 tk = pytest.importorskip("tkinter")
 

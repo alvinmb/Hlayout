@@ -111,7 +111,7 @@ def _matched_component_footprint(library, cell_name, component_models, role_laye
     a footprint matching a known gull-wing package's pin pattern
     (component_match.match_gullwing_by_footprint()), or -- for a "bare"
     part identified by neither, e.g. a wire-bonded die built with
-    Session.create_chip_cell() (Tools > Chip Wizard...) -- a cell that
+    Session.create_chip_cell() (Create > Chip Wizard...) -- a cell that
     (a) has at least one child SRef/ARef of its own (a real chip/die
     cell always gets its pins placed AFTERWARDS as separate instances,
     per create_chip_cell()'s own convention) AND (b) whose own shapes
@@ -1440,7 +1440,7 @@ class Session:
         means a placed resistor is one selectable/movable/rotatable
         object on the canvas -- click it once instead of marquee-
         selecting 4-5 separate shapes -- matching how the rest of the
-        tool already treats reusable parts (Tools > Via Wizard...'s via
+        tool already treats reusable parts (Create > Via Wizard...'s via
         cells, attached-library parts placed via PLACE/find-and-place).
         The new cell is named after ``cell_name`` if given, else
         ``ref_des`` (e.g. "R1"), else "RESISTOR" -- de-duplicated

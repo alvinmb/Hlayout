@@ -127,7 +127,7 @@ class LayoutCanvas(tk.Canvas):
         # route starts, route_layer_b is what Space switches to (and back).
         self.route_layer_a = 0
         self.route_layer_b = 1
-        # Which reusable via cell (see Tools > Via Wizard.../scripting's
+        # Which reusable via cell (see Create > Via Wizard.../scripting's
         # create_via_cell()) Space places at the switch point -- an SRef
         # to this cell, not raw pad/dielectric-window shapes, so the via's
         # actual footprint (size, shape, dielectric window, anything else
@@ -151,7 +151,7 @@ class LayoutCanvas(tk.Canvas):
         # (x, y) DBU point. No-op so a bare LayoutCanvas still works.
         self.on_auto_route = lambda a, b: None
         self._auto_route_a = None
-        # Chip Wizard pin placement (Tools > Chip Wizard...): each click
+        # Chip Wizard pin placement (Create > Chip Wizard...): each click
         # drops one epoxy die-attach pad; on_chip_pin(point, pin_no) is
         # fired per click, on_chip_pins_done() after the last pin,
         # on_chip_pins_cancel() if Esc bails out first. No-ops so a bare
@@ -801,7 +801,7 @@ class LayoutCanvas(tk.Canvas):
         self._after_edit()
 
     def start_chip_pins(self, total: int, names=None):
-        """Tools > Chip Wizard...: after the body outline is placed,
+        """Create > Chip Wizard...: after the body outline is placed,
         enter click-to-place-a-pin mode. Each click drops epoxy pad
         `_chip_pin_next` (via on_chip_pin) and advances; after pin
         `total` the cell is finished (on_chip_pins_done) and the tool

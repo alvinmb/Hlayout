@@ -368,11 +368,13 @@ def test_tools_menu_has_resistor_designer_item():
         app.destroy()
 
 
-def test_tools_menu_has_via_wizard_item():
+def test_the_wizards_are_on_the_create_menu_not_tools():
     app = _make_app()
     try:
-        labels = _submenu_labels(app, "Tools")
-        assert "Via Wizard..." in labels
+        create = _submenu_labels(app, "Create")
+        tools = _submenu_labels(app, "Tools")
+        for w in ("Via Wizard...", "Pad Wizard...", "Chip Wizard...", "I/O Pad Wizard..."):
+            assert w in create and w not in tools, w
     finally:
         app.destroy()
 

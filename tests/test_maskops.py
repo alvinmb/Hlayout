@@ -1080,7 +1080,7 @@ def test_top_view_component_recognition_needs_no_layer_thickness_at_all():
 
 def test_top_view_bare_die_recognized_by_outline_not_role_layers():
     # Per user direction: a bare semiconductor die (built the same way
-    # Tools > Chip Wizard.../Session.create_chip_cell() does -- a body-
+    # Create > Chip Wizard.../Session.create_chip_cell() does -- a body-
     # outline path plus an epoxy die-attach pad, neither one a resistor/
     # conductor/glaze film) is a real physical part regardless of its
     # actual size (could be 0.2 x 0.2mm, could be 1.8 x 1.8mm) -- so
