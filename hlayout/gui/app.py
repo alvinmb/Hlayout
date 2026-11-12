@@ -562,6 +562,7 @@ class App(tk.Tk):
         toolsm.add_command(label="Autoroute...",
                            command=lambda: __import__("hlayout.gui.autoroute_window",
                                                       fromlist=["x"]).open_autoroute_window(self))
+        toolsm.add_command(label="Unroute All", command=self.unroute_all)
         toolsm.add_command(label="Thermal Analysis...", command=lambda: open_thermal_window(self))
         toolsm.add_command(label="Generate Dielectric Fill...", command=self.show_dielectric_dialog)
         toolsm.add_command(label="Remove Dielectric Fill", command=self.remove_dielectric_fill)
@@ -3057,6 +3058,18 @@ class App(tk.Tk):
                                             list(r["skipped"].items())[:4])
         self.status.set(msg)
         self.refresh_all()
+
+    def unroute_all(self):
+        """Tools > Unroute All: delete the routing, back to the SLI (Ctrl+Z undoes)."""
+        try:
+            r = self.session.unroute(cell_name=self.canvas.cell_name)
+        except LayoutError as e:
+            dialogs.show_error("Unroute All", str(e), parent=self)
+            return
+        self.canvas.recalc_sli()
+        self.refresh_all()
+        self.status.set(f"Unrouted: {r['tracks']} track(s) and {r['added']} router-added "
+                        "shape(s) deleted -- Ctrl+Z to undo")
 
     def fan_out_die_bonds(self):
         """Tools > Fan Out Die Bonds...: a bond finger and a wire bond for

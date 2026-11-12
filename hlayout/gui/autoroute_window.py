@@ -298,7 +298,9 @@ class AutorouteWindow(tk.Toplevel):
                     routed = SR.route(design, max_jumpers=own["max_jumpers"],
                                       local_dielectric=mapping.get("local_diel", -1) >= 0,
                                       cond2_keepouts=mapping.get("local_keepouts"),
-                                      passes=1 + max(0, int(own["ripup_passes"])))
+                                      passes=1 + max(0, int(own["ripup_passes"])),
+                                      on_line=self._lines.append,
+                                      cancel=lambda: self._cancel)
                     self._result = ("ok", (0, routed, [], {}), mapping)
                 else:
                     self._result = ("ok", H.run_router(design, timeout=1800,
@@ -344,7 +346,8 @@ class AutorouteWindow(tk.Toplevel):
         self.app.refresh_all()
         rs = st["stats"]
         xovers = st.get("crossovers", 0) + st.get("windows", 0)
-        txt = (f"Routed {rs.get('routed', '?')} of {rs.get('connections', '?')} connections: "
+        txt = ("Stopped -- best so far applied. " if rs.get("stopped") else "") + (
+               f"Routed {rs.get('routed', '?')} of {rs.get('connections', '?')} connections: "
                f"{st['traces']} tracks, {xovers} crossover(s), {st['jumpers']} jumper(s), "
                f"{st['bonds']} new bond(s)")
         txt += (f"; {st['removed_tracks']} old track(s) taken out." if st["removed_tracks"]

@@ -278,3 +278,20 @@ def test_hybrid_route_runs_the_shape_engine_end_to_end():
     assert st["engine"] == "shape" and st["jumpers"] >= 1
     assert st["stats"]["routed"] == st["stats"]["connections"]
     assert s.find_shorts() == [] and s.resistor_crossings() == []
+
+
+def test_unroute_takes_the_routing_out_and_keeps_the_pads():
+    from hlayout.core.shapes import Path, Rectangle
+    s = _cross_board(dielectric=True)
+    pads = sorted(sh.bbox() for sh in s.cell.shapes if isinstance(sh, Rectangle) and sh.pin)
+    st = H.hybrid_route(s, layers=2, engine="shape")
+    assert st["traces"] and st["crossovers"]
+    n_routed = len(s.cell.shapes)
+    r = s.unroute()
+    assert r["tracks"] >= st["traces"] and r["added"] > 0
+    assert not any(isinstance(sh, Path) and sh.layer in (3, 5) for sh in s.cell.shapes)
+    assert not any(sh.layer == DIEL for sh in s.cell.shapes)
+    assert sorted(sh.bbox() for sh in s.cell.shapes if isinstance(sh, Rectangle) and sh.pin) == pads
+    s.undo()
+    assert len(s.cell.shapes) == n_routed
+

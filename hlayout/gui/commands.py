@@ -257,6 +257,10 @@ Attached libraries:
                                        Recalculate SLI, F5). Session.sli()
     UNUSEDBONDS [LIST|REMOVE]          bonds/fingers on die pads no net uses: list / take off
     UNROUTED [<net>|NEXT|PREV|CLEAR]   list unrouted nets / zoom to one and show its SLI
+    UNROUTE                            delete the routing (tracks, crossover / jumper
+                                       lands, dielectric strips, jumper bonds) and go
+                                       back to the SLI; one undo step. Also Tools >
+                                       Unroute All and Session.unroute()
     IOPINS [PLAN|APPLY] [lock=<pin,pin,...>]
                                        move the I/O nets to the header pins that
                                        shorten the SLI (free pins too, no crossing
@@ -2605,6 +2609,16 @@ class CommandInterpreter:
         detail = "; ".join(f"{ref}: {','.join(p)}" for ref, p in sorted(r["dies"].items()))
         verb = "unused" if sub == "LIST" else "removed"
         return f"{r['bonds']} {verb} bond(s): {detail}"
+
+    def _cmd_unroute(self, args):
+        """UNROUTE -- delete the routing and go back to the SLI."""
+        if args:
+            raise CommandError("usage: UNROUTE")
+        r = self.session.unroute()
+        if self.view is not None:
+            self.view.recalc_sli()
+        return (f"UNROUTE: {r['tracks']} track(s) and {r['added']} router-added shape(s) "
+                "deleted; the SLI shows what is to route")
 
     def _cmd_iopins(self, args):
         """IOPINS [PLAN|APPLY] [lock=<pins>] -- I/O nets to the pins with the shortest SLI."""

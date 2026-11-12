@@ -910,6 +910,39 @@ def apply_routed(session, routed: dict, mapping: dict, remove_existing: bool = T
     return st
 
 
+def unroute(session, cell_name: Optional[str] = None) -> dict:
+    """Take the routing out and go back to the SLI (one undo step): every
+    track (an unpinned path on either conductor) and everything Hybrid Route
+    drew for its crossovers and jumpers -- the via / jumper lands, the local
+    dielectric strips, the jumper bonds. Pads, parts, die bonds and anything
+    with a pin stay. Returns {"tracks", "added"} -- how many of each went."""
+    lib = session.library
+    name = cell_name or session.current_cell_name
+    cell = lib.get_cell(name)
+    la, lb = session._route_layers()
+    try:
+        old = json.loads(lib.tech_params.get(ADDED_KEY) or "{}")
+    except ValueError:
+        old = {}
+    sigs = {tuple(x) for x in (old.get(name) or [])}
+    out = {"tracks": 0, "added": 0}
+    with session._batch():
+        keep = []
+        for sh in cell.shapes:
+            if (sh.layer, *map(round, sh.bbox())) in sigs:
+                out["added"] += 1
+                continue
+            if isinstance(sh, Path) and sh.layer in (la, lb) and not getattr(sh, "pin", ""):
+                out["tracks"] += 1
+                continue
+            keep.append(sh)
+        cell.shapes[:] = keep
+        old.pop(name, None)
+        lib.tech_params[ADDED_KEY] = json.dumps(old)
+    session._notify()
+    return out
+
+
 def unrouted_text(u) -> str:
     """One line for an unrouted connection, whatever shape the router gives."""
     if isinstance(u, dict):
@@ -990,6 +1023,7 @@ def hybrid_route(session, cell_name: Optional[str] = None, layers: Optional[int]
         routed = _shape.route(design, max_jumpers=max_jumpers,
                               local_dielectric=mapping.get("local_diel", -1) >= 0,
                               cond2_keepouts=mapping.get("local_keepouts"),
+                              on_line=on_line, cancel=cancel,
                               passes=1 + max(0, int(ripup_passes)))
         code, tail, paths = 0, [], {}
     else:

@@ -6120,6 +6120,14 @@ class Session:
             self._notify()
         return changed
 
+    def unroute(self, cell_name: Optional[str] = None) -> dict:
+        """Delete the routing and go back to the SLI (one undo step): every
+        track (unpinned path on either conductor) and what Hybrid Route added
+        -- crossover / jumper lands, local dielectric strips, jumper bonds.
+        Pads, parts and die bonds stay. Returns {"tracks", "added"}."""
+        from . import hybridroute
+        return hybridroute.unroute(self, cell_name=cell_name)
+
     def optimize_io_pins(self, cell_name: Optional[str] = None, locked=(),
                          apply: bool = True) -> dict:
         """Before routing: move the I/O nets to the header pins that shorten

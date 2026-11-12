@@ -156,6 +156,26 @@ class ShapeSpace:
         # (a pin that abuts its part's body would otherwise be unreachable)
         self.term_rects = {}
         self.term_nets = {}
+        self._tgrid = {}           # bucket -> [(net, rect)]: the pad a point lies in
+
+    _TB = 2000.0
+
+    def index_terms(self):
+        """Bucket the pads so pad_at() is quick (call after term_rects/nets)."""
+        g = {}
+        for k, r in self.term_rects.items():
+            net = self.term_nets.get(k, "")
+            for bx in range(int(r[0] // self._TB), int(r[2] // self._TB) + 1):
+                for by in range(int(r[1] // self._TB), int(r[3] // self._TB) + 1):
+                    g.setdefault((bx, by), []).append((net, r))
+        self._tgrid = g
+
+    def pad_at(self, x, y, net):
+        """The pad of ``net`` that (x, y) lies in, or None."""
+        for n, r in self._tgrid.get((int(x // self._TB), int(y // self._TB)), ()):
+            if n == net and r[0] - EPS <= x <= r[2] + EPS and r[1] - EPS <= y <= r[3] + EPS:
+                return r
+        return None
 
     def add(self, layer: str, net: Optional[str], rect: Rect):
         self._by_layer.setdefault(layer, []).append((net or "", rect))
@@ -174,6 +194,10 @@ class ShapeSpace:
         b = self.boundary
         if b is None or (round(p[0]), round(p[1])) in self.exempt:
             return True
+        if self._tgrid:            # anywhere in a pad: the pad sits where it was put
+            for _n, r in self._tgrid.get((int(p[0] // self._TB), int(p[1] // self._TB)), ()):
+                if r[0] - EPS <= p[0] <= r[2] + EPS and r[1] - EPS <= p[1] <= r[3] + EPS:
+                    return True
         return (b[0] + hw - EPS <= p[0] <= b[2] - hw + EPS and
                 b[1] + hw - EPS <= p[1] <= b[3] - hw + EPS)
 
@@ -188,9 +212,12 @@ class ShapeSpace:
         net = net or ""
         ax, ay = a
         bx, by = b
-        if self.term_rects:
-            ra = self.term_rects.get((round(ax), round(ay)))
-            rb = self.term_rects.get((round(bx), round(by)))
+        if self._tgrid:
+            # inside a pad of its own net a track adds no copper: check only
+            # the part outside (anywhere in the pad, not just its centre -- the
+            # 90-degree planner steps out of a pin a grid line at a time)
+            ra = self.pad_at(ax, ay, net)
+            rb = self.pad_at(bx, by, net)
             if ra is not None or rb is not None:
                 t0 = _exit_t(ax, ay, bx, by, ra, hw) if ra is not None else 0.0
                 t1 = 1.0 - _exit_t(bx, by, ax, ay, rb, hw) if rb is not None else 1.0
@@ -201,7 +228,8 @@ class ShapeSpace:
         lox, hix = (ax, bx) if ax <= bx else (bx, ax)
         loy, hiy = (ay, by) if ay <= by else (by, ay)
         lox -= margin; loy -= margin; hix += margin; hiy += margin
-        for n, r in blockers:
+        near = blockers.near(lox, loy, hix, hiy) if isinstance(blockers, _Scoped) else blockers
+        for n, r in near:
             if n == net:
                 continue
             if r[2] < lox or r[0] > hix or r[3] < loy or r[1] > hiy:
@@ -296,6 +324,7 @@ class ShapeProblem:
                                  for t in self.terminals}
         self.space.term_nets = {(round(t.centre[0]), round(t.centre[1])): (t.net or "")
                                 for t in self.terminals}
+        self.space.index_terms()
         self.parts = [_die_rect(x) for x in (design.get("dies") or [])]
         for c in design.get("components") or []:
             self.parts.append(_comp_body_rect(c))
@@ -561,6 +590,15 @@ def _plan_ortho(space, layer, net, margin, starts, targets, target_rects, blocke
             addx(v)
         for v in (r[1] - margin, r[3] + margin):
             addy(v)
+    # every pad, own net included: a track leaves a pin through the edge away
+    # from its part's body and turns just outside it -- it needs lines there
+    for r in space.term_rects.values():
+        if bb is not None and (r[2] < bb[0] or r[0] > bb[2] or r[3] < bb[1] or r[1] > bb[3]):
+            continue
+        for v in (r[0] - margin, r[2] + margin, (r[0] + r[2]) / 2.0):
+            addx(v)
+        for v in (r[1] - margin, r[3] + margin, (r[1] + r[3]) / 2.0):
+            addy(v)
     if bb is not None:
         xs = {v for v in xs if bb[0] + margin - EPS <= v <= bb[2] - margin + EPS}
         ys = {v for v in ys if bb[1] + margin - EPS <= v <= bb[3] - margin + EPS}
@@ -745,8 +783,31 @@ def _exit_t(ax, ay, bx, by, r, hw) -> float:
 class _Scoped(list):
     """A scoped blocker list that knows its box: blockers outside ``bb`` were
     left out, so a query point must keep its clearance inside ``bb`` or the
-    answer would be wrong (see _inside)."""
+    answer would be wrong (see _inside). Bucketed on first query (rebuilt if
+    the list has grown) so a clearance check looks only at what is near."""
     bb = None
+    _CELL = 1000.0
+    _grid = None
+    _glen = -1
+
+    def near(self, lox, loy, hix, hiy):
+        if self._glen != len(self):
+            g = {}
+            c = self._CELL
+            for i, (_n, r) in enumerate(self):
+                for gx in range(int(r[0] // c), int(r[2] // c) + 1):
+                    for gy in range(int(r[1] // c), int(r[3] // c) + 1):
+                        g.setdefault((gx, gy), []).append(i)
+            self._grid, self._glen = g, len(self)
+        c = self._CELL
+        out = set()
+        g = self._grid
+        for gx in range(int(lox // c), int(hix // c) + 1):
+            for gy in range(int(loy // c), int(hiy // c) + 1):
+                v = g.get((gx, gy))
+                if v:
+                    out.update(v)
+        return [self[i] for i in out]
 
 
 def _inside(blockers, p, clr) -> bool:
@@ -779,7 +840,9 @@ def _point_clear(space, x, y, clearance, net, blockers) -> bool:
     if not _inside(blockers, (x, y), clearance):
         return False
     net = net or ""
-    for n, r in blockers:
+    near = blockers.near(x - clearance, y - clearance, x + clearance, y + clearance) \
+        if isinstance(blockers, _Scoped) else blockers
+    for n, r in near:
         if n == net:
             continue
         if _seg_rect_dist(x, y, x, y, r) < clearance - EPS:
@@ -959,12 +1022,15 @@ def _via_escape(P, layer, net, margin, term, blockers, toward):
             rect = (x - hl, y - hl, x + hl, y + hl)
             global _EXPAND_CAP
             _EXPAND_CAP = 1500          # a stub to a nearby via: a small search
+            # a short stub: plan it in a small local scope (cheap to set up)
+            loc = _scope(P.space, layer, [(term[0], term[1], term[0], term[1])], [rect],
+                         1500.0 + margin)
             try:
-                path = _plan(P.space, layer, net, margin, [term], [(x, y)], [rect], blockers)
+                path = _plan(P.space, layer, net, margin, [term], [(x, y)], [rect], loc)
             finally:
                 _EXPAND_CAP = None
             if path is not None:
-                path = P.space.tighten(path, net, margin, blockers)
+                path = P.space.tighten(path, net, margin, loc)
                 L = _polylen(path) if len(path) >= 2 else 0.0
                 if best is None or L < best[0]:
                     best = (L, (x, y), path)
@@ -1394,46 +1460,47 @@ def _orthogonalize(P, layer, net, margin, pts, pref):
 
 def _route_core(design: dict, order=None, on_net=None, scope_pad: float = 6000.0,
                 max_jumpers: Optional[int] = None, allow_crossovers: bool = True,
-                max_crossovers: Optional[int] = None, local_dielectric: bool = True) -> dict:
-    """One routing pass over ``design`` in net ``order`` (default: easiest
-    first by bounding-box spread). Planar -> local crossover ->
-    wire-bond jumper) and return a result dict shaped like the Java engine's.
-
-    A connection that the conductor can't carry gets a local second-conductor
-    crossover (a COND2 bridge with a local dielectric strip, diel_factor x the
-    trace width); where that dielectric would foul a printed resistor the
-    crossover is refused and a wire-bond jumper is used instead. ``max_jumpers``
-    overrides routing.maxJumpers (0 = no limit); ``max_crossovers`` caps crossovers (default
-    one per connection). ``local_dielectric`` False (the design has no
-    dielectric layer) turns crossovers off: a COND2 bridge with nothing under
-    it would short whatever it crosses."""
+                max_crossovers: Optional[int] = None, local_dielectric: bool = True,
+                on_line=None, cancel=None, tag: str = "", ripup_rounds: int = 0,
+                time_budget: Optional[float] = None) -> dict:
+    """Route ``design``: one pass over the nets in ``order`` (default: easiest
+    first by bounding-box spread) -- per connection planar, then a local
+    crossover (a COND2 bridge on a local dielectric strip, diel_factor x the
+    width, kept off resistors and pads), then a wire-bond jumper -- and then up
+    to ``ripup_rounds`` rounds of RIP-UP AND REROUTE: for each connection left
+    open, the path it would take with only the fixed obstacles (pads, parts,
+    keep-outs) on the board shows which nets' copper is in its way; those are
+    ripped up, the failed net routes first, they route after it, and the
+    change is kept only if more connections route in all (else rolled back).
+    ``time_budget`` (s) caps the rip-up rounds. Returns a result dict shaped
+    like the Java engine's. ``max_jumpers`` overrides routing.maxJumpers
+    (0 = no limit); ``local_dielectric`` False (no dielectric layer) turns
+    crossovers off."""
     global _DIRS, _ORTHO
+    import time as _time
     P = ShapeProblem(design)
     _DIRS = {L: (ax, P.against) for L, ax in P.dir_axis.items()}
     _ORTHO = P.orthogonal
-    traces: List[dict] = []
-    crossovers: List[dict] = []
-    unrouted: List[dict] = []
-    connections = 0
-    routed = 0
-    jumpers = 0
     layer = P.layers[0]
     two = len(P.layers) >= 2
     cond2 = P.layers[1] if two else "COND2"
-    jbudget = P.max_jumpers if max_jumpers is None else int(max_jumpers)
-    if jbudget <= 0:
-        jbudget = 10 ** 9          # 0 = no limit, as the Java engine and the dialog say
+    jb0 = P.max_jumpers if max_jumpers is None else int(max_jumpers)
+    if jb0 <= 0:
+        jb0 = 10 ** 9              # 0 = no limit, as the Java engine and the dialog say
     jumpers_on = P.jumpers_allowed
-    cbudget = (10 ** 9 if max_crossovers is None else int(max_crossovers)) \
+    cb0 = (10 ** 9 if max_crossovers is None else int(max_crossovers)) \
         if (allow_crossovers and local_dielectric) else 0
     issues: List[dict] = []
     if allow_crossovers and not local_dielectric:
         issues.append({"severity": "WARNING", "code": "NO_DIELECTRIC_LAYER", "ref": "",
                        "message": "no dielectric layer is set (Setup > Technology Properties), "
                                   "so no printed crossovers: crossings need wire-bond jumpers"})
-    new_pads = design.setdefault("substratePads", [])
-    new_wires = design.setdefault("wires", [])
-    n = [0]
+    base_pads = list(design.get("substratePads") or [])
+    base_wires = list(design.get("wires") or [])
+    say = on_line or (lambda _m: None)
+    st = {"jb": jb0, "cb": cb0, "n": 0}
+    recs: Dict[str, dict] = {}       # net -> what routing it put on the board
+    term_by_id = {t.tid: t for t in P.terminals}
 
     def spread(net):
         ts = [t for g in P.groups[net] for t in g]
@@ -1441,7 +1508,12 @@ def _route_core(design: dict, order=None, on_net=None, scope_pad: float = 6000.0
         ys = [t.centre[1] for t in ts]
         return (max(xs) - min(xs)) + (max(ys) - min(ys))
 
-    def add_copper(lay, net, pts, width):
+    def add_rect(rec, lay, net, rect):
+        e = (net or "", rect)
+        P.space._by_layer.setdefault(lay, []).append(e)
+        rec["space"].append((lay, e))
+
+    def add_copper(rec, lay, net, pts, width):
         # an axis-aligned leg is its exact rectangle; a slanted one is covered
         # by a strip of small squares along it (its bounding box would wall
         # off the whole box it spans)
@@ -1449,55 +1521,72 @@ def _route_core(design: dict, order=None, on_net=None, scope_pad: float = 6000.0
         for i in range(1, len(pts)):
             (ax, ay), (bx, by) = pts[i - 1], pts[i]
             if abs(ax - bx) < EPS or abs(ay - by) < EPS:
-                P.space.add(lay, net, (min(ax, bx) - hw, min(ay, by) - hw,
-                                       max(ax, bx) + hw, max(ay, by) + hw))
+                add_rect(rec, lay, net, (min(ax, bx) - hw, min(ay, by) - hw,
+                                         max(ax, bx) + hw, max(ay, by) + hw))
                 continue
             L = math.hypot(bx - ax, by - ay)
-            n = max(1, int(math.ceil(L / max(hw, 25.0))))
-            # a slice's box grown by hw contains the slice swept by the track
-            ex = hw
-            for k in range(n):
-                t0, t1 = k / n, (k + 1) / n
+            k = max(1, int(math.ceil(L / max(hw, 25.0))))
+            for j in range(k):
+                t0, t1 = j / k, (j + 1) / k
                 x0, x1 = ax + (bx - ax) * t0, ax + (bx - ax) * t1
                 y0, y1 = ay + (by - ay) * t0, ay + (by - ay) * t1
-                P.space.add(lay, net, (min(x0, x1) - ex, min(y0, y1) - ex,
-                                       max(x0, x1) + ex, max(y0, y1) + ex))
+                add_rect(rec, lay, net, (min(x0, x1) - hw, min(y0, y1) - hw,
+                                         max(x0, x1) + hw, max(y0, y1) + hw))
 
-    def emit_trace(net, pts):
+    def emit_trace(rec, net, pts):
         pts = [q for i, q in enumerate(pts) if i == 0 or q != pts[i - 1]]
         if len(pts) < 2:
             return
         if P.orthogonal:
             pts = _orthogonalize(P, layer, net, P.margin(net), pts, P.dir_axis.get(layer))
         w = P.width_of(net)
-        traces.append({"net": net, "layer": layer, "widthUm": int(round(w)),
-                       "points": [{"x": int(round(x)), "y": int(round(y))} for x, y in pts]})
-        add_copper(layer, net, pts, w)
+        rec["traces"].append({"net": net, "layer": layer, "widthUm": int(round(w)),
+                              "points": [{"x": int(round(x)), "y": int(round(y))} for x, y in pts]})
+        add_copper(rec, layer, net, pts, w)
 
-    def add_land(net, rect, role, lid):
+    def add_land(rec, net, rect, role, lid):
         cx = (rect[0] + rect[2]) / 2.0
         cy = (rect[1] + rect[3]) / 2.0
-        new_pads.append({"id": lid, "net": net, "layer": layer,
-                         "position": {"x": int(round(cx)), "y": int(round(cy))},
-                         "widthUm": int(round(P.land)), "heightUm": int(round(P.land)),
-                         "role": role})
-        P.space.add(layer, net, rect)      # own-net copper others must clear
+        rec["pads"].append({"id": lid, "net": net, "layer": layer,
+                            "position": {"x": int(round(cx)), "y": int(round(cy))},
+                            "widthUm": int(round(P.land)), "heightUm": int(round(P.land)),
+                            "role": role})
+        add_rect(rec, layer, net, rect)     # own-net copper others must clear
 
-    if order is None:
-        net_seq = sorted(P.groups, key=lambda nm: (spread(nm), nm))
-    else:
-        seen = set()
-        net_seq = [nm for nm in order if nm in P.groups and not (nm in seen or seen.add(nm))]
-        net_seq += [nm for nm in sorted(P.groups, key=lambda nm: (spread(nm), nm)) if nm not in seen]
-    for net in net_seq:
+    def add_crossover(rec, net, A, B, bridge, w):
+        rec["crossovers"].append({"net": net, "widthUm": int(round(w)),
+                                  "dielWidthUm": int(round(P.diel_factor * w)),
+                                  "landUm": int(round(P.land)),
+                                  "a": {"x": int(round(A[0])), "y": int(round(A[1]))},
+                                  "b": {"x": int(round(B[0])), "y": int(round(B[1]))},
+                                  "bridge": [{"x": int(round(x)), "y": int(round(y))}
+                                             for x, y in bridge]})
+        add_copper(rec, cond2, net, bridge, w)
+        st["cb"] -= 1
+
+    def rip(net):
+        """Take everything ``net`` routed off the board (and give back its
+        crossover / jumper budget)."""
+        rec = recs.pop(net, None)
+        if not rec:
+            return
+        ids = {id(e) for _l, e in rec["space"]}
+        for lay in {l for l, _e in rec["space"]}:
+            P.space._by_layer[lay] = [e for e in P.space._by_layer[lay] if id(e) not in ids]
+        st["jb"] += rec["jumpers"]
+        st["cb"] += len(rec["crossovers"])
+
+    def route_net(net, verbose=True):
+        rec = {"traces": [], "crossovers": [], "pads": [], "wires": [], "space": [],
+               "routed": 0, "unrouted": [], "jumpers": 0}
+        recs[net] = rec
         groups = [list(g) for g in P.groups[net]]
         if len(groups) < 2:
-            continue
+            return rec
         margin = P.margin(net)
         w = P.width_of(net)
         tree = groups.pop(0)
         while groups:
-            connections += 1
             start_rects = [t.rect for t in tree]
             starts = [t.centre for t in tree]
             groups.sort(key=lambda grp: min(math.hypot(s[0] - t.centre[0], s[1] - t.centre[1])
@@ -1510,9 +1599,8 @@ def _route_core(design: dict, order=None, on_net=None, scope_pad: float = 6000.0
                 if path is not None:
                     made = ("planar", gi, grp, P.space.tighten(path, net, margin, blk))
                     break
-            if made is None and cbudget > 0:
-                # short local crossovers (multi-hop) first -- robust in both modes;
-                # the COND2 hops draw on the real 2nd conductor when two
+            if made is None and st["cb"] > 0:
+                # short local crossovers (multi-hop) first -- robust in both modes
                 for gi, grp in enumerate(groups):
                     blk = _scope(P.space, layer, start_rects, [t.rect for t in grp],
                                  scope_pad + margin)
@@ -1521,8 +1609,7 @@ def _route_core(design: dict, order=None, on_net=None, scope_pad: float = 6000.0
                         made = ("multi", gi, grp, ops)
                         break
                 if made is None and two:
-                    # two conductors: a full COND2 track as an extra fallback for runs
-                    # the short hops can't make
+                    # two conductors: a full COND2 track for runs the hops can't make
                     for gi, grp in enumerate(groups):
                         blk = _scope(P.space, layer, start_rects, [t.rect for t in grp],
                                      scope_pad + margin)
@@ -1530,7 +1617,7 @@ def _route_core(design: dict, order=None, on_net=None, scope_pad: float = 6000.0
                         if c is not None and c != "resistor":
                             made = ("xover", gi, grp, c)
                             break
-            if made is None and jumpers_on and jbudget > 0:
+            if made is None and jumpers_on and st["jb"] > 0:
                 for gi, grp in enumerate(groups):
                     blk = _scope(P.space, layer, start_rects, [t.rect for t in grp], scope_pad + margin)
                     j = _try_jumper(P, layer, net, margin, starts, grp, blk)
@@ -1538,71 +1625,199 @@ def _route_core(design: dict, order=None, on_net=None, scope_pad: float = 6000.0
                         made = ("jumper", gi, grp, j)
                         break
             if made is None:
-                for grp in groups:
-                    unrouted.append({"net": net, "from": tree[0].tid, "to": grp[0].tid})
-                break
+                # nothing reaches the tree: leave this one gap, and grow a new
+                # tree from the nearest pad left so the rest of the net still
+                # routes among itself (one failure is one gap, not the net)
+                grp = groups[0]
+                rec["unrouted"].append({"net": net, "from": tree[0].tid, "to": grp[0].tid})
+                if verbose:
+                    say(f"{tag}   {net}: {tree[0].tid} -> {grp[0].tid} NOT routed")
+                tree = groups.pop(0)
+                continue
             kind, gi, grp, payload = made
+            if kind != "planar" and verbose:
+                say(f"{tag}   {net}: {tree[0].tid} -> {grp[0].tid} needs a "
+                    + {"jumper": "wire-bond jumper", "xover": "COND2 crossover"}.get(
+                        kind, "printed crossover"))
             if kind == "planar":
-                emit_trace(net, payload)
+                emit_trace(rec, net, payload)
             elif kind == "jumper":
                 landA, landB, pathA, pathB, a, b = payload
-                n[0] += 1
-                la, lb = "JL_%s_%d" % (net, n[0]), "JL2_%s_%d" % (net, n[0])
-                add_land(net, landA, "JUMPER_LAND", la)
-                add_land(net, landB, "JUMPER_LAND", lb)
-                emit_trace(net, pathA + [a])
-                emit_trace(net, [b] + pathB)
-                new_wires.append({"id": "JW_%s_%d" % (net, n[0]), "net": net,
-                                  "from": {"kind": "SUBSTRATE_PAD", "pad": la},
-                                  "to": {"kind": "SUBSTRATE_PAD", "pad": lb}})
-                jumpers += 1
-                jbudget -= 1
+                st["n"] += 1
+                la, lb = "JL_%s_%d" % (net, st["n"]), "JL2_%s_%d" % (net, st["n"])
+                add_land(rec, net, landA, "JUMPER_LAND", la)
+                add_land(rec, net, landB, "JUMPER_LAND", lb)
+                emit_trace(rec, net, pathA + [a])
+                emit_trace(rec, net, [b] + pathB)
+                rec["wires"].append({"id": "JW_%s_%d" % (net, st["n"]), "net": net,
+                                     "from": {"kind": "SUBSTRATE_PAD", "pad": la},
+                                     "to": {"kind": "SUBSTRATE_PAD", "pad": lb}})
+                rec["jumpers"] += 1
+                st["jb"] -= 1
             elif kind == "xover":  # full second-conductor track with COND1 stubs
-                a, b = payload["a"], payload["b"]
-                bridge = payload["bridge"]
-                emit_trace(net, payload["stubA"])
-                emit_trace(net, payload["stubB"])
-                P.space.add(layer, net, payload["landA"])
-                P.space.add(layer, net, payload["landB"])
-                add_copper(cond2, net, bridge, w)
-                crossovers.append({"net": net, "widthUm": int(round(w)),
-                                   "dielWidthUm": int(round(P.diel_factor * w)),
-                                           "landUm": int(round(P.land)),
-                                   "a": {"x": int(round(a[0])), "y": int(round(a[1]))},
-                                   "b": {"x": int(round(b[0])), "y": int(round(b[1]))},
-                                   "bridge": [{"x": int(round(x)), "y": int(round(y))}
-                                              for x, y in bridge]})
-                cbudget -= 1
+                emit_trace(rec, net, payload["stubA"])
+                emit_trace(rec, net, payload["stubB"])
+                add_rect(rec, layer, net, payload["landA"])
+                add_rect(rec, layer, net, payload["landB"])
+                add_crossover(rec, net, payload["a"], payload["b"], payload["bridge"], w)
             else:  # multi: COND1 traces + short printed-jumper crossovers
                 hl = P.land / 2.0
                 for op in payload:
                     if op[0] == "trace":
-                        emit_trace(net, op[1])
+                        emit_trace(rec, net, op[1])
                     else:
                         _, A, B, bridge = op
-                        P.space.add(layer, net, (A[0] - hl, A[1] - hl, A[0] + hl, A[1] + hl))
-                        P.space.add(layer, net, (B[0] - hl, B[1] - hl, B[0] + hl, B[1] + hl))
-                        add_copper("COND2", net, bridge, w)
-                        crossovers.append({"net": net, "widthUm": int(round(w)),
-                                           "dielWidthUm": int(round(P.diel_factor * w)),
-                                           "landUm": int(round(P.land)),
-                                           "a": {"x": int(round(A[0])), "y": int(round(A[1]))},
-                                           "b": {"x": int(round(B[0])), "y": int(round(B[1]))},
-                                           "bridge": [{"x": int(round(x)), "y": int(round(y))}
-                                                      for x, y in bridge]})
-                        cbudget -= 1
-            routed += 1
+                        add_rect(rec, layer, net, (A[0] - hl, A[1] - hl, A[0] + hl, A[1] + hl))
+                        add_rect(rec, layer, net, (B[0] - hl, B[1] - hl, B[0] + hl, B[1] + hl))
+                        add_crossover(rec, net, A, B, bridge, w)
+            rec["routed"] += 1
             tree += grp
             del groups[gi]
         if on_net:
             on_net(net)
+        return rec
 
+    if order is None:
+        net_seq = sorted(P.groups, key=lambda nm: (spread(nm), nm))
+    else:
+        seen = set()
+        net_seq = [nm for nm in order if nm in P.groups and not (nm in seen or seen.add(nm))]
+        net_seq += [nm for nm in sorted(P.groups, key=lambda nm: (spread(nm), nm)) if nm not in seen]
+    connections = sum(max(0, len(P.groups[nm]) - 1) for nm in net_seq)   # all of them, up front
+    fixed = {L: list(v) for L, v in P.space._by_layer.items()}        # pads, parts, keep-outs
+
+    def routed_now():
+        return sum(r["routed"] for r in recs.values())
+
+    def stop_now():
+        return cancel is not None and cancel()
+
+    # ---- first pass ------------------------------------------------------------------
+    stopped = False
+    nets_n = len(net_seq)
+    for net_i, net in enumerate(net_seq, 1):
+        if len(P.groups[net]) < 2:
+            continue
+        if stopped or stop_now():
+            if not stopped:
+                say(f"{tag}stopped -- {routed_now()}/{connections} routed")
+            stopped = True
+            g = P.groups[net]
+            recs[net] = {"traces": [], "crossovers": [], "pads": [], "wires": [], "space": [],
+                         "routed": 0, "jumpers": 0,
+                         "unrouted": [{"net": net, "from": g[0][0].tid, "to": x[0].tid}
+                                      for x in g[1:]]}
+            continue
+        say(f"{tag}net {net_i}/{nets_n} {net} ({len(P.groups[net])} pads) -- "
+            f"{routed_now()}/{connections} routed")
+        route_net(net)
+    say(f"{tag}first pass: {routed_now()}/{connections} routed")
+
+    # ---- rip-up and reroute ------------------------------------------------------------
+    def blockers_for(net, gap):
+        """The nets whose routed copper lies across the path ``gap`` would take
+        with only the fixed obstacles on the board."""
+        a, b = term_by_id.get(gap["from"]), term_by_id.get(gap["to"])
+        if a is None or b is None:
+            return []
+        margin = P.margin(net)
+        live = P.space._by_layer
+        P.space._by_layer = fixed
+        try:
+            blk = _scope(P.space, layer, [a.rect], [b.rect], scope_pad + margin)
+            path = _plan(P.space, layer, net, margin, [a.centre], [b.centre], [b.rect], blk)
+        finally:
+            P.space._by_layer = live
+        if not path:
+            return []
+        hits = {}
+        fixed_ids = {id(e) for e in fixed.get(layer, ())}
+        for n2, r in live.get(layer, ()):
+            if not n2 or n2 == net or n2.startswith("~"):
+                continue
+            for i in range(1, len(path)):
+                if _seg_rect_dist(path[i - 1][0], path[i - 1][1], path[i][0], path[i][1], r) \
+                        < margin - EPS:
+                    hits[n2] = hits.get(n2, 0) + 1
+                    break
+        # copper only (pads of other nets are fixed and not rippable)
+        rippable = {n2 for n2, c in hits.items() if n2 in recs and recs[n2]["space"]}
+        return sorted(rippable, key=lambda n2: -hits[n2])[:4]
+
+    t0 = _time.time()
+    rounds = 0
+    for rnd in range(max(0, int(ripup_rounds))):
+        if stopped:
+            break
+        failed = [nm for nm in net_seq if recs.get(nm) and recs[nm]["unrouted"]]
+        if not failed:
+            break
+        rounds += 1
+        say(f"{tag}rip-up round {rnd + 1}/{ripup_rounds}: {len(failed)} net(s) with gaps")
+        improved = False
+        for net in failed:
+            if stop_now() or (time_budget is not None and _time.time() - t0 > time_budget):
+                say(f"{tag}rip-up {'stopped' if stop_now() else 'out of time'} -- "
+                    f"{routed_now()}/{connections} routed")
+                stopped = stop_now()
+                break
+            rec = recs.get(net)
+            if not rec or not rec["unrouted"]:
+                continue
+            blockers = blockers_for(net, rec["unrouted"][0])
+            if not blockers:
+                continue
+            before = routed_now()
+            snap_space = {L: list(v) for L, v in P.space._by_layer.items()}
+            snap_recs = dict(recs)
+            snap_st = dict(st)
+            for b in blockers:
+                rip(b)
+            rip(net)
+            route_net(net, verbose=False)
+            for b in sorted(blockers, key=lambda nm: (spread(nm), nm)):
+                route_net(b, verbose=False)
+            after = routed_now()
+            if after > before:
+                improved = True
+                say(f"{tag}   ripped up {', '.join(blockers)} for {net}: "
+                    f"{before} -> {after} routed")
+            else:
+                P.space._by_layer = snap_space
+                recs.clear()
+                recs.update(snap_recs)
+                st.clear()
+                st.update(snap_st)
+        else:
+            if not improved:
+                break
+            continue
+        break
+    if ripup_rounds:
+        say(f"{tag}after rip-up: {routed_now()}/{connections} routed")
+
+    # ---- the result -------------------------------------------------------------------
+    traces, crossovers, unrouted, pads, wires = [], [], [], [], []
+    jumpers = 0
+    for nm in net_seq:
+        r = recs.get(nm)
+        if not r:
+            continue
+        traces += r["traces"]
+        crossovers += r["crossovers"]
+        unrouted += r["unrouted"]
+        pads += r["pads"]
+        wires += r["wires"]
+        jumpers += r["jumpers"]
+    design["substratePads"] = base_pads + pads
+    design["wires"] = base_wires + wires
     length = 0.0
     for t in traces:
         pts = t["points"]
         for i in range(1, len(pts)):
             length += math.hypot(pts[i]["x"] - pts[i - 1]["x"], pts[i]["y"] - pts[i - 1]["y"])
-    stats = {"connections": connections, "routed": routed, "jumpersAdded": jumpers,
+    stats = {"connections": connections, "routed": routed_now(), "jumpersAdded": jumpers,
+             "stopped": stopped, "ripupRounds": rounds,
              "crossoversAdded": len(crossovers), "fingersAdded": 0, "windows": 0,
              "traceLengthUm": int(length), "gridUm": 0}
     return {"design": design, "traces": traces, "crossovers": crossovers, "windows": [],
@@ -1626,66 +1841,41 @@ def _congestion_penalty(h, cell, k):
     return pen
 
 
-def route(design: dict, on_net=None, scope_pad: float = 6000.0,
+def route(design: dict, on_net=None, scope_pad: float = 6000.0, on_line=None, cancel=None,
           max_jumpers: Optional[int] = None, allow_crossovers: bool = True,
           max_crossovers: Optional[int] = None, passes: Optional[int] = None,
-          local_dielectric: bool = True, cond2_keepouts=None) -> dict:
-    """Route ``design`` with the gridless shape router, using negotiated
-    congestion to raise coverage: each pass re-routes from scratch; where a
-    connection failed, the region around its terminals gains a congestion cost,
-    so on the next pass OTHER nets' A* pays to cross it and routes around,
-    freeing the corridor the stuck net needs. The still-unrouted nets are also
-    moved to the front. The best pass is returned. ``passes`` (default 1; set
-    >1 to negotiate) caps the passes. Planar -> short local crossover -> jumper."""
+          local_dielectric: bool = True, cond2_keepouts=None,
+          time_budget: Optional[float] = 180.0) -> dict:
+    """Route ``design`` with the gridless shape router: one pass over the nets,
+    then ``passes`` - 1 rounds of rip-up and reroute (each connection left open
+    rips up the nets in its way, routes first, and the change is kept only if
+    more connections route in all) -- see _route_core. ``time_budget`` (s) caps
+    the rip-up; ``cancel`` stops after the current net with the best so far;
+    ``on_line`` gets progress lines. Planar -> local crossover -> jumper."""
     global _PEN, _ORTHO
     import copy
+    import time as _time
     if cond2_keepouts is not None:
         # the local-strip keep-outs (resistor ink + oversize, keep-out layers)
         # in place of the full-fill ones the design carries for the Java engine
         design = copy.deepcopy(design)
         design.setdefault("routing", {}).setdefault("keepouts", {})["COND2"] = \
             [list(r) for r in cond2_keepouts]
-    npass = max(1, 1 if passes is None else int(passes))
-    # terminal centres per net (fixed across passes)
-    P0 = ShapeProblem(copy.deepcopy(design))
-    net_terms = {nm: [t.centre for g in P0.groups[nm] for t in g] for nm in P0.groups}
-    cell = max(500.0, P0.min_line * 3)
-    bump = 1.0
-    k = 0.015
-    h = {}
-    order = None
-    best = None
+    rounds = max(0, (1 if passes is None else int(passes)) - 1)
+    say = on_line or (lambda _m: None)
+    t0 = _time.time()
+    _PEN = None
     try:
-        for _i in range(npass):
-            _PEN = _congestion_penalty(h, cell, k)
-            work = copy.deepcopy(design)
-            res = _route_core(work, order=order, on_net=on_net, scope_pad=scope_pad,
-                              max_jumpers=max_jumpers, allow_crossovers=allow_crossovers,
-                              max_crossovers=max_crossovers,
-                              local_dielectric=local_dielectric)
-            if best is None or res["stats"]["routed"] > best["stats"]["routed"]:
-                best = res
-            if res["stats"]["routed"] == res["stats"]["connections"]:
-                break
-            failed = []
-            seen = set()
-            for u in res["unrouted"]:
-                nm = u.get("net")
-                if nm and nm not in seen:
-                    seen.add(nm)
-                    failed.append(nm)
-                # raise congestion around the stuck connection's terminals
-                for nm2 in (u.get("net"),):
-                    for cx, cy in net_terms.get(nm2, []):
-                        for dxc in (-1, 0, 1):
-                            for dyc in (-1, 0, 1):
-                                key = (int(cx // cell) + dxc, int(cy // cell) + dyc)
-                                h[key] = h.get(key, 0.0) + bump
-            if not failed:
-                break
-            order = failed
+        res = _route_core(copy.deepcopy(design), on_net=on_net, scope_pad=scope_pad,
+                          max_jumpers=max_jumpers, allow_crossovers=allow_crossovers,
+                          max_crossovers=max_crossovers, local_dielectric=local_dielectric,
+                          on_line=on_line, cancel=cancel, ripup_rounds=rounds,
+                          time_budget=time_budget)
     finally:
         _PEN = None
         _ORTHO = False
-    best["stats"]["passes"] = _i + 1
-    return best
+    st = res["stats"]
+    say(f"done in {_time.time() - t0:.1f}s: {st['routed']}/{st['connections']} routed, "
+        f"{st['crossoversAdded']} crossover(s), {st['jumpersAdded']} jumper(s)")
+    st["passes"] = 1 + st.get("ripupRounds", 0)
+    return res
