@@ -277,6 +277,19 @@ def bottleneck(path, feats, net, w, sp, traces, reach=4000.0, step=3):
     return best
 
 
+def _owner_nets(feats, owner):
+    return {f["net"] for f in feats if f["owner"] == owner and f["net"]}
+
+
+def _shares_net(feats, a, b, net):
+    """Do parts ``a`` and ``b`` share a net (other than ``net``)? Opening a
+    channel between them for ``net`` would cut that link: it would have to
+    cross the new track."""
+    if a is None or b is None or a == b:
+        return False
+    return bool((_owner_nets(feats, a) & _owner_nets(feats, b)) - {net})
+
+
 def _owner_rects(feats, owner):
     return [f for f in feats if f["owner"] == owner]
 
@@ -346,6 +359,12 @@ def plan(design, unrouted, locked=(), max_move: float = 500.0, margin: float = 5
         hits = dict(r["hits"])
         # the worst channel on the way, once the other nets' tracks are in it
         bn = bottleneck(r["path"], feats, net, P.width_of(net), P.min_space, traces)
+        if bn is not None and _shares_net(feats, feats[bn["left"]]["owner"],
+                                          feats[bn["right"]]["owner"], net):
+            why.append(f"{net} {a}-{b}: the channel at ({bn['at'][0]:.0f}, {bn['at'][1]:.0f}) "
+                       f"runs between {feats[bn['left']]['owner']} and "
+                       f"{feats[bn['right']]['owner']}, which are connected -- not opened")
+            bn = None
         if bn is not None:
             x, y = bn["at"]
             for fi, sgn in ((bn["left"], -1.0), (bn["right"], 1.0)):
@@ -360,6 +379,19 @@ def plan(design, unrouted, locked=(), max_move: float = 500.0, margin: float = 5
                     hits[fi] = (share, v, (x, y))
             why.append(f"{net} {a}-{b}: channel at ({x:.0f}, {y:.0f}) short by "
                        f"{bn['short']:.0f} um with {bn['tracks']} track(s) in it")
+        # never open a channel between two connected parts (see _shares_net)
+        drop = set()
+        hl = list(hits.items())
+        for i1, (f1, (_i, v1, _a)) in enumerate(hl):
+            for f2, (_i2, v2, _a2) in hl[i1 + 1:]:
+                if v1[0] * v2[0] + v1[1] * v2[1] < -0.3 and \
+                        _shares_net(feats, feats[f1]["owner"], feats[f2]["owner"], net):
+                    drop |= {f1, f2}
+        if drop:
+            why.append(f"{net} {a}-{b}: way between connected parts "
+                       + ", ".join(sorted({str(feats[f]["owner"]) for f in drop})) + " -- not opened")
+            for f in drop:
+                hits.pop(f, None)
         if not hits:
             stuck.append(u)
             continue

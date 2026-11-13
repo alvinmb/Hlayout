@@ -110,3 +110,13 @@ def test_nudged_design_routes():
         c["centre"]["y"] += dy
     r = PF.route(d, local_dielectric=False, iterations=5)
     assert not r["unrouted"], r["unrouted"]
+
+
+def test_nudge_never_opens_a_way_between_two_connected_parts():
+    """A track between two parts that are wired to each other would cut that
+    link: the gap is left alone."""
+    from hlayout.scripting import nudge as NG
+    d = _design(850.0)
+    d["components"][1]["pinA"]["net"] = "P"           # C2.A on C1.A's net
+    pl = NG.plan(d, [{"net": "N", "from": "A", "to": "B"}])
+    assert not pl["moves"] and any("connected" in w for w in pl["why"])
