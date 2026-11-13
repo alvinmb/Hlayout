@@ -6208,6 +6208,53 @@ class Session:
         from . import iopads
         return iopads.optimize_pins(self, cell_name=cell_name, locked=locked, apply=apply)
 
+    def backannotate_header(self, schematic: Optional[str] = None, ref: Optional[str] = None,
+                            apply: bool = True, no_connect: bool = False) -> dict:
+        """Write the header pinout (the IO.<pin> net names IOPINS / Header
+        Pinout set) back to the KiCad schematic, so schematic, netlist and
+        PCB agree with the layout: header pin N here = pin N of the header
+        symbol ``ref``. A pin that changes net has its label renamed; one
+        that gains a net gets a wire and label like its neighbours'; one
+        that is freed loses them (``no_connect``: and gets a no-connect
+        flag). Pins whose wiring is shared with anything else are reported,
+        not edited. ``schematic`` defaults to the .kicad_sch beside the last
+        imported netlist, ``ref`` to the header in that netlist's cell map.
+        ``apply`` False only reports. Close the schematic in KiCad first.
+        Returns {"changes", "shared", "schematic", "backup", "ref"}. See
+        hlayout.io.kicad_backannotate."""
+        from ..io import kicad_backannotate as KB
+        from ..io.techfile import load_net_names
+        net = (self.autoplace_settings() or {}).get("last_netlist") or ""
+        if schematic is None:
+            if not net:
+                raise LayoutError("no schematic given and no netlist imported to find one by")
+            schematic = os.path.splitext(net)[0] + ".kicad_sch"
+        if not os.path.exists(schematic):
+            raise LayoutError(f"schematic not found: {schematic}")
+        if ref is None and net:
+            # the header: the unlabelled package placed in the current cell
+            cell = self.library.cells.get(self.current_cell_name or "")
+            for hc in [r.cell_name for r in (cell.srefs if cell else []) if not r.label]:
+                ref = KB.header_ref_from_cellmap(net, hc)
+                if ref:
+                    break
+            if ref is None:
+                ref = KB.header_ref_from_cellmap(net)
+        if ref is None:
+            raise LayoutError("can't tell which symbol is the header -- give ref= (e.g. J30)")
+        with open(schematic, encoding="utf-8") as f:
+            pins = KB._pin_ends(f.read(), ref)
+        names = load_net_names(self.library)
+
+        def real(v):
+            return v if v and not v.lower().startswith("unconnected") and not v.startswith("~") \
+                else None
+        want = {p: real(names.get(f"IO.{p}")) for p in pins}
+        try:
+            return KB.backannotate_pins(schematic, ref, want, apply=apply, no_connect=no_connect)
+        except ValueError as e:
+            raise LayoutError(str(e))
+
     def swap_header_pins(self, a, b, cell_name: Optional[str] = None) -> dict:
         """Swap the nets on two header pins: the signal that entered at pin
         ``a`` now enters at pin ``b`` and vice versa (the IO.<pin> net names

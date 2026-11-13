@@ -271,6 +271,12 @@ Attached libraries:
                                        lines) -- run before Autoroute; PLAN only
                                        reports. Also Tools > Header Pinout...
                                        Auto-optimize and Session.optimize_io_pins()
+    BACKANNOTATE [PLAN|APPLY] [sch=<file>] [ref=<J..>] [nc=1]
+                                       write the header pinout (IOPINS) back to the
+                                       KiCad schematic: the header symbol's pin
+                                       labels renamed / added / removed (.bak kept);
+                                       close the schematic in KiCad first, then
+                                       Update PCB from Schematic
     IOPADS [PLAN|APPLY] [w=<um>] [l=<um>] [inset=<um>] [csv=<file>]
                                        optimise the module pinout: each I/O net onto the
                                        header pin / I/O pad with the shortest, uncrossed
@@ -2656,6 +2662,37 @@ class CommandInterpreter:
         return (f"I/O pins {'moved' if sub == 'APPLY' else 'plan'}: SLI pin-to-copper "
                 f"{r['before'] / 1000:.1f} -> {r['after'] / 1000:.1f} mm; "
                 + (moves if moves else "already the shortest"))
+
+    def _cmd_backannotate(self, args):
+        """BACKANNOTATE [PLAN|APPLY] [sch=<file>] [ref=<J..>] [nc=1] -- header
+        pinout back to the KiCad schematic."""
+        usage = "usage: BACKANNOTATE [PLAN|APPLY] [sch=<file.kicad_sch>] [ref=<header ref>] [nc=1]"
+        sub, kw = "APPLY", {}
+        for a in args:
+            k, eq, v = a.partition("=")
+            if not eq and k.upper() in ("PLAN", "APPLY"):
+                sub = k.upper()
+            elif eq and k.lower() == "sch":
+                kw["schematic"] = v.strip('"')
+            elif eq and k.lower() == "ref":
+                kw["ref"] = v
+            elif eq and k.lower() == "nc":
+                kw["no_connect"] = v.lower() not in ("0", "false", "no")
+            else:
+                raise CommandError(usage)
+        r = self.session.backannotate_header(apply=(sub == "APPLY"), **kw)
+        what = "; ".join(f"pin {c['pin']}: {c['was'] or '(free)'} -> {c['net'] or '(free)'}"
+                         for c in r["changes"])
+        out = (f"BACKANNOTATE {'applied to' if sub == 'APPLY' else 'plan for'} {r['ref']} in "
+               f"{os.path.basename(r['schematic'])}: " + (what or "already matches the layout"))
+        if r["shared"]:
+            out += "; NOT edited (wiring shared, fix by hand): " + ", ".join(
+                f"pin {x['pin']} ({x['was'] or 'free'} -> {x['net'] or 'free'})" for x in r["shared"])
+        if r.get("backup"):
+            out += f"; original kept as {os.path.basename(r['backup'])}"
+        if sub == "APPLY" and r["changes"]:
+            out += ". In KiCad: reopen the schematic, then Update PCB from Schematic"
+        return out
 
     def _cmd_iopads(self, args):
         """IOPADS [PLAN|APPLY] [w=<um>] [l=<um>] [inset=<um>] [csv=<file>] --
