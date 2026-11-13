@@ -112,6 +112,29 @@ def mst(points):
     return total, edges
 
 
+def _cross(p, q, r, t):
+    """Segments p-q and r-t cross (properly: not just touching at an end)."""
+    def o(a, b, c):
+        v = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+        return (v > 1e-9) - (v < -1e-9)
+    return o(p, q, r) * o(p, q, t) < 0 and o(r, t, p) * o(r, t, q) < 0
+
+
+def seg_crossings(A, B) -> int:
+    """How many times the segments of A cross those of B."""
+    n = 0
+    for p, q in A:
+        ax0, ax1 = (p[0], q[0]) if p[0] <= q[0] else (q[0], p[0])
+        ay0, ay1 = (p[1], q[1]) if p[1] <= q[1] else (q[1], p[1])
+        for r, t in B:
+            if max(r[0], t[0]) < ax0 or min(r[0], t[0]) > ax1 or \
+                    max(r[1], t[1]) < ay0 or min(r[1], t[1]) > ay1:
+                continue
+            if _cross(p, q, r, t):
+                n += 1
+    return n
+
+
 def _ov(a, b):
     w = min(a[2], b[2]) - max(a[0], b[0])
     h = min(a[3], b[3]) - max(a[1], b[1])
@@ -129,7 +152,7 @@ class Stopped(Exception):
 
 class Placer:
     def __init__(self, parts: List[Part], nets: List[PNet], region, grid: float = 50.0,
-                 thermal: float = 0.0, obstacles=(), seed: int = 0):
+                 thermal: float = 0.0, obstacles=(), seed: int = 0, cross_weight: float = 0.0):
         self._stop = None
         #: what run() is doing now, for a progress display (read from another
         #: thread; only ever replaced, never mutated)
@@ -150,7 +173,47 @@ class Placer:
         #: annealing only accepts moves that keep every part legal (no
         #: overlap, inside the region) once the start has made them so
         self.legal_only = False
-        self.net_len = [self._net_length(k) for k in range(len(self.nets))]
+        #: what one crossing of two nets' SLI lines costs, in um of wire: a
+        #: crossing is a crossover or jumper later, so the placer avoids them
+        self.cross_weight = float(cross_weight or 0.0)
+        self._refresh()
+
+    def _net_geom(self, k):
+        """(weighted-free length, SLI segments) of net k's spanning tree."""
+        pts = self._net_points(k)
+        L, edges = mst(pts)
+        return L, [(pts[a], pts[b]) for a, b in edges]
+
+    def _refresh(self, ks=None):
+        """Recompute the lengths and SLI segments of nets ``ks`` (all if None)."""
+        if ks is None or not hasattr(self, "net_segs"):
+            geo = [self._net_geom(k) for k in range(len(self.nets))]
+            self.net_len = [g[0] for g in geo]
+            self.net_segs = [g[1] for g in geo]
+            return
+        for k in ks:
+            self.net_len[k], self.net_segs[k] = self._net_geom(k)
+
+    def crossings(self) -> int:
+        """SLI crossings between different nets, in the placement as it is."""
+        n = 0
+        for a in range(len(self.nets)):
+            for b in range(a + 1, len(self.nets)):
+                n += seg_crossings(self.net_segs[a], self.net_segs[b])
+        return n
+
+    def _cross_of(self, ks, segs):
+        """Crossings involving nets ``ks`` (with segments ``segs``: k -> list)."""
+        ks = sorted(ks)
+        kset = set(ks)
+        n = 0
+        for i, a in enumerate(ks):
+            for b in ks[i + 1:]:
+                n += seg_crossings(segs[a], segs[b])
+            for j in range(len(self.nets)):
+                if j not in kset:
+                    n += seg_crossings(segs[a], self.net_segs[j])
+        return n
 
     # --- cost pieces ------------------------------------------------------
     def _net_points(self, k):
@@ -195,7 +258,7 @@ class Placer:
         return c, nets
 
     def cost(self):
-        c = self.wirelength()
+        c = self.wirelength() + self.cross_weight * (self.crossings() if self.cross_weight else 0)
         for i in range(len(self.parts)):
             c += self._single(i)
             for j in range(i + 1, len(self.parts)):
@@ -230,14 +293,20 @@ class Placer:
         before, nets = self._local(moved)
         old_len = {k: self.net_len[k] for k in nets}
         before += sum(self.nets[k].weight * old_len[k] for k in nets)
+        if self.cross_weight:
+            before += self.cross_weight * self._cross_of(nets, {k: self.net_segs[k] for k in nets})
         apply()
         after, nets2 = self._local(moved)
-        new_len = {k: self._net_length(k) for k in nets2 | nets}
-        after += sum(self.nets[k].weight * new_len[k] for k in nets2 | nets)
+        allk = nets2 | nets
+        geo = {k: self._net_geom(k) for k in allk}
+        after += sum(self.nets[k].weight * geo[k][0] for k in allk)
+        if self.cross_weight:
+            after += self.cross_weight * self._cross_of(allk, {k: geo[k][1] for k in allk})
         d = after - before
         if d <= 0 or (T > 0 and self.rng.random() < math.exp(-d / T)):
-            for k, v in new_len.items():
-                self.net_len[k] = v
+            for k, (L, sg) in geo.items():
+                self.net_len[k] = L
+                self.net_segs[k] = sg
             return d, True
         undo()
         return d, False
@@ -379,7 +448,7 @@ class Placer:
             p.placed = True
             self.phase = f"First placement: {p.ref}"
             todo.remove(best)
-        self.net_len = [self._net_length(k) for k in range(len(self.nets))]
+        self._refresh()
 
     def anneal(self, effort=1.0, on_progress=None, cancel=None, hot=1.0):
         """Simulated annealing. ``hot`` scales the starting temperature:
@@ -415,7 +484,7 @@ class Placer:
                 on_progress(step / n)
         for p, (x, y, r) in zip(self.parts, best_state):     # keep the best seen
             p.x, p.y, p.rot = x, y, r
-        self.net_len = [self._net_length(k) for k in range(len(self.nets))]
+        self._refresh()
 
     def legalise(self, on_progress=None):
         """Snap to the grid and move every overlapping / out-of-region part to
@@ -460,7 +529,7 @@ class Placer:
                 else:
                     stuck.add(i)                     # nowhere legal: don't search again
         self.stuck = [self.parts[i].ref for i in stuck]
-        self.net_len = [self._net_length(k) for k in range(len(self.nets))]
+        self._refresh()
 
     def orient(self, sweeps=3):
         """Final orientation pass: turn each movable part to whichever of
@@ -491,12 +560,10 @@ class Placer:
                         if d < -1e-6 and (best is None or d < best[0]):
                             best = (d, n)
                         undo()
-                        self.net_len = [self._net_length(k) if k in self.part_nets[i] else v
-                                        for k, v in enumerate(self.net_len)]
+                        self._refresh(self.part_nets[i])
                 if best is not None:
                     p.rot = best[1]
-                    for k in self.part_nets[i]:
-                        self.net_len[k] = self._net_length(k)
+                    self._refresh(self.part_nets[i])
                     better += 1
             kept += better
             if not better:

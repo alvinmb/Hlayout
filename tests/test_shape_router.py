@@ -221,6 +221,8 @@ def test_no_dielectric_layer_means_no_crossovers_and_a_warning():
 
 def test_a_crossover_is_insulated_by_a_fill_strip_with_bare_lands():
     s = _cross_board(dielectric=True)
+    # the board's corner pocket is too tight for the 0.3 mm defaults: user dims
+    H.save_settings(s.library, {"xo_diel_side": 150, "xo_diel_gap": 100})
     d, m, r = _route(s, 2)
     assert r["stats"]["routed"] == r["stats"]["connections"]
     assert r["crossovers"]
@@ -228,12 +230,17 @@ def test_a_crossover_is_insulated_by_a_fill_strip_with_bare_lands():
     assert st["crossovers"] == len(r["crossovers"])
     strips = [sh for sh in s.cell.shapes if sh.layer == DIEL]
     assert strips and all(sh.datatype == s.DIELECTRIC_FILL_DATATYPE for sh in strips)
-    # each strip stops at its lands: the COND1/COND2 contact stays bare
+    # each strip is the bridge + side margins wide and stops dielGapUm short of
+    # its contacts (one track wide): the COND1/COND2 contact and the gap stay bare
     for c in r["crossovers"]:
+        assert c["landUm"] == c["widthUm"]
+        assert c["dielWidthUm"] == c["widthUm"] + 300 and c["dielGapUm"] == 100
         ends = [(q["x"], q["y"]) for q in (c["bridge"][0], c["bridge"][-1])]
         for sh in strips:
+            assert sh.width == c["dielWidthUm"]
             for (x, y) in ends:
-                assert min(math.hypot(x - px, y - py) for px, py in sh.points) >= c["landUm"] / 2 - 1
+                assert min(math.hypot(x - px, y - py) for px, py in sh.points) >= \
+                    c["landUm"] / 2 + c["dielGapUm"] - 1
     assert s.find_shorts() == [] and s.resistor_crossings() == []
 
 
@@ -284,6 +291,7 @@ def test_unroute_takes_the_routing_out_and_keeps_the_pads():
     from hlayout.core.shapes import Path, Rectangle
     s = _cross_board(dielectric=True)
     pads = sorted(sh.bbox() for sh in s.cell.shapes if isinstance(sh, Rectangle) and sh.pin)
+    H.save_settings(s.library, {"xo_diel_side": 150, "xo_diel_gap": 100})   # tight corner
     st = H.hybrid_route(s, layers=2, engine="shape")
     assert st["traces"] and st["crossovers"]
     n_routed = len(s.cell.shapes)
@@ -295,3 +303,16 @@ def test_unroute_takes_the_routing_out_and_keeps_the_pads():
     s.undo()
     assert len(s.cell.shapes) == n_routed
 
+
+def test_crossover_dims_are_user_defined():
+    s = _cross_board(dielectric=True)
+    d, m = H.export_design(s, layers=2)
+    rt = d["routing"]
+    assert (rt["crossoverDielSideUm"], rt["crossoverDielGapUm"], rt["crossoverContactUm"]) == \
+        (300.0, 300.0, 0.0)
+    H.save_settings(s.library, {"xo_diel_side": 200, "xo_diel_gap": 250, "xo_contact": 400})
+    d, m = H.export_design(s, layers=2)
+    P = SR.ShapeProblem(d)
+    assert P.strip_w(300) == 700 and P.contact(300) == 400 and P.trim(300) == 450
+    # foreign COND1 keeps half the contact + gap + side from a contact's centre
+    assert P.xclr("A") == 200 + 250 + 200

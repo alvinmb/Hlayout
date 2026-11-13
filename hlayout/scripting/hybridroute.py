@@ -39,7 +39,11 @@ SETTINGS_KEY = "hybrid_route_settings"   # tech_params: the window's choices
 #: the nets to leave unrouted, shorten tracks and remove jogs are the
 #: Autoroute (Freerouting) rules', shared by both routers.
 DEFAULTS = {"max_jumpers": 0, "jumper_cost": 50.0, "crossover_cost": 10.0, "grid": 100,
-            "ripup_passes": 3, "engine": "java"}
+            "ripup_passes": 3, "engine": "pathfinder",
+            # printed crossover geometry (um): local dielectric past the bridge
+            # each side; dielectric end -> COND1 contact gap; contact square
+            # (0 = the track width)
+            "xo_diel_side": 300.0, "xo_diel_gap": 300.0, "xo_contact": 0.0}
 
 
 def layers_for(session, rules=None) -> int:
@@ -641,6 +645,10 @@ def export_design(session, cell_name: Optional[str] = None, layers: int = 1,
                          "netWindows": net_windows, "keepouts": keepouts,
                          "againstDirectionCost": max(1.0, float(R.get("against_direction_cost",
                                                                       2.5) or 2.5))}
+    XO = load_settings(lib)
+    design["routing"].update(crossoverDielSideUm=max(0.0, float(XO["xo_diel_side"])),
+                             crossoverDielGapUm=max(0.0, float(XO["xo_diel_gap"])),
+                             crossoverContactUm=max(0.0, float(XO["xo_contact"])))
     design["rules"] = {
         "conductor": {"minLineUm": width, "minSpaceUm": clr, "edgeClearanceUm": edge_clr,
                       # a crossover is the design's one via: keep its whole
@@ -826,7 +834,7 @@ def apply_routed(session, routed: dict, mapping: dict, remove_existing: bool = T
             return [(round(x), round(y)) for x, y in out]
         for c in routed.get("crossovers") or []:
             cw = max(1, int(c.get("widthUm") or 0))
-            dw = max(cw, int(c.get("dielWidthUm") or cw * 3))
+            dw = max(cw, int(c.get("dielWidthUm") or cw + 600))
             bpts = [W(q) for q in c.get("bridge") or []]
             bpts = [q for i, q in enumerate(bpts) if i == 0 or q != bpts[i - 1]]
             if len(bpts) < 2:
@@ -838,10 +846,10 @@ def apply_routed(session, routed: dict, mapping: dict, remove_existing: bool = T
                 rect(la, end[0], end[1], vp, vp)          # COND1 up-via pad
                 rect(lb, end[0], end[1], vp, vp)          # COND2 up-via pad
             if ld is not None and ld >= 0:
-                # flush ends at the land edges: the lands stay bare (the contact)
-                # and everything the bridge crosses -- which the router kept at
-                # least land/2 + spacing from each end -- is under dielectric
-                dpts = _inset(bpts, vp / 2)
+                # flush ends dielGapUm short of each contact: the contacts and
+                # the gap stay bare; everything the bridge crosses -- which the
+                # router kept clear of that bare end -- is under dielectric
+                dpts = _inset(bpts, vp / 2 + int(c.get("dielGapUm") or 0))
                 if len(dpts) >= 2:
                     # the FILL datatype: datatype 0 on the dielectric layer means
                     # a via window (an opening), which would short the bridge to
@@ -1009,13 +1017,20 @@ def hybrid_route(session, cell_name: Optional[str] = None, layers: Optional[int]
     ripup_passes = H["ripup_passes"] if ripup_passes is None else ripup_passes
     if remove_existing is None:
         remove_existing = not bool(R.get("keep_existing", True))
-    engine = (H.get("engine") or "java") if engine is None else str(engine).lower()
+    engine = (H.get("engine") or "pathfinder") if engine is None else str(engine).lower()
     design, mapping = export_design(session, cell_name, layers=layers, max_jumpers=max_jumpers,
                                     jumper_cost=jumper_cost, crossover_cost=crossover_cost,
                                     grid=grid, orthogonal=orthogonal, ripup_passes=ripup_passes,
                                     exclude_nets=exclude_nets,
                                     keep_existing=not remove_existing)
-    if engine == "shape":
+    if engine == "pathfinder":
+        # negotiated congestion (every net every round) -- completion first
+        from . import pathfinder as _pf
+        routed = _pf.route(design, local_dielectric=mapping.get("local_diel", -1) >= 0,
+                           cond2_keepouts=mapping.get("local_keepouts"),
+                           on_line=on_line, cancel=cancel)
+        code, tail, paths = 0, [], {}
+    elif engine == "shape":
         # native Python gridless shape router (planar + printed-jumper crossovers)
         from . import shape_router as _shape
         if on_line:
@@ -1038,7 +1053,7 @@ def hybrid_route(session, cell_name: Optional[str] = None, layers: Optional[int]
               orthogonal=design["routing"]["orthogonal"])
     # the shape router's output is already clean; the Java via/track clean-ups
     # don't understand its printed-jumper crossovers, so skip them for it
-    st["cleanup"] = {} if engine == "shape" else finish(
+    st["cleanup"] = {} if engine in ("shape", "pathfinder") else finish(
         session, mapping["cell"], shorten, dejog,
         design["routing"]["orthogonal"], via_optimize, layers)
     st["kept"] = mapping.get("kept") or {}

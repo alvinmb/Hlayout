@@ -94,7 +94,7 @@ def test_a_real_single_layer_route_uses_a_jumper(tmp_path):
     except LayoutError as e:
         pytest.skip(str(e))
     s = _board()
-    st = s.hybrid_route(layers=1, grid=100, out_dir=str(tmp_path), timeout=180)
+    st = s.hybrid_route(layers=1, grid=100, out_dir=str(tmp_path), timeout=180, engine="java")
     assert st["stats"].get("routed") == st["stats"].get("connections")
     assert st["jumpers"] >= 1 and not s.resistor_crossings()
 
@@ -166,7 +166,7 @@ def test_keeping_the_existing_route_adds_only_what_is_open(tmp_path):
     except LayoutError as e:
         pytest.skip(str(e))
     s = _board()
-    st = s.hybrid_route(layers=1, grid=100, remove_existing=True, out_dir=str(tmp_path),
+    st = s.hybrid_route(layers=1, grid=100, remove_existing=True, out_dir=str(tmp_path), engine="java",
                         timeout=180, shorten=False, dejog=False)
     assert st["stats"]["routed"] == st["stats"]["connections"] and not s.find_shorts()
     tracks = [sh for sh in s.cell.shapes if isinstance(sh, Path) and sh.layer == 3]

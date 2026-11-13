@@ -38,6 +38,11 @@ _OWN_FIELDS = (
     ("Max jumpers", "max_jumpers", "0 = no limit"),
     ("Jumper cost (mm)", "jumper_cost", "track length a jumper is worth"),
     ("Crossover cost (mm)", "crossover_cost", "track length a crossover (via) is worth"),
+    ("Crossover dielectric side (um)", "xo_diel_side",
+     "dielectric past the COND2 bridge, each side"),
+    ("Crossover dielectric gap (um)", "xo_diel_gap",
+     "dielectric end stops this short of the contact"),
+    ("Crossover contact (um)", "xo_contact", "COND1 contact square; 0 = track width"),
 )
 _LAYER_MODES = (("Auto (one conductor if nothing is on the 2nd)", "auto"),
                 ("One conductor -- wire-bond jumpers are the only crossings", "single"),
@@ -48,7 +53,8 @@ _DIRECTIONS = (("1st conductor horizontal, 2nd vertical", "hv"),
 _TRACK_CAPS = (("Round (smooth -- thick-film default)", "round"),
                ("Square (butt ends squared off)", "square"),
                ("Flush (stops at the end point)", "flush"))
-_ENGINES = (("Shape -- gridless Python (planar + printed-jumper crossovers)", "shape"),
+_ENGINES = (("PathFinder -- negotiated congestion, completion first (slower)", "pathfinder"),
+            ("Shape -- gridless Python (planar + printed-jumper crossovers)", "shape"),
             ("Freerouting -- grid, Java", "java"))
 
 
@@ -181,7 +187,7 @@ class AutorouteWindow(tk.Toplevel):
             self.v[key].set(f"{float(R[key]):g}")
         for _l, key, _n in _OWN_FIELDS:
             self.v[key].set(f"{float(H[key]):g}")
-        eng = str(H.get("engine", "java"))
+        eng = str(H.get("engine", "pathfinder"))
         self.v["engine"].set(next((t for t, v in _ENGINES if v == eng), _ENGINES[0][0]))
         self.v["power_nets"].set(", ".join(R.get("power_nets") or []))
         self.v["exclude_nets"].set(", ".join(R.get("exclude_nets") or []))
@@ -216,7 +222,7 @@ class AutorouteWindow(tk.Toplevel):
             own[key] = int(own[key])
         if own["jumper_cost"] <= 1 or own["crossover_cost"] <= 1:
             raise ValueError("cost")
-        own["engine"] = next((v for t, v in _ENGINES if t == self.v["engine"].get()), "java")
+        own["engine"] = next((v for t, v in _ENGINES if t == self.v["engine"].get()), "pathfinder")
         for key in ("power_nets", "exclude_nets"):
             rules[key] = [x.strip() for x in self.v[key].get().split(",") if x.strip()]
         rules["layer_mode"] = next((v for t, v in _LAYER_MODES if t == self.v["layer_mode"].get()),
@@ -284,7 +290,7 @@ class AutorouteWindow(tk.Toplevel):
         if mapping["unbonded"]:
             self._say("die pads the router will bond: " + ", ".join(mapping["unbonded"]))
         self._cancel, self._result, self._lines = False, None, []
-        self._opts = (rules, layers, own.get("engine", "java"))
+        self._opts = (rules, layers, own.get("engine", "pathfinder"))
         self.run_btn.config(state="disabled")
         self.stop_btn.config(state="normal")
 
@@ -292,7 +298,14 @@ class AutorouteWindow(tk.Toplevel):
 
         def work():
             try:
-                if engine == "shape":
+                if engine == "pathfinder":
+                    from ..scripting import pathfinder as PF
+                    routed = PF.route(design, local_dielectric=mapping.get("local_diel", -1) >= 0,
+                                      cond2_keepouts=mapping.get("local_keepouts"),
+                                      on_line=self._lines.append,
+                                      cancel=lambda: self._cancel)
+                    self._result = ("ok", (0, routed, [], {}), mapping)
+                elif engine == "shape":
                     from ..scripting import shape_router as SR
                     self._lines.append("shape router: gridless planar + local-dielectric crossovers")
                     routed = SR.route(design, max_jumpers=own["max_jumpers"],
@@ -336,7 +349,7 @@ class AutorouteWindow(tk.Toplevel):
         rules, layers, engine = self._opts
         st = H.apply_routed(self.session, routed, mapping,
                             remove_existing=not rules["keep_existing"])
-        if engine == "shape":
+        if engine in ("shape", "pathfinder"):
             cl = {}
         else:
             self._say("cleaning up ...")

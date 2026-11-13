@@ -34,7 +34,8 @@ class AutoPlaceWindow(tk.Toplevel):
         self._cancel = False
         self.nl = None
         self.v = {k: tk.StringVar() for k in ("netlist", "overrides", "grid", "thermal", "effort",
-                                               "seed", "clearance", "bond_reach", "res_layer")}
+                                               "seed", "clearance", "bond_reach", "res_layer",
+                                               "sli_crossing")}
         self._build()
         self.reload()
         self.protocol("WM_DELETE_WINDOW", self.close)
@@ -135,7 +136,8 @@ class AutoPlaceWindow(tk.Toplevel):
         sf = ttk.LabelFrame(f, text="Settings (saved with the design)", padding=8)
         sf.pack(fill="x", pady=(8, 0))
         items = (("Grid (um)", "grid"), ("Clearance (um)", "clearance"), ("Bond reach (um)", "bond_reach"),
-                 ("Thermal (0 = off)", "thermal"), ("Effort", "effort"), ("Seed", "seed"))
+                 ("Thermal (0 = off)", "thermal"), ("Effort", "effort"), ("Seed", "seed"),
+                 ("SLI crossing (um)", "sli_crossing"))
         for k, (label, key) in enumerate(items):
             r, c = divmod(k, 4)
             ttk.Label(sf, text=label + ":").grid(row=r, column=c * 2, sticky="e", padx=4, pady=2)
@@ -168,8 +170,9 @@ class AutoPlaceWindow(tk.Toplevel):
     def reload(self):
         S = self.session.autoplace_settings()
         for key, sk in (("grid", "grid"), ("clearance", "clearance"), ("bond_reach", "bond_reach"),
-                        ("thermal", "thermal"), ("effort", "effort"), ("seed", "seed")):
-            self.v[key].set(f"{float(S[sk]):g}")
+                        ("thermal", "thermal"), ("effort", "effort"), ("seed", "seed"),
+                        ("sli_crossing", "sli_crossing")):
+            self.v[key].set(f"{float(S.get(sk, 0) or 0):g}")
         self._fill_res_layers(S)
         for cls, var in self.cw.items():
             var.set(f"{float(S['class_weights'].get(cls, 1.0)):g}")
@@ -215,7 +218,8 @@ class AutoPlaceWindow(tk.Toplevel):
         out = {}
         for key, sk, typ in (("grid", "grid", float), ("clearance", "clearance", float),
                              ("bond_reach", "bond_reach", float), ("thermal", "thermal", float),
-                             ("effort", "effort", float), ("seed", "seed", int)):
+                             ("effort", "effort", float), ("seed", "seed", int),
+                             ("sli_crossing", "sli_crossing", float)):
             try:
                 out[sk] = typ(float(self.v[key].get()))
             except ValueError:
@@ -548,7 +552,7 @@ class AutoPlaceWindow(tk.Toplevel):
         d = s.sli()
         bad, out = placer.overlaps()
         msg = (f"PLACED in {secs:.0f} s -- {sum(1 for p in placer.parts if not p.fixed)} parts, "
-               f"SLI total {d['total'] / 1000:.1f} mm")
+               f"SLI total {d['total'] / 1000:.1f} mm, {placer.crossings()} SLI crossing(s)")
         notes = []
         if info["skipped"]:
             notes.append("not placed: " + ", ".join(info["skipped"]))

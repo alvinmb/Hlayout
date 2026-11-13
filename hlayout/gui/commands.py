@@ -257,6 +257,10 @@ Attached libraries:
                                        Recalculate SLI, F5). Session.sli()
     UNUSEDBONDS [LIST|REMOVE]          bonds/fingers on die pads no net uses: list / take off
     UNROUTED [<net>|NEXT|PREV|CLEAR]   list unrouted nets / zoom to one and show its SLI
+    RESKEEPOUT <um>                    the resistors' dielectric keep-out: the ink between
+                                       the terminations grown by <um> (Resistor Geometry
+                                       rules); redraws every resistor's keep-out to match.
+                                       Session.set_resistor_keepout()
     UNROUTE                            delete the routing (tracks, crossover / jumper
                                        lands, dielectric strips, jumper bonds) and go
                                        back to the SLI; one undo step. Also Tools >
@@ -2609,6 +2613,18 @@ class CommandInterpreter:
         detail = "; ".join(f"{ref}: {','.join(p)}" for ref, p in sorted(r["dies"].items()))
         verb = "unused" if sub == "LIST" else "removed"
         return f"{r['bonds']} {verb} bond(s): {detail}"
+
+    def _cmd_reskeepout(self, args):
+        """RESKEEPOUT <um> -- the resistors' dielectric keep-out oversize; redraws them."""
+        if len(args) != 1:
+            raise CommandError("usage: RESKEEPOUT <oversize um>")
+        try:
+            e = float(args[0])
+        except ValueError:
+            raise CommandError("usage: RESKEEPOUT <oversize um>")
+        r = self.session.set_resistor_keepout(e)
+        return (f"RESKEEPOUT: dielectric keep-out {e:g} um round the resistor ink; "
+                f"{len(r['cells'])} resistor(s) redrawn")
 
     def _cmd_unroute(self, args):
         """UNROUTE -- delete the routing and go back to the SLI."""

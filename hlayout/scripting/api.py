@@ -5995,7 +5995,7 @@ class Session:
                      orthogonal: Optional[bool] = None, ripup_passes: Optional[int] = None,
                      exclude_nets=None, shorten: Optional[bool] = None,
                      dejog: Optional[bool] = None,
-                     via_optimize: Optional[bool] = None) -> dict:
+                     via_optimize: Optional[bool] = None, engine: Optional[str] = None) -> dict:
         """Route the cell with the chip-and-wire hybrid router (router/,
         HybridRouterCli): ``layers`` 1 = one conductor, wire-bond jumpers
         the only crossings (``max_jumpers`` 0 = no limit, ``jumper_cost`` in
@@ -6024,7 +6024,7 @@ class Session:
                                         on_line=on_line, cancel=cancel, out_dir=out_dir,
                                         orthogonal=orthogonal, ripup_passes=ripup_passes,
                                         exclude_nets=exclude_nets, shorten=shorten, dejog=dejog,
-                                        via_optimize=via_optimize)
+                                        via_optimize=via_optimize, engine=engine)
 
     autoroute = hybrid_route
 
@@ -6119,6 +6119,62 @@ class Session:
             save_net_names(self.library, names)
             self._notify()
         return changed
+
+    def set_resistor_keepout(self, oversize: float, redraw: bool = True) -> dict:
+        """Set the printed resistors' dielectric keep-out oversize (Resistor
+        Geometry rules, E: how far the dielectric stays off the resistor
+        ink) and, with ``redraw``, redraw the keep-out of every resistor
+        already in the design to match: its resistive area (the ink less
+        where the terminations overlap it) grown by ``oversize``, square
+        corners. One undo step. Returns {"oversize", "cells"}."""
+        from shapely.geometry import Polygon as SPoly
+        from shapely.ops import unary_union
+        from ..core.maskops import shape_to_shapely
+        from ..core.shapes import Polygon, Rectangle
+        from ..io.techfile import load_resistor_geometry_rules, save_resistor_geometry_rules
+        e = float(oversize)
+        if e < 0:
+            raise LayoutError("the keep-out oversize can't be negative")
+        rules = load_resistor_geometry_rules(self.library)
+        rules["keepout_oversize"] = e
+        k_layer = rules.get("keepout_layer")
+        inks = {int(v) for v in (rules.get("ink_layers") or {}).values() if isinstance(v, int)}
+        if isinstance(rules.get("resistor_layer"), int) and rules["resistor_layer"] >= 0:
+            inks.add(rules["resistor_layer"])
+        cond = rules.get("conductor_layer")
+        done = []
+        with self._batch():
+            save_resistor_geometry_rules(self.library, rules)
+            if redraw and isinstance(k_layer, int) and k_layer >= 0 and inks:
+                for name, cell in self.library.cells.items():
+                    if not any(sh.layer == k_layer for sh in cell.shapes):
+                        continue
+                    ink = [shape_to_shapely(sh) for sh in cell.shapes if sh.layer in inks]
+                    ink = [g for g in ink if g is not None and not g.is_empty]
+                    if not ink:
+                        continue                  # a keep-out on its own: not a resistor
+                    res = unary_union(ink)
+                    pads = [shape_to_shapely(sh) for sh in cell.shapes
+                            if sh.layer == cond and getattr(sh, "pin", "")]
+                    pads = [g for g in pads if g is not None and not g.is_empty]
+                    if pads:
+                        res = res.difference(unary_union(pads))
+                    if res.is_empty:
+                        continue
+                    grown = res.buffer(e, join_style=2) if e > 0 else res
+                    cell.shapes[:] = [sh for sh in cell.shapes if sh.layer != k_layer]
+                    for poly in getattr(grown, "geoms", [grown]):
+                        pts = [(int(round(x)), int(round(y))) for x, y in poly.exterior.coords[:-1]]
+                        xs = sorted({p[0] for p in pts})
+                        ys = sorted({p[1] for p in pts})
+                        if len(pts) == 4 and len(xs) == 2 and len(ys) == 2:
+                            cell.shapes.append(Rectangle.from_corners(k_layer, xs[0], ys[0],
+                                                                      xs[1], ys[1]))
+                        else:
+                            cell.shapes.append(Polygon(layer=k_layer, points=pts))
+                    done.append(name)
+        self._notify()
+        return {"oversize": e, "cells": done}
 
     def unroute(self, cell_name: Optional[str] = None) -> dict:
         """Delete the routing and go back to the SLI (one undo step): every

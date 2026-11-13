@@ -42,6 +42,9 @@ DEFAULTS = {
     "edge": 1000,              # um kept clear inside the substrate / I/O ring
     "bond_reach": 1500,        # um from a die pad to its bond-finger landing
     "thermal": 1.0,            # strength of the thermal term (0 = off)
+    #: um of wire one crossing of two nets' SLI lines is worth (0 = ignore):
+    #: every crossing is a crossover or a jumper once routed
+    "sli_crossing": 3000.0,
     "effort": 1.0,
     "seed": 0,
     "resistor_layer": None,    # conductor for generated resistors (None: tech file)
@@ -581,7 +584,8 @@ def build_job(session, netlist, cell_name=None, overrides=None, settings=None, o
             + " -- a bigger substrate, a smaller clearance, or fewer parts")
     obstacles = [o for o in obstacles if (o[2] - o[0]) * (o[3] - o[1]) < 0.4 * rw * rh]
     placer = Placer(parts, nets, region, grid=float(S["grid"]), thermal=float(S["thermal"]),
-                    seed=int(S["seed"]), obstacles=obstacles)
+                    seed=int(S["seed"]), obstacles=obstacles,
+                    cross_weight=float(S.get("sli_crossing", 3000.0) or 0.0))
     info.update(settings=S, netlist=nl, cell=name, region=region)
     return placer, info
 

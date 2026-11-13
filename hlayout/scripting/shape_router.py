@@ -338,7 +338,16 @@ class ShapeProblem:
         # printed-resistor regions a crossover's local dielectric must avoid
         self.resistors = [_comp_body_rect(c) for c in (design.get("components") or [])
                           if str(c.get("kind", "")).upper() == "PRINTED_RESISTOR"]
-        self.diel_factor = 3.0            # local dielectric width = factor x trace width
+        # a printed crossover: the COND2 bridge lands on COND1 in a contact one
+        # track-width square; its local dielectric is the bridge width plus
+        # diel_side each side, and stops diel_side short of each contact
+        # (all three user-defined: Autoroute > Router settings)
+        def _um(key, d):
+            v = rt.get(key)
+            return float(v) if isinstance(v, (int, float)) and v >= 0 else d
+        self.diel_side = _um("crossoverDielSideUm", 300.0)   # dielectric past the bridge, each side
+        self.diel_gap = _um("crossoverDielGapUm", 300.0)     # dielectric end -> contact
+        self.contact_um = _um("crossoverContactUm", 0.0)     # contact square; 0 = track width
         self.cross_max = float(rt.get("crossoverMaxUm", 8000))
         self.cross_short = float(rt.get("crossoverShortUm", 5000))  # a crossover must be a short hop
         self.res_clear = float(rt.get("resistorClearanceUm", self.min_space))
@@ -367,6 +376,25 @@ class ShapeProblem:
                 (ax, ay), (bx, by) = pts[i - 1], pts[i]
                 self.space.add(L, net, (min(ax, bx) - hw, min(ay, by) - hw,
                                         max(ax, bx) + hw, max(ay, by) + hw))
+
+    def strip_w(self, w: float) -> float:
+        """Width of a crossover's local dielectric for a bridge ``w`` wide."""
+        return w + 2.0 * self.diel_side
+
+    def contact(self, w: float) -> float:
+        """Side of a crossover's COND1 contact for a bridge ``w`` wide."""
+        return self.contact_um if self.contact_um > 0 else w
+
+    def trim(self, w: float) -> float:
+        """How far a crossover's dielectric stops short of each bridge end."""
+        return self.contact(w) / 2.0 + self.diel_gap
+
+    def xclr(self, net: str) -> float:
+        """How far other nets' COND1 copper keeps from a crossover contact's
+        centre: half the contact, the bare gap to the dielectric's end, and
+        the dielectric's own diel_side over the copper it covers."""
+        c = self.contact(self.width_of(net)) / 2.0
+        return max(c + self.min_space, c + self.diel_gap + self.diel_side)
 
     def width_of(self, net: str) -> float:
         return self.net_widths.get(net, self.min_line)
@@ -858,9 +886,9 @@ def _seg_hits_box(a, b, box) -> bool:
 def _bridge_route(P, net, a, b, w):
     """Route the COND2 bridge a->b (the printed jumper) as a poly-line that may
     dog-leg around printed resistors. Resistor regions are inflated so the local
-    dielectric strip (diel_factor x width) stays res_clear from them; other COND2
+    dielectric strip (bridge width + diel_side each side) stays res_clear from them; other COND2
     copper is inflated for spacing. Returns the bridge poly-line or None."""
-    dhw = P.diel_factor * w / 2.0
+    dhw = P.strip_w(w) / 2.0
     mB = w / 2.0
     raw2 = _scope(P.space, "COND2", [(a[0], a[1], a[0], a[1])],
                   [(b[0], b[1], b[0], b[1])], 4000 + dhw)
@@ -926,8 +954,8 @@ def _shorten_crossover(P, layer, net, margin, starts, grp, blockers, bridge, a0,
     COND1 from the tree up to the wall and from the wall to the target, each side
     independently (falling back to an up-via on the terminal where a side is
     hemmed). Returns (pathA, pathB, short_bridge, A, B) or None."""
-    hl = P.land / 2.0
-    vclr = hl + P.min_space
+    hl = P.contact(P.width_of(net)) / 2.0
+    vclr = P.xclr(net)
     samp = _polyline_points(bridge, max(100.0, P.min_line / 2.0))
     clear = [_point_clear(P.space, pt[0], pt[1], vclr, net, blockers) and _via_site_ok(P, net, *pt)
              for pt, _v in samp]
@@ -984,8 +1012,8 @@ def _via_escape(P, layer, net, margin, term, blockers, toward):
     directions (not just toward the target) so a pin whose only clear side faces
     away still escapes. Returns (via_xy, cond1_path term->via) or None; a clear
     terminal vias in place."""
-    hl = P.land / 2.0
-    clr = hl + P.min_space
+    hl = P.contact(P.width_of(net)) / 2.0
+    clr = P.xclr(net)
     bb = (term[0] - 6000, term[1] - 6000, term[0] + 6000, term[1] + 6000)
     c2 = [(n, r) for n, r in P.space.layer_blockers("COND2")
           if r[2] >= bb[0] and r[0] <= bb[2] and r[3] >= bb[1] and r[1] <= bb[3]]
@@ -1047,7 +1075,7 @@ def _try_crossover(P, layer, net, margin, starts, grp, blockers, cap=None):
     Vias escape resistor pins and the edge band. Returns a payload dict,
     'resistor' when the second conductor can't be reached, or None."""
     w = P.width_of(net)
-    hl = P.land / 2.0
+    hl = P.contact(w) / 2.0
     pairs = sorted(((math.hypot(s[0] - t.centre[0], s[1] - t.centre[1]), s, t.centre)
                     for s in starts for t in grp), key=lambda z: z[0])
     res_block = False
@@ -1276,8 +1304,8 @@ def _short_hop(P, layer, net, margin, F, grp, blockers, tries: int = 12):
     is left to go, and the best few bridged. Dog-legs around resistors;
     bridge capped at cross_short. Returns (G, bridge) or None."""
     w = P.width_of(net)
-    hl = P.land / 2.0
-    vclr = hl + P.min_space
+    hl = P.contact(w) / 2.0
+    vclr = P.xclr(net)
     b0 = min((t.centre for t in grp), key=lambda c: math.hypot(c[0] - F[0], c[1] - F[1]))
     base = math.atan2(b0[1] - F[1], b0[0] - F[0])
     step = max(150.0, P.min_line / 2.0)
@@ -1311,10 +1339,10 @@ def _short_hop(P, layer, net, margin, F, grp, blockers, tries: int = 12):
 
 def _via_site_ok(P, net, x, y) -> bool:
     """A crossover via at (x, y) leaves every pad (any net) bare: its local
-    dielectric strip, diel_factor x the width wide, starts at the land's edge,
+    dielectric strip, bridge width + diel_side each side, stops diel_gap short of the contact,
     so the via keeps that half-width plus spacing from every pad."""
-    dclr = P.diel_factor * P.width_of(net) / 2.0 + P.min_space
-    lclr = P.land / 2.0 + P.min_space
+    dclr = P.strip_w(P.width_of(net)) / 2.0 + P.min_space
+    lclr = P.contact(P.width_of(net)) / 2.0 + P.min_space
     own = net or ""
     for k, r in P.space.term_rects.items():
         c = lclr if P.space.term_nets.get(k) == own else dclr
@@ -1343,17 +1371,44 @@ def _trim_ends(pts, d):
     return cut(cut(list(pts))[::-1])[::-1]
 
 
+def _prefix(pts, d):
+    """The first ``d`` of polyline ``pts`` (all of it if it is shorter)."""
+    out = [tuple(pts[0])]
+    left = d
+    for i in range(1, len(pts)):
+        (x0, y0), (x1, y1) = pts[i - 1], pts[i]
+        sl = math.hypot(x1 - x0, y1 - y0)
+        if sl >= left:
+            f = left / sl if sl > 0 else 0.0
+            out.append((x0 + (x1 - x0) * f, y0 + (y1 - y0) * f))
+            return out
+        out.append((x1, y1))
+        left -= sl
+    return out
+
+
+def bare_ends(P, bridge, w):
+    """The two bare ends of a crossover's bridge -- contact, the gap to the
+    dielectric's end and the dielectric's own margin -- as polylines: COND2
+    lies straight on the substrate there, so they count as COND1 copper."""
+    L = max(0.0, P.trim(w) + P.diel_side - P.min_space)
+    pts = [tuple(q) for q in bridge]
+    if len(pts) < 2 or L <= 0:
+        return []
+    return [_prefix(pts, L), _prefix(pts[::-1], L)]
+
+
 def _strip_leaves_pads_bare(P, bridge, w) -> bool:
     """The local dielectric strip apply_routed will print for ``bridge`` (flat
-    ends at the via lands, diel_factor x w wide) keeps min_space off every pad."""
+    stops diel_gap short of each contact, w + 2 x diel_side wide) keeps min_space off every pad."""
     try:
         from shapely.geometry import LineString, box
     except ImportError:
         return True
-    pts = _trim_ends(bridge, P.land / 2.0)
+    pts = _trim_ends(bridge, P.trim(w))
     if len(pts) < 2:
         return True
-    strip = LineString(pts).buffer(P.diel_factor * w / 2.0, cap_style=2, join_style=2)
+    strip = LineString(pts).buffer(P.strip_w(w) / 2.0, cap_style=2, join_style=2)
     bx = strip.bounds
     for r in P.space.term_rects.values():
         if r[2] < bx[0] - P.min_space or r[0] > bx[2] + P.min_space or \
@@ -1369,7 +1424,7 @@ def _backoff_land(P, net, path, blockers):
     frontier is clear for a track end, but a land can be wider than the track.
     Returns the shortened path ([start] at worst) or None if even the start
     can't take one."""
-    clr = P.land / 2.0 + P.min_space
+    clr = P.xclr(net)
     step = 50.0
     pts = list(path)
     while len(pts) >= 2:
@@ -1465,7 +1520,7 @@ def _route_core(design: dict, order=None, on_net=None, scope_pad: float = 6000.0
                 time_budget: Optional[float] = None) -> dict:
     """Route ``design``: one pass over the nets in ``order`` (default: easiest
     first by bounding-box spread) -- per connection planar, then a local
-    crossover (a COND2 bridge on a local dielectric strip, diel_factor x the
+    crossover (a COND2 bridge on a local dielectric strip, bridge width + diel_side each side, the
     width, kept off resistors and pads), then a wire-bond jumper -- and then up
     to ``ripup_rounds`` rounds of RIP-UP AND REROUTE: for each connection left
     open, the path it would take with only the fixed obstacles (pads, parts,
@@ -1555,13 +1610,18 @@ def _route_core(design: dict, order=None, on_net=None, scope_pad: float = 6000.0
 
     def add_crossover(rec, net, A, B, bridge, w):
         rec["crossovers"].append({"net": net, "widthUm": int(round(w)),
-                                  "dielWidthUm": int(round(P.diel_factor * w)),
-                                  "landUm": int(round(P.land)),
+                                  "dielWidthUm": int(round(P.strip_w(w))),
+                                  "landUm": int(round(P.contact(w))),
+                                  "dielGapUm": int(round(P.diel_gap)),
                                   "a": {"x": int(round(A[0])), "y": int(round(A[1]))},
                                   "b": {"x": int(round(B[0])), "y": int(round(B[1]))},
                                   "bridge": [{"x": int(round(x)), "y": int(round(y))}
                                              for x, y in bridge]})
         add_copper(rec, cond2, net, bridge, w)
+        # the bare ends (no dielectric under the COND2 there) block COND1 too
+        for end in bare_ends(P, bridge, w):
+            if len(end) >= 2:
+                add_copper(rec, layer, net, end, w)
         st["cb"] -= 1
 
     def rip(net):
@@ -1661,7 +1721,7 @@ def _route_core(design: dict, order=None, on_net=None, scope_pad: float = 6000.0
                 add_rect(rec, layer, net, payload["landB"])
                 add_crossover(rec, net, payload["a"], payload["b"], payload["bridge"], w)
             else:  # multi: COND1 traces + short printed-jumper crossovers
-                hl = P.land / 2.0
+                hl = P.contact(w) / 2.0
                 for op in payload:
                     if op[0] == "trace":
                         emit_trace(rec, net, op[1])
