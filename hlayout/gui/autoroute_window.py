@@ -67,107 +67,135 @@ class AutorouteWindow(tk.Toplevel):
         self.app = app
         self.title("Autoroute")
         self.transient(app)
-        self.minsize(1040, 540)
+        self.minsize(640, 420)
         self._cancel = False
         self._result = None
         self._lines = []
         self.v = {}
-        f = ttk.Frame(self, padding=10)
+        f = ttk.Frame(self, padding=8)
         f.pack(fill="both", expand=True)
-        cols = ttk.Frame(f)
-        cols.pack(fill="both", expand=True)
-        left = ttk.Frame(cols)
-        left.pack(side="left", fill="y")
-        right = ttk.Frame(cols)
-        right.pack(side="left", fill="both", expand=True, padx=(10, 0))
+        self.tabs = ttk.Notebook(f)
+        self.tabs.pack(fill="both", expand=True)
 
-        gf = ttk.LabelFrame(left, text="Rules (saved with the design)", padding=6)
-        gf.pack(fill="x")
+        def tab(title):
+            t = ttk.Frame(self.tabs, padding=8)
+            self.tabs.add(t, text=title)
+            return t
+
+        def own_rows(parent, keys, start=0):
+            by = {k: (lab, note) for lab, k, note in _OWN_FIELDS}
+            for r, key in enumerate(keys, start):
+                lab, note = by[key]
+                self.v[key] = tk.StringVar()
+                ttk.Label(parent, text=lab + ":").grid(row=r, column=0, sticky="e", padx=4, pady=2)
+                ttk.Entry(parent, textvariable=self.v[key], width=9).grid(row=r, column=1, sticky="w")
+                ttk.Label(parent, text=note, foreground="#666", wraplength=330,
+                          justify="left").grid(row=r, column=2, sticky="w", padx=6)
+            return start + len(keys)
+
+        # ---- Rules
+        gf = tab("Rules")
+        ttk.Label(gf, text="Saved with the design; shared with the Freerouting engine.",
+                  foreground="#666").grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 4))
         self.v["layer_mode"] = tk.StringVar()
-        ttk.Label(gf, text="Conductors:").grid(row=0, column=0, sticky="e", padx=4, pady=2)
-        ttk.Combobox(gf, textvariable=self.v["layer_mode"], state="readonly", width=56,
-                     values=[t for t, _v in _LAYER_MODES]).grid(row=0, column=1, columnspan=3,
+        ttk.Label(gf, text="Conductors:").grid(row=1, column=0, sticky="e", padx=4, pady=2)
+        ttk.Combobox(gf, textvariable=self.v["layer_mode"], state="readonly", width=48,
+                     values=[t for t, _v in _LAYER_MODES]).grid(row=1, column=1, columnspan=3,
                                                                  sticky="w")
         for i, (label, key) in enumerate(_NUM_FIELDS):
             self.v[key] = tk.StringVar()
             r, c = divmod(i, 2)
-            ttk.Label(gf, text=label + ":").grid(row=r + 1, column=c * 2, sticky="e", padx=4, pady=2)
-            ttk.Entry(gf, textvariable=self.v[key], width=9).grid(row=r + 1, column=c * 2 + 1,
+            ttk.Label(gf, text=label + ":").grid(row=r + 2, column=c * 2, sticky="e", padx=4, pady=2)
+            ttk.Entry(gf, textvariable=self.v[key], width=9).grid(row=r + 2, column=c * 2 + 1,
                                                                  sticky="w")
-        row = 1 + (len(_NUM_FIELDS) + 1) // 2
+        row = 2 + (len(_NUM_FIELDS) + 1) // 2
         for key, label in (("power_nets", "Power nets:"), ("exclude_nets", "Leave unrouted:")):
             self.v[key] = tk.StringVar()
             ttk.Label(gf, text=label).grid(row=row, column=0, sticky="e", padx=4, pady=2)
-            ttk.Entry(gf, textvariable=self.v[key], width=58).grid(row=row, column=1,
+            ttk.Entry(gf, textvariable=self.v[key], width=50).grid(row=row, column=1,
                                                                   columnspan=3, sticky="we")
             row += 1
         self.v["layer_directions"] = tk.StringVar()
         ttk.Label(gf, text="Track directions:").grid(row=row, column=0, sticky="e", padx=4, pady=2)
-        ttk.Combobox(gf, textvariable=self.v["layer_directions"], state="readonly", width=56,
+        ttk.Combobox(gf, textvariable=self.v["layer_directions"], state="readonly", width=48,
                      values=[t for t, _v in _DIRECTIONS]).grid(row=row, column=1, columnspan=3,
                                                                 sticky="w")
         row += 1
         self.v["track_cap"] = tk.StringVar()
         ttk.Label(gf, text="Track ends:").grid(row=row, column=0, sticky="e", padx=4, pady=2)
-        ttk.Combobox(gf, textvariable=self.v["track_cap"], state="readonly", width=56,
+        ttk.Combobox(gf, textvariable=self.v["track_cap"], state="readonly", width=48,
                      values=[t for t, _v in _TRACK_CAPS]).grid(row=row, column=1, columnspan=3,
                                                                 sticky="w")
         row += 1
         self.v["snap_90"] = tk.BooleanVar()
         ttk.Checkbutton(gf, text="90-degree routing only (horizontal and vertical tracks)",
                         variable=self.v["snap_90"]).grid(row=row, column=0, columnspan=4,
-                                                        sticky="w", padx=4)
+                                                        sticky="w", padx=4, pady=(4, 0))
         row += 1
         self.v["keep_existing"] = tk.BooleanVar()
-        ttk.Checkbutton(gf, text="Keep the tracks, vias and jumpers already drawn and route only "
-                        "what is still open (else rip everything up and route from scratch)",
+        ttk.Checkbutton(gf, text="Keep what is already drawn and route only what is open\n"
+                        "(else rip everything up and route from scratch)",
                         variable=self.v["keep_existing"]).grid(row=row, column=0, columnspan=4,
                                                               sticky="w", padx=4)
 
-        of = ttk.LabelFrame(left, text="Router (saved with the design)", padding=6)
-        of.pack(fill="x", pady=(6, 0))
-        for r, (label, key, note) in enumerate(_OWN_FIELDS):
-            self.v[key] = tk.StringVar()
-            ttk.Label(of, text=label + ":").grid(row=r, column=0, sticky="e", padx=4, pady=1)
-            ttk.Entry(of, textvariable=self.v[key], width=8).grid(row=r, column=1, sticky="w")
-            ttk.Label(of, text=note, foreground="#666").grid(row=r, column=2, sticky="w", padx=6)
-        erow = len(_OWN_FIELDS)
+        # ---- Router
+        of = tab("Router")
         self.v["engine"] = tk.StringVar()
-        ttk.Label(of, text="Engine:").grid(row=erow, column=0, sticky="e", padx=4, pady=(4, 1))
+        ttk.Label(of, text="Engine:").grid(row=0, column=0, sticky="e", padx=4, pady=(0, 6))
         ttk.Combobox(of, textvariable=self.v["engine"], state="readonly", width=52,
-                     values=[t for t, _v in _ENGINES]).grid(row=erow, column=1, columnspan=2,
-                                                            sticky="w", pady=(4, 1))
+                     values=[t for t, _v in _ENGINES]).grid(row=0, column=1, columnspan=2,
+                                                            sticky="w", pady=(0, 6))
+        own_rows(of, ("ripup_passes", "grid", "max_jumpers", "jumper_cost", "crossover_cost"), 1)
 
-        cf = ttk.LabelFrame(left, text="Clean-up at the end", padding=6)
-        cf.pack(fill="x", pady=(6, 0))
+        # ---- Crossovers
+        xf = tab("Crossovers")
+        ttk.Label(xf, text="A crossover is a 2nd-conductor bridge on its own printed dielectric "
+                  "strip; these set the strip's size.", foreground="#666", wraplength=560,
+                  justify="left").grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 6))
+        own_rows(xf, ("xo_diel_side", "xo_diel_gap", "xo_contact"), 1)
+
+        # ---- Nudge
+        uf = tab("Nudge")
+        ttk.Label(uf, text="PathFinder only. When connections are left open, unlocked parts are "
+                  "moved apart a little and the board routed again; a pass that routes no more "
+                  "is undone. LOCK <refs> (command bar) keeps parts where they are.",
+                  foreground="#666", wraplength=560, justify="left").grid(
+            row=0, column=0, columnspan=3, sticky="w", pady=(0, 6))
+        own_rows(uf, ("nudge_passes", "nudge_max"), 1)
+        self.locked_label = ttk.Label(uf, text="", foreground="#555")
+        self.locked_label.grid(row=4, column=0, columnspan=3, sticky="w", pady=(8, 0))
+
+        # ---- Clean-up
+        cf = tab("Clean-up")
         for key, label in (("via_optimize", "Take out every crossover (via) that can go "
-                                             "(two conductors)"),
+                                             "(two conductors, Freerouting engine)"),
                            ("shorten_tracks", "Shorten tracks (straighten detours, pull corners "
-                                              "tight)"),
+                                              "tight; Freerouting engine)"),
                            ("remove_jogs", "Remove jogs (line up short sideways steps)")):
             self.v[key] = tk.BooleanVar()
-            ttk.Checkbutton(cf, text=label, variable=self.v[key]).pack(anchor="w")
+            ttk.Checkbutton(cf, text=label, variable=self.v[key]).pack(anchor="w", pady=2)
 
-        nf = ttk.Frame(left)
-        nf.pack(fill="x", pady=(6, 0))
-        self.nets_label = ttk.Label(nf, text="", foreground="#555")
-        self.nets_label.pack(side="left")
-        ttk.Button(nf, text="Import Net Names...", command=self._import_names).pack(side="right")
-
-        # the log fills the new width on the right, so the form stays short
-        ttk.Label(right, text="Log").pack(anchor="w")
-        logf = ttk.Frame(right)
+        # ---- Log
+        lf = tab("Log")
+        self.log_tab = lf
+        logf = ttk.Frame(lf)
         logf.pack(fill="both", expand=True)
-        self.log = tk.Text(logf, width=46, wrap="none", font=("Consolas", 11))
+        self.log = tk.Text(logf, width=70, height=16, wrap="none", font=("Consolas", 10))
         logsb = ttk.Scrollbar(logf, command=self.log.yview)
         self.log.configure(yscrollcommand=logsb.set)
         logsb.pack(side="right", fill="y")
         self.log.pack(side="left", fill="both", expand=True)
-        self.result = ttk.Label(right, text="", wraplength=440, justify="left")
-        self.result.pack(anchor="w", pady=(6, 0))
 
+        # always in view: the outcome, the net names, the buttons
+        self.result = ttk.Label(f, text="", wraplength=600, justify="left")
+        self.result.pack(anchor="w", pady=(6, 0))
+        nf = ttk.Frame(f)
+        nf.pack(fill="x", pady=(4, 0))
+        self.nets_label = ttk.Label(nf, text="", foreground="#555")
+        self.nets_label.pack(side="left")
+        ttk.Button(nf, text="Import Net Names...", command=self._import_names).pack(side="right")
         b = ttk.Frame(f)
-        b.pack(fill="x")
+        b.pack(fill="x", pady=(6, 0))
         self.run_btn = ttk.Button(b, text="Route", command=self.run)
         self.run_btn.pack(side="left")
         self.stop_btn = ttk.Button(b, text="Stop", command=self.stop, state="disabled")
@@ -204,6 +232,11 @@ class AutorouteWindow(tk.Toplevel):
         for key, default in (("snap_90", True), ("keep_existing", True), ("via_optimize", True),
                              ("shorten_tracks", True), ("remove_jogs", True)):
             self.v[key].set(bool(R.get(key, default)))
+        try:
+            lk = sorted(self.session.locked_parts(), key=lambda r: (len(r), r))
+            self.locked_label.config(text="Locked: " + (", ".join(lk) if lk else "none"))
+        except Exception:
+            pass
         names = load_net_names(self.session.library)
         nets = {n for n in names.values() if n and not n.lower().startswith("unconnected")}
         self.nets_label.config(text=f"{len(names)} named pads, {len(nets)} nets"
@@ -282,6 +315,10 @@ class AutorouteWindow(tk.Toplevel):
             return
         if not getattr(self, "_nudging", False):
             self.log.delete("1.0", "end")
+        try:
+            self.tabs.select(self.log_tab)
+        except Exception:
+            pass
         self.result.config(text="")
         self._say(f"{len(design['dies'])} die(s), {len(design['components'])} two-pin part(s), "
                   f"{len(design['substratePads'])} pad(s), {len(design['wires'])} fixed bond(s); "
