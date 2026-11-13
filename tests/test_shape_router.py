@@ -228,6 +228,7 @@ def test_a_crossover_is_insulated_by_a_fill_strip_with_bare_lands():
     assert r["crossovers"]
     st = H.apply_routed(s, r, m)
     assert st["crossovers"] == len(r["crossovers"])
+    from shapely.geometry import Polygon as SPoly, box as sbox
     strips = [sh for sh in s.cell.shapes if sh.layer == DIEL]
     assert strips and all(sh.datatype == s.DIELECTRIC_FILL_DATATYPE for sh in strips)
     # each strip is the bridge + side margins wide and stops dielGapUm short of
@@ -237,10 +238,14 @@ def test_a_crossover_is_insulated_by_a_fill_strip_with_bare_lands():
         assert c["dielWidthUm"] == c["widthUm"] + 300 and c["dielGapUm"] == 100
         ends = [(q["x"], q["y"]) for q in (c["bridge"][0], c["bridge"][-1])]
         for sh in strips:
-            assert sh.width == c["dielWidthUm"]
+            # one polygon, every edge horizontal or vertical, clear of the
+            # contacts (land) by the dielectric gap
+            p = sh.points
+            assert all(p[i][0] == p[i - 1][0] or p[i][1] == p[i - 1][1] for i in range(len(p)))
+            g = SPoly(p)
             for (x, y) in ends:
-                assert min(math.hypot(x - px, y - py) for px, py in sh.points) >= \
-                    c["landUm"] / 2 + c["dielGapUm"] - 1
+                h = c["landUm"] / 2
+                assert g.distance(sbox(x - h, y - h, x + h, y + h)) >= c["dielGapUm"] - 1
     assert s.find_shorts() == [] and s.resistor_crossings() == []
 
 
@@ -254,7 +259,8 @@ def test_the_strip_inset_never_folds_back_on_a_short_last_leg():
     H.apply_routed(s, routed, m)
     (strip,) = [sh for sh in s.cell.shapes if sh.layer == DIEL]
     xs = [p[0] for p in strip.points]
-    assert xs == sorted(xs) and min(xs) >= 3150 and max(xs) <= 4950
+    # trimmed along its length: it stays between the contacts (no fold back)
+    assert min(xs) >= 3150 and max(xs) <= 4950
 
 
 @pytest.mark.parametrize("seed", range(8))

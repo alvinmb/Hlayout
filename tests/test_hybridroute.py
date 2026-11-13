@@ -174,3 +174,27 @@ def test_keeping_the_existing_route_adds_only_what_is_open(tmp_path):
                       timeout=180, shorten=False, dejog=False)
     assert st2["stats"]["connections"] == 0 and st2["removed_tracks"] == 0
     assert all(t in s.cell.shapes for t in tracks) and not s.find_shorts()
+
+
+def test_ortho_strip_is_one_90_degree_polygon_clear_of_the_contacts():
+    """A crossover's local dielectric: one polygon, every edge horizontal or
+    vertical, stopping dielGap short of each contact, bends filled square."""
+    from shapely.geometry import Point, Polygon, box
+    from hlayout.scripting.hybridroute import ortho_strip
+    W, GAP, LAND = 900, 300, 300
+    for bridge in ([(0, 0), (3000, 0)], [(0, 0), (2000, 0), (2000, 1500)],
+                   [(0, 0), (1000, 0), (1000, 800), (3000, 800)],
+                   [(0, 0), (1500, 0), (1500, 1500), (0, 1500)]):
+        p = ortho_strip(bridge, W, GAP, LAND)
+        assert p is not None, bridge
+        assert all(p[i][0] == p[i - 1][0] or p[i][1] == p[i - 1][1] for i in range(len(p))), p
+        g = Polygon(p)
+        assert g.is_valid
+        for e in (bridge[0], bridge[-1]):
+            contact = box(e[0] - LAND / 2, e[1] - LAND / 2, e[0] + LAND / 2, e[1] + LAND / 2)
+            assert abs(g.distance(contact) - GAP) < 1.0
+        for q in bridge[1:-1]:
+            assert g.buffer(1).contains(Point(q).buffer(W / 2 - 1, cap_style=3))
+    # no room for any dielectric between the contacts
+    assert ortho_strip([(0, 0), (800, 0)], W, GAP, LAND) is None
+

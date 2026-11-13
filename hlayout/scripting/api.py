@@ -5630,8 +5630,19 @@ class Session:
         if diel is None or diel < 0:
             return None
         dt = self.DIELECTRIC_FILL_DATATYPE
-        fill = [_SP(sh.points) for sh in cell.shapes if sh.layer == diel
-                and getattr(sh, "datatype", 0) == dt and len(getattr(sh, "points", ())) >= 3]
+        from shapely.geometry import LineString as _LS
+        from ..core.shapes import Path as _Path
+
+        def _outline(sh):
+            if isinstance(sh, _Path):
+                # an older crossover strip drawn as a path: its outline is the
+                # centre line grown by half its width (never the centre line
+                # read as a polygon -- that is a sliver, and GEOS rejects it)
+                return _LS(sh.points).buffer(sh.width / 2.0, cap_style=2, join_style=2)
+            return _SP(sh.points)
+        fill = [_outline(sh) for sh in cell.shapes if sh.layer == diel
+                and getattr(sh, "datatype", 0) == dt
+                and len(getattr(sh, "points", ())) >= (2 if isinstance(sh, _Path) else 3)]
         ins = [_box(*sh.bbox()) for sh in cell.shapes if sh.layer == diel
                and getattr(sh, "datatype", 0) == 0 and hasattr(sh, "bbox")]
         # a crossover strip with a dog-leg can come out self-touching; GEOS

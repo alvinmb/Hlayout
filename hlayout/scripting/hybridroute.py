@@ -408,6 +408,25 @@ def export_design(session, cell_name: Optional[str] = None, layers: int = 1,
             strips = [(b[0], b[1], db[0], b[3]), (db[2], b[1], b[2], b[3]),
                       (b[0], b[1], b[2], db[1]), (b[0], db[3], b[2], b[3])]
             strips = [t for t in strips if t[2] - t[0] > 0 and t[3] - t[1] > 0]
+            # a strip narrower than a track (a 110 um rim round a 780 um die)
+            # can't take one: widen it outward, away from the die, to a
+            # track's width -- the track's own copper is the land there
+            wmin = float(max(width, R.get("power_width", width) or width))
+
+            def _widen(t):
+                x0, y0, x1, y1 = t
+                if x1 - x0 < wmin and (x1 <= db[0] or x0 >= db[2]):     # left / right rim
+                    if x1 <= db[0]:
+                        x0 = x1 - wmin
+                    else:
+                        x1 = x0 + wmin
+                if y1 - y0 < wmin and (y1 <= db[1] or y0 >= db[3]):     # bottom / top rim
+                    if y1 <= db[1]:
+                        y0 = y1 - wmin
+                    else:
+                        y1 = y0 + wmin
+                return (x0, y0, x1, y1)
+            strips = [_widen(t) for t in strips]
             strips.sort(key=lambda t: -(t[2] - t[0]) * (t[3] - t[1]))
             # every strip is the pad's copper (nothing else may touch it);
             # they are one piece, so the router need not join them
@@ -710,6 +729,75 @@ def _pt(q):
     return (float(q["x"]), float(q["y"])) if isinstance(q, dict) else (float(q[0]), float(q[1]))
 
 
+def ortho_strip(bridge, diel_w: float, gap: float, land: float):
+    """The local dielectric under a COND2 crossover as ONE polygon with every
+    edge horizontal or vertical (90-degree corners, inside and out).
+    ``bridge`` = the COND2 centre line (axis-aligned legs; contact squares of
+    side ``land`` centred on its two ends). The line is first trimmed by
+    land/2 + gap ALONG ITS LENGTH at each end (so a short last leg can't fold
+    the strip back over a contact), then each leg is grown by diel_w/2 either
+    side; at a bend the legs run on by diel_w/2 so the corner is filled
+    square; the two trimmed ends are flush. Returns [(x, y), ...] or None
+    when nothing is left (a bridge no longer than land + 2 * gap) or a leg
+    is slanted."""
+    import math as _m
+    from shapely.geometry import box
+    from shapely.ops import unary_union
+    pts = [tuple(map(float, p)) for p in bridge]
+    pts = [p for i, p in enumerate(pts) if i == 0 or p != pts[i - 1]]
+    if len(pts) < 2:
+        return None
+    if any(abs(a[0] - b[0]) > 1e-6 and abs(a[1] - b[1]) > 1e-6 for a, b in zip(pts, pts[1:])):
+        return None                                  # a slanted leg: not ours to square
+    d = land / 2.0 + gap
+
+    def cut(seq):
+        left = d
+        for i in range(1, len(seq)):
+            (x0, y0), (x1, y1) = seq[i - 1], seq[i]
+            sl = _m.hypot(x1 - x0, y1 - y0)
+            if sl > left:
+                f = left / sl
+                return [(x0 + (x1 - x0) * f, y0 + (y1 - y0) * f)] + list(seq[i:])
+            left -= sl
+        return []
+    total = sum(_m.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(pts, pts[1:]))
+    if total <= 2 * d:
+        return None
+    pts = cut(cut(pts)[::-1])[::-1] if d > 0 else pts
+    # drop collinear corners: a straight run kept as two legs is not a bend
+    q = [pts[0]]
+    for k in range(1, len(pts) - 1):
+        a, b, c = q[-1], pts[k], pts[k + 1]
+        if abs((b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0])) < 1e-6:
+            continue
+        q.append(b)
+    q.append(pts[-1])
+    pts = [p for i, p in enumerate(q) if i == 0 or p != q[i - 1]]
+    if len(pts) < 2:
+        return None
+    h = diel_w / 2.0
+    n = len(pts) - 1
+    rects = []
+    for i, ((x0, y0), (x1, y1)) in enumerate(zip(pts, pts[1:])):
+        horiz = abs(y1 - y0) < 1e-6
+        a, b = (x0, x1) if horiz else (y0, y1)
+        sgn = 1.0 if b >= a else -1.0
+        a2 = a if i == 0 else a - sgn * h            # trimmed ends flush,
+        b2 = b if i == n - 1 else b + sgn * h        # bends run on into the corner
+        lo, hi = min(a2, b2), max(a2, b2)
+        if hi - lo <= 0:
+            continue
+        c = y0 if horiz else x0
+        rects.append(box(lo, c - h, hi, c + h) if horiz else box(c - h, lo, c + h, hi))
+    if not rects:
+        return None
+    g = unary_union(rects).simplify(0.5, preserve_topology=True)
+    if g.geom_type != "Polygon":
+        return None
+    return [(int(round(x)), int(round(y))) for x, y in list(g.exterior.coords)[:-1]]
+
+
 def apply_routed(session, routed: dict, mapping: dict, remove_existing: bool = True) -> dict:
     """Draw the router's result into the cell (one undo step): see the
     module doc. Returns counts and the router's stats / unrouted list."""
@@ -849,14 +937,20 @@ def apply_routed(session, routed: dict, mapping: dict, remove_existing: bool = T
                 # flush ends dielGapUm short of each contact: the contacts and
                 # the gap stay bare; everything the bridge crosses -- which the
                 # router kept clear of that bare end -- is under dielectric
-                dpts = _inset(bpts, vp / 2 + int(c.get("dielGapUm") or 0))
-                if len(dpts) >= 2:
-                    # the FILL datatype: datatype 0 on the dielectric layer means
-                    # a via window (an opening), which would short the bridge to
-                    # every COND1 track it crosses (see core.nettrace)
-                    s = cell.add_path(ld, dpts, dw, cap="flush",
-                                      datatype=session.DIELECTRIC_FILL_DATATYPE)
+                # one polygon, every edge at 90 degrees (a wide path's joins
+                # would bevel). The FILL datatype: datatype 0 on the
+                # dielectric layer means a via window (an opening), which would
+                # short the bridge to every COND1 track it crosses (core.nettrace)
+                poly = ortho_strip(bpts, dw, int(c.get("dielGapUm") or 0), vp)
+                if poly is not None:
+                    s = cell.add_polygon(ld, poly, datatype=session.DIELECTRIC_FILL_DATATYPE)
                     added.append((s.layer, *map(round, s.bbox())))
+                else:
+                    dpts = _inset(bpts, vp / 2 + int(c.get("dielGapUm") or 0))
+                    if len(dpts) >= 2:                # a slanted bridge (45-degree routing)
+                        s = cell.add_path(ld, dpts, dw, cap="flush",
+                                          datatype=session.DIELECTRIC_FILL_DATATYPE)
+                        added.append((s.layer, *map(round, s.bbox())))
             s = cell.add_path(lb, bpts, cw, cap=cap)      # COND2 bridge
             added.append((s.layer, *map(round, s.bbox())))
             st["crossovers"] += 1

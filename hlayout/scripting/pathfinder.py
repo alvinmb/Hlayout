@@ -149,7 +149,14 @@ def route(design: dict, cell: float = 100.0, iterations: int = 60,
         cur = pad_in[m]
         pad_in[m] = np.where((cur == -1) | (cur == k), k, -2)
     cond1 = P.layers[0]
-    fixed1 = list(P.space.layer_blockers(cond1))
+    # a chip part's body (the ceramic between its terminations) is not copper:
+    # a track only has to stay out from under it, so it is grown by half the
+    # track, not by the copper spacing as well (that walled a pad's own exit
+    # off -- C12.B on PRE+AMP). Printed resistors keep the spacing (ink).
+    chip_bodies = {tuple(float(v) for v in SR._comp_body_rect(c))
+                   for c in (design.get("components") or []) if c.get("kind") == "CHIP"}
+    fixed1 = [(n_, r_) for n_, r_ in P.space.layer_blockers(cond1)
+              if n_ or tuple(float(v) for v in r_) not in chip_bodies]
     fixed2 = list(P.space.layer_blockers("COND2"))
     part_rects = list(P.parts)
     res_rects = list(P.resistors)
@@ -187,7 +194,11 @@ def route(design: dict, cell: float = 100.0, iterations: int = 60,
     maps1 = {}
     for m in margins:
         mg = math.sqrt(m * m + (cell / 2.0) ** 2)
-        maps1[m] = forbid_map(fixed1, lambda n, mg=mg: mg, m - sp)
+        hard, padnet = forbid_map(fixed1, lambda n, mg=mg: mg, m - sp)
+        hb = math.sqrt((m - sp) ** 2 + (cell / 2.0) ** 2)      # half the track
+        for r_ in chip_bodies:
+            hard |= G.cover(r_, hb)[0]
+        maps1[m] = (hard, padnet)
     # COND2 (the strip): off parts, resistor ink (+ clearance), keep-outs, other
     # nets' COND2, and every pad
     maps2 = {}
@@ -753,8 +764,17 @@ def _emit(design, P, G, routes, drop, order, stopped, t_start, say):
             return None
         for ci, path in enumerate(r["conns"]):
             if ci in drop.get(n, ()):
-                a = next((t for t in cell_terms.get(path[0][1], ()) if t.net == n), None)
-                b = next((t for t in cell_terms.get(path[-1][1], ()) if t.net == n), None)
+                def term_at(k, n=n):
+                    t = next((t for t in cell_terms.get(k, ()) if t.net == n), None)
+                    if t is not None:
+                        return t
+                    # the path starts on the net's tree, not on a pad: the
+                    # net's terminal nearest that cell is the end it grew from
+                    x, y = G.xy(k)
+                    ts = [t for t in P.terminals if t.net == n]
+                    return min(ts, key=lambda t: math.hypot(t.centre[0] - x, t.centre[1] - y),
+                               default=None)
+                a, b = term_at(path[0][1]), term_at(path[-1][1])
                 unrouted.append({"net": n, "from": a.tid if a else "?", "to": b.tid if b else "?"})
                 continue
             routed += 1
