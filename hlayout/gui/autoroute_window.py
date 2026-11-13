@@ -291,6 +291,7 @@ class AutorouteWindow(tk.Toplevel):
             self._say("die pads the router will bond: " + ", ".join(mapping["unbonded"]))
         self._cancel, self._result, self._lines = False, None, []
         self._opts = (rules, layers, own.get("engine", "pathfinder"))
+        self._min_space = design["rules"]["conductor"]["minSpaceUm"]
         self.run_btn.config(state="disabled")
         self.stop_btn.config(state="normal")
 
@@ -350,7 +351,16 @@ class AutorouteWindow(tk.Toplevel):
         st = H.apply_routed(self.session, routed, mapping,
                             remove_existing=not rules["keep_existing"])
         if engine in ("shape", "pathfinder"):
-            cl = {}
+            self._say("removing jogs ...")
+            self.update_idletasks()
+            cl = H.tidy(self.session, mapping["cell"], rules["remove_jogs"], rules["snap_90"],
+                        self._min_space)
+            d = cl.get("dejog") or {}
+            if "error" in d:
+                self._say(f"jog removal failed: {d['error']}")
+            elif d:
+                self._say(f"jogs: {d.get('found', 0)} found, {d.get('jogs', 0)} removed "
+                          f"{d.get('why') or ''}")
         else:
             self._say("cleaning up ...")
             self.update_idletasks()

@@ -5139,6 +5139,11 @@ class Session:
         board = max((bx[2] - bx[0]) * (bx[3] - bx[1]), 1) if bx else 1
         gap = float(R.get("clearance", 100))
         die_m = float(R.get("die_keepout", 200))
+        try:
+            _sb = self._substrate_box(cell)
+            sub_area = _sb.area if _sb is not None else 0.0
+        except Exception:
+            sub_area = 0.0
         out = []
 
         def collect(name, tr, acc, depth=0):
@@ -5184,8 +5189,12 @@ class Session:
                 continue
             allg = unary_union([g for _l, _p, g in acc])
             b = allg.bounds
-            if (b[2] - b[0]) * (b[3] - b[1]) > 0.4 * board:
-                continue                          # enclosing package / header
+            area = (b[2] - b[0]) * (b[3] - b[1])
+            # the enclosing package / header / substrate: judged against the
+            # substrate when there is one (a part left off the board must not
+            # inflate the cell's extent and turn the substrate into a body)
+            if area > 0.4 * board or (sub_area and area >= 0.8 * sub_area):
+                continue
             shapes = []
             # a printed resistor (ink / glaze): never routed through or under
             res = [g for l, _p, g in acc if l in ink]
@@ -5625,6 +5634,10 @@ class Session:
                 and getattr(sh, "datatype", 0) == dt and len(getattr(sh, "points", ())) >= 3]
         ins = [_box(*sh.bbox()) for sh in cell.shapes if sh.layer == diel
                and getattr(sh, "datatype", 0) == 0 and hasattr(sh, "bbox")]
+        # a crossover strip with a dog-leg can come out self-touching; GEOS
+        # won't union an invalid polygon, so repair it first
+        fill = [g if g.is_valid else g.buffer(0) for g in fill]
+        fill = [g for g in fill if not g.is_empty]
         if fill:
             u = unary_union(fill + ins)
             # the windows are openings INSIDE the sheet: close them up

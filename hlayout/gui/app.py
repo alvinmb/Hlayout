@@ -199,10 +199,10 @@ class App(tk.Tk):
         self._build_statusbar()
 
         self.canvas.on_commit = self._on_canvas_commit
-        self.canvas.on_edit = self.refresh_all
+        self.canvas.on_edit = self._after_canvas_edit
         self.canvas.on_mode_status = self.status.set
         self.canvas.on_list_cells = self._placeable_cell_names
-        self.canvas.checkpoint = self.session.checkpoint
+        self.canvas.checkpoint = self._canvas_checkpoint
         self.canvas.on_select = self._update_properties_panel
         self._update_properties_panel()
         self.canvas.on_route_via = self._on_route_via
@@ -5400,6 +5400,65 @@ class App(tk.Tk):
         self.canvas.redraw()
         self._refresh_layer_choices()
         self._update_properties_panel()
+
+    # --- a die's wire bonds and fingers follow it ---------------------------
+    def _die_placements(self):
+        """(cell, {id(sref): (label, cell_name, frozen transform, placement)})
+        of every labelled instance in the current cell, taken at a canvas
+        checkpoint so _after_canvas_edit can tell what moved or turned."""
+        try:
+            import types
+            from ..scripting.autoplace_session import _xf
+            name = self.session.current_cell_name
+            cell = self.session.library.cells.get(name) if name else None
+            if cell is None:
+                return None
+            out = {}
+            for r in cell.srefs:
+                if not r.label:
+                    continue
+                pl = (tuple(r.origin), float(r.rotation), bool(r.x_reflection),
+                      float(r.magnification or 1.0))
+                frozen = types.SimpleNamespace(origin=pl[0], rotation=pl[1],
+                                               x_reflection=pl[2], magnification=pl[3])
+                out[id(r)] = (r.label, r.cell_name, _xf(frozen), pl)
+            return name, out
+        except Exception:
+            return None
+
+    def _canvas_checkpoint(self):
+        self.session.checkpoint()
+        self._die_place = self._die_placements()
+
+    def _after_canvas_edit(self):
+        """After a canvas move / rotate / mirror / edit: any bare die that
+        moved or turned takes its wire bonds and bond fingers with it
+        (fanout.carry_bonds; same undo step as the edit), then refresh."""
+        snap, self._die_place = getattr(self, "_die_place", None), None
+        if snap:
+            name, before = snap
+            cell = self.session.library.cells.get(name)
+            if cell is not None:
+                from ..scripting.autoplace_session import _xf
+                moved = {}
+                for r in cell.srefs:
+                    b = before.get(id(r))
+                    if b is None:
+                        continue
+                    now = (tuple(r.origin), float(r.rotation), bool(r.x_reflection),
+                           float(r.magnification or 1.0))
+                    if now != b[3]:
+                        moved[r.label] = (b[2], _xf(r), r.cell_name)
+                if moved:
+                    try:
+                        from ..scripting.fanout import carry_bonds
+                        res = carry_bonds(self.session, name, moved)
+                        if res.get("bonds"):
+                            self.status.set(f"{res['bonds']} bond(s), {res['fingers']} finger(s) "
+                                            f"moved with {', '.join(sorted(moved))}")
+                    except Exception as e:
+                        self.status.set(f"bonds not moved with the die: {e}")
+        self.refresh_all()
 
     def refresh_all(self):
         self.canvas.net_highlight = getattr(self.session, "net_highlight", None)

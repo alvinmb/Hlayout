@@ -994,6 +994,27 @@ def finish(session, cell_name, shorten=None, dejog=None, orthogonal=None,
     return out
 
 
+def tidy(session, cell_name, dejog=None, orthogonal=None, clearance=None) -> dict:
+    """The clean-up after a PathFinder / shape-router route: remove jogs only
+    (the via and track-shortening clean-ups don't understand the local
+    crossovers). ``clearance`` is the hybrid minimum space, so a track that
+    slides keeps the thick-film spacing, not the looser Freerouting one.
+    remove_jogs puts everything back if any two nets would join."""
+    R = session.freerouting_rules()
+    dejog = R.get("remove_jogs", True) if dejog is None else dejog
+    if not dejog:
+        return {}
+    over = {"keepout_bodies": True}
+    if orthogonal is not None:
+        over["snap_90"] = bool(orthogonal)
+    if clearance:
+        over["clearance"] = max(float(clearance), float(R.get("clearance", 0) or 0))
+    try:
+        return {"dejog": session.remove_jogs(cell_name=cell_name, **over)}
+    except Exception as e:
+        return {"dejog": {"error": str(e)}}
+
+
 def hybrid_route(session, cell_name: Optional[str] = None, layers: Optional[int] = None,
                  max_jumpers: Optional[int] = None, jumper_cost: Optional[float] = None,
                  crossover_cost: Optional[float] = None, grid: Optional[int] = None,
@@ -1051,10 +1072,13 @@ def hybrid_route(session, cell_name: Optional[str] = None, layers: Optional[int]
     st.update(exit_code=code, paths=paths, log=tail[-12:], layers=int(layers), engine=engine,
               unbonded=mapping.get("unbonded") or [],
               orthogonal=design["routing"]["orthogonal"])
-    # the shape router's output is already clean; the Java via/track clean-ups
-    # don't understand its printed-jumper crossovers, so skip them for it
-    st["cleanup"] = {} if engine in ("shape", "pathfinder") else finish(
-        session, mapping["cell"], shorten, dejog,
-        design["routing"]["orthogonal"], via_optimize, layers)
+    # the Java via/track clean-ups don't understand the local crossovers, so
+    # the gridless/PathFinder engines get the jog removal only
+    if engine in ("shape", "pathfinder"):
+        st["cleanup"] = tidy(session, mapping["cell"], dejog, design["routing"]["orthogonal"],
+                             design["rules"]["conductor"]["minSpaceUm"])
+    else:
+        st["cleanup"] = finish(session, mapping["cell"], shorten, dejog,
+                               design["routing"]["orthogonal"], via_optimize, layers)
     st["kept"] = mapping.get("kept") or {}
     return st

@@ -377,7 +377,9 @@ def route(design: dict, cell: float = 100.0, iterations: int = 60,
                         continue
                 step = math.hypot(xs[ii] - x, ys[jj] - y)
                 cc_ = 1.0 if (l == 0 and padin[kk] == kn) else cost[kk]   # own pad: free
-                c = step * lf * cc_ + (bend_cost if bent else 0.0)
+                # a bend is charged at the local congestion too: with a fixed
+                # bend cost, late rounds (dear steps) staircase freely
+                c = (step * lf + (bend_cost if bent else 0.0)) * cc_
                 ns = (l, kk, di)
                 ng = gs + c
                 if ng < g.get(ns, INF):
@@ -392,6 +394,81 @@ def route(design: dict, cell: float = 100.0, iterations: int = 60,
                     prev[ns] = s
                     heapq.heappush(pq, (ng + h(k), ng, ns))
         return None
+
+    def straight_run(n, ks, cost1):
+        """One COND1 run (cells ``ks``, ends fixed) with its staircases taken
+        out: from each corner jump to the farthest later corner reachable by
+        a straight leg or an L whose cells are all allowed for ``n``, whose
+        corner is not inside a pad, and which costs no more (at the present
+        congestion) than the stretch it replaces."""
+        a1 = allow[n][0]
+        kn = net_id[n]
+
+        def cc(k):
+            return 1.0 if padin[k] == kn else cost1[k]
+
+        def line(k1, k2):
+            i1, j1, i2, j2 = k1 % nx, k1 // nx, k2 % nx, k2 // nx
+            if j1 == j2:
+                st = 1 if i2 > i1 else -1
+                return [j1 * nx + i for i in range(i1, i2 + st, st)]
+            st = 1 if j2 > j1 else -1
+            return [j * nx + i1 for j in range(j1, j2 + st, st)]
+
+        def dirn(k1, k2):
+            return (k2 % nx - k1 % nx, k2 // nx - k1 // nx)
+        corners = [0] + [i for i in range(1, len(ks) - 1)
+                         if dirn(ks[i - 1], ks[i]) != dirn(ks[i], ks[i + 1])] + [len(ks) - 1]
+        if len(corners) < 4:
+            return ks
+        out = [ks[0]]
+        ci = 0
+        while ci < len(corners) - 1:
+            i = corners[ci]
+            done = False
+            for cj in range(len(corners) - 1, ci + 1, -1):
+                j = corners[cj]
+                old_cost = sum(cc(k) for k in ks[i + 1:j + 1]) + bend_cost * (cj - ci - 1)
+                k1, k2 = ks[i], ks[j]
+                i1, j1, i2, j2 = k1 % nx, k1 // nx, k2 % nx, k2 // nx
+                if i1 == i2 or j1 == j2:
+                    cands = [[k1, k2]]
+                else:
+                    cands = [[k1, j1 * nx + i2, k2], [k1, j2 * nx + i1, k2]]
+                for cnd in cands:
+                    if len(cnd) == 3 and padin[cnd[1]] >= 0:
+                        continue                         # no turning inside a pad
+                    cells_ = line(cnd[0], cnd[1])
+                    if len(cnd) == 3:
+                        cells_ += line(cnd[1], cnd[2])[1:]
+                    if not all(a1[k] for k in cells_):
+                        continue
+                    new_cost = sum(cc(k) for k in cells_[1:]) + bend_cost * (len(cnd) - 2)
+                    if new_cost <= old_cost + 1e-6:
+                        out += cells_[1:]
+                        ci = cj
+                        done = True
+                        break
+                if done:
+                    break
+            if not done:
+                out += ks[i + 1:corners[ci + 1] + 1]
+                ci += 1
+        return out
+
+    def straighten(n, path, cost1):
+        runs = []
+        for l, k in path:
+            if runs and runs[-1][0] == l:
+                runs[-1][1].append(k)
+            else:
+                runs.append([l, [k]])
+        res = []
+        for l, ks in runs:
+            if ortho and l == 0 and len(ks) >= 4:   # 90-degree grids only
+                ks = straight_run(n, ks, cost1)
+            res += [(l, k) for k in ks]
+        return res
 
     def route_net(n, pf):
         k = net_id[n]
@@ -437,6 +514,7 @@ def route(design: dict, cell: float = 100.0, iterations: int = 60,
                 tree_terms = gr                              # grow on from here
                 cells += [(0, G.idx(*t.centre)) for t in gr]
                 continue
+            path = straighten(n, path, c[0])
             conns.append(path)
             cells += path
             cells += [(0, G.idx(*t.centre)) for t in gr]
@@ -590,6 +668,52 @@ def _clear_of(P, net, w, pts, others, layer):
     return True
 
 
+def _straighten(P, net, w, pts, others, layer, ortho=True):
+    """Take the grid's staircases and jogs out of a run: from each corner,
+    jump to the farthest later corner reachable by a straight leg or an L
+    (either way round; with 45-degree routing a direct leg first) that keeps
+    clear (_clear_of). The ends stay where they are. Congestion makes a grid
+    step dear and a bend cheap by comparison, so A* staircases freely; this
+    puts the corners back where they need to be."""
+    if len(pts) < 4:
+        return pts
+    pts = [tuple(p) for p in pts]
+    out = [pts[0]]
+    i = 0
+    while i < len(pts) - 1:
+        best = None
+        for j in range(len(pts) - 1, i + 1, -1):
+            a, b = pts[i], pts[j]
+            if abs(a[0] - b[0]) < 1e-6 or abs(a[1] - b[1]) < 1e-6:
+                cands = [[a, b]]
+            else:
+                cands = [] if ortho else [[a, b]]
+                cands += [[a, (b[0], a[1]), b], [a, (a[0], b[1]), b]]
+            for cnd in cands:
+                if _clear_of(P, net, w, cnd, others, layer):
+                    best = (j, cnd)
+                    break
+            if best:
+                break
+        if best is None:
+            out.append(pts[i + 1])
+            i += 1
+        else:
+            out += best[1][1:]
+            i = best[0]
+    # drop collinear points
+    res = [out[0]]
+    for k in range(1, len(out) - 1):
+        a, b, c = res[-1], out[k], out[k + 1]
+        if b == a:
+            continue
+        if abs((b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0])) < 1e-6:
+            continue
+        res.append(b)
+    res.append(out[-1])
+    return res
+
+
 def _emit(design, P, G, routes, drop, order, stopped, t_start, say):
     """Turn the grid routes into the result dict: COND1 runs are traces,
     COND2 runs local crossovers (their via lands at the ends). A net still
@@ -662,9 +786,25 @@ def _emit(design, P, G, routes, drop, order, stopped, t_start, say):
     # half a cell) keeps it clear of every other net's copper; else it stays
     cop = [(n, w, a, b) for n, w, pts, _c in pending for a, b in zip(pts, pts[1:])]
     for c in crossovers:
+        # round a contact the COND2 runs bare (the dielectric stops short of
+        # it): foreign COND1 keeps the contact clearance (xclr), as on the
+        # grid -- _clear_of adds w/2 + min_space, so size the "land" to match
+        land = max(float(c["landUm"]), 2.0 * (float(P.xclr(c["net"])) - P.min_space))
         for q in (c["a"], c["b"]):
             xy = (float(q["x"]), float(q["y"]))
-            cop.append((c["net"], float(c["landUm"]), xy, xy))
+            cop.append((c["net"], land, xy, xy))
+    jogs_before = jogs_after = 0
+    for idx, (n, w, pts, centre_of) in enumerate(pending):
+        others = [x for x in cop if x[0] != n]
+        st = _straighten(P, n, w, pts, others, P.layers[0], P.orthogonal)
+        jogs_before += len(pts)
+        jogs_after += len(st)
+        if st != pts:
+            old_segs = set(zip(pts, pts[1:]))
+            cop = [x for x in cop if not (x[0] == n and (x[2], x[3]) in old_segs)]
+            cop += [(n, w, a, b) for a, b in zip(st, st[1:])]
+            pending[idx] = (n, w, st, centre_of)
+    say(f"straightened: {jogs_before} -> {jogs_after} points")
     for n, w, pts, centre_of in pending:
         al = _align_ends(pts, centre_of)
         if al != pts:
