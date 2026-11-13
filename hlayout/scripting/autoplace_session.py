@@ -399,6 +399,10 @@ def build_job(session, netlist, cell_name=None, overrides=None, settings=None, o
     if name not in lib.cells:
         raise LayoutError("no current cell")
     cell = lib.cells[name]
+    try:
+        board_locked = session.locked_parts(name)        # LOCK on the board
+    except Exception:
+        board_locked = set()
     S = load_settings(lib)
     S.update(settings or {})
     nl = netlist if isinstance(netlist, Netlist) else read_netlist(netlist)
@@ -491,7 +495,8 @@ def build_job(session, netlist, cell_name=None, overrides=None, settings=None, o
         bb = (body[0] - clr / 2, body[1] - clr / 2, body[2] + clr / 2, body[3] + clr / 2)
         power = _f(o.get("power_mw") or comp.fields.get("HL_Power_mW"),
                    S["family_power_mw"].get(fam, 0.0))
-        locked = (o.get("locked") or comp.fields.get("HL_Fixed") or "").lower() in ("1", "yes", "true", "y")
+        locked = (ref in board_locked or
+                  (o.get("locked") or comp.fields.get("HL_Fixed") or "").lower() in ("1", "yes", "true", "y"))
         p = Part(ref=ref, cell=cellname, family=fam or "smd", bbox=bb, pins=pins, power=power)
         if sref is not None:
             p.x, p.y, p.rot, p.placed = float(sref.origin[0]), float(sref.origin[1]), int(sref.rotation) % 360, True

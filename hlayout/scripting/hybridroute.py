@@ -43,7 +43,10 @@ DEFAULTS = {"max_jumpers": 0, "jumper_cost": 50.0, "crossover_cost": 10.0, "grid
             # printed crossover geometry (um): local dielectric past the bridge
             # each side; dielectric end -> COND1 contact gap; contact square
             # (0 = the track width)
-            "xo_diel_side": 300.0, "xo_diel_gap": 300.0, "xo_contact": 0.0}
+            "xo_diel_side": 300.0, "xo_diel_gap": 300.0, "xo_contact": 0.0,
+            # nudge: after a PathFinder route, move unlocked parts to let what
+            # is left open through (passes; most any part moves in total, um)
+            "nudge_passes": 3, "nudge_max": 500.0}
 
 
 def layers_for(session, rules=None) -> int:
@@ -1109,6 +1112,71 @@ def tidy(session, cell_name, dejog=None, orthogonal=None, clearance=None) -> dic
         return {"dejog": {"error": str(e)}}
 
 
+def nudge_and_reroute(session, cell_name, st, routed, mapping, passes=None, max_move=None,
+                      reroute=None, say=None) -> dict:
+    """After a route that left connections open: move unlocked parts out of
+    the way (nudge.plan / nudge.apply) and reroute, up to ``passes`` times,
+    keeping the best. ``reroute()`` routes the cell afresh and returns (st,
+    routed, mapping). A pass that routes no more than the best so far has
+    its moves undone and the best routing put back, and the loop stops. No
+    part moves more than ``max_move`` um in total; locked parts never move.
+    Returns {"moves": {ref: (dx, dy)} kept, "passes", "best": st,
+    "log": [text]}."""
+    from . import nudge as NG
+    say = say or (lambda _m: None)
+    S = load_settings(session.library)
+    passes = int(S.get("nudge_passes", 3) if passes is None else passes)
+    max_move = float(S.get("nudge_max", 500.0) if max_move is None else max_move)
+    total, log = {}, []
+    best = (st["stats"].get("routed", 0), st, routed, mapping)
+
+    def note(t):
+        log.append(t)
+        say(t)
+    for k in range(passes):
+        cur_st, cur_routed = best[1], best[2]
+        if not cur_st.get("unrouted"):
+            break
+        locked = session.locked_parts(cell_name)
+        traces = [(t["net"], float(t["widthUm"]), [(q["x"], q["y"]) for q in t["points"]])
+                  for t in cur_routed.get("traces") or []]
+        pl = NG.plan(cur_routed["design"], cur_routed.get("unrouted") or [], locked=locked,
+                     max_move=max_move, traces=traces)
+        moves = {}
+        for ref, (dx, dy) in pl["moves"].items():
+            tx, ty = total.get(ref, (0.0, 0.0))
+            if math.hypot(tx + dx, ty + dy) <= max_move + 1e-6:
+                moves[ref] = (dx, dy)
+        for w in pl["why"]:
+            note("  " + w)
+        if not moves:
+            note(f"nudge pass {k + 1}: no part can move to help -- stopping")
+            break
+        note(f"nudge pass {k + 1}: " + ", ".join(
+            f"{r} {dx / 1000:+.2f},{dy / 1000:+.2f} mm" for r, (dx, dy) in moves.items()))
+        unroute(session, cell_name)
+        NG.apply(session, cell_name, moves)
+        n_st, n_routed, n_map = reroute()
+        n = n_st["stats"].get("routed", 0)
+        if n > best[0]:
+            note(f"nudge pass {k + 1}: {n} routed (was {best[0]}) -- kept")
+            for r, (dx, dy) in moves.items():
+                tx, ty = total.get(r, (0.0, 0.0))
+                total[r] = (tx + dx, ty + dy)
+            best = (n, n_st, n_routed, n_map)
+        else:
+            note(f"nudge pass {k + 1}: {n} routed, no better than {best[0]} -- moves undone, "
+                 "best routing put back")
+            unroute(session, cell_name)
+            NG.apply(session, cell_name, {r: (-dx, -dy) for r, (dx, dy) in moves.items()})
+            apply_routed(session, best[2], best[3], remove_existing=True)
+            d_ = best[2]["design"]
+            tidy(session, cell_name, None, d_["routing"]["orthogonal"],
+                 d_["rules"]["conductor"]["minSpaceUm"])
+            break
+    return {"moves": total, "passes": k + 1 if passes else 0, "best": best[1], "log": log}
+
+
 def hybrid_route(session, cell_name: Optional[str] = None, layers: Optional[int] = None,
                  max_jumpers: Optional[int] = None, jumper_cost: Optional[float] = None,
                  crossover_cost: Optional[float] = None, grid: Optional[int] = None,
@@ -1117,7 +1185,8 @@ def hybrid_route(session, cell_name: Optional[str] = None, layers: Optional[int]
                  out_dir: Optional[str] = None, orthogonal: Optional[bool] = None,
                  ripup_passes: Optional[int] = None, exclude_nets=None,
                  shorten: Optional[bool] = None, dejog: Optional[bool] = None,
-                 via_optimize: Optional[bool] = None, engine: Optional[str] = None) -> dict:
+                 via_optimize: Optional[bool] = None, engine: Optional[str] = None,
+                 nudge_passes: Optional[int] = None, nudge_max: Optional[float] = None) -> dict:
     """Export, route and apply in one go (the apply is one undo step), then
     the clean-ups (crossover optimisation, shorten tracks, remove jogs).
     Anything left None comes from the design: the Autoroute rules
@@ -1175,4 +1244,30 @@ def hybrid_route(session, cell_name: Optional[str] = None, layers: Optional[int]
         st["cleanup"] = finish(session, mapping["cell"], shorten, dejog,
                                design["routing"]["orthogonal"], via_optimize, layers)
     st["kept"] = mapping.get("kept") or {}
+    # move unlocked parts to finish what PathFinder left open (best kept)
+    np_ = int(H.get("nudge_passes", 3) if nudge_passes is None else nudge_passes)
+    if engine == "pathfinder" and np_ > 0 and st.get("unrouted"):
+        def again():
+            return _route_fresh(session, mapping["cell"], layers, dejog, on_line, cancel)
+        res = nudge_and_reroute(session, mapping["cell"], st, routed, mapping, passes=np_,
+                                max_move=nudge_max, reroute=again, say=on_line)
+        best = res["best"]
+        best["nudge"] = {"moves": res["moves"], "log": res["log"]}
+        best["kept"] = st["kept"]
+        return best
     return st
+
+
+def _route_fresh(session, cell_name, layers, dejog, on_line, cancel):
+    """One PathFinder route of the cell from scratch (for the nudge loop):
+    (st, routed, mapping)."""
+    from . import pathfinder as _pf
+    design, mapping = export_design(session, cell_name, layers=layers, keep_existing=False)
+    routed = _pf.route(design, local_dielectric=mapping.get("local_diel", -1) >= 0,
+                       cond2_keepouts=mapping.get("local_keepouts"), on_line=on_line, cancel=cancel)
+    st = apply_routed(session, routed, mapping, remove_existing=True)
+    st.update(exit_code=0, paths={}, log=[], layers=int(layers), engine="pathfinder",
+              unbonded=mapping.get("unbonded") or [], orthogonal=design["routing"]["orthogonal"])
+    st["cleanup"] = tidy(session, mapping["cell"], dejog, design["routing"]["orthogonal"],
+                         design["rules"]["conductor"]["minSpaceUm"])
+    return st, routed, mapping

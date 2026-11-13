@@ -5440,7 +5440,11 @@ class App(tk.Tk):
             cell = self.session.library.cells.get(name)
             if cell is not None:
                 from ..scripting.autoplace_session import _xf
-                moved = {}
+                try:
+                    locked = self.session.locked_parts(name)
+                except Exception:
+                    locked = set()
+                moved, held = {}, []
                 for r in cell.srefs:
                     b = before.get(id(r))
                     if b is None:
@@ -5448,7 +5452,16 @@ class App(tk.Tk):
                     now = (tuple(r.origin), float(r.rotation), bool(r.x_reflection),
                            float(r.magnification or 1.0))
                     if now != b[3]:
+                        if r.label in locked:
+                            # a locked part stays put: undo the move / turn
+                            (r.origin, r.rotation, r.x_reflection, r.magnification) = (
+                                b[3][0], b[3][1], b[3][2], b[3][3])
+                            held.append(r.label)
+                            continue
                         moved[r.label] = (b[2], _xf(r), r.cell_name)
+                if held:
+                    self.status.set(f"locked, not moved: {', '.join(sorted(held))} "
+                                    "(UNLOCK to move)")
                 if moved:
                     try:
                         from ..scripting.fanout import carry_bonds

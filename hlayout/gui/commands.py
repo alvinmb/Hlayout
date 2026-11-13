@@ -261,6 +261,11 @@ Attached libraries:
                                        the terminations grown by <um> (Resistor Geometry
                                        rules); redraws every resistor's keep-out to match.
                                        Session.set_resistor_keepout()
+    LOCK [<ref,ref,...>|*]             lock parts in place: autoplace keeps them, the
+                                       router's nudge pass never moves them and the
+                                       canvas won't move or turn them; no argument
+                                       lists the locked parts. Session.lock_parts()
+    UNLOCK [<ref,ref,...>|*]           unlock parts (no argument: all)
     UNROUTE                            delete the routing (tracks, crossover / jumper
                                        lands, dielectric strips, jumper bonds) and go
                                        back to the SLI; one undo step. Also Tools >
@@ -2631,6 +2636,19 @@ class CommandInterpreter:
         r = self.session.set_resistor_keepout(e)
         return (f"RESKEEPOUT: dielectric keep-out {e:g} um round the resistor ink; "
                 f"{len(r['cells'])} resistor(s) redrawn")
+
+    def _cmd_lock(self, args):
+        """LOCK [<ref,ref,...>|*] -- lock parts in place; no argument lists them."""
+        if not args:
+            refs = sorted(self.session.locked_parts(), key=lambda r: (len(r), r))
+            return "locked: " + (", ".join(refs) if refs else "none")
+        refs = self.session.lock_parts(" ".join(args).replace(" ", ","))
+        return "locked: " + ", ".join(refs)
+
+    def _cmd_unlock(self, args):
+        """UNLOCK [<ref,ref,...>|*] -- unlock parts (no argument: all)."""
+        refs = self.session.unlock_parts(" ".join(args).replace(" ", ",") if args else "*")
+        return "still locked: " + (", ".join(refs) if refs else "none")
 
     def _cmd_unroute(self, args):
         """UNROUTE -- delete the routing and go back to the SLI."""

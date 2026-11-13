@@ -43,6 +43,9 @@ _OWN_FIELDS = (
     ("Crossover dielectric gap (um)", "xo_diel_gap",
      "dielectric end stops this short of the contact"),
     ("Crossover contact (um)", "xo_contact", "COND1 contact square; 0 = track width"),
+    ("Nudge passes", "nudge_passes",
+     "PathFinder: move unlocked parts to finish what is left open; 0 = off"),
+    ("Nudge max move (um)", "nudge_max", "the most any one part moves in total"),
 )
 _LAYER_MODES = (("Auto (one conductor if nothing is on the 2nd)", "auto"),
                 ("One conductor -- wire-bond jumpers are the only crossings", "single"),
@@ -218,7 +221,7 @@ class AutorouteWindow(tk.Toplevel):
             own[key] = float(self.v[key].get() or 0)
             if own[key] < 0:
                 raise ValueError(key)
-        for key in ("ripup_passes", "grid", "max_jumpers"):
+        for key in ("ripup_passes", "grid", "max_jumpers", "nudge_passes"):
             own[key] = int(own[key])
         if own["jumper_cost"] <= 1 or own["crossover_cost"] <= 1:
             raise ValueError("cost")
@@ -255,6 +258,8 @@ class AutorouteWindow(tk.Toplevel):
     # ------------------------------------------------------------------ run
     def run(self):
         from ..scripting import hybridroute as H
+        if not getattr(self, "_nudging", False):
+            self._nudge = {"pass": 0, "best": None, "last": {}, "total": {}}
         try:
             rules, own = self._collect()
         except ValueError:
@@ -275,7 +280,8 @@ class AutorouteWindow(tk.Toplevel):
         except LayoutError as e:
             dialogs.show_error("Autoroute", str(e), parent=self)
             return
-        self.log.delete("1.0", "end")
+        if not getattr(self, "_nudging", False):
+            self.log.delete("1.0", "end")
         self.result.config(text="")
         self._say(f"{len(design['dies'])} die(s), {len(design['components'])} two-pin part(s), "
                   f"{len(design['substratePads'])} pad(s), {len(design['wires'])} fixed bond(s); "
@@ -403,6 +409,91 @@ class AutorouteWindow(tk.Toplevel):
                            ("#1e8e3e" if not st["unrouted"] else "#d56e00"))
         try:
             self.app.status.set(txt.splitlines()[0])
+        except Exception:
+            pass
+        if engine == "pathfinder":
+            self._nudge_after(st, routed, mapping)
+
+    # ------------------------------------------------------------- nudge
+    def _nudge_after(self, st, routed, mapping):
+        """After a PathFinder route: keep the best result; if connections are
+        still open and nudge passes are left, move unlocked parts out of their
+        way (scripting.nudge) and route again. A pass that routes no more than
+        the best has its moves undone and the best routing put back."""
+        from ..scripting import hybridroute as H
+        from ..scripting import nudge as NG
+        N = getattr(self, "_nudge", None) or {"pass": 0, "best": None, "last": {}, "total": {}}
+        self._nudge = N
+        s, cell = self.session, mapping["cell"]
+        own = H.load_settings(s.library)
+        passes, cap = int(own.get("nudge_passes", 0) or 0), float(own.get("nudge_max", 500) or 0)
+        n = int(st["stats"].get("routed", 0))
+        best = N["best"]
+        if best is not None and n <= best["n"]:
+            self._say(f"nudge pass {N['pass']}: {n} routed, no better than {best['n']} -- "
+                      "moves undone, best routing put back")
+            H.unroute(s, cell)
+            NG.apply(s, cell, {r: (-dx, -dy) for r, (dx, dy) in N["last"].items()})
+            H.apply_routed(s, best["routed"], best["mapping"], remove_existing=True)
+            H.tidy(s, cell, True, best["routed"]["design"]["routing"]["orthogonal"],
+                   best["routed"]["design"]["rules"]["conductor"]["minSpaceUm"])
+            self._nudge_report(best["n"], best["conns"])
+            self.app.refresh_all()
+            return
+        if best is not None:
+            for r, (dx, dy) in N["last"].items():
+                tx, ty = N["total"].get(r, (0.0, 0.0))
+                N["total"][r] = (tx + dx, ty + dy)
+        N["best"] = {"n": n, "conns": int(st["stats"].get("connections", 0)),
+                     "routed": routed, "mapping": mapping}
+        N["last"] = {}
+        if not st.get("unrouted") or N["pass"] >= passes or passes <= 0:
+            if N["pass"]:
+                self._nudge_report(n, N["best"]["conns"])
+            return
+        traces = [(t["net"], float(t["widthUm"]), [(q["x"], q["y"]) for q in t["points"]])
+                  for t in routed.get("traces") or []]
+        try:
+            pl = NG.plan(routed["design"], routed.get("unrouted") or [],
+                         locked=s.locked_parts(cell), max_move=cap, traces=traces)
+        except Exception as e:
+            self._say(f"nudge: {e}")
+            return
+        moves = {}
+        for r, (dx, dy) in pl["moves"].items():
+            tx, ty = N["total"].get(r, (0.0, 0.0))
+            if (tx + dx) ** 2 + (ty + dy) ** 2 <= cap * cap + 1e-6:
+                moves[r] = (dx, dy)
+        for w in pl["why"]:
+            self._say("  " + w)
+        if not moves:
+            self._say("nudge: no unlocked part can move to help -- stopping")
+            if N["pass"]:
+                self._nudge_report(n, N["best"]["conns"])
+            return
+        N["pass"] += 1
+        N["last"] = moves
+        self._say(f"nudge pass {N['pass']}: " + ", ".join(
+            f"{r} {dx / 1000:+.2f},{dy / 1000:+.2f} mm" for r, (dx, dy) in moves.items())
+            + " -- routing again")
+        H.unroute(s, cell)
+        NG.apply(s, cell, moves)
+        self.app.refresh_all()
+        self._nudging = True
+        try:
+            self.run()
+        finally:
+            self._nudging = False
+
+    def _nudge_report(self, n, conns):
+        tot = getattr(self, "_nudge", {}).get("total") or {}
+        moved = ", ".join(f"{r} {dx / 1000:+.2f},{dy / 1000:+.2f} mm"
+                          for r, (dx, dy) in sorted(tot.items()) if dx or dy)
+        txt = (f"\nNudge: {n} of {conns} routed; parts moved: {moved}" if moved
+               else f"\nNudge: {n} of {conns} routed; no part moved")
+        self._say(txt.strip())
+        try:
+            self.result.config(text=self.result.cget("text") + txt)
         except Exception:
             pass
 
