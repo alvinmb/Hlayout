@@ -164,6 +164,10 @@ class ThermalWindow(tk.Toplevel):
                                     width=_MAP_PIXELS, height=360)
         self.map_canvas.pack(fill="both", expand=True, padx=4, pady=4)
         self.map_canvas.bind("<Motion>", self._on_probe)
+        # redraw at the new size when the window (or the pane split) changes
+        self._map_size = (0, 0)
+        self._resize_job = None
+        self.map_canvas.bind("<Configure>", self._on_map_resize)
         self.map_canvas.bind("<Leave>", lambda e: self.probe_var.set(""))
         foot = ttk.Frame(map_frame)
         foot.pack(fill="x", padx=4)
@@ -528,12 +532,18 @@ class ThermalWindow(tk.Toplevel):
         avail_w = max(canvas.winfo_width(), 300) - _MAP_LEFT - _MAP_PAD - _LEGEND_W
         avail_h = max(canvas.winfo_height(), 200) - _MAP_TOP - _MAP_BOTTOM
         rgb = view.rgb
-        self._map_scale = max(1, min(avail_w // rgb.shape[1], avail_h // rgb.shape[0]))
+        ny_, nx_ = rgb.shape[:2]
+        # fill the space: any scale (not just whole pixels per cell), the
+        # board's aspect kept; cells drawn nearest-neighbour so bands stay sharp
+        self._map_scale = max(0.25, min(avail_w / nx_, avail_h / ny_))
         s = self._map_scale
         ox, oy = _MAP_LEFT, _MAP_TOP
         self._map_origin = (ox, oy)
-        iw, ih = rgb.shape[1] * s, rgb.shape[0] * s
-        png = rgb_to_png(rgb, s)
+        iw, ih = max(1, int(round(nx_ * s))), max(1, int(round(ny_ * s)))
+        rows = np.minimum((np.arange(ih) * ny_) // ih, ny_ - 1)
+        cols = np.minimum((np.arange(iw) * nx_) // iw, nx_ - 1)
+        self._map_px = (iw, ih)
+        png = rgb_to_png(rgb[rows][:, cols], 1)
         self._photo = tk.PhotoImage(data=base64.b64encode(png).decode("ascii"))
         canvas.delete("all")
         canvas.create_image(ox, oy, image=self._photo, anchor="nw", tags="map")
@@ -575,8 +585,9 @@ class ThermalWindow(tk.Toplevel):
         if event.x < ox or event.y < oy:
             self.probe_var.set("")
             return
-        i = (event.x - ox) // self._map_scale
-        j = ny - 1 - (event.y - oy) // self._map_scale       # image row 0 is the top
+        iw, ih = getattr(self, "_map_px", (nx, ny))
+        i = int((event.x - ox) * nx // iw) if iw else -1
+        j = ny - 1 - int((event.y - oy) * ny // ih) if ih else -1   # image row 0 is the top
         if 0 <= i < nx and 0 <= j < ny:
             t = self._map_grid[j, i]
             x, y = self.result.model.cell_center(j, i)
@@ -599,13 +610,27 @@ class ThermalWindow(tk.Toplevel):
         if part is None or not part.mask.any():
             return
         js, is_ = np.nonzero(part.mask)
-        ny = part.mask.shape[0]
-        s = self._map_scale
+        ny, nx = part.mask.shape
+        iw, ih = getattr(self, "_map_px", (nx, ny))
+        sx, sy = iw / nx, ih / ny
         ox, oy = getattr(self, "_map_origin", (0, 0))
         self.map_canvas.create_rectangle(
-            ox + int(is_.min()) * s - 2, oy + (ny - 1 - int(js.max())) * s - 2,
-            ox + (int(is_.max()) + 1) * s + 2, oy + (ny - int(js.min())) * s + 2,
+            ox + int(is_.min()) * sx - 2, oy + (ny - 1 - int(js.max())) * sy - 2,
+            ox + (int(is_.max()) + 1) * sx + 2, oy + (ny - int(js.min())) * sy + 2,
             outline="#ffffff", width=2, tags="mark")
+
+    def _on_map_resize(self, event):
+        size = (event.width, event.height)
+        if size == self._map_size:
+            return
+        self._map_size = size
+        if self._resize_job is not None:
+            self.after_cancel(self._resize_job)
+        self._resize_job = self.after(120, self._redraw_after_resize)
+
+    def _redraw_after_resize(self):
+        self._resize_job = None
+        self._draw_map()
 
     # -- outputs -----------------------------------------------------------
     def _need_result(self):
