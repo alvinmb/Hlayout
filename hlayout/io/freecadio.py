@@ -96,6 +96,9 @@ def substrate_thickness_um(library):
 #: Resistor glaze overprint: green, see-through (RGB 0..1, transparency %).
 _GLAZE_RGB = (0.20, 0.72, 0.35)
 _GLAZE_TRANSPARENCY = 55
+#: The printed dielectric is partly see-through, so the 1st-conductor track a
+#: crossover passes over still shows under it (transparency %).
+_DIELECTRIC_TRANSPARENCY = 40
 
 
 def dielectric_layer(library):
@@ -753,7 +756,8 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
             rgb = pad_rgb
         else:
             rgb = _rgb01(library.layers[n].color)
-        transp = _GLAZE_TRANSPARENCY if n in glazes else 0
+        transp = (_GLAZE_TRANSPARENCY if n in glazes
+                  else _DIELECTRIC_TRANSPARENCY if n == diel else 0)
         lines.append(f"# --- layer {n} ({library.layers[n].name}) : "
                      f"z {zb:.4f}..{zt:.4f} mm ---")
         lines.append("_s = []")
