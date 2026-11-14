@@ -152,7 +152,7 @@ def test_full_dielectric_via_cost_follows_crossover_cost():
 
 # ---- a die part with its own bonds and fingers (the chip_wire DIE_* cells)
 
-def _die_in_cell_board(finger_layer=5):
+def _die_in_cell_board(finger_layer=5, attach=False):
     """12 x 8 mm: die U1 whose cell carries its two pads (58), bonds (59)
     and bond fingers numbered like the pads on ``finger_layer``; each finger
     is wired to an edge pad."""
@@ -165,6 +165,8 @@ def _die_in_cell_board(finger_layer=5):
         s.rect(finger_layer, fx - 100, 1500, fx + 100, 1700, pin=pin)
         s.path(59, [(x, 0), (fx, 1600)], 30)
     s.rect(20, -400, -400, 400, 400)
+    if attach:                                     # an unnumbered die-attach pad on COND2
+        s.rect(5, -900, -900, 900, 900)
     s.new_cell("TOP")
     s.rect(57, 0, 0, 12000, 8000)
     for pin, (x, y) in {"1": (550, 550), "2": (11450, 550)}.items():
@@ -235,3 +237,30 @@ def test_a_connection_grown_from_a_dropped_one_is_dropped_too():
     # nothing dropped: both drawn
     out = PF._emit(d, P, G, routes, {}, ["A"], False, 0.0, lambda _m: None)
     assert out["stats"]["routed"] == 2 and len(out["traces"]) == 2
+
+
+def test_unnumbered_copper_in_a_die_part_is_kept_clear():
+    """A die-attach pad on the 2nd conductor in the die part (no pin, no
+    net) is copper: exported as a net-less pad, and no track touches it --
+    on ALU8 a COND2 track crossed one and shorted B7X to F7 through it."""
+    from shapely.geometry import LineString, box
+    s = _die_in_cell_board(attach=True)
+    s.cell.add_rectangle(3, 5450, 7000, 6550, 7600, pin="3")       # a pad above the die
+    s.cell.add_rectangle(3, 5450, 400, 6550, 1000, pin="4")        # and one below
+    s.set_net_names({"IO.1": "A", "U1.1": "A", "IO.2": "B", "U1.2": "B",
+                     "IO.3": "C", "IO.4": "C"})
+    H.save_settings(s.library, {"full_dielectric": True})
+    d, m = H.export_design(s, layers=2)
+    cu = [p for p in d["substratePads"] if p["id"].startswith("U1_COPPER")]
+    assert len(cu) == 1 and cu[0]["layer"] == "COND2" and cu[0]["net"].startswith("~NC")
+    r = H.pf_route(copy.deepcopy(d), m)
+    ox, oy = m["origin"]
+    att = box(6000 - 900 - ox, 3000 - 900 - oy, 6000 + 900 - ox, 3000 + 900 - oy)
+    sp = d["rules"]["conductor"]["minSpaceUm"]
+    for t in r["traces"]:
+        if t["layer"] != "COND2":
+            continue
+        g = LineString([(q["x"], q["y"]) for q in t["points"]]).buffer(t["widthUm"] / 2)
+        assert g.distance(att) >= sp - 1, t
+    H.apply_routed(s, r, m)
+    assert s.find_shorts() == []

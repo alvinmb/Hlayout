@@ -435,6 +435,23 @@ def export_design(session, cell_name: Optional[str] = None, layers: int = 1,
                           "spec": {"material": "GOLD",
                                    "diameterUm": max(1, int(round(float(br["width"]))))},
                           "fixed": True})
+        # unnumbered conductor copper in the die part (a die-attach pad, a
+        # seal ring): no net, but copper -- nothing may touch it, and the
+        # spacing applies. On the 2nd conductor only when that is routed.
+        xf_ = _xf(r)
+        dcell = lib.cells.get(r.cell_name)
+        for k_, shp in enumerate([sh for sh in (dcell.shapes if dcell else [])
+                                  if sh.layer in (la, lb) and not getattr(sh, "pin", "")
+                                  and isinstance(sh, (Rectangle, Polygon))]):
+            if shp.layer == lb and not two:
+                continue
+            q = [xf_(pt) for pt in shp.points]
+            ab = (min(p_[0] for p_ in q), min(p_[1] for p_ in q),
+                  max(p_[0] for p_ in q), max(p_[1] for p_ in q))
+            if shp.layer == la and any(not (ab[2] <= bb[0] or ab[0] >= bb[2] or ab[3] <= bb[1]
+                                             or ab[1] >= bb[3]) for bb in backside.values()):
+                continue                      # the backside contact's own pad
+            add_pad(f"{r.label}_COPPER{k_}", None, ab, layer=shp.layer)
         for pin, b in backside.items():           # a diode's cathode, a collector
             # the attach pad round the die is what a track can reach: the
             # widest strip of it outside the die (the router keeps tracks
