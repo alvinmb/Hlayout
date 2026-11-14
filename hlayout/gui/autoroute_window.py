@@ -56,9 +56,11 @@ _DIRECTIONS = (("1st conductor horizontal, 2nd vertical", "hv"),
 _TRACK_CAPS = (("Round (smooth -- thick-film default)", "round"),
                ("Square (butt ends squared off)", "square"),
                ("Flush (stops at the end point)", "flush"))
-_ENGINES = (("PathFinder -- negotiated congestion, completion first (slower)", "pathfinder"),
+_ENGINES = (("Auto -- picks the engine for the board (recommended)", "auto"),
+            ("PathFinder -- negotiated congestion; local crossovers, jumpers", "pathfinder"),
+            ("Freerouting -- gridless push-and-shove; full dielectric sheet", "freerouting"),
             ("Shape -- gridless Python (planar + printed-jumper crossovers)", "shape"),
-            ("Freerouting -- grid, Java", "java"))
+            ("Hybrid grid router -- Java (HybridRouterCli)", "java"))
 
 
 class AutorouteWindow(tk.Toplevel):
@@ -231,7 +233,7 @@ class AutorouteWindow(tk.Toplevel):
             self.v[key].set(f"{float(H[key]):g}")
         self.v["under_chips"].set(bool(H.get("under_chips", False)))
         self.v["full_dielectric"].set(bool(H.get("full_dielectric", False)))
-        eng = str(H.get("engine", "pathfinder"))
+        eng = str(H.get("engine", "auto"))
         self.v["engine"].set(next((t for t, v in _ENGINES if v == eng), _ENGINES[0][0]))
         self.v["power_nets"].set(", ".join(R.get("power_nets") or []))
         self.v["exclude_nets"].set(", ".join(R.get("exclude_nets") or []))
@@ -271,7 +273,7 @@ class AutorouteWindow(tk.Toplevel):
             own[key] = int(own[key])
         if own["jumper_cost"] <= 1 or own["crossover_cost"] <= 1:
             raise ValueError("cost")
-        own["engine"] = next((v for t, v in _ENGINES if t == self.v["engine"].get()), "pathfinder")
+        own["engine"] = next((v for t, v in _ENGINES if t == self.v["engine"].get()), "auto")
         own["under_chips"] = bool(self.v["under_chips"].get())
         own["full_dielectric"] = bool(self.v["full_dielectric"].get())
         for key in ("power_nets", "exclude_nets"):
@@ -348,7 +350,41 @@ class AutorouteWindow(tk.Toplevel):
         if mapping["unbonded"]:
             self._say("die pads the router will bond: " + ", ".join(mapping["unbonded"]))
         self._cancel, self._result, self._lines = False, None, []
-        self._opts = (rules, layers, own.get("engine", "pathfinder"))
+        engine = own.get("engine", "auto")
+        if engine == "auto":
+            engine, why = H.choose_engine(s, design, mapping, layers)
+            self._say(f"Auto engine: {engine} -- {why}")
+        fr_job = None
+        if engine == "freerouting":
+            # Freerouting proper: the DSN written here, the router on the
+            # worker thread, the session read back in _poll (main thread)
+            import os
+            import tempfile
+            from ..io import app_settings
+            from ..io.specctra import find_freerouting
+            exe = find_freerouting(app_settings.get_setting(app_settings.FREEROUTING_PATH_KEY))
+            if not exe:
+                dialogs.show_error("Autoroute", "Freerouting not found -- install it "
+                                   "(freerouting.app) and set its path in Setup > "
+                                   "Freerouting..., or pick another engine.", parent=self)
+                return
+            wd = os.path.join(tempfile.gettempdir(), "hlayout_freerouting")
+            os.makedirs(wd, exist_ok=True)
+            name = mapping["cell"]
+            dsn, ses = os.path.join(wd, f"{name}.dsn"), os.path.join(wd, f"{name}.ses")
+            if os.path.exists(ses):
+                os.remove(ses)
+            FR = s.freerouting_rules()
+            FR.update(layer_mode="two", remove_existing=not rules["keep_existing"],
+                      keep_existing=rules["keep_existing"])
+            s.export_dsn(dsn, cell_name=name, **FR)
+            cmd = s.freeroute_command(exe, dsn, ses, FR,
+                                      java=app_settings.get_setting(app_settings.JAVA_PATH_KEY))
+            fr_job = (cmd, ses, FR, name)
+            self._say(f"Freerouting: {FR.get('passes')} pass(es), "
+                      f"{FR.get('optimize_passes')} optimise pass(es)")
+        self._opts = (rules, layers, engine)
+        self._fr_job = fr_job
         self._min_space = design["rules"]["conductor"]["minSpaceUm"]
         self.run_btn.config(state="disabled")
         self.stop_btn.config(state="normal")
@@ -357,7 +393,14 @@ class AutorouteWindow(tk.Toplevel):
 
         def work():
             try:
-                if engine == "pathfinder":
+                if engine == "freerouting":
+                    from ..io.specctra import run_freerouting
+                    cmd, ses, _FR, _n = fr_job
+                    code, tail = run_freerouting(cmd, ses, timeout=None,
+                                                 on_line=self._lines.append,
+                                                 cancel=lambda: self._cancel)
+                    self._result = ("fr", (code, tail), mapping)
+                elif engine == "pathfinder":
                     routed = H.pf_route(design, mapping, on_line=self._lines.append,
                                         cancel=lambda: self._cancel)
                     self._result = ("ok", (0, routed, [], {}), mapping)
@@ -394,6 +437,9 @@ class AutorouteWindow(tk.Toplevel):
         kind, res, mapping = self._result
         if kind == "err":
             self.result.config(text=f"Failed: {res}", foreground="#c5221f")
+            return
+        if kind == "fr":
+            self._finish_freerouting(res)
             return
         code, routed, tail, paths = res
         if routed is None:
@@ -462,6 +508,58 @@ class AutorouteWindow(tk.Toplevel):
             pass
         if engine == "pathfinder":
             self._nudge_after(st, routed, mapping)
+
+    def _finish_freerouting(self, res):
+        """Read Freerouting's session back (main thread) and run the
+        clean-ups, as FREEROUTE RUN does; then the short-circuit check."""
+        import os
+        code, tail = res
+        cmd, ses, FR, name = self._fr_job
+        s = self.session
+        if not os.path.exists(ses):
+            self.result.config(text="Freerouting wrote no result" + (
+                " (stopped)" if self._cancel else f" (exit {code})"), foreground="#c5221f")
+            return
+        self._say("reading the routing back ...")
+        self.update_idletasks()
+        try:
+            out = s.import_ses(ses, cell_name=name, **FR)
+            if FR.get("via_optimize"):
+                vo = s.optimize_vias(cell_name=name, **FR)
+                self._say(f"via optimisation: {vo['before']} -> {vo['after']} via(s)")
+            if FR.get("shorten_tracks", True):
+                sh = s.shorten_tracks(cell_name=name, **FR)
+                self._say(f"shortened: {sh['tracks']} track(s)")
+            if FR.get("remove_jogs", True):
+                dj = s.remove_jogs(cell_name=name, **FR)
+                self._say(f"jogs removed: {dj['jogs']}")
+        except LayoutError as e:
+            self.result.config(text=f"Failed: {e}", foreground="#c5221f")
+            return
+        self.app.canvas.recalc_sli()
+        self.app.refresh_all()
+        nets = out.get("nets", 0)
+        txt = (("Stopped -- " if self._cancel else "") +
+               f"Freerouting: {out.get('complete', 0)} of {nets} nets complete, "
+               f"{out.get('wires', 0)} "
+               f"track(s), {out.get('vias', 0)} via(s).")
+        un = out.get("unrouted") or []
+        if un:
+            txt += f"\nStill unrouted ({len(un)}): " + ", ".join(un[:12]) + (
+                " ..." if len(un) > 12 else "")
+        shorts = s.find_shorts(cell_name=name)
+        for x in shorts:
+            self._say("SHORT CIRCUIT: " + " + ".join(x["nets"]))
+        if shorts:
+            txt += f"\n{len(shorts)} SHORT CIRCUIT(S) -- see the log (SHORTS lists them)."
+        self._say("short-circuit check: " + (f"{len(shorts)} found" if shorts else
+                                             "no nets joined"))
+        self.result.config(text=txt, foreground="#c5221f" if shorts else
+                           ("#1e8e3e" if not un else "#d56e00"))
+        try:
+            self.app.status.set(txt.splitlines()[0])
+        except Exception:
+            pass
 
     # ------------------------------------------------------------- nudge
     def _nudge_after(self, st, routed, mapping):

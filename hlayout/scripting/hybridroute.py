@@ -39,7 +39,7 @@ SETTINGS_KEY = "hybrid_route_settings"   # tech_params: the window's choices
 #: the nets to leave unrouted, shorten tracks and remove jogs are the
 #: Autoroute (Freerouting) rules', shared by both routers.
 DEFAULTS = {"max_jumpers": 0, "jumper_cost": 50.0, "crossover_cost": 10.0, "grid": 100,
-            "ripup_passes": 3, "engine": "pathfinder",
+            "ripup_passes": 3, "engine": "auto",
             # printed crossover geometry (um): local dielectric past the bridge
             # each side; dielectric end -> COND1 contact gap; contact square
             # (0 = the track width)
@@ -1297,6 +1297,23 @@ def hybrid_route(session, cell_name: Optional[str] = None, layers: Optional[int]
                                     grid=grid, orthogonal=orthogonal, ripup_passes=ripup_passes,
                                     exclude_nets=exclude_nets,
                                     keep_existing=not remove_existing)
+    if engine == "auto":
+        engine, why = choose_engine(session, design, mapping, layers)
+        if on_line:
+            on_line(f"Auto engine: {engine} -- {why}")
+    if engine == "freerouting":
+        # Freerouting proper (Specctra round trip) on a full dielectric sheet
+        name = mapping["cell"]
+        fr = session.freeroute(cell_name=name, timeout=timeout, on_line=on_line, cancel=cancel,
+                               layer_mode="two", remove_existing=bool(remove_existing),
+                               keep_existing=not remove_existing)
+        un = list(fr.get("unrouted") or [])
+        return {"engine": "freerouting", "layers": 2, "cell": name, "freerouting": fr,
+                "traces": fr.get("wires", 0), "windows": fr.get("vias", 0), "crossovers": 0,
+                "jumpers": 0, "bonds": 0, "removed_tracks": 0,
+                "stats": {"connections": fr.get("nets", 0), "routed": fr.get("complete", 0),
+                          "engine": "freerouting", "unit": "nets"},
+                "unrouted": [{"net": n} for n in un], "issues": [], "kept": {}}
     if engine == "pathfinder":
         # negotiated congestion (every net every round) -- completion first
         from . import pathfinder as _pf
@@ -1344,6 +1361,87 @@ def hybrid_route(session, cell_name: Optional[str] = None, layers: Optional[int]
         best["kept"] = st["kept"]
         return best
     return st
+
+
+#: Auto engine: SLI crossings per connection from which a board without
+#: printed resistors is routed on a full dielectric sheet by Freerouting
+DENSE_CROSSINGS = 0.3
+
+
+def sli_crossings(design) -> tuple:
+    """(crossings, connections) of the exported design's straight-line
+    interconnects: each net's pads joined by a shortest spanning tree, and
+    how often two nets' lines cross."""
+    from ..core.autoplace import seg_crossings
+    pts = {}
+    for p in design.get("substratePads") or []:
+        n = p.get("net") or ""
+        if n and not n.startswith("~"):
+            q = p["position"]
+            pts.setdefault(n, []).append((float(q["x"]), float(q["y"])))
+    for c in design.get("components") or []:
+        for key in ("pinA", "pinB"):
+            pin = c.get(key) or {}
+            n = pin.get("net") or ""
+            q = pin.get("position") or c.get("position")
+            if n and not n.startswith("~") and q:
+                pts.setdefault(n, []).append((float(q["x"]), float(q["y"])))
+    segs, conns = {}, 0
+    for n, ps in pts.items():
+        if len(ps) < 2:
+            continue
+        conns += len(ps) - 1
+        inside, rest, out = [ps[0]], ps[1:], []
+        while rest:                                   # Prim's spanning tree
+            a, b = min(((a, b) for a in inside for b in rest),
+                       key=lambda e: (e[0][0] - e[1][0]) ** 2 + (e[0][1] - e[1][1]) ** 2)
+            out.append((a, b))
+            inside.append(b)
+            rest.remove(b)
+        segs[n] = out
+    names = sorted(segs)
+    x = sum(seg_crossings(segs[a], segs[b]) for i, a in enumerate(names) for b in names[i + 1:])
+    return x, conns
+
+
+def choose_engine(session, design, mapping, layers: int) -> tuple:
+    """The engine for this board (Autoroute's Auto): (engine, why).
+
+    * one conductor -- PathFinder (wire-bond jumpers are the crossings);
+    * pads or bond fingers on the 2nd conductor, or Full dielectric ticked
+      -- a full dielectric sheet: Freerouting (gridless, push-and-shove),
+      else PathFinder in its full-dielectric mode if Freerouting is not
+      installed;
+    * printed resistors -- PathFinder: local crossovers keep the
+      dielectric off the ink, which a full sheet can't;
+    * otherwise by density: DENSE_CROSSINGS or more straight-line
+      crossings per connection -- Freerouting; fewer -- PathFinder."""
+    from ..io import app_settings
+    from ..io.specctra import find_freerouting
+    if int(layers) < 2:
+        return "pathfinder", "one conductor: wire-bond jumpers are the crossings"
+    fr = find_freerouting(app_settings.get_setting(app_settings.FREEROUTING_PATH_KEY))
+    n2 = sum(1 for p in design.get("substratePads") or []
+             if p.get("layer") == "COND2" and not str(p.get("net") or "").startswith("~"))
+    if n2 or mapping.get("full_dielectric"):
+        why = (f"{n2} pad(s) / bond finger(s) on the 2nd conductor" if n2
+               else "Full dielectric ticked") + ": a full dielectric sheet"
+        if fr:
+            return "freerouting", why
+        mapping["full_dielectric"] = True
+        return "pathfinder", why + " (Freerouting not installed: PathFinder, full dielectric)"
+    res = sum(1 for c in design.get("components") or []
+              if str(c.get("kind", "")).upper() == "PRINTED_RESISTOR")
+    if res:
+        return "pathfinder", (f"{res} printed resistor(s): local crossovers keep the "
+                              "dielectric off the ink")
+    x, conns = sli_crossings(design)
+    dens = x / conns if conns else 0.0
+    if dens >= DENSE_CROSSINGS and fr:
+        return "freerouting", (f"{x} straight-line crossing(s) over {conns} connection(s) "
+                               f"({dens:.2f} each): dense, a full dielectric sheet")
+    return "pathfinder", (f"{x} straight-line crossing(s) over {conns} connection(s) "
+                          f"({dens:.2f} each): a few local crossovers")
 
 
 def pf_route(design, mapping, on_line=None, cancel=None) -> dict:

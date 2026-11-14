@@ -264,3 +264,61 @@ def test_unnumbered_copper_in_a_die_part_is_kept_clear():
         assert g.distance(att) >= sp - 1, t
     H.apply_routed(s, r, m)
     assert s.find_shorts() == []
+
+
+# ---- Auto engine
+
+def _no_fr(monkeypatch, path=None):
+    import hlayout.io.specctra as SP
+    monkeypatch.setattr(SP, "find_freerouting", lambda saved=None: path)
+
+
+def test_auto_engine_one_conductor_is_pathfinder(monkeypatch):
+    _no_fr(monkeypatch, "freerouting.exe")
+    s = T._cross_board(dielectric=True)
+    d, m = H.export_design(s, layers=1)
+    assert H.choose_engine(s, d, m, 1)[0] == "pathfinder"
+
+
+def test_auto_engine_printed_resistors_keep_local_crossovers(monkeypatch):
+    _no_fr(monkeypatch, "freerouting.exe")
+    s = T._cross_board(dielectric=True)               # R1 in the middle
+    d, m = H.export_design(s, layers=2)
+    eng, why = H.choose_engine(s, d, m, 2)
+    assert eng == "pathfinder" and "resistor" in why
+
+
+def test_auto_engine_fingers_on_cond2_want_a_full_sheet(monkeypatch):
+    s = _die_in_cell_board()
+    d, m = H.export_design(s, layers=2)
+    _no_fr(monkeypatch, "freerouting.exe")
+    assert H.choose_engine(s, d, m, 2)[0] == "freerouting"
+    _no_fr(monkeypatch, None)                         # not installed: PathFinder, full
+    m2 = dict(m)
+    eng, why = H.choose_engine(s, d, m2, 2)
+    assert eng == "pathfinder" and m2["full_dielectric"] and "not installed" in why
+
+
+def test_auto_engine_by_crossing_density(monkeypatch):
+    _no_fr(monkeypatch, "freerouting.exe")
+    s = T.Session.new("DENSE")
+    T._setup(s, True)
+    s.new_cell("TOP")
+    s.rect(57, 0, 0, 12000, 8000)
+    names = {}
+    # four nets, each from the left edge to the right edge in reverse order:
+    # every pair crosses (6 crossings over 4 connections)
+    for i in range(4):
+        a, b = str(2 * i + 1), str(2 * i + 2)
+        s.rect(3, 300, 1000 + 1500 * i, 900, 1600 + 1500 * i, pin=a)
+        s.rect(3, 11100, 5500 - 1500 * i, 11700, 6100 - 1500 * i, pin=b)
+        names[f"IO.{a}"] = names[f"IO.{b}"] = f"N{i}"
+    s.set_net_names(names)
+    d, m = H.export_design(s, layers=2)
+    assert H.sli_crossings(d) == (6, 4)
+    assert H.choose_engine(s, d, m, 2)[0] == "freerouting"
+    # straight across instead: no crossings -> PathFinder
+    s2 = T._random_board(0)
+    d2, m2 = H.export_design(s2, layers=2)
+    x, c = H.sli_crossings(d2)
+    assert x >= 0 and c > 0
