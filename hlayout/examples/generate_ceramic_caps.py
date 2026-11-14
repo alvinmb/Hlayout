@@ -9,21 +9,25 @@ One cell per standard EIA chip size (0201 .. 2512). Each cell has:
 
   * a body-outline Path on LAYER 61, traced round the nominal body
     envelope (L x W);
-  * two epoxy-print pads on LAYER 20, one under each end termination --
-    the conductive-epoxy die-attach print for chip-and-wire assembly.
-    Each epoxy pad is the termination band grown by EPOXY_OVERSIZE_MM
-    on every side (so it's EPOXY_OVERSIZE_MM larger than the contact
-    it prints under, giving room for placement tolerance and a fillet).
-    Pads are pin-numbered "1" / "2" for netlist extraction.
+  * two printed conductor pads on LAYER 3 (the 1st routing conductor),
+    pin-numbered "1" / "2" for netlist extraction: each end termination
+    grown by PAD_OVERSIZE_MM past the body end and on both sides (the
+    inner edge stays at the termination's), so the land shows round the
+    part and gives the epoxy fillet somewhere to sit;
+  * two conductive-epoxy prints on LAYER 20, one under each termination,
+    inset EPOXY_INSET_MM inside it (the epoxy must not spread past the
+    termination towards the other pad).
+
+The termination length is the one the 3D models use
+(hlayout.core.smdlib: TERMINAL_LENGTH_FRACTION of the body length, at
+most TERMINAL_LENGTH_MAX_MM), so pad, epoxy and model always agree.
 
 Component origin is the BOTTOM-LEFT corner of the body outline: the
-body spans (0, 0) to (L, W); the epoxy pads poke EPOXY_OVERSIZE_MM
-past that, as a real epoxy print does. This matches
-hlayout.io.component_library's 3D STEP models exactly (also
+body spans (0, 0) to (L, W); the pads poke PAD_OVERSIZE_MM past that.
+This matches hlayout.io.component_library's 3D STEP models exactly (also
 bottom-left origin in X/Y), so a cell built here and one built there
 sharing the same name (e.g. CAP_1210) substitute correctly in File >
-Export to FreeCAD: the 3D body lands on the real footprint instead of
-offset by the body size.
+Export to FreeCAD.
 
 Run:  python hlayout/examples/generate_ceramic_caps.py
 """
@@ -44,19 +48,18 @@ from hlayout.core.units import mm_to_dbu
 
 TARGET_GDS = os.path.join(_root, "hlayout", "examples", "chip_wire.gds")
 
+PAD_LAYER = 3
 EPOXY_LAYER = 20
 OUTLINE_LAYER = 61
 OUTLINE_WIDTH_MM = 0.05
 
-#: Epoxy print oversize -- the epoxy pad extends this far beyond the end
-#: termination it prints under, on every edge.
-EPOXY_OVERSIZE_MM = 0.2
+#: The conductor pad extends this far past the body end and the body sides.
+PAD_OVERSIZE_MM = 0.2
+#: The epoxy print sits this far inside the termination on every edge.
+EPOXY_INSET_MM = 0.05
 
-#: End-termination band as a fraction of body length, capped -- a
-#: generic nominal (real chip terminals run ~a quarter to a third of
-#: body length on small sizes); not per-manufacturer datasheet values.
-TERM_FRACTION = 0.25
-TERM_MAX_MM = 0.6
+from hlayout.core.smdlib import TERMINAL_LENGTH_FRACTION as TERM_FRACTION  # noqa: E402
+from hlayout.core.smdlib import TERMINAL_LENGTH_MAX_MM as TERM_MAX_MM  # noqa: E402
 
 #: EIA chip size -> (length_mm, width_mm), nominal body envelope.
 CHIP_SIZES_MM = {
@@ -76,17 +79,22 @@ def _build_cap(cell, length_mm, width_mm):
     L = mm_to_dbu(length_mm)
     W = mm_to_dbu(width_mm)
     band = mm_to_dbu(min(length_mm * TERM_FRACTION, TERM_MAX_MM))
-    e = mm_to_dbu(EPOXY_OVERSIZE_MM)
+    o = mm_to_dbu(PAD_OVERSIZE_MM)
+    i = mm_to_dbu(EPOXY_INSET_MM)
 
     # body outline (layer 61) -- origin at the bottom-left corner
     cell.add_path(OUTLINE_LAYER,
                   [(0, 0), (L, 0), (L, W), (0, W), (0, 0)],
                   width=mm_to_dbu(OUTLINE_WIDTH_MM), cap="flush")
 
-    # epoxy print pads (layer 20): each end's termination band, grown by
-    # e on all four sides.
-    cell.add_rectangle(EPOXY_LAYER, -e, -e, band + e, W + e, pin="1")
-    cell.add_rectangle(EPOXY_LAYER, L - band - e, -e, L + e, W + e, pin="2")
+    # conductor pads (layer 3): each termination, grown past the body end
+    # and both sides; the inner edge stays at the termination's
+    cell.add_rectangle(PAD_LAYER, -o, -o, band, W + o, pin="1")
+    cell.add_rectangle(PAD_LAYER, L - band, -o, L + o, W + o, pin="2")
+
+    # conductive epoxy (layer 20): inside each termination
+    cell.add_rectangle(EPOXY_LAYER, i, i, band - i, W - i)
+    cell.add_rectangle(EPOXY_LAYER, L - band + i, i, L - i, W - i)
 
 
 def main():
@@ -111,10 +119,8 @@ def main():
     for size in CHIP_SIZES_MM:
         L, Wd = CHIP_SIZES_MM[size]
         band = min(L * TERM_FRACTION, TERM_MAX_MM)
-        pad_l = band + 2 * EPOXY_OVERSIZE_MM
-        pad_w = Wd + 2 * EPOXY_OVERSIZE_MM
-        print(f"  CAP_{size}: body {L:.2f} x {Wd:.2f} mm  "
-              f"epoxy pad {pad_l:.2f} x {pad_w:.2f} mm  (band {band:.2f} + {EPOXY_OVERSIZE_MM} each side)")
+        print(f"  CAP_{size}: body {L:.2f} x {Wd:.2f} mm  pad {band + PAD_OVERSIZE_MM:.2f} x "
+              f"{Wd + 2 * PAD_OVERSIZE_MM:.2f} mm  gap between pads {L - 2 * band:.2f} mm")
 
 
 if __name__ == "__main__":
