@@ -106,7 +106,8 @@ def _disk(r_cells):
 def route(design: dict, cell: float = 100.0, iterations: int = 60,
           on_line=None, cancel=None, local_dielectric: bool = True, cond2_keepouts=None,
           time_budget: Optional[float] = None, via_cost: float = 3000.0,
-          cond2_factor: float = 2.5, bend_cost: Optional[float] = None, **_ignored) -> dict:
+          cond2_factor: float = 2.5, bend_cost: Optional[float] = None, rescue: bool = True,
+          **_ignored) -> dict:
     """Route ``design`` (the hybrid.json design dict) with PathFinder. See the
     module doc. ``iterations`` caps the negotiation rounds, ``time_budget``
     (s) the run; ``via_cost`` (um of track) is what a crossover's via pair
@@ -637,6 +638,76 @@ def route(design: dict, cell: float = 100.0, iterations: int = 60,
                 break
             kept.discard(worst)
             drop.setdefault(worst[0], set()).add(worst[1])
+
+    # ---- rescue: what is still open, routed net by net against the settled
+    # board (everything kept, nothing dropped) with overlapping made all but
+    # impossible -- crossovers allowed as in the rounds. Kept only if the net
+    # then overlaps nothing and routes more than it did; else put back.
+    open_nets = [n for n in order if n in final and (drop.get(n) or final[n].get("fail"))]
+    if open_nets and not stopped and rescue:
+        for L in (0, 1):
+            occ[L][...] = 0
+        occv[...] = 0
+        own.clear()
+        routes.clear()
+        for nm, r in final.items():
+            dc = drop.get(nm, set())
+            conns = [p_ for i_, p_ in enumerate(r["conns"]) if i_ not in dc]
+            routes[nm] = {"cells": list(dict.fromkeys(c_ for p_ in conns for c_ in p_)),
+                          "conns": conns, "fail": list(r.get("fail") or [])}
+            mark(nm, +1)
+        rescued = 0
+        for n in open_nets:
+            if cancel is not None and cancel():
+                break
+            before = len(routes[n]["conns"])
+            saved = routes[n]
+            mark(n, -1)
+            route_net(n, 1e6)
+            mark(n, +1)
+            ok = not conflicts() and len(routes[n]["conns"]) > before
+            if ok:
+                rescued += len(routes[n]["conns"]) - before
+                final[n] = dict(routes[n])
+                drop.pop(n, None)
+                continue
+            mark(n, -1)
+            routes[n] = saved
+            mark(n, +1)
+            # still nothing: find the nets in its way (route it once letting it
+            # overlap), rip one up, route this net first and that one round
+            # it; kept only if together they route more and overlap nothing
+            mark(n, -1)
+            route_net(n, 3.0)
+            mark(n, +1)
+            in_way = [b for b in conflicts() if b != n and b in routes]
+            mark(n, -1)
+            routes[n] = saved
+            mark(n, +1)
+            for b in in_way[:3]:
+                b_before, b_saved = len(routes[b]["conns"]), routes[b]
+                mark(n, -1)
+                mark(b, -1)
+                routes.pop(b, None)
+                route_net(n, 1e6)
+                mark(n, +1)
+                route_net(b, 1e6)
+                mark(b, +1)
+                gain = (len(routes[n]["conns"]) + len(routes[b]["conns"])) - (before + b_before)
+                if not conflicts() and gain > 0:
+                    rescued += gain
+                    for x in (n, b):
+                        final[x] = dict(routes[x])
+                        drop.pop(x, None)
+                    say(f"rescue: {n} routed after re-routing {b} round it")
+                    break
+                mark(n, -1)
+                mark(b, -1)
+                routes[n], routes[b] = saved, b_saved
+                mark(n, +1)
+                mark(b, +1)
+        if rescued:
+            say(f"rescue: {rescued} more connection(s) routed against the settled board")
     return _emit(design, P, G, final, drop, order, stopped, t_start, say)
 
 
