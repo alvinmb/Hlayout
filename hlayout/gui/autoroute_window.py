@@ -185,7 +185,7 @@ class AutorouteWindow(tk.Toplevel):
         self.log_tab = lf
         logf = ttk.Frame(lf)
         logf.pack(fill="both", expand=True)
-        self.log = tk.Text(logf, width=70, height=16, wrap="none", font=("Consolas", 10))
+        self.log = tk.Text(logf, width=70, height=16, wrap="none", font=("Consolas", 12))
         logsb = ttk.Scrollbar(logf, command=self.log.yview)
         self.log.configure(yscrollcommand=logsb.set)
         logsb.pack(side="right", fill="y")
