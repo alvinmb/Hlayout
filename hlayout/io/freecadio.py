@@ -718,6 +718,14 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
                                            datatype=1 if n == diel else None)
         except Exception:
             continue
+        # a printed film exists only on the substrate: what lies off it (a
+        # header's seal pads, a package's footprint lands) belongs to that
+        # part's own 3D model, not to the print stack
+        if g is not None and sub_geom is not None and not g.is_empty:
+            try:
+                g = g.intersection(sub_geom)
+            except Exception:
+                g = g.buffer(0).intersection(sub_geom.buffer(0))
         if g is not None and not g.is_empty and list(_iter_polygons(g)):
             film_geoms[n] = g
     z = 0.0

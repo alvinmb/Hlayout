@@ -41,7 +41,6 @@ INNER_W = 26.0              # cavity width (Y): 1.57 mm from each pin row to the
 END_MARGIN = 2.27           # cavity end wall to the end pin centre (X)
 PIN_D = 0.46                # Kovar pin (0.018 in)
 SEAL_D = 1.60               # glass bead through the floor
-MENISCUS_H = 0.25           # glass meniscus climbing the pin inside the cavity
 PIN_IN = 2.0                # pin above the floor, inside the package
 PIN_OUT = 5.0               # pin below the package
 
@@ -82,19 +81,11 @@ def make_body(n):
 
 
 def make_seals(n):
+    """Each pin's glass-to-metal seal: a bead filling the floor's hole round
+    the pin, flush with the floor top and bottom."""
     pts = [(x, y) for _p, x, y in pin_sites(n)]
-    bead = cq.Workplane("XY").pushPoints(pts).circle(SEAL_D / 2.0) \
+    return cq.Workplane("XY").pushPoints(pts).circle(SEAL_D / 2.0) \
         .circle(PIN_D / 2.0).extrude(FLOOR)
-    # a shallow glass meniscus wetting up the pin from the floor
-    men = None
-    for x, y in pts:
-        m = (cq.Workplane("XY").workplane(offset=FLOOR).center(x, y)
-             .circle(SEAL_D / 2.0).workplane(offset=MENISCUS_H)
-             .circle(PIN_D / 2.0 + 0.05).loft()
-             .cut(cq.Workplane("XY").workplane(offset=FLOOR).center(x, y)
-                  .circle(PIN_D / 2.0).extrude(MENISCUS_H)))
-        men = m if men is None else men.union(m)
-    return bead.union(men)
 
 
 def make_pins(n):
