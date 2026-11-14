@@ -115,7 +115,7 @@ def test_header_package_goes_under_the_substrate_and_header_bonds_are_wires():
              if c["command"] == "solid.box"}
     pk = boxes["40_PIN_pkg_1"]
     assert pk["corner"][2] + pk["height"] <= -0.635 + 1e-6             # under the substrate
-    assert abs(boxes["U1"]["height"] - 0.38) < 1e-6
+    assert abs(boxes["U1"]["height"] - 0.5) < 1e-6
 
 
 def test_freecad_macro_package_under_substrate_die_body_and_all_bonds(tmp_path):
@@ -147,7 +147,7 @@ def test_freecad_macro_package_under_substrate_die_body_and_all_bonds(tmp_path):
     txt = open(write_freecad_macro(lib, "TOP", str(tmp_path / "m.FCMacro"))).read()
     assert "package 40_PIN_pkg (base under the substrate)" in txt
     assert "Header_wire_Bond" not in txt.split("# --- wire bonds")[0]   # not a film
-    assert "extrude 0.3800 mm" in txt
+    assert "extrude 0.5000 mm" in txt
     die_block = txt.split("# --- component DIE_X")[1].split("_add(")[0]
     assert "9.3" in die_block and "8.3" not in die_block                 # body only
 
@@ -171,8 +171,9 @@ def test_3d_stack_skips_empty_layers_and_header_pins_stand_on_the_base(tmp_path)
           for c in b[1] if c["command"] == "sketch.create"}
     assert abs(sk["L49 L49 posts sketch"] + 0.635) < 1e-6
     txt = open(write_freecad_macro(lib, "TOP", str(tmp_path / "m.FCMacro"))).read()
-    assert "layer 49 (L49) : z 0.0120..0.0220 mm" in txt
-    assert "V(1.00000,-3.00000,-0.63500)" in txt
+    # FreeCAD clips every film to the substrate: the off-board pin is the
+    # package model's, not a film
+    assert "layer 49 (L49)" not in txt and "-3.00000" not in txt
 
 
 def test_freecad_enclosing_package_model_goes_under_the_substrate(tmp_path):

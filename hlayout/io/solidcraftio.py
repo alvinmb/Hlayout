@@ -34,9 +34,9 @@ from .techfile import (DEFAULT_COMPONENT_HEIGHT_UM, default_component_models,
 SIMPLIFY_UM = 1.0
 COMPONENT_HEX = "#26262b"
 PACKAGE_HEX = "#8a8f96"          # header / package base under the substrate
-#: a bare chip-and-wire die (a part carrying its own wire bonds) with no
+#: a bare chip-and-wire die (its own wire bonds, or pads on a die-pad layer) with no
 #: height of its own in the component models: a typical die thickness
-DIE_HEIGHT_UM = 380.0
+DIE_HEIGHT_UM = F.DIE_HEIGHT_UM     # the FreeCAD export's, so both agree
 #: an enclosing package (header) the substrate sits on: its base depth
 PACKAGE_BASE_UM = 500.0
 SUBSTRATE_HEX = "#f7f7f2"
@@ -310,8 +310,8 @@ def build_batches(library, cell_name: str, *, layer_thickness=None, component_mo
         base = F._rest_z(surf, fx0, fy0, fx1, fy1)
         if "height_um" in entry:
             h = _mm(float(entry["height_um"]))
-        elif any(sh.layer in bond_layers for sh in c.shapes):
-            h = _mm(DIE_HEIGHT_UM)               # a bare die with its own bonds
+        elif any(sh.layer in bond_layers for sh in c.shapes) or F._is_bare_die(library, cn):
+            h = _mm(DIE_HEIGHT_UM)               # a bare die (bonds in it or on the board)
         else:
             h = _mm(DEFAULT_COMPONENT_HEIGHT_UM)
         part_cmds.append(
