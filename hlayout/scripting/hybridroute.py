@@ -46,7 +46,10 @@ DEFAULTS = {"max_jumpers": 0, "jumper_cost": 50.0, "crossover_cost": 10.0, "grid
             "xo_diel_side": 300.0, "xo_diel_gap": 300.0, "xo_contact": 0.0,
             # nudge: after a PathFinder route, move unlocked parts to let what
             # is left open through (passes; most any part moves in total, um)
-            "nudge_passes": 3, "nudge_max": 500.0}
+            "nudge_passes": 3, "nudge_max": 500.0,
+            # a 1st-conductor track may run under a chip part, between its
+            # terminals (the spacing rules still apply to the terminals)
+            "under_chips": False}
 
 
 def layers_for(session, rules=None) -> int:
@@ -483,8 +486,14 @@ def export_design(session, cell_name: Optional[str] = None, layers: int = 1,
                 by0, by1 = by0 - 0.5, by0 + 0.5
             cx, cy = (bx0 + bx1) / 2, (by0 + by1) / 2
             printed = res is not None
-            # nothing -- no track, no jumper land -- goes under a part
-            obstacle = ["COND1", "COND2"] if two else ["COND1"]
+            # nothing -- no track, no jumper land -- goes under a part; with
+            # "under_chips" a 1st-conductor track may pass under a chip part,
+            # between its terminals (spacing to them still holds). Never a
+            # crossover (its dielectric would lift the part), never under a
+            # printed resistor
+            under = bool(load_settings(lib).get("under_chips", False)) and not printed
+            obstacle = (["COND2"] if two else []) if under else \
+                (["COND1", "COND2"] if two else ["COND1"])
 
             def pin(b, p):
                 return {"net": _net(names, f"{r.label}.{p}") or f"~NC_{r.label}.{p}",
@@ -767,6 +776,7 @@ def ortho_strip(bridge, diel_w: float, gap: float, land: float):
     total = sum(_m.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(pts, pts[1:]))
     if total <= 2 * d:
         return None
+    ends = (pts[0], pts[-1])
     pts = cut(cut(pts)[::-1])[::-1] if d > 0 else pts
     # drop collinear corners: a straight run kept as two legs is not a bend
     q = [pts[0]]
@@ -795,8 +805,17 @@ def ortho_strip(bridge, diel_w: float, gap: float, land: float):
         rects.append(box(lo, c - h, hi, c + h) if horiz else box(c - h, lo, c + h, hi))
     if not rects:
         return None
-    g = unary_union(rects).simplify(0.5, preserve_topology=True)
-    if g.geom_type != "Polygon":
+    g = unary_union(rects)
+    if d > 0:
+        # each contact and its gap stay bare whatever the leg lengths: a leg
+        # next to a short end leg, grown sideways, would otherwise run back
+        # over the contact (the joint would be under dielectric -- open)
+        for (ex, ey) in ends:
+            g = g.difference(box(ex - d, ey - d, ex + d, ey + d))
+    g = g.simplify(0.5, preserve_topology=True)
+    if g.geom_type == "MultiPolygon":
+        g = max(g.geoms, key=lambda q: q.area)      # the part under the bridge's middle
+    if g.is_empty or g.geom_type != "Polygon":
         return None
     return [(int(round(x)), int(round(y))) for x, y in list(g.exterior.coords)[:-1]]
 

@@ -198,3 +198,21 @@ def test_ortho_strip_is_one_90_degree_polygon_clear_of_the_contacts():
     # no room for any dielectric between the contacts
     assert ortho_strip([(0, 0), (800, 0)], W, GAP, LAND) is None
 
+
+def test_ortho_strip_never_covers_a_contact_after_a_short_end_leg():
+    """A 300 um first leg then a turn: the next leg grown sideways must not
+    run back over the contact (PRE+AMP U1B-- was left open that way)."""
+    from shapely.geometry import Polygon, box
+    from hlayout.scripting.hybridroute import ortho_strip
+    W, GAP, LAND = 900, 300, 300
+    for bridge in ([(32000, -13200), (32000, -12900), (32300, -12900), (32300, -10400),
+                    (32700, -10400)],
+                   [(0, 0), (0, 200), (2000, 200), (2000, 2000)]):
+        p = ortho_strip(bridge, W, GAP, LAND)
+        assert p is not None
+        assert all(p[i][0] == p[i - 1][0] or p[i][1] == p[i - 1][1] for i in range(len(p)))
+        g = Polygon(p)
+        for e in (bridge[0], bridge[-1]):
+            contact = box(e[0] - LAND / 2, e[1] - LAND / 2, e[0] + LAND / 2, e[1] + LAND / 2)
+            assert g.distance(contact) >= GAP - 1, (bridge, e)
+

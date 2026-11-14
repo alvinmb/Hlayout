@@ -57,8 +57,11 @@ def features(design) -> List[dict]:
     out = []
     for c in design.get("components") or []:
         cx, cy = float(c["centre"]["x"]), float(c["centre"]["y"])
+        # "passable": a 1st-conductor track may run under it (under_chips);
+        # it still counts when parts are moved (bodies may not overlap)
         out.append({"rect": SR._comp_body_rect(c), "owner": c["refdes"], "net": None,
-                    "kind": "body", "chip": c.get("kind") == "CHIP"})
+                    "kind": "body", "chip": c.get("kind") == "CHIP",
+                    "passable": "COND1" not in (c.get("obstacleLayers") or [])})
         for k in ("pinA", "pinB"):
             q = c.get(k)
             if q:
@@ -132,7 +135,7 @@ def blockers(design, net, a_tid, b_tid, cell=100.0, soft=20.0) -> Optional[dict]
         if t.net == net:
             own |= G.cover(t.rect, 0.5)[0]
     for f in feats:
-        if f["net"] == net:
+        if f["net"] == net or f.get("passable"):
             continue
         need = _need(f, w, sp)
         win, d = _dist_map(G, f["rect"], need)
@@ -189,7 +192,7 @@ def blockers(design, net, a_tid, b_tid, cell=100.0, soft=20.0) -> Optional[dict]
     hits = {}
     for (x, y) in path:
         for fi, f in enumerate(feats):
-            if f["net"] == net:
+            if f["net"] == net or f.get("passable"):
                 continue
             r = f["rect"]
             need = _need(f, w, sp)
@@ -229,7 +232,7 @@ def bottleneck(path, feats, net, w, sp, traces, reach=4000.0, step=3):
         horiz = abs(x1 - x0) >= abs(y1 - y0)       # path runs along x: cut is along y
         lo = hi = None                             # (gap, fi) below/left and above/right
         for fi, f in enumerate(feats):
-            if f["net"] == net:
+            if f["net"] == net or f.get("passable"):
                 continue
             r = f["rect"]
             if horiz:

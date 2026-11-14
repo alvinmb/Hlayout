@@ -145,7 +145,12 @@ class AutorouteWindow(tk.Toplevel):
         ttk.Combobox(of, textvariable=self.v["engine"], state="readonly", width=52,
                      values=[t for t, _v in _ENGINES]).grid(row=0, column=1, columnspan=2,
                                                             sticky="w", pady=(0, 6))
-        own_rows(of, ("ripup_passes", "grid", "max_jumpers", "jumper_cost", "crossover_cost"), 1)
+        n_ = own_rows(of, ("ripup_passes", "grid", "max_jumpers", "jumper_cost", "crossover_cost"), 1)
+        self.v["under_chips"] = tk.BooleanVar()
+        ttk.Checkbutton(of, text="Allow tracks under chip parts, between their terminals "
+                        "(1st conductor only; spacing to the terminals still applies)",
+                        variable=self.v["under_chips"]).grid(row=n_, column=0, columnspan=3,
+                                                            sticky="w", padx=4, pady=(6, 0))
 
         # ---- Crossovers
         xf = tab("Crossovers")
@@ -218,6 +223,7 @@ class AutorouteWindow(tk.Toplevel):
             self.v[key].set(f"{float(R[key]):g}")
         for _l, key, _n in _OWN_FIELDS:
             self.v[key].set(f"{float(H[key]):g}")
+        self.v["under_chips"].set(bool(H.get("under_chips", False)))
         eng = str(H.get("engine", "pathfinder"))
         self.v["engine"].set(next((t for t, v in _ENGINES if v == eng), _ENGINES[0][0]))
         self.v["power_nets"].set(", ".join(R.get("power_nets") or []))
@@ -259,6 +265,7 @@ class AutorouteWindow(tk.Toplevel):
         if own["jumper_cost"] <= 1 or own["crossover_cost"] <= 1:
             raise ValueError("cost")
         own["engine"] = next((v for t, v in _ENGINES if t == self.v["engine"].get()), "pathfinder")
+        own["under_chips"] = bool(self.v["under_chips"].get())
         for key in ("power_nets", "exclude_nets"):
             rules[key] = [x.strip() for x in self.v[key].get().split(",") if x.strip()]
         rules["layer_mode"] = next((v for t, v in _LAYER_MODES if t == self.v["layer_mode"].get()),
