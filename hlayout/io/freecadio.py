@@ -574,9 +574,9 @@ def _rest_z(surf_geoms, x0, y0, x1, y1):
 BOND_RGB = (0.831, 0.686, 0.216)
 BOND_DIAMETER_UM = 100.0
 
-#: a bare chip-and-wire die (a part carrying its own wire bonds) with no
-#: height of its own in the component models: a typical die thickness
-DIE_HEIGHT_UM = 380.0
+#: a bare chip-and-wire die (pads on a die-pad layer, or its own wire
+#: bonds) with no height of its own in the component models
+DIE_HEIGHT_UM = 500.0
 #: an enclosing package (header) the substrate sits on: its base depth
 PACKAGE_BASE_UM = 500.0
 _PACKAGE_RGB = (0.54, 0.56, 0.59)
@@ -596,6 +596,24 @@ def all_bond_layers(library) -> set:
     out |= {n for n in drawn if 0 <= n < len(library.layers)
             and "bond" in (library.layers[n].name or "").lower()}
     return out
+
+
+def _is_bare_die(library, cell_name) -> bool:
+    """A bare die: the part draws pads on a die-pad layer (Wire Bond rules),
+    in its own cell or a cell it places -- whether its bonds are drawn in it
+    or on the board."""
+    pads = isolated_pad_layers(library)
+    if not pads:
+        return False
+
+    def walk(name, depth=0):
+        c = library.cells.get(name)
+        if c is None or depth > 8:
+            return False
+        if any(sh.layer in pads for sh in c.shapes):
+            return True
+        return any(walk(r.cell_name, depth + 1) for r in c.srefs)
+    return walk(cell_name)
 
 
 def _carries_bonds(library, cell_name, bond_layers) -> bool:
@@ -889,8 +907,8 @@ def write_freecad_macro(library: Library, cell_name: str, path: str, *,
         corners = [xf((x0, y0)), xf((x1, y0)), xf((x1, y1)), xf((x0, y1))]
         if "height_um" in entry:
             h_mm = _mm(float(entry["height_um"]))
-        elif _carries_bonds(library, cn, bond_layers):
-            h_mm = _mm(DIE_HEIGHT_UM)            # a bare die with its own bonds
+        elif _carries_bonds(library, cn, bond_layers) or _is_bare_die(library, cn):
+            h_mm = _mm(DIE_HEIGHT_UM)            # a bare die (bonds drawn in it or on the board)
         else:
             h_mm = _mm(DEFAULT_COMPONENT_HEIGHT_UM)
         lines.append(f"# --- component {cn} (extrude {h_mm:.4f} mm) ---")
