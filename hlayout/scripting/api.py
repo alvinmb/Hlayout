@@ -6204,7 +6204,9 @@ class Session:
         """Delete the routing and go back to the SLI (one undo step): every
         track (unpinned path on either conductor) and what Hybrid Route added
         -- crossover / jumper lands, local dielectric strips, jumper bonds.
-        Pads, parts and die bonds stay. Returns {"tracks", "added"}."""
+        Flat vias from any router (pads on both conductors and the window)
+        go too. Pads, parts and die bonds stay. Returns {"tracks", "added",
+        "vias"}."""
         from . import hybridroute
         return hybridroute.unroute(self, cell_name=cell_name)
 

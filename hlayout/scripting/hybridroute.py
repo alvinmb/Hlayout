@@ -1044,7 +1044,10 @@ def unroute(session, cell_name: Optional[str] = None) -> dict:
     track (an unpinned path on either conductor) and everything Hybrid Route
     drew for its crossovers and jumpers -- the via / jumper lands, the local
     dielectric strips, the jumper bonds. Pads, parts, die bonds and anything
-    with a pin stay. Returns {"tracks", "added"} -- how many of each went."""
+    with a pin stay. Vias drawn flat in the cell by any router (Freerouting
+    included) go too: a square pad on both conductors at one centre, with no
+    pin, and its window on the dielectric layer. Returns {"tracks", "added",
+    "vias"} -- how many of each went."""
     lib = session.library
     name = cell_name or session.current_cell_name
     cell = lib.get_cell(name)
@@ -1054,12 +1057,32 @@ def unroute(session, cell_name: Optional[str] = None) -> dict:
     except ValueError:
         old = {}
     sigs = {tuple(x) for x in (old.get(name) or [])}
-    out = {"tracks": 0, "added": 0}
+    out = {"tracks": 0, "added": 0, "vias": 0}
+    # flat vias (any router's): the pads on both conductors and the window
+    from ..io.specctra import find_vias
+    from ..io.techfile import load_dielectric_rules
+    vsites = {(x, y) for x, y, _w in find_vias(cell, (la, lb))}
+    try:
+        diel = int(load_dielectric_rules(lib).get("layer", -1))
+    except Exception:
+        diel = -1
+
+    def via_part(sh):
+        if getattr(sh, "pin", "") or sh.layer not in (la, lb, diel) or hasattr(sh, "width") \
+                or getattr(sh, "datatype", 0) != 0:
+            return False
+        x0, y0, x1, y1 = sh.bbox()
+        if abs((x1 - x0) - (y1 - y0)) > max(2, 0.02 * (x1 - x0)) or x1 - x0 > 5000:
+            return False
+        return (round((x0 + x1) / 2), round((y0 + y1) / 2)) in vsites
     with session._batch():
         keep = []
         for sh in cell.shapes:
             if (sh.layer, *map(round, sh.bbox())) in sigs:
                 out["added"] += 1
+                continue
+            if vsites and via_part(sh):
+                out["vias"] += sh.layer == la
                 continue
             if isinstance(sh, Path) and sh.layer in (la, lb) and not getattr(sh, "pin", ""):
                 out["tracks"] += 1

@@ -3090,7 +3090,8 @@ class App(tk.Tk):
             return
         self.canvas.recalc_sli()
         self.refresh_all()
-        self.status.set(f"Unrouted: {r['tracks']} track(s) and {r['added']} router-added "
+        self.status.set(f"Unrouted: {r['tracks']} track(s), {r.get('vias', 0)} via(s) and "
+                        f"{r['added']} router-added "
                         "shape(s) deleted -- Ctrl+Z to undo")
 
     def fan_out_die_bonds(self):

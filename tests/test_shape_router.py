@@ -322,3 +322,24 @@ def test_crossover_dims_are_user_defined():
     assert P.strip_w(300) == 700 and P.contact(300) == 400 and P.trim(300) == 450
     # foreign COND1 keeps half the contact + gap + side from a contact's centre
     assert P.xclr("A") == 200 + 250 + 200
+
+
+def test_unroute_takes_out_flat_vias_from_any_router():
+    """A via another router drew (pads on both conductors + its window, no
+    pin, not on the Hybrid Route list) is routing too: Unroute takes it out,
+    and leaves pinned pads and a lone conductor square alone."""
+    from hlayout.core.shapes import Rectangle
+    s = _cross_board(dielectric=True)
+    pads = sorted(sh.bbox() for sh in s.cell.shapes if isinstance(sh, Rectangle) and sh.pin)
+    c = s.cell
+    for x in (5000, 7000):
+        c.add_rectangle(3, x - 150, 4850, x + 150, 5150)
+        c.add_rectangle(5, x - 150, 4850, x + 150, 5150)
+        c.add_rectangle(DIEL, x - 250, 4750, x + 250, 5250)
+    lone = c.add_rectangle(3, 9850, 4850, 10150, 5150)          # COND1 only: not a via
+    r = s.unroute()
+    assert r["vias"] == 2
+    left = [(sh.layer, sh.bbox()) for sh in c.shapes]
+    assert (3, lone.bbox()) in left
+    assert not any(l == DIEL for l, _b in left)
+    assert sorted(sh.bbox() for sh in c.shapes if isinstance(sh, Rectangle) and sh.pin) == pads
