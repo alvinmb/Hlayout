@@ -4277,6 +4277,29 @@ def increment_pin_str(pin: str) -> str:
     return pin
 
 
+def _locked_refs(library, cell_name) -> set:
+    """The ref-des locked in ``cell_name`` (Session.locked_parts' store)."""
+    import json as _json
+    try:
+        d = _json.loads(library.tech_params.get("locked_parts") or "{}")
+    except (ValueError, AttributeError):
+        d = {}
+    return set(d.get(cell_name) or []) if cell_name else set()
+
+
+def _set_locked_refs(library, cell_name, refs):
+    import json as _json
+    try:
+        d = _json.loads(library.tech_params.get("locked_parts") or "{}")
+    except ValueError:
+        d = {}
+    if refs:
+        d[cell_name] = sorted(refs, key=lambda r: (len(r), r))
+    else:
+        d.pop(cell_name, None)
+    library.tech_params["locked_parts"] = _json.dumps(d)
+
+
 def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
     """A small property-edit form for the selected shape or sref.
     `checkpoint`, if given, is called once -- right before the shape's
@@ -4375,6 +4398,17 @@ def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
         # Wizard. Numbers or names ("E", "B", "C") both work: pins are
         # matched as text against the netlist.
         add_field("Pin", getattr(shape, "pin", ""))
+        # Lock: the part stays where it is -- Auto Place keeps it, the
+        # router's nudge pass never moves it and the canvas puts it back
+        # (stored per cell by ref-des, as LOCK / Session.lock_parts do)
+        lock_var = tk.BooleanVar(value=bool(shape.label) and shape.label in
+                                 _locked_refs(parent.library, getattr(parent, "cell_name", None)))
+        entries["__lock__"] = lock_var
+        ttk.Checkbutton(win, text="Locked (Auto Place, the router's nudge and the canvas "
+                        "leave it where it is; needs a Label)",
+                        variable=lock_var).grid(row=row, column=0, columnspan=2, sticky="w",
+                                                padx=6, pady=3)
+        row += 1
 
     def on_ok(event=None):
         try:
@@ -4443,6 +4477,18 @@ def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
                 shape.x_reflection = bool(int(entries["Mirror (0/1)"].get()))
             else:  # sref
                 old_label = shape.label
+                new_label = entries["Label"].get().strip()
+                want_lock = bool(entries["__lock__"].get())
+                if want_lock and not new_label:
+                    raise ValueError("a part needs a Label (ref-des) to be locked")
+                cname = getattr(parent, "cell_name", None)
+                if cname:
+                    refs = _locked_refs(parent.library, cname)
+                    refs.discard(old_label)
+                    refs.discard(new_label)
+                    if want_lock:
+                        refs.add(new_label)
+                    _set_locked_refs(parent.library, cname, refs)
                 shape.label = entries["Label"].get()
                 shape.pin = entries["Pin"].get().strip()
                 label_height = int(round(float(entries["Label Size (px)"].get())))
