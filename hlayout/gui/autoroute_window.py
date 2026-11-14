@@ -378,9 +378,15 @@ class AutorouteWindow(tk.Toplevel):
             FR.update(layer_mode="two", remove_existing=not rules["keep_existing"],
                       keep_existing=rules["keep_existing"])
             s.export_dsn(dsn, cell_name=name, **FR)
-            cmd = s.freeroute_command(exe, dsn, ses, FR,
-                                      java=app_settings.get_setting(app_settings.JAVA_PATH_KEY))
-            fr_job = (cmd, ses, FR, name)
+            java = app_settings.get_setting(app_settings.JAVA_PATH_KEY)
+            cmd = s.freeroute_command(exe, dsn, ses, FR, java=java)
+            # stage 1: route only (no optimiser) to its own file, so Stop
+            # during the long optimisation still has a routing to read back
+            ses0 = os.path.join(wd, f"{name}_routed.ses")
+            if os.path.exists(ses0):
+                os.remove(ses0)
+            cmd0 = s.freeroute_command(exe, dsn, ses0, dict(FR, optimize_passes=0), java=java)
+            fr_job = (cmd, ses, FR, name, cmd0, ses0)
             self._say(f"Freerouting: {FR.get('passes')} pass(es), "
                       f"{FR.get('optimize_passes')} optimise pass(es)")
         self._opts = (rules, layers, engine)
@@ -395,10 +401,18 @@ class AutorouteWindow(tk.Toplevel):
             try:
                 if engine == "freerouting":
                     from ..io.specctra import run_freerouting
-                    cmd, ses, _FR, _n = fr_job
-                    code, tail = run_freerouting(cmd, ses, timeout=None,
+                    cmd, ses, FR_, _n, cmd0, ses0 = fr_job
+                    self._lines.append("Freerouting stage 1: routing (no optimiser)")
+                    code, tail = run_freerouting(cmd0, ses0, timeout=None,
                                                  on_line=self._lines.append,
                                                  cancel=lambda: self._cancel)
+                    if not self._cancel and int(FR_.get("optimize_passes") or 0) > 0 \
+                            and os.path.exists(ses0):
+                        self._lines.append("Freerouting stage 2: routing + optimiser -- Stop "
+                                           "keeps the stage 1 routing")
+                        code, tail = run_freerouting(cmd, ses, timeout=None,
+                                                     on_line=self._lines.append,
+                                                     cancel=lambda: self._cancel)
                     self._result = ("fr", (code, tail), mapping)
                 elif engine == "pathfinder":
                     routed = H.pf_route(design, mapping, on_line=self._lines.append,
@@ -514,12 +528,17 @@ class AutorouteWindow(tk.Toplevel):
         clean-ups, as FREEROUTE RUN does; then the short-circuit check."""
         import os
         code, tail = res
-        cmd, ses, FR, name = self._fr_job
+        cmd, ses, FR, name, _cmd0, ses0 = self._fr_job
         s = self.session
         if not os.path.exists(ses):
-            self.result.config(text="Freerouting wrote no result" + (
-                " (stopped)" if self._cancel else f" (exit {code})"), foreground="#c5221f")
-            return
+            if os.path.exists(ses0):
+                self._say("using the stage 1 routing (Freerouting's optimiser "
+                          + ("stopped)" if self._cancel else "wrote nothing)"))
+                ses = ses0
+            else:
+                self.result.config(text="Freerouting wrote no result" + (
+                    " (stopped)" if self._cancel else f" (exit {code})"), foreground="#c5221f")
+                return
         self._say("reading the routing back ...")
         self.update_idletasks()
         try:
