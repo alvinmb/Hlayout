@@ -815,6 +815,37 @@ def _emit(design, P, G, routes, drop, order, stopped, t_start, say):
         for q in (c["a"], c["b"]):
             xy = (float(q["x"]), float(q["y"]))
             cop.append((c["net"], land, xy, xy))
+    # a crossover that, once everything has settled, passes over no other
+    # net's COND1 never needed the 2nd conductor (the negotiation took it
+    # when that stretch was busy): lay it on COND1 along the same line, if
+    # that keeps every clearance; its contacts and dielectric go
+    kept_xo, dropped_xo = [], 0
+    for c in crossovers:
+        n, w = c["net"], float(c["widthUm"])
+        br = [(float(q["x"]), float(q["y"])) for q in c["bridge"]]
+        ends = {(float(c["a"]["x"]), float(c["a"]["y"])), (float(c["b"]["x"]), float(c["b"]["y"]))}
+        crosses = False
+        for n2, w2, a_, b_ in cop:
+            if n2 == n or a_ == b_:
+                continue
+            for p_, q_ in zip(br, br[1:]):
+                if SR._seg_seg_dist(p_[0], p_[1], q_[0], q_[1], a_[0], a_[1], b_[0], b_[1]) < \
+                        (w + w2) / 2.0:
+                    crosses = True
+                    break
+            if crosses:
+                break
+        if not crosses:
+            others = [x for x in cop if not (x[0] == n and x[2] == x[3] and x[2] in ends)]
+            if _clear_of(P, n, w, br, others, P.layers[0]):
+                cop = others + [(n, w, a_, b_) for a_, b_ in zip(br, br[1:])]
+                pending.append((n, w, br, lambda _p: None))
+                dropped_xo += 1
+                continue
+        kept_xo.append(c)
+    if dropped_xo:
+        say(f"{dropped_xo} crossover(s) no longer needed: laid on the 1st conductor")
+    crossovers = kept_xo
     jogs_before = jogs_after = 0
     for idx, (n, w, pts, centre_of) in enumerate(pending):
         others = [x for x in cop if x[0] != n]
