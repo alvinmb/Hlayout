@@ -360,6 +360,7 @@ def export_design(session, cell_name: Optional[str] = None, layers: int = 1,
 
     die_refs = set()
     unbonded = []
+    n_cell_bonds = 0              # die bonds drawn inside the die parts
     nofly = []                    # (ref, world box) no jumper may fly over
     for r in cell.srefs:
         if not r.label:
@@ -370,7 +371,17 @@ def export_design(session, cell_name: Optional[str] = None, layers: int = 1,
         die_refs.add(r.label)
         boxes = _pinned_boxes(lib, r.cell_name, set(pad_layers), _xf(r))
         db = _world_bbox(lib, r, pad_layers) or _world_bbox(lib, r)
-        backside = _pinned_boxes(lib, r.cell_name, route, _xf(r))
+        # numbered conductor pads in the die part: a pad numbered like a die
+        # pad is that pad's bond finger, its bond drawn in the part (the
+        # chip_wire DIE_* cells, a die fanned out in its own cell); any other
+        # is a backside contact (a diode's cathode, a collector)
+        backside, cell_fingers = {}, {}
+        for lay in (la, lb):
+            for pin, bx in _pinned_boxes(lib, r.cell_name, {lay}, _xf(r)).items():
+                if pin in boxes:
+                    cell_fingers.setdefault(pin, (bx, lay))
+                elif lay in route:
+                    backside.setdefault(pin, bx)
         die = {"refdes": r.label, "partName": r.cell_name, "origin": P(db[0], db[1]),
                "rotation": "R0", "widthUm": max(1, int(round(db[2] - db[0]))),
                "heightUm": max(1, int(round(db[3] - db[1]))),
@@ -382,6 +393,20 @@ def export_design(session, cell_name: Optional[str] = None, layers: int = 1,
                                              "y": int(round((b[1] + b[3]) / 2 - db[1]))},
                                 "widthUm": max(1, int(round(b[2] - b[0]))),
                                 "heightUm": max(1, int(round(b[3] - b[1])))})
+            if pin in cell_fingers:
+                fbx, flay = cell_fingers[pin]
+                # on the 2nd conductor only where it is routed to as such
+                flay = flay if (two and flay == lb) else la
+                fid = add_pad(f"F_{r.label}_{pin}", _net(names, f"{r.label}.{pin}"), fbx,
+                              "BOND_FINGER", layer=flay)
+                wires.append({"id": f"W_{r.label}_{pin}", "net": _net(names, f"{r.label}.{pin}"),
+                              "from": {"kind": "DIE_PAD", "die": r.label, "pad": pin},
+                              "to": {"kind": "SUBSTRATE_PAD", "pad": fid},
+                              "spec": {"material": "GOLD",
+                                       "diameterUm": max(1, int(round(float(br["width"]))))},
+                              "fixed": True})
+                n_cell_bonds += 1
+                continue
             # its bond and finger, if it has them (Fan Out Die Bonds): fixed
             cx, cy = (b[0] + b[2]) / 2, (b[1] + b[3]) / 2
             found = session.find_wire_bond((cx, cy), layer=blay, cell_name=name,
@@ -710,6 +735,7 @@ def export_design(session, cell_name: Optional[str] = None, layers: int = 1,
                                        and load_settings(lib).get("full_dielectric")),
                "pads": [p["id"] for p in pads], "wires": [w["id"] for w in wires],
                "unbonded": unbonded, "bond_width": int(round(float(br["width"]))),
+               "cell_bonds": n_cell_bonds,
                "nofly": nofly, "keep_existing": bool(keep_existing),
                "kept": {"tracks": len(fixed), "joined": len(connected), "jumpers": kept_wires},
                "power_nets": sorted(n for n in all_nets if n.upper() in power),
@@ -1310,6 +1336,11 @@ def pf_route(design, mapping, on_line=None, cancel=None) -> dict:
     outside the dielectric sheet and its holes), not the local ones."""
     from . import pathfinder as _pf
     full = bool(mapping.get("full_dielectric"))
+    n2 = sum(1 for p in design.get("substratePads") or [] if p.get("layer") == "COND2")
+    if n2 and not full and on_line:
+        on_line(f"WARNING: {n2} pad(s) / bond finger(s) are on the 2nd conductor; without "
+                "Full dielectric PathFinder reaches them on the 1st -- tick Full dielectric "
+                "(Router tab), or fan the dies out onto the 1st conductor")
     return _pf.route(design, local_dielectric=full or mapping.get("local_diel", -1) >= 0,
                      cond2_keepouts=None if full else mapping.get("local_keepouts"),
                      full_dielectric=full, on_line=on_line, cancel=cancel)

@@ -144,6 +144,11 @@ def route(design: dict, cell: float = 100.0, iterations: int = 60,
         if isinstance(cc_mm, (int, float)) and cc_mm >= 0:
             via_cost = float(cc_mm) * 1000.0            # mm of track -> um
     two_cond = local_dielectric or full         # COND2 allowed (strips, or the full layer)
+
+    def tl(t):
+        """The grid layer a terminal is reached on: its own conductor with a
+        full dielectric (a bond finger on COND2), else COND1."""
+        return 1 if full and len(P.layers) > 1 and t.layer == P.layers[1] else 0
     # preferred direction per layer (full dielectric only): 0 = COND1, 1 = COND2;
     # 'H' / 'V' or None, and the factor for a step against it
     pref = [P.dir_axis.get(P.layers[0]) if full else None,
@@ -400,7 +405,7 @@ def route(design: dict, cell: float = 100.0, iterations: int = 60,
             if gs > g.get(s, INF):
                 continue
             l, k, d = s
-            if l == 0 and (0, k) in tset and prev[s] is not None:
+            if (l, k) in tset and prev[s] is not None:
                 out = []
                 while s is not None:
                     out.append((s[0], s[1]))
@@ -557,7 +562,7 @@ def route(design: dict, cell: float = 100.0, iterations: int = 60,
             vc = [1.0] * G.n
         groups = [list(gr) for gr in P.groups[n]]
         tree_terms = groups.pop(0)
-        tree = [(0, G.idx(*t.centre)) for t in tree_terms]
+        tree = [(tl(t), G.idx(*t.centre)) for t in tree_terms]
         cells = list(tree)
         conns, fail = [], []
         while groups:
@@ -565,18 +570,18 @@ def route(design: dict, cell: float = 100.0, iterations: int = 60,
             groups.sort(key=lambda gr: min(math.hypot(s[0] - t.centre[0], s[1] - t.centre[1])
                                            for s in starts for t in gr))
             gr = groups.pop(0)
-            targets = {(0, G.idx(*t.centre)) for t in gr}
-            srcs = [c_ for c_ in cells if c_[0] == 0]
+            targets = {(tl(t), G.idx(*t.centre)) for t in gr}
+            srcs = [c_ for c_ in cells if c_[0] == 0 or full]
             path = astar(n, srcs, targets, c[0], c[1], vc)
             if path is None:
                 fail.append({"net": n, "from": tree_terms[0].tid, "to": gr[0].tid})
                 tree_terms = gr                              # grow on from here
-                cells += [(0, G.idx(*t.centre)) for t in gr]
+                cells += [(tl(t), G.idx(*t.centre)) for t in gr]
                 continue
             path = straighten(n, path, c[0], c[1])
             conns.append(path)
             cells += path
-            cells += [(0, G.idx(*t.centre)) for t in gr]
+            cells += [(tl(t), G.idx(*t.centre)) for t in gr]
             tree_terms = tree_terms + gr
         routes[n] = {"cells": list(dict.fromkeys(cells)), "conns": conns, "fail": fail}
 
@@ -906,7 +911,7 @@ def _emit(design, P, G, routes, drop, order, stopped, t_start, say, full=False, 
                     runs.append([l, [xy]])
                 else:
                     runs[-1][1].append(xy)
-            for l, pts in runs:
+            for ri, (l, pts) in enumerate(runs):
                 pts = [p for i, p in enumerate(pts) if i == 0 or p != pts[i - 1]]
                 if l == 0:
                     if len(pts) >= 2:
@@ -922,7 +927,10 @@ def _emit(design, P, G, routes, drop, order, stopped, t_start, say, full=False, 
                                        "a": {"x": int(round(br[0][0])), "y": int(round(br[0][1]))},
                                        "b": {"x": int(round(br[-1][0])), "y": int(round(br[-1][1]))},
                                        "bridge": [{"x": int(round(x)), "y": int(round(y))}
-                                                  for x, y in br]})
+                                                  for x, y in br],
+                                       # a layer change at this end (full dielectric:
+                                       # a COND2 pad / COND2 branch needs no via)
+                                       "_via": (ri > 0, ri < len(runs) - 1)})
     # line each run's ends up on its pads' centres -- where the shift (under
     # half a cell) keeps it clear of every other net's copper; else it stays
     cop = [(n, w, a, b) for n, w, pts, _c in pending for a, b in zip(pts, pts[1:])]
@@ -944,8 +952,8 @@ def _emit(design, P, G, routes, drop, order, stopped, t_start, say, full=False, 
         n, w = c["net"], float(c["widthUm"])
         br = [(float(q["x"]), float(q["y"])) for q in c["bridge"]]
         ends = {(float(c["a"]["x"]), float(c["a"]["y"])), (float(c["b"]["x"]), float(c["b"]["y"]))}
-        crosses = False
-        for n2, w2, a_, b_ in cop:
+        crosses = not all(c.get("_via", (True, True)))   # on a COND2 pad / branch: stays
+        for n2, w2, a_, b_ in ([] if crosses else cop):
             if n2 == n or a_ == b_:
                 continue
             for p_, q_ in zip(br, br[1:]):
@@ -976,7 +984,9 @@ def _emit(design, P, G, routes, drop, order, stopped, t_start, say, full=False, 
         for c in crossovers:
             traces.append({"net": c["net"], "layer": c2, "widthUm": c["widthUm"],
                            "points": [dict(q) for q in c["bridge"]]})
-            for q in (c["a"], c["b"]):
+            for q, via in zip((c["a"], c["b"]), c.get("_via", (True, True))):
+                if not via:
+                    continue
                 key = (c["net"], q["x"], q["y"])
                 if key in seen:
                     continue
@@ -986,6 +996,8 @@ def _emit(design, P, G, routes, drop, order, stopped, t_start, say, full=False, 
                                 "fromLayer": P.layers[0], "toLayer": c2,
                                 "padUm": c["landUm"], "openingUm": o})
         crossovers = []
+    for c in crossovers:
+        c.pop("_via", None)
     jogs_before = jogs_after = 0
     for idx, (n, w, pts, centre_of) in enumerate(pending):
         others = [x for x in cop if x[0] != n]

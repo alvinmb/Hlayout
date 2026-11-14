@@ -148,3 +148,59 @@ def test_full_dielectric_via_cost_follows_crossover_cost():
     _d, _m, cheap = _full(s, crossover_cost=0.5)
     _d, _m, dear = _full(s, crossover_cost=50.0)
     assert len(cheap["windows"]) >= len(dear["windows"])
+
+
+# ---- a die part with its own bonds and fingers (the chip_wire DIE_* cells)
+
+def _die_in_cell_board(finger_layer=5):
+    """12 x 8 mm: die U1 whose cell carries its two pads (58), bonds (59)
+    and bond fingers numbered like the pads on ``finger_layer``; each finger
+    is wired to an edge pad."""
+    s = T.Session.new("DIE")
+    T._setup(s, True)
+    s.new_cell("DIE_X")
+    for pin, x in (("1", -200), ("2", 200)):
+        s.rect(58, x - 50, -50, x + 50, 50, pin=pin)
+        fx = x * 8
+        s.rect(finger_layer, fx - 100, 1500, fx + 100, 1700, pin=pin)
+        s.path(59, [(x, 0), (fx, 1600)], 30)
+    s.rect(20, -400, -400, 400, 400)
+    s.new_cell("TOP")
+    s.rect(57, 0, 0, 12000, 8000)
+    for pin, (x, y) in {"1": (550, 550), "2": (11450, 550)}.items():
+        s.rect(3, x - 300, y - 300, x + 300, y + 300, pin=pin)
+    s.sref("DIE_X", (6000, 3000), label="U1")
+    s.set_net_names({"IO.1": "A", "U1.1": "A", "IO.2": "B", "U1.2": "B"})
+    return s
+
+
+def test_die_bonds_drawn_in_the_die_part_are_fixed_bonds():
+    s = _die_in_cell_board()
+    d, m = H.export_design(s, layers=2)
+    assert m["unbonded"] == [] and m["cell_bonds"] == 2
+    fingers = {p["id"]: p for p in d["substratePads"] if p["role"] == "BOND_FINGER"}
+    assert set(fingers) == {"F_U1_1", "F_U1_2"}
+    assert all(p["layer"] == "COND2" for p in fingers.values())
+    assert all(w["fixed"] for w in d["wires"])
+    # not taken for backside contacts (no attach-pad strips round the die)
+    assert not any(p["id"].startswith("U1_") for p in d["substratePads"])
+    d1, m1 = H.export_design(s, layers=1)                  # one conductor: on COND1
+    assert all(p["layer"] == "COND1" for p in d1["substratePads"]
+               if p["role"] == "BOND_FINGER")
+
+
+def test_full_dielectric_routes_to_fingers_on_the_2nd_conductor():
+    s = _die_in_cell_board()
+    H.save_settings(s.library, {"full_dielectric": True})
+    d, m = H.export_design(s, layers=2)
+    r = H.pf_route(copy.deepcopy(d), m)
+    assert r["stats"]["routed"] == r["stats"]["connections"] == 2
+    st = H.apply_routed(s, r, m)
+    assert st["bonds"] == 0                                 # the part's own bonds stand
+    assert s.find_shorts() == []
+    # no via on a finger: a COND2 run that ends on its COND2 finger needs none
+    fpos = {(p["position"]["x"], p["position"]["y"]) for p in d["substratePads"]
+            if p["role"] == "BOND_FINGER"}
+    for w in r["windows"]:
+        q = (w["position"]["x"], w["position"]["y"])
+        assert all(abs(q[0] - x) > 150 or abs(q[1] - y) > 150 for x, y in fpos)
