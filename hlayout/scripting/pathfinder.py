@@ -875,6 +875,34 @@ def _emit(design, P, G, routes, drop, order, stopped, t_start, say, full=False, 
     for t in P.terminals:
         cell_terms.setdefault(G.idx(*t.centre), []).append(t)
 
+    # a connection grows from the net's copper so far: one that started on a
+    # connection now dropped would be left floating (a dangling track that
+    # reaches nothing) -- drop it too, and anything grown from it in turn
+    drop = {k: set(v) for k, v in (drop or {}).items()}
+    orphaned = 0
+    for n in order:
+        r = routes.get(n)
+        if r is None or not drop.get(n):
+            continue
+        reach = {G.idx(*t.centre) for gr in P.groups[n] for t in gr}
+        kept = set()
+        changed = True
+        while changed:
+            changed = False
+            for ci, path in enumerate(r["conns"]):
+                if ci in drop[n] or ci in kept or not path:
+                    continue
+                if path[0][1] in reach:
+                    kept.add(ci)
+                    reach |= {k for _l, k in path}
+                    changed = True
+        for ci in range(len(r["conns"])):
+            if ci not in kept and ci not in drop[n]:
+                drop[n].add(ci)
+                orphaned += 1
+    if orphaned:
+        say(f"{orphaned} connection(s) dropped with the one they grew from "
+            "(they would have reached nothing)")
     pending = []                          # (net, w, COND1 run, centre_of)
     for n in order:
         r = routes.get(n)

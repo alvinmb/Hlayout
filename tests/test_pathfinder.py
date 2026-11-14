@@ -204,3 +204,34 @@ def test_full_dielectric_routes_to_fingers_on_the_2nd_conductor():
     for w in r["windows"]:
         q = (w["position"]["x"], w["position"]["y"])
         assert all(abs(q[0] - x) > 150 or abs(q[1] - y) > 150 for x, y in fpos)
+
+
+def test_a_connection_grown_from_a_dropped_one_is_dropped_too():
+    """Net A: pads 1 (left), 2 (right) and 3 (top middle). Connection 0 runs
+    1 -> 2; connection 1 grows from the middle of it up to 3. With
+    connection 0 dropped, connection 1 would be a track from nowhere to pad
+    3: it must be dropped (and reported unrouted), not drawn."""
+    s = T.Session.new("ORPH")
+    T._setup(s, True)
+    s.new_cell("TOP")
+    s.rect(57, 0, 0, 12000, 8000)
+    for pin, (x, y) in {"1": (1050, 4050), "2": (10950, 4050), "3": (6050, 7050)}.items():
+        s.rect(3, x - 300, y - 300, x + 300, y + 300, pin=pin)
+    s.set_net_names({"IO.1": "A", "IO.2": "A", "IO.3": "A"})
+    d, m = H.export_design(s, layers=1)
+    P = PF.SR.ShapeProblem(d)
+    G = PF._Grid(P, 100.0)
+    ts = {t.tid: t for t in P.terminals}
+    k = lambda x, y: G.idx(x, y)
+    t1, t2, t3 = (ts[i].centre for i in ("IO1", "IO2", "IO3"))
+    row = [(0, k(x, t1[1])) for x in range(int(t1[0]), int(t2[0]) + 1, 100)]
+    mid = k(t3[0], t1[1])
+    col = [(0, k(t3[0], y)) for y in range(int(t1[1]), int(t3[1]) + 1, 100)]
+    assert col[0][1] == mid
+    routes = {"A": {"cells": row + col, "conns": [row, col], "fail": []}}
+    out = PF._emit(d, P, G, routes, {"A": {0}}, ["A"], False, 0.0, lambda _m: None)
+    assert out["traces"] == []
+    assert out["stats"]["routed"] == 0 and len(out["unrouted"]) == 2
+    # nothing dropped: both drawn
+    out = PF._emit(d, P, G, routes, {}, ["A"], False, 0.0, lambda _m: None)
+    assert out["stats"]["routed"] == 2 and len(out["traces"]) == 2
