@@ -151,6 +151,12 @@ class AutorouteWindow(tk.Toplevel):
                         "(1st conductor only; spacing to the terminals still applies)",
                         variable=self.v["under_chips"]).grid(row=n_, column=0, columnspan=3,
                                                             sticky="w", padx=4, pady=(6, 0))
+        self.v["full_dielectric"] = tk.BooleanVar()
+        ttk.Checkbutton(of, text="Full dielectric (PathFinder, two conductors): the 2nd conductor "
+                        "is a routing layer like the 1st,\nunder one dielectric sheet, joined by "
+                        "vias; Crossover cost is what a via is worth",
+                        variable=self.v["full_dielectric"]).grid(row=n_ + 1, column=0, columnspan=3,
+                                                                sticky="w", padx=4, pady=(4, 0))
 
         # ---- Crossovers
         xf = tab("Crossovers")
@@ -224,6 +230,7 @@ class AutorouteWindow(tk.Toplevel):
         for _l, key, _n in _OWN_FIELDS:
             self.v[key].set(f"{float(H[key]):g}")
         self.v["under_chips"].set(bool(H.get("under_chips", False)))
+        self.v["full_dielectric"].set(bool(H.get("full_dielectric", False)))
         eng = str(H.get("engine", "pathfinder"))
         self.v["engine"].set(next((t for t, v in _ENGINES if v == eng), _ENGINES[0][0]))
         self.v["power_nets"].set(", ".join(R.get("power_nets") or []))
@@ -266,6 +273,7 @@ class AutorouteWindow(tk.Toplevel):
             raise ValueError("cost")
         own["engine"] = next((v for t, v in _ENGINES if t == self.v["engine"].get()), "pathfinder")
         own["under_chips"] = bool(self.v["under_chips"].get())
+        own["full_dielectric"] = bool(self.v["full_dielectric"].get())
         for key in ("power_nets", "exclude_nets"):
             rules[key] = [x.strip() for x in self.v[key].get().split(",") if x.strip()]
         rules["layer_mode"] = next((v for t, v in _LAYER_MODES if t == self.v["layer_mode"].get()),
@@ -350,11 +358,8 @@ class AutorouteWindow(tk.Toplevel):
         def work():
             try:
                 if engine == "pathfinder":
-                    from ..scripting import pathfinder as PF
-                    routed = PF.route(design, local_dielectric=mapping.get("local_diel", -1) >= 0,
-                                      cond2_keepouts=mapping.get("local_keepouts"),
-                                      on_line=self._lines.append,
-                                      cancel=lambda: self._cancel)
+                    routed = H.pf_route(design, mapping, on_line=self._lines.append,
+                                        cancel=lambda: self._cancel)
                     self._result = ("ok", (0, routed, [], {}), mapping)
                 elif engine == "shape":
                     from ..scripting import shape_router as SR

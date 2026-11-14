@@ -32,6 +32,16 @@ COND2 is the printed crossover: costlier per mm than COND1 (so it is used
 to cross, not to travel), reached by a via whose land is kept off every
 pad; its runs become local-dielectric crossovers. The result is the same
 dict the other engines return, so apply_routed draws it unchanged.
+
+Full dielectric (``full_dielectric=True``): COND2 is a routing layer like
+COND1, under one dielectric sheet. It costs the same per mm, its copper
+claims only its own track width, each conductor keeps its preferred
+direction (going against it costs againstDirectionCost), and a change of
+layer is the design's via -- its footprint (pad or dielectric window, the
+larger) kept clear of other nets on both conductors -- worth the Autoroute
+Crossover cost in mm of track. COND2 runs come out as COND2 traces and the
+layer changes as via windows; apply_routed draws the vias and regenerates
+the dielectric fill.
 """
 import heapq
 import math
@@ -107,12 +117,14 @@ def route(design: dict, cell: float = 100.0, iterations: int = 60,
           on_line=None, cancel=None, local_dielectric: bool = True, cond2_keepouts=None,
           time_budget: Optional[float] = None, via_cost: float = 3000.0,
           cond2_factor: float = 2.5, bend_cost: Optional[float] = None, rescue: bool = True,
-          **_ignored) -> dict:
+          full_dielectric: bool = False, **_ignored) -> dict:
     """Route ``design`` (the hybrid.json design dict) with PathFinder. See the
     module doc. ``iterations`` caps the negotiation rounds, ``time_budget``
     (s) the run; ``via_cost`` (um of track) is what a crossover's via pair
     is worth, ``cond2_factor`` how much dearer COND2 is per mm. Returns the
-    shape router's result dict (traces, crossovers, unrouted, stats)."""
+    shape router's result dict (traces, crossovers, unrouted, stats).
+    ``full_dielectric``: COND2 a full routing layer under a dielectric
+    sheet, joined to COND1 by vias (see the module doc)."""
     import copy
     from scipy import ndimage
     say = on_line or (lambda _m: None)
@@ -124,20 +136,46 @@ def route(design: dict, cell: float = 100.0, iterations: int = 60,
     P = SR.ShapeProblem(design)
     G = _Grid(P, float(cell))
     ortho = P.orthogonal
-    two_cond = local_dielectric                 # COND2 crossovers (local strips) allowed
+    full = bool(full_dielectric) and len(P.layers) >= 2
+    rt_ = design.get("routing") or {}
+    if full:
+        cond2_factor = 1.0
+        cc_mm = rt_.get("crossoverCost")
+        if isinstance(cc_mm, (int, float)) and cc_mm >= 0:
+            via_cost = float(cc_mm) * 1000.0            # mm of track -> um
+    two_cond = local_dielectric or full         # COND2 allowed (strips, or the full layer)
+    # preferred direction per layer (full dielectric only): 0 = COND1, 1 = COND2;
+    # 'H' / 'V' or None, and the factor for a step against it
+    pref = [P.dir_axis.get(P.layers[0]) if full else None,
+            P.dir_axis.get(P.layers[1]) if full and len(P.layers) > 1 else None]
+    against = P.against if full else 1.0
     sp = P.min_space
     nets = sorted(P.groups)
     net_id = {n: k for k, n in enumerate(nets)}
     width = {n: P.width_of(n) for n in nets}
     # crossover geometry (user-defined): contact square, dielectric margins
-    hc_of = {n: P.contact(width[n]) / 2.0 for n in nets}
+    if full:
+        # a via is the design's one via: its footprint (pad or window, the
+        # larger) is copper as far as the clearances go, on both conductors
+        vkeep = float((design.get("rules") or {}).get("conductor", {}).get("windowMinUm") or 0)
+        nwin = rt_.get("netWindows") or {}
+        hc_of = {n: max(width[n], float(nwin.get(n, vkeep) or vkeep)) / 2.0 for n in nets}
+        xc_of = {n: hc_of[n] + sp for n in nets}
+    else:
+        hc_of = {n: P.contact(width[n]) / 2.0 for n in nets}
+        xc_of = {n: P.xclr(n) for n in nets}          # contact centre -> foreign COND1
     hc_max = max(hc_of.values()) if hc_of else P.min_line / 2.0
-    xc_of = {n: P.xclr(n) for n in nets}              # contact centre -> foreign COND1
+
+    def sw(w):
+        """Width COND2 copper claims: the track (full) or its local strip."""
+        return w if full else P.strip_w(w)
     xc_max = max(xc_of.values()) if xc_of else hc_max + sp
     if bend_cost is None:
         bend_cost = 2.0 * P.min_line
     say(f"PathFinder: {G.nx} x {G.ny} grid ({cell:g} um), {len(nets)} nets, "
-        f"{sum(len(P.groups[n]) - 1 for n in nets)} connections")
+        f"{sum(len(P.groups[n]) - 1 for n in nets)} connections"
+        + (f"; full dielectric, vias {via_cost / 1000:g} mm, directions "
+           f"{pref[0] or '-'}/{pref[1] or '-'}" if full else ""))
 
     # ---- what is where -------------------------------------------------------------
     # pad interiors: which net's pad a cell centre is in (-2: more than one)
@@ -207,8 +245,8 @@ def route(design: dict, cell: float = 100.0, iterations: int = 60,
     maps2 = {}
     if two_cond:
         for w in sorted(set(width.values())):
-            dhw = P.strip_w(w) / 2.0
-            hc = P.contact(w) / 2.0
+            dhw = sw(w) / 2.0
+            hc = hc_max if full else P.contact(w) / 2.0
             hard = np.zeros((G.ny, G.nx), bool)
             for r in part_rects:
                 hard |= G.cover(r, dhw)[0]
@@ -225,7 +263,8 @@ def route(design: dict, cell: float = 100.0, iterations: int = 60,
                 m = G.cover(t.rect, dhw + sp)[0]
                 cur = padnet[m]
                 padnet[m] = np.where((cur == -1) | (cur == k), k, -2)
-                hard |= G.cover(t.rect, hc + sp)[0]
+                if not full:              # full: via sites are kept off pads by vmap
+                    hard |= G.cover(t.rect, hc + sp)[0]
             maps2[w] = (hard, padnet)
     # via sites: the contact, its bare gap and the dielectric's margin clear of
     # foreign copper/pads; the contact itself not on any pad
@@ -261,7 +300,7 @@ def route(design: dict, cell: float = 100.0, iterations: int = 60,
     wmax = max(width.values()) if width else P.min_line
 
     def need(n, L):
-        if L == 0:
+        if L == 0 or full:
             return (max(width[n], 2 * hc_of[n]) + max(wmax, 2 * hc_max)) / 2.0 + sp
         return (P.strip_w(width[n]) + P.strip_w(wmax)) / 2.0 + sp
 
@@ -390,6 +429,8 @@ def route(design: dict, cell: float = 100.0, iterations: int = 60,
                     if not (allowed[j * nx + ii] and allowed[jj * nx + i]):
                         continue
                 step = math.hypot(xs[ii] - x, ys[jj] - y)
+                if pref[l] is not None and (("H" if dx else "V") != pref[l] or (dx and dy)):
+                    step *= against               # against the layer's direction
                 cc_ = 1.0 if (l == 0 and padin[kk] == kn) else cost[kk]   # own pad: free
                 # a bend is charged at the local congestion too: with a fixed
                 # bend cost, late rounds (dear steps) staircase freely
@@ -409,17 +450,17 @@ def route(design: dict, cell: float = 100.0, iterations: int = 60,
                     heapq.heappush(pq, (ng + h(k), ng, ns))
         return None
 
-    def straight_run(n, ks, cost1):
+    def straight_run(n, ks, cost1, layer=0):
         """One COND1 run (cells ``ks``, ends fixed) with its staircases taken
         out: from each corner jump to the farthest later corner reachable by
         a straight leg or an L whose cells are all allowed for ``n``, whose
         corner is not inside a pad, and which costs no more (at the present
         congestion) than the stretch it replaces."""
-        a1 = allow[n][0]
+        a1 = allow[n][layer]
         kn = net_id[n]
 
         def cc(k):
-            return 1.0 if padin[k] == kn else cost1[k]
+            return 1.0 if (layer == 0 and padin[k] == kn) else cost1[k]
 
         def line(k1, k2):
             i1, j1, i2, j2 = k1 % nx, k1 // nx, k2 % nx, k2 // nx
@@ -450,13 +491,15 @@ def route(design: dict, cell: float = 100.0, iterations: int = 60,
                 else:
                     cands = [[k1, j1 * nx + i2, k2], [k1, j2 * nx + i1, k2]]
                 for cnd in cands:
-                    if len(cnd) == 3 and padin[cnd[1]] >= 0:
+                    if len(cnd) == 3 and layer == 0 and padin[cnd[1]] >= 0:
                         continue                         # no turning inside a pad
                     cells_ = line(cnd[0], cnd[1])
                     if len(cnd) == 3:
                         cells_ += line(cnd[1], cnd[2])[1:]
                     if not all(a1[k] for k in cells_):
                         continue
+                    if pref[layer] is not None and len(cnd) == 3:
+                        continue                         # an L turns against the direction
                     new_cost = sum(cc(k) for k in cells_[1:]) + bend_cost * (len(cnd) - 2)
                     if new_cost <= old_cost + 1e-6:
                         out += cells_[1:]
@@ -470,7 +513,7 @@ def route(design: dict, cell: float = 100.0, iterations: int = 60,
                 ci += 1
         return out
 
-    def straighten(n, path, cost1):
+    def straighten(n, path, cost1, cost2=None):
         runs = []
         for l, k in path:
             if runs and runs[-1][0] == l:
@@ -481,6 +524,8 @@ def route(design: dict, cell: float = 100.0, iterations: int = 60,
         for l, ks in runs:
             if ortho and l == 0 and len(ks) >= 4:   # 90-degree grids only
                 ks = straight_run(n, ks, cost1)
+            elif ortho and full and l == 1 and len(ks) >= 4 and cost2 is not None:
+                ks = straight_run(n, ks, cost2, layer=1)
             res += [(l, k) for k in ks]
         return res
 
@@ -528,7 +573,7 @@ def route(design: dict, cell: float = 100.0, iterations: int = 60,
                 tree_terms = gr                              # grow on from here
                 cells += [(0, G.idx(*t.centre)) for t in gr]
                 continue
-            path = straighten(n, path, c[0])
+            path = straighten(n, path, c[0], c[1])
             conns.append(path)
             cells += path
             cells += [(0, G.idx(*t.centre)) for t in gr]
@@ -708,7 +753,8 @@ def route(design: dict, cell: float = 100.0, iterations: int = 60,
                 mark(b, +1)
         if rescued:
             say(f"rescue: {rescued} more connection(s) routed against the settled board")
-    return _emit(design, P, G, final, drop, order, stopped, t_start, say)
+    return _emit(design, P, G, final, drop, order, stopped, t_start, say,
+                 full=full, via_half=hc_of)
 
 
 def _align_ends(pts, centre_of):
@@ -798,10 +844,12 @@ def _straighten(P, net, w, pts, others, layer, ortho=True):
     return res
 
 
-def _emit(design, P, G, routes, drop, order, stopped, t_start, say):
+def _emit(design, P, G, routes, drop, order, stopped, t_start, say, full=False, via_half=None):
     """Turn the grid routes into the result dict: COND1 runs are traces,
-    COND2 runs local crossovers (their via lands at the ends). A net still
-    overlapping another is left out (unrouted), never drawn."""
+    COND2 runs local crossovers (their via lands at the ends) -- or, with
+    ``full`` (full dielectric), COND2 traces with a via window at each
+    layer change. A net still overlapping another is left out (unrouted),
+    never drawn."""
     term_rect = {(round(t.centre[0]), round(t.centre[1])): t.rect for t in P.terminals}
     traces, crossovers, unrouted = [], [], []
     connections = sum(max(0, len(P.groups[n]) - 1) for n in order)
@@ -882,7 +930,8 @@ def _emit(design, P, G, routes, drop, order, stopped, t_start, say):
         # round a contact the COND2 runs bare (the dielectric stops short of
         # it): foreign COND1 keeps the contact clearance (xclr), as on the
         # grid -- _clear_of adds w/2 + min_space, so size the "land" to match
-        land = max(float(c["landUm"]), 2.0 * (float(P.xclr(c["net"])) - P.min_space))
+        land = (2.0 * float(via_half[c["net"]]) if full and via_half else
+                max(float(c["landUm"]), 2.0 * (float(P.xclr(c["net"])) - P.min_space)))
         for q in (c["a"], c["b"]):
             xy = (float(q["x"]), float(q["y"]))
             cop.append((c["net"], land, xy, xy))
@@ -915,8 +964,28 @@ def _emit(design, P, G, routes, drop, order, stopped, t_start, say):
                 continue
         kept_xo.append(c)
     if dropped_xo:
-        say(f"{dropped_xo} crossover(s) no longer needed: laid on the 1st conductor")
+        say(f"{dropped_xo} {'COND2 run(s)' if full else 'crossover(s)'} no longer needed: "
+            "laid on the 1st conductor")
     crossovers = kept_xo
+    windows = []
+    if full:
+        # the 2nd conductor is a routing layer: its runs are traces, each
+        # layer change one via (apply_routed draws the design's via there)
+        c2 = P.layers[1]
+        seen = set()
+        for c in crossovers:
+            traces.append({"net": c["net"], "layer": c2, "widthUm": c["widthUm"],
+                           "points": [dict(q) for q in c["bridge"]]})
+            for q in (c["a"], c["b"]):
+                key = (c["net"], q["x"], q["y"])
+                if key in seen:
+                    continue
+                seen.add(key)
+                o = int(round(2 * float(via_half[c["net"]]))) if via_half else c["landUm"]
+                windows.append({"net": c["net"], "position": {"x": q["x"], "y": q["y"]},
+                                "fromLayer": P.layers[0], "toLayer": c2,
+                                "padUm": c["landUm"], "openingUm": o})
+        crossovers = []
     jogs_before = jogs_after = 0
     for idx, (n, w, pts, centre_of) in enumerate(pending):
         others = [x for x in cop if x[0] != n]
@@ -946,8 +1015,9 @@ def _emit(design, P, G, routes, drop, order, stopped, t_start, say):
             length += math.hypot(p[i]["x"] - p[i - 1]["x"], p[i]["y"] - p[i - 1]["y"])
     stats = {"connections": connections, "routed": routed, "jumpersAdded": 0,
              "stopped": stopped, "crossoversAdded": len(crossovers), "fingersAdded": 0,
-             "windows": 0, "traceLengthUm": int(length), "gridUm": 0, "engine": "pathfinder"}
+             "windows": len(windows), "traceLengthUm": int(length), "gridUm": 0,
+             "engine": "pathfinder", "fullDielectric": bool(full)}
     say(f"done in {time.time() - t_start:.1f}s: {routed}/{connections} routed, "
-        f"{len(crossovers)} crossover(s)")
-    return {"design": design, "traces": traces, "crossovers": crossovers, "windows": [],
+        + (f"{len(windows)} via(s)" if full else f"{len(crossovers)} crossover(s)"))
+    return {"design": design, "traces": traces, "crossovers": crossovers, "windows": windows,
             "unrouted": unrouted, "stats": stats, "issues": []}

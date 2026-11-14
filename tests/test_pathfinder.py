@@ -89,3 +89,62 @@ def test_hybrid_route_defaults_to_pathfinder():
     assert st["engine"] == "pathfinder"
     assert st["stats"]["routed"] == st["stats"]["connections"]
     assert s.find_shorts() == []
+
+
+# ---- full dielectric: COND2 a routing layer under one sheet, joined by vias
+
+def _full(s, **settings):
+    H.save_settings(s.library, dict(full_dielectric=True, **settings))
+    d, m = H.export_design(s, layers=2)
+    assert m["full_dielectric"]
+    return d, m, H.pf_route(copy.deepcopy(d), m)
+
+
+def test_full_dielectric_crossing_nets_route_on_cond2_with_vias():
+    s = T._cross_board(dielectric=True)
+    d, m, r = _full(s)
+    assert r["stats"]["routed"] == r["stats"]["connections"] == 3
+    assert r["crossovers"] == []                          # no local strips
+    assert r["windows"] and r["stats"]["fullDielectric"]
+    c2 = [t for t in r["traces"] if t["layer"] == "COND2"]
+    assert c2                                             # real 2nd-conductor tracks
+    # every COND2 run ends on a via of its own net
+    vias = {(w["net"], w["position"]["x"], w["position"]["y"]) for w in r["windows"]}
+    for t in c2:
+        for q in (t["points"][0], t["points"][-1]):
+            assert (t["net"], q["x"], q["y"]) in vias
+    st = H.apply_routed(s, r, m)
+    assert st["windows"] == len(r["windows"])
+    assert s.find_shorts() == [] and s.resistor_crossings() == []
+
+
+def test_full_dielectric_off_keeps_local_strips():
+    s = T._cross_board(dielectric=True)
+    H.save_settings(s.library, {"full_dielectric": False})
+    d, m = H.export_design(s, layers=2)
+    assert not m["full_dielectric"]
+    r = H.pf_route(copy.deepcopy(d), m)
+    assert r["crossovers"] and not r["windows"]
+
+
+def test_full_dielectric_needs_two_conductors():
+    s = T._cross_board(dielectric=True)
+    H.save_settings(s.library, {"full_dielectric": True})
+    d, m = H.export_design(s, layers=1)
+    assert not m["full_dielectric"]
+
+
+@pytest.mark.parametrize("seed", range(3))
+def test_full_dielectric_random_boards_route_clean(seed):
+    s = T._random_board(seed)
+    d, m, r = _full(s)
+    H.apply_routed(s, r, m)
+    assert s.find_shorts() == [] and s.resistor_crossings() == [], seed
+    assert r["stats"]["routed"] >= 0.8 * r["stats"]["connections"]
+
+
+def test_full_dielectric_via_cost_follows_crossover_cost():
+    s = T._cross_board(dielectric=True)
+    _d, _m, cheap = _full(s, crossover_cost=0.5)
+    _d, _m, dear = _full(s, crossover_cost=50.0)
+    assert len(cheap["windows"]) >= len(dear["windows"])

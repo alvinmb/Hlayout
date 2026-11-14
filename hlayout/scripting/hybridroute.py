@@ -49,7 +49,10 @@ DEFAULTS = {"max_jumpers": 0, "jumper_cost": 50.0, "crossover_cost": 10.0, "grid
             "nudge_passes": 3, "nudge_max": 500.0,
             # a 1st-conductor track may run under a chip part, between its
             # terminals (the spacing rules still apply to the terminals)
-            "under_chips": False}
+            "under_chips": False,
+            # PathFinder, two conductors: the 2nd conductor a full routing
+            # layer under a dielectric sheet, joined by vias (not local strips)
+            "full_dielectric": False}
 
 
 def layers_for(session, rules=None) -> int:
@@ -703,6 +706,8 @@ def export_design(session, cell_name: Optional[str] = None, layers: int = 1,
         local_diel = diel
     mapping = {"local_keepouts": local_keepouts, "cell": name, "origin": [ox, oy], "layers": {"COND1": la, "COND2": lb},
                "dielectric": diel, "local_diel": local_diel, "bond_layer": blay,
+               "full_dielectric": bool(two and diel >= 0
+                                       and load_settings(lib).get("full_dielectric")),
                "pads": [p["id"] for p in pads], "wires": [w["id"] for w in wires],
                "unbonded": unbonded, "bond_width": int(round(float(br["width"]))),
                "nofly": nofly, "keep_existing": bool(keep_existing),
@@ -1229,9 +1234,7 @@ def hybrid_route(session, cell_name: Optional[str] = None, layers: Optional[int]
     if engine == "pathfinder":
         # negotiated congestion (every net every round) -- completion first
         from . import pathfinder as _pf
-        routed = _pf.route(design, local_dielectric=mapping.get("local_diel", -1) >= 0,
-                           cond2_keepouts=mapping.get("local_keepouts"),
-                           on_line=on_line, cancel=cancel)
+        routed = pf_route(design, mapping, on_line=on_line, cancel=cancel)
         code, tail, paths = 0, [], {}
     elif engine == "shape":
         # native Python gridless shape router (planar + printed-jumper crossovers)
@@ -1277,13 +1280,24 @@ def hybrid_route(session, cell_name: Optional[str] = None, layers: Optional[int]
     return st
 
 
+def pf_route(design, mapping, on_line=None, cancel=None) -> dict:
+    """PathFinder on an exported design, in the mode the mapping says:
+    local crossover strips, or (full_dielectric) the 2nd conductor as a full
+    routing layer with vias -- its keep-outs then the design's own (the band
+    outside the dielectric sheet and its holes), not the local ones."""
+    from . import pathfinder as _pf
+    full = bool(mapping.get("full_dielectric"))
+    return _pf.route(design, local_dielectric=full or mapping.get("local_diel", -1) >= 0,
+                     cond2_keepouts=None if full else mapping.get("local_keepouts"),
+                     full_dielectric=full, on_line=on_line, cancel=cancel)
+
+
 def _route_fresh(session, cell_name, layers, dejog, on_line, cancel):
     """One PathFinder route of the cell from scratch (for the nudge loop):
     (st, routed, mapping)."""
     from . import pathfinder as _pf
     design, mapping = export_design(session, cell_name, layers=layers, keep_existing=False)
-    routed = _pf.route(design, local_dielectric=mapping.get("local_diel", -1) >= 0,
-                       cond2_keepouts=mapping.get("local_keepouts"), on_line=on_line, cancel=cancel)
+    routed = pf_route(design, mapping, on_line=on_line, cancel=cancel)
     st = apply_routed(session, routed, mapping, remove_existing=True)
     st.update(exit_code=0, paths={}, log=[], layers=int(layers), engine="pathfinder",
               unbonded=mapping.get("unbonded") or [], orthogonal=design["routing"]["orthogonal"])
