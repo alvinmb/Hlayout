@@ -7,7 +7,7 @@
 A machined Kovar tub -- floor and four 1 mm walls, every inside and
 outside vertical wall corner chamfered 0.6 mm -- with two rows of Kovar
 pins on 0.1 in (2.54 mm) pitch, 0.9 in (22.86 mm) row to row. Each pin
-passes through the floor in its own glass-to-metal seal, stands 2 mm up
+passes through the floor in its own glass-to-metal seal, stands 0.8 mm up
 into the cavity above the floor and runs 5 mm out below the package.
 
 Pin 1 bottom left (−X, −Y), numbered counter-clockwise from above (the
@@ -41,7 +41,7 @@ INNER_W = 26.0              # cavity width (Y): 1.57 mm from each pin row to the
 END_MARGIN = 2.27           # cavity end wall to the end pin centre (X)
 PIN_D = 0.46                # Kovar pin (0.018 in)
 SEAL_D = 1.60               # glass bead through the floor
-PIN_IN = 2.0                # pin above the floor, inside the package
+PIN_IN = 0.8                # pin above the floor, inside the package
 PIN_OUT = 5.0               # pin below the package
 
 KOVAR = cq.Color(0.62, 0.63, 0.66)
