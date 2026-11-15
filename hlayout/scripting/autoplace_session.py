@@ -45,6 +45,12 @@ DEFAULTS = {
     #: um of wire one crossing of two nets' SLI lines is worth (0 = ignore):
     #: every crossing is a crossover or a jumper once routed
     "sli_crossing": 3000.0,
+    #: weight of routing room (0 = off): um of wire one um of track with no
+    #: room to run is worth -- see hlayout.core.autoplace (congestion)
+    "congestion": 0.0,
+    #: crossover room: a straight-line crossing near a printed resistor or
+    #: a part body (no room for a crossover strip) counts 1 + this crossings
+    "xo_room": 0.0,
     "effort": 1.0,
     "seed": 0,
     "resistor_layer": None,    # conductor for generated resistors (None: tech file)
@@ -428,6 +434,10 @@ def build_job(session, netlist, cell_name=None, overrides=None, settings=None, o
             "Netlist... puts them in the Resistor Designer, where each needs an ink and "
             "a size (Use This Solution) before Auto Place can lay them out")
     clr = float(S["clearance"])
+    # footprints include the parts' conductor pads: two that touch are a
+    # short (a C11 pad against R12's at clearance 0), so never closer than
+    # the copper spacing the router keeps
+    clr = max(clr, _copper_space(session))
     reach = float(S["bond_reach"])
     parts, info = [], {"skipped": [], "generated": [], "unmapped": [], "missing_pins": []}
     idx = {}
@@ -590,9 +600,31 @@ def build_job(session, netlist, cell_name=None, overrides=None, settings=None, o
     obstacles = [o for o in obstacles if (o[2] - o[0]) * (o[3] - o[1]) < 0.4 * rw * rh]
     placer = Placer(parts, nets, region, grid=float(S["grid"]), thermal=float(S["thermal"]),
                     seed=int(S["seed"]), obstacles=obstacles,
-                    cross_weight=float(S.get("sli_crossing", 3000.0) or 0.0))
+                    cross_weight=float(S.get("sli_crossing", 3000.0) or 0.0),
+                    cong_weight=float(S.get("congestion", 0.0) or 0.0),
+                    pitch=_track_pitch(session),
+                    xo_room=float(S.get("xo_room", 0.0) or 0.0))
     info.update(settings=S, netlist=nl, cell=name, region=region)
     return placer, info
+
+
+def _copper_space(session) -> float:
+    """The minimum copper-to-copper spacing (Autoroute clearance, raised to
+    the DRC's spacing rules on the route layers)."""
+    try:
+        R = session._rules_with_drc(session.freerouting_rules())
+        return max(0.0, float(R.get("clearance", 0) or 0))
+    except Exception:
+        return 0.0
+
+
+def _track_pitch(session) -> float:
+    """Track + spacing (um) from the Autoroute rules, for the congestion term."""
+    try:
+        R = session.freerouting_rules()
+        return float(R.get("signal_width", 300)) + float(R.get("clearance", 150))
+    except Exception:
+        return 400.0
 
 
 _HEADER_REF = re.compile(r"^(J|P|CN|CON|HDR)\d", re.I)

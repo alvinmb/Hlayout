@@ -562,7 +562,13 @@ class AutoPlaceWindow(tk.Toplevel):
         if info["unmapped"]:
             notes.append("no cell for: " + ", ".join(info["unmapped"]))
         if bad or out:
-            notes.append(f"{len(bad)} overlap(s), {len(out)} outside")
+            pairs = ", ".join(f"{a}-{b}" for a, b in bad[:8]) + (" ..." if len(bad) > 8 else "")
+            notes.append("NOT LEGAL -- the parts don't fit: "
+                         + (f"{len(bad)} overlapping ({pairs})" if bad else "")
+                         + (", " if bad and out else "")
+                         + (f"{len(out)} off the substrate ({', '.join(out[:8])})" if out else "")
+                         + ". Overlapping pads are short circuits: move them apart, enlarge the "
+                         "substrate or lower Clearance (it can't go below the copper spacing)")
         cb = info.get("carried") or {}
         if cb.get("bonds"):
             notes.append(f"{cb['bonds']} wire bond(s) and {cb.get('fingers', 0)} bond finger(s) "
@@ -572,7 +578,8 @@ class AutoPlaceWindow(tk.Toplevel):
         if info["missing_pins"]:
             notes.append(f"{len(info['missing_pins'])} netlist pin(s) not on the footprint")
         if alive:
-            self._say(msg + ("; " + "; ".join(notes) if notes else ""), "warn" if (bad or out or info["unmapped"]) else "ok", 100)
+            self._say(msg + ("; " + "; ".join(notes) if notes else ""),
+                      "err" if (bad or out) else ("warn" if info["unmapped"] else "ok"), 100)
             try:
                 self.bell()
                 self.lift()

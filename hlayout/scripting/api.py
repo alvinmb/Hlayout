@@ -4014,7 +4014,11 @@ class Session:
         merged into the design's net names.
         Returns {"placed", "fixed", "generated", "skipped", "unmapped",
         "missing_pins", "length_before", "length_after", "overlaps",
-        "outside"}."""
+        "outside", "legal"}. ``legal`` False: the parts did not fit --
+        overlapping footprints (their pads touching: shorts) or parts off
+        the substrate; the placement is applied so it can be fixed by hand.
+        Footprints never come closer than the copper spacing (the Autoroute
+        clearance, raised to the DRC spacing), whatever the clearance setting."""
         from .autoplace_session import apply, build_job
         placer, info = build_job(self, netlist, cell_name=cell_name, overrides=overrides,
                                  settings=settings, only=set(only) if only else None)
@@ -4030,7 +4034,9 @@ class Session:
                 "generated": info["generated"], "skipped": info["skipped"],
                 "unmapped": info["unmapped"], "missing_pins": info["missing_pins"],
                 "length_before": before, "length_after": placer.wirelength(),
-                "overlaps": bad, "outside": out}
+                "overlaps": bad, "outside": out,
+                # overlapping footprints include their pads: a short circuit
+                "legal": not bad and not out}
 
     def sli(self, cell_name: Optional[str] = None, nets=None, unrouted_only: bool = True) -> dict:
         """Straight-line interconnects (SLIs) of the design as placed: for

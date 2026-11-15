@@ -14,6 +14,14 @@ Cost (all lengths in DBU = um):
       + thermal * K_T * sum_{i<j} P_i P_j / d_ij   hot parts apart
       + LAM_OVERLAP * overlap_area / 1000       parts may not overlap
       + LAM_OUT * area_outside_region / 1000    ... or leave the region
+      + cong * overflow / pitch                 room to route (off when 0)
+
+The congestion term estimates routing room on a coarse grid: each SLI
+segment spreads its track area (length x track pitch) evenly over the
+cells of its bounding box (where an L-shaped route could run), and each
+part body takes its area out of the cells it covers. Overflow is the
+track area beyond UTIL of the free area, summed over cells; divided by the
+pitch it is "um of track with nowhere to go", weighted by ``cong``.
 
 MST_n = length of the minimum spanning tree over the net's pin positions --
 exactly the straight-line interconnects (SLIs) drawn for it. Three passes:
@@ -26,6 +34,8 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
 LAM_OVERLAP = 20.0
+#: congestion: how much of a cell's free area tracks may fill before it overflows
+UTIL = 0.6
 LAM_OUT = 20.0
 K_THERMAL = 1000.0     # um per (mW^2 / um): two 100 mW parts 5 mm apart ~ 2 mm of wire
 MIN_THERMAL_D = 500.0
@@ -135,6 +145,23 @@ def seg_crossings(A, B) -> int:
     return n
 
 
+def _cross_pt(p, q, r, t):
+    """Where segments p-q and r-t cross (properly), else None."""
+    if not _cross(p, q, r, t):
+        return None
+    d = (q[0] - p[0]) * (t[1] - r[1]) - (q[1] - p[1]) * (t[0] - r[0])
+    if abs(d) < 1e-12:
+        return None
+    u = ((r[0] - p[0]) * (t[1] - r[1]) - (r[1] - p[1]) * (t[0] - r[0])) / d
+    return (p[0] + u * (q[0] - p[0]), p[1] + u * (q[1] - p[1]))
+
+
+#: crossover room: a crossing this near a printed resistor (um, edge to
+#: point) or another part has no room for a crossover's dielectric strip
+XO_RES_CLEAR = 1000.0
+XO_PART_CLEAR = 400.0
+
+
 def _ov(a, b):
     w = min(a[2], b[2]) - max(a[0], b[0])
     h = min(a[3], b[3]) - max(a[1], b[1])
@@ -152,7 +179,9 @@ class Stopped(Exception):
 
 class Placer:
     def __init__(self, parts: List[Part], nets: List[PNet], region, grid: float = 50.0,
-                 thermal: float = 0.0, obstacles=(), seed: int = 0, cross_weight: float = 0.0):
+                 thermal: float = 0.0, obstacles=(), seed: int = 0, cross_weight: float = 0.0,
+                 cong_weight: float = 0.0, pitch: float = 400.0, cong_cell: float = 0.0,
+                 xo_room: float = 0.0):
         self._stop = None
         #: what run() is doing now, for a progress display (read from another
         #: thread; only ever replaced, never mutated)
@@ -176,6 +205,14 @@ class Placer:
         #: what one crossing of two nets' SLI lines costs, in um of wire: a
         #: crossing is a crossover or jumper later, so the placer avoids them
         self.cross_weight = float(cross_weight or 0.0)
+        #: crossover room: a crossing with no room for a crossover (near a
+        #: resistor or a part body) counts 1 + xo_room crossings
+        self.xo_room = float(xo_room or 0.0)
+        #: routing room (see the module doc): weight, track pitch (track +
+        #: spacing, um) and the grid cell (default 2.5 pitches)
+        self.cong = float(cong_weight or 0.0)
+        self.pitch = max(1.0, float(pitch or 400.0))
+        self.cong_cell = float(cong_cell or 0.0) or 2.5 * self.pitch
         self._refresh()
 
     def _net_geom(self, k):
@@ -190,16 +227,40 @@ class Placer:
             geo = [self._net_geom(k) for k in range(len(self.nets))]
             self.net_len = [g[0] for g in geo]
             self.net_segs = [g[1] for g in geo]
+            self._cong_build()
             return
         for k in ks:
             self.net_len[k], self.net_segs[k] = self._net_geom(k)
 
+    def _xc(self, A, B):
+        """Crossings of segment lists A and B, each with no room for a
+        crossover (xo_room) counted 1 + xo_room."""
+        if not self.xo_room:
+            return seg_crossings(A, B)
+        n = 0.0
+        for p, q in A:
+            for r, t in B:
+                pt = _cross_pt(p, q, r, t)
+                if pt is not None:
+                    n += 1.0 + (self.xo_room if self._blocked(pt) else 0.0)
+        return n
+
+    def _blocked(self, pt):
+        x, y = pt
+        for p in self.parts:
+            g = XO_RES_CLEAR if p.family == "resistor" else XO_PART_CLEAR
+            b = p.world_bbox()
+            if b[0] - g <= x <= b[2] + g and b[1] - g <= y <= b[3] + g:
+                return True
+        return False
+
     def crossings(self) -> int:
-        """SLI crossings between different nets, in the placement as it is."""
+        """SLI crossings between different nets, in the placement as it is
+        (with xo_room: weighted by the room for a crossover)."""
         n = 0
         for a in range(len(self.nets)):
             for b in range(a + 1, len(self.nets)):
-                n += seg_crossings(self.net_segs[a], self.net_segs[b])
+                n += self._xc(self.net_segs[a], self.net_segs[b])
         return n
 
     def _cross_of(self, ks, segs):
@@ -209,11 +270,90 @@ class Placer:
         n = 0
         for i, a in enumerate(ks):
             for b in ks[i + 1:]:
-                n += seg_crossings(segs[a], segs[b])
+                n += self._xc(segs[a], segs[b])
             for j in range(len(self.nets)):
                 if j not in kset:
-                    n += seg_crossings(segs[a], self.net_segs[j])
+                    n += self._xc(segs[a], self.net_segs[j])
         return n
+
+    # --- routing room ----------------------------------------------------
+    def _cong_build(self):
+        """Demand / blocked grids from scratch (congestion on only)."""
+        if not self.cong:
+            return
+        import numpy as np
+        x0, y0, x1, y1 = self.region
+        c = self.cong_cell
+        self._cg = (x0, y0, c, max(1, int(math.ceil((x1 - x0) / c))),
+                    max(1, int(math.ceil((y1 - y0) / c))))
+        nx, ny = self._cg[3], self._cg[4]
+        self.D = np.zeros((ny, nx))
+        self.B = np.zeros((ny, nx))
+        for k in range(len(self.nets)):
+            for a, b in self.net_segs[k]:
+                self._seg(a, b, +1.0)
+        for p in self.parts:
+            self._body(p.world_bbox(), +1.0)
+
+    def _cells(self, bx0, by0, bx1, by1):
+        x0, y0, c, nx, ny = self._cg
+        i0 = max(0, min(nx - 1, int((bx0 - x0) // c)))
+        i1 = max(0, min(nx - 1, int((bx1 - x0) // c)))
+        j0 = max(0, min(ny - 1, int((by0 - y0) // c)))
+        j1 = max(0, min(ny - 1, int((by1 - y0) // c)))
+        return i0, i1, j0, j1
+
+    def _seg(self, a, b, sign):
+        L = math.hypot(b[0] - a[0], b[1] - a[1])
+        if L <= 0:
+            return
+        i0, i1, j0, j1 = self._cells(min(a[0], b[0]), min(a[1], b[1]),
+                                     max(a[0], b[0]), max(a[1], b[1]))
+        n = (i1 - i0 + 1) * (j1 - j0 + 1)
+        self.D[j0:j1 + 1, i0:i1 + 1] += sign * L * self.pitch / n
+
+    def _body(self, bb, sign):
+        x0, y0, c, nx, ny = self._cg
+        i0, i1, j0, j1 = self._cells(*bb)
+        for j in range(j0, j1 + 1):
+            cy0, cy1 = y0 + j * c, y0 + (j + 1) * c
+            h = min(bb[3], cy1) - max(bb[1], cy0)
+            if h <= 0:
+                continue
+            for i in range(i0, i1 + 1):
+                cx0, cx1 = x0 + i * c, x0 + (i + 1) * c
+                w = min(bb[2], cx1) - max(bb[0], cx0)
+                if w > 0:
+                    self.B[j, i] += sign * w * h
+
+    def _overflow(self, win=None):
+        import numpy as np
+        if win is None:
+            D, B = self.D, self.B
+        else:
+            i0, i1, j0, j1 = win
+            D, B = self.D[j0:j1 + 1, i0:i1 + 1], self.B[j0:j1 + 1, i0:i1 + 1]
+        cap = np.maximum(0.0, self.cong_cell ** 2 - B) * UTIL
+        return float(np.maximum(0.0, D - cap).sum())
+
+    def congestion(self) -> float:
+        """Overflow of the placement as it is: um of track with no room."""
+        if not self.cong:
+            return 0.0
+        return self._overflow() / self.pitch
+
+    def _cong_window(self, segs_lists, boxes):
+        xs, ys = [], []
+        for segs in segs_lists:
+            for a, b in segs:
+                xs += [a[0], b[0]]
+                ys += [a[1], b[1]]
+        for bb in boxes:
+            xs += [bb[0], bb[2]]
+            ys += [bb[1], bb[3]]
+        if not xs:
+            return None
+        return self._cells(min(xs), min(ys), max(xs), max(ys))
 
     # --- cost pieces ------------------------------------------------------
     def _net_points(self, k):
@@ -259,6 +399,7 @@ class Placer:
 
     def cost(self):
         c = self.wirelength() + self.cross_weight * (self.crossings() if self.cross_weight else 0)
+        c += self.cong * self.congestion()
         for i in range(len(self.parts)):
             c += self._single(i)
             for j in range(i + 1, len(self.parts)):
@@ -290,6 +431,7 @@ class Placer:
             undo()
             if not ok:
                 return 0.0, False
+        old_boxes = [self.parts[i].world_bbox() for i in moved] if self.cong else []
         before, nets = self._local(moved)
         old_len = {k: self.net_len[k] for k in nets}
         before += sum(self.nets[k].weight * old_len[k] for k in nets)
@@ -302,12 +444,37 @@ class Placer:
         after += sum(self.nets[k].weight * geo[k][0] for k in allk)
         if self.cross_weight:
             after += self.cross_weight * self._cross_of(allk, {k: geo[k][1] for k in allk})
+        cong_undo = None
+        if self.cong:
+            new_boxes = [self.parts[i].world_bbox() for i in moved]
+            old_segs = [self.net_segs[k] for k in allk]
+            new_segs = [geo[k][1] for k in allk]
+            win = self._cong_window(old_segs + new_segs, old_boxes + new_boxes)
+            o1 = self._overflow(win) if win else 0.0
+
+            def swap_in(sign):
+                for sg in old_segs:
+                    for a, b in sg:
+                        self._seg(a, b, -sign)
+                for sg in new_segs:
+                    for a, b in sg:
+                        self._seg(a, b, sign)
+                for bb in old_boxes:
+                    self._body(bb, -sign)
+                for bb in new_boxes:
+                    self._body(bb, sign)
+            swap_in(+1.0)
+            o2 = self._overflow(win) if win else 0.0
+            after += self.cong * (o2 - o1) / self.pitch
+            cong_undo = lambda: swap_in(-1.0)
         d = after - before
         if d <= 0 or (T > 0 and self.rng.random() < math.exp(-d / T)):
             for k, (L, sg) in geo.items():
                 self.net_len[k] = L
                 self.net_segs[k] = sg
             return d, True
+        if cong_undo:
+            cong_undo()
         undo()
         return d, False
 
@@ -561,9 +728,13 @@ class Placer:
                             best = (d, n)
                         undo()
                         self._refresh(self.part_nets[i])
+                        if self.cong:
+                            self._cong_build()
                 if best is not None:
                     p.rot = best[1]
                     self._refresh(self.part_nets[i])
+                    if self.cong:
+                        self._cong_build()
                     better += 1
             kept += better
             if not better:

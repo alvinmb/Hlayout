@@ -2612,7 +2612,8 @@ class CommandInterpreter:
         if r["unmapped"]:
             msg += "; no cell for: " + ", ".join(r["unmapped"])
         if r["overlaps"] or r["outside"]:
-            msg += f"; {len(r['overlaps'])} overlap(s), {len(r['outside'])} outside"
+            msg += (f"; NOT LEGAL -- the parts don't fit: {len(r['overlaps'])} overlapping "
+                    f"(pads touching = shorts), {len(r['outside'])} off the substrate")
         return msg
 
     def _cmd_unusedbonds(self, args):
