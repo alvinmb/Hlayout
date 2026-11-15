@@ -341,6 +341,7 @@ Attached libraries:
                                        Session.import_routed_hybrid()
     HYBRID ROUTE [layers=1|2] [jumpers=<max>] [cost=<mm>] [grid=<um>] [keep=1]
              [ortho=0|1] [passes=<n>] [shorten=0|1] [dejog=0|1]
+             [engine=auto|pathfinder|freerouting|shape|java]
                                        route this cell with the hybrid router: layers=1
                                        one conductor, wire-bond jumpers the only
                                        crossings (jumpers=0: no limit; cost = a jumper
@@ -350,6 +351,8 @@ Attached libraries:
                                        taken out (keep=1 keeps them). ortho=1 90-degree
                                        tracks only, passes = rip-up passes (3), shorten /
                                        dejog the Autoroute clean-ups (default: its rules).
+                                       engine= as Autoroute's Engine (default: its
+                                       setting; auto picks for the board).
                                        One undo step for the route.
                                        Also Tools > Hybrid Route... and
                                        Session.hybrid_route()
@@ -3072,7 +3075,7 @@ class CommandInterpreter:
         usage = ("usage: HYBRID IMPORT <file.routed.json> [cell=<name>] [fill=0|1] | "
                  "HYBRID BONDS [<file.csv>] | HYBRID ROUTE [layers=1|2] [jumpers=<max>] "
                  "[cost=<mm>] [grid=<um>] [keep=1] [ortho=0|1] [passes=<n>] [shorten=0|1] "
-                 "[dejog=0|1]")
+                 "[dejog=0|1] [engine=auto|pathfinder|freerouting|shape|java]")
         if not args:
             raise CommandError(usage)
         sub = args[0].upper()
@@ -3098,6 +3101,9 @@ class CommandInterpreter:
                         kw["ripup_passes"] = int(v)
                     elif k == "cap":
                         self.session.set_freerouting_rules(track_cap=v.lower())
+                    elif k == "engine" and v.lower() in ("auto", "pathfinder", "freerouting",
+                                                         "shape", "java"):
+                        kw["engine"] = v.lower()
                     else:
                         raise CommandError(usage)
                 except ValueError:
@@ -3105,7 +3111,8 @@ class CommandInterpreter:
             from ..scripting.hybridroute import unrouted_text
             st = self.session.hybrid_route(**kw)
             rs = st["stats"]
-            msg = (f"HYBRID ROUTE ({st['layers']} conductor{'s' if st['layers'] > 1 else ''}): "
+            msg = (f"HYBRID ROUTE [{st.get('engine', '?')}] "
+                   f"({st['layers']} conductor{'s' if st['layers'] > 1 else ''}): "
                    f"{rs.get('routed', '?')}/{rs.get('connections', '?')} connections, "
                    f"{st['traces']} tracks, {st['jumpers']} jumper(s), {st['windows']} crossover(s), "
                    f"{st['bonds']} new bond(s)")
