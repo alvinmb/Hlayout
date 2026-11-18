@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HLayout – Free Thick-Film Hybrid Circuit Layout Software (Open Source CAD)</title>
-<meta name="description" content="HLayout is free, open-source layout CAD for thick-film hybrid circuits and chip-and-wire modules: printed conductors, dielectric and resistors, wire bonds, DRC, Gerber and 3D output. Windows, Linux and macOS.">
+<meta name="description" content="Free, open-source layout software for thick-film hybrids and chip-and-wire modules: printed resistors, wire bonds, DRC, autorouting, Gerber and 3D output.">
 <link rel="canonical" href="https://www.h-layout.co.uk/">
 <meta name="robots" content="index, follow, max-image-preview:large">
 <meta name="author" content="Alvin Brown">
@@ -42,7 +42,16 @@
  },
  "license": "https://www.gnu.org/licenses/gpl-3.0.html",
  "isAccessibleForFree": true,
- "downloadUrl": "https://www.h-layout.co.uk/#download",
+ "downloadUrl": "https://www.h-layout.co.uk/download/",
+ "softwareVersion": "0.9.1",
+ "datePublished": "2026-11-18",
+ "publisher": {
+  "@type": "Organization",
+  "name": "HLayout",
+  "url": "https://www.h-layout.co.uk/",
+  "email": "support@h-layout.co.uk",
+  "logo": "https://www.h-layout.co.uk/img/logo-256.png"
+ },
  "screenshot": "https://www.h-layout.co.uk/img/alu8-3d.jpg",
  "image": "https://www.h-layout.co.uk/img/og-image.jpg",
  "author": {
@@ -354,13 +363,16 @@ td:first-child{font-weight:600;white-space:nowrap}
 .consent a{color:var(--gold-soft)}
 .consent .row{display:flex;flex-wrap:wrap;gap:10px}
 .linklike{background:none;border:0;padding:0;font:inherit;color:inherit;text-decoration:underline;cursor:pointer}
+h1.eyebrow{font:500 .78rem/1 var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.display{font-family:var(--f-display);line-height:1.08;margin:0;text-wrap:balance;letter-spacing:-.01em;font-size:clamp(2.6rem,6vw,4.4rem);font-weight:700}
+.hero-copy .display span{color:var(--gold)}
 </style>
 </head>
 <body>
 
 <header>
   <div class="wrap bar">
-    <a class="brand" href="#home" aria-label="HLayout home">
+    <a class="brand" href="/" aria-label="HLayout home">
       <img class="mark" src="img/logo-mark.png" alt="" width="32" height="32">
       HLayout
     </a>
@@ -372,7 +384,7 @@ td:first-child{font-weight:600;white-space:nowrap}
       <a class="hide-sm" href="#services">Services</a>
       <a class="hide-sm" href="/thermal-and-trim.htm">Thermal &amp; resistors</a>
       <a class="hide-sm" href="#faq">FAQ</a>
-      <a class="btn btn-gold btn-sm" href="#download">Download</a>
+      <a class="btn btn-gold btn-sm" href="/download/">Download</a>
     </nav>
   </div>
 </header>
@@ -383,11 +395,11 @@ td:first-child{font-weight:600;white-space:nowrap}
   <section class="hero">
     <div class="wrap hero-grid">
       <div class="hero-copy">
-        <div class="hero-mark"><img src="img/logo-hero.png" alt="HLayout logo" width="88" height="88"><span class="eyebrow">Thick-film hybrid circuit layout CAD</span></div>
-        <h1>Lay out hybrids, <span>not PCBs.</span></h1>
+        <div class="hero-mark"><img src="img/logo-hero.png" alt="HLayout logo" width="88" height="88"><h1 class="eyebrow">Free, open-source thick-film hybrid layout software</h1></div>
+        <p class="display">Lay out hybrids, <span>not PCBs.</span></p>
         <p class="lede">HLayout designs the printed conductors, dielectric, resistor inks and glaze of a thick-film hybrid on its ceramic substrate, with packaged parts or wire-bonded bare dies. It takes a KiCad netlist in and sends Gerbers, bond diagrams, assembly drawings and 3D models out.</p>
         <div class="cta">
-          <a class="btn btn-gold" href="#download" data-dl-main>Download HLayout</a>
+          <a class="btn btn-gold" href="/download/" data-dl-main>Download HLayout</a>
           <a class="btn btn-line" href="https://github.com/alvinmb/Hlayout" target="_blank" rel="noopener">View on GitHub</a>
         </div>
         <span class="hint">Free and open source · GPL-3.0 · Windows, Linux and macOS</span>
@@ -558,132 +570,18 @@ td:first-child{font-weight:600;white-space:nowrap}
         <h2>Ready to lay out your first hybrid?</h2>
         <p class="lede">Free and open source under GPL-3.0. Installers for Windows, Linux and macOS, built from the public source by the project's CI.</p>
       </div>
-      <a class="btn btn-gold" href="#download" data-dl-main>Download HLayout</a>
+      <a class="btn btn-gold" href="/download/" data-dl-main>Download HLayout</a>
     </div>
   </section>
 </div>
 
 <!-- ================= DOWNLOAD ================= -->
-<div id="view-download" class="view" hidden>
-  <div class="wrap dl-head">
-    <div class="hero-mark"><img src="img/logo-hero.png" alt="HLayout logo" width="88" height="88"><span class="eyebrow">Download</span></div>
-    <h1>Get HLayout</h1>
-    <p class="lede">Pick your operating system. Each installer bundles Python and every library HLayout needs, so there is nothing else to install before you start drawing.</p>
-    <span class="ver">Current release <b data-ver></b> <a href="https://github.com/alvinmb/Hlayout/releases" target="_blank" rel="noopener">All releases and notes</a></span>
-    <div class="new" data-new="0.9.1" hidden><b>New in 0.9.1</b><span>Auto Place now reports in full: every overlap with the move that clears it (one click to apply), and a Check Routability button that tells you in under a second which pads no track can reach and which parts wall them in, which crossings have no room for a crossover, and how much of the board's routing room the nets need. Bare dies are placed with room for their bond fingers, and printed resistors take only their real footprint.</span></div>
-    <div class="new" data-new="0.9" hidden><b>New in 0.9</b><span>One autorouter for chip-and-wire hybrids (Tools → Autoroute…): a gridless shape router that routes on exact geometry, crosses on one conductor with a short printed crossover over a local dielectric strip kept clear of resistors, and falls back to a wire-bond jumper. Die-bond fan-out, an edge I/O pad wizard, header pinout and a Read Netlist flow round it out.</span></div>
-    <div class="new" data-new="0.8" hidden><b>New in 0.8</b><span>Thick-film resistors beyond the rectangle: top-hat, top-hat with roof, U, U with roof, angle, double angle and three-sided angle, each sized by solving the ink as a resistive sheet and trimmed in its own simulator. Setup → Technology Properties → Resistor Shapes sets which shapes your process supports, and only those are offered.</span></div>
-    <div class="new" data-new="0.7" hidden><b>New in 0.7</b><span>Every cell carries a created and modified date and time, in your design and in attached libraries (Setup → Library Cells…). The Chip Wizard makes real, named pins (E, B for a transistor) and can make the die-attach pad the back contact, such as a collector, with a tab for the track. HLayout is open source under GPL-3.0, and there is a three-day ALU8 training course.</span></div>
-    <div class="new" data-new="0.6"><b>New in 0.6</b><span>Help → Report Bug collects versions, errors and recent steps into one report you can preview before sending. When an unexpected error appears, HLayout offers to report it with the details filled in.</span></div>
-  </div>
-
-  <div class="wrap">
-    <div class="plats">
-      <article class="plat" data-os="windows">
-        <span class="yours" hidden>YOUR SYSTEM</span>
-        <div class="os"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 4.5 10 3.4v7.8H2V4.5Zm9-1.2L22 2v9.2H11V3.3ZM2 12.6h8v7.9L2 19.4v-6.8Zm9 0h11V22l-11-1.5v-7.9Z"/></svg><h3>Windows</h3></div>
-        <p class="file" data-file></p>
-        <a class="btn btn-gold" data-link target="_blank" rel="noopener">Download for Windows <small>.exe</small></a>
-        <ol><li>Run the setup file and follow the installer.</li><li>If your browser or SmartScreen warns about the file, choose <b>Keep</b>, then <b>More info → Run anyway</b>. Releases are not yet code-signed.</li><li>Start HLayout from the Start menu.</li></ol>
-        <p class="alt" data-portable-row hidden>No admin rights? <a data-portable target="_blank" rel="noopener">Portable 64-bit .zip</a> &ndash; unzip anywhere (even a USB stick) and run <span class="mono">hlayout.exe</span>. Settings stay in the folder.</p>
-        <p class="req">Windows 10 or 11, 64-bit.</p>
-      </article>
-
-      <article class="plat" data-os="linux">
-        <span class="yours" hidden>YOUR SYSTEM</span>
-        <div class="os"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c-2.2 0-3.6 1.9-3.6 4.6 0 1.4.3 2.3-.6 3.6C6.6 12 5 14.2 5 16.4c0 .7.2 1.2.4 1.6-.7.4-1.6.7-1.6 1.6 0 1.3 2 1.2 3.6 1.9 1.3.6 2.4.8 3.2-.2h2.8c.8 1 1.9.8 3.2.2 1.6-.7 3.6-.6 3.6-1.9 0-.9-.9-1.2-1.6-1.6.2-.4.4-.9.4-1.6 0-2.2-1.6-4.4-2.8-6.2-.9-1.3-.6-2.2-.6-3.6C15.6 3.9 14.2 2 12 2Zm-1.5 4.2c.4 0 .7.5.7 1.1s-.3 1-.7 1-.7-.4-.7-1 .3-1.1.7-1.1Zm3 0c.4 0 .7.5.7 1.1s-.3 1-.7 1-.7-.4-.7-1 .3-1.1.7-1.1ZM12 9c.9 0 2 .5 2 .9s-1.1 1-2 1-2-.6-2-1 1.1-.9 2-.9Z"/></svg><h3>Linux</h3></div>
-        <p class="file" data-file></p>
-        <a class="btn btn-gold" data-link target="_blank" rel="noopener">Download for Linux <small>.deb</small></a>
-        <ol><li>Install the package: <span class="mono">sudo apt install ./<span data-fname></span></span></li><li>Launch HLayout from your applications menu, or run <span class="mono">hlayout</span>.</li><li>Other distributions: run from source (below).</li></ol>
-        <p class="req">Debian, Ubuntu and derivatives, x86-64.</p>
-      </article>
-
-      <article class="plat" data-os="mac">
-        <span class="yours" hidden>YOUR SYSTEM</span>
-        <div class="os"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.4 12.6c0-2.4 2-3.5 2-3.6-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.2-2.8.8-3.5.8s-1.8-.8-3-.8C7 7.2 5.5 8.1 4.7 9.6c-1.7 2.9-.4 7.2 1.2 9.6.8 1.2 1.8 2.5 3 2.4 1.2 0 1.7-.8 3.1-.8s1.9.8 3.1.8c1.3 0 2.1-1.2 2.9-2.4.9-1.3 1.3-2.6 1.3-2.7 0 0-2.9-1.1-2.9-3.9ZM14.1 5.4c.6-.8 1.1-1.9 1-3-1 0-2.1.6-2.8 1.4-.6.7-1.1 1.8-1 2.9 1 .1 2.1-.5 2.8-1.3Z"/></svg><h3>macOS</h3></div>
-        <p class="file" data-file></p>
-        <a class="btn btn-gold" data-link target="_blank" rel="noopener">Download for macOS <small>.dmg</small></a>
-        <ol><li>Open the disk image and drag HLayout to Applications.</li><li>The app is not notarised: the first time, Control-click it and choose <b>Open</b>.</li><li>Intel Macs: run from source (below).</li></ol>
-        <p class="req">macOS on Apple silicon (M1 or later).</p>
-      </article>
-    </div>
-  </div>
-
-  <section>
-    <div class="wrap src">
-      <div class="sec-head" style="margin:0">
-        <span class="eyebrow">Any platform</span>
-        <h2>Run from source</h2>
-        <p class="lede">HLayout is a Python application. With Python 3.10 or later and Tkinter you can run it on any system, including Intel Macs and non-Debian Linux.</p>
-      </div>
-      <div class="code">
-        <button class="copy" type="button" id="copy-src">Copy</button>
-<pre id="src-cmds"><span class="c"># Debian/Ubuntu only: sudo apt install python3-tk</span>
-git clone https://github.com/alvinmb/Hlayout.git
-cd Hlayout
-pip install -r requirements.txt
-python hlayout_app.py hlayout/examples/notch_filter.gds</pre>
-      </div>
-    </div>
-  </section>
-
-  <section class="band">
-    <div class="wrap">
-      <div class="sec-head">
-        <span class="eyebrow">Optional companions</span>
-        <h2>Tools that plug into the workflow</h2>
-        <p class="lede">HLayout runs on its own. These free tools add schematic capture, autorouting and 3D; install the ones you need.</p>
-      </div>
-      <div class="tbl-wrap">
-        <table>
-          <thead><tr><th>Tool</th><th>Used for</th><th>Notes</th></tr></thead>
-          <tbody>
-            <tr><td>KiCad</td><td>Schematic capture and the netlist that Auto Place reads</td><td><span class="pill">open source</span> Export with File → Export → Netlist.</td></tr>
-            <tr><td>Freerouting</td><td>Autorouting two-conductor and chip-and-wire designs</td><td><span class="pill">open source</span> Use the Java build; a .jar needs Java 25 or later.</td></tr>
-            <tr><td>FreeCAD</td><td>3D model of the fired stack; building the STEP part library</td><td><span class="pill">open source</span> Run the exported .FCMacro, or freecadcmd headless.</td></tr>
-            <tr><td>Claude</td><td>Driving HLayout through its built-in MCP server</td><td><span class="pill opt">optional</span> Tools → MCP Server (Claude) starts the bridge.</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </section>
-
-  <section id="policies">
-    <div class="wrap">
-      <div class="sec-head">
-        <span class="eyebrow">Licence and policies</span>
-        <h2>Free software you can inspect</h2>
-      </div>
-      <div class="pol-grid">
-        <div class="pol">
-          <h3>Licence</h3>
-          <p>HLayout is free software under the <a href="https://github.com/alvinmb/Hlayout/blob/main/LICENSE" target="_blank" rel="noopener">GNU General Public License v3.0 or later</a>: you can use, study, change and share it, and the full source is on GitHub. The chip-and-wire router is a fork of Freerouting, also GPL-3.0.</p>
-        </div>
-        <div class="pol">
-          <h3>Code signing policy</h3>
-          <p>Free code signing provided by <a href="https://about.signpath.io" target="_blank" rel="noopener">SignPath.io</a>, certificate by <a href="https://signpath.org" target="_blank" rel="noopener">SignPath Foundation</a>. Signing starts with the first release after the project is accepted; earlier installers are unsigned.</p>
-          <p>Committers and reviewers: Alvin Brown. Approvers: Alvin Brown. Only release builds made by the project's GitHub Actions workflow from its public source are signed, and each request is approved by hand.</p>
-        </div>
-        <div class="pol">
-          <h3>Privacy policy</h3>
-          <p>This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it.</p>
-          <p>Help → Report Bug saves its report on your computer and opens a GitHub issue only when you ask. The MCP bridge is off until you turn it on and listens only on this computer. Freerouting, installed separately, is run with its analytics turned off.</p>
-          <p>This website uses Google Analytics only if you accept analytics cookies. It counts page visits and downloads to show which pages are useful; it does not identify you and is not used for advertising. Without your consent no analytics cookies are set and nothing is sent to Google. <button class="linklike" type="button" data-consent-open>Change cookie settings</button></p>
-        </div>
-        <div class="pol">
-          <h3>Uninstalling</h3>
-          <p>Windows: Settings → Apps, or Uninstall HLayout in the Start menu. Debian/Ubuntu: <span class="mono">sudo apt remove hlayout</span>. macOS: drag HLayout from Applications to the Bin.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-</div>
 </main>
 
 <footer>
   <div class="wrap">
     <span>HLayout · thick-film hybrid layout CAD · GPL-3.0 · support@h-layout.co.uk</span>
-    <span><a href="https://github.com/alvinmb/Hlayout" target="_blank" rel="noopener">GitHub</a> · <a href="https://github.com/alvinmb/Hlayout/releases" target="_blank" rel="noopener">Releases</a> · <a href="#policies" data-go-policies>Privacy</a> · <button class="linklike" type="button" data-consent-open>Cookie settings</button> · <a href="https://github.com/alvinmb/Hlayout/issues" target="_blank" rel="noopener">Report an issue</a> · <a href="#services">Consultancy</a> · <a href="#download" onclick="setTimeout(function(){var e=document.getElementById('policies');if(e)e.scrollIntoView()},60)">Licence, code signing and privacy</a></span>
+    <span><a href="https://github.com/alvinmb/Hlayout" target="_blank" rel="noopener">GitHub</a> · <a href="https://github.com/alvinmb/Hlayout/releases" target="_blank" rel="noopener">Releases</a> · <a href="/download/#policies">Privacy</a> · <button class="linklike" type="button" data-consent-open>Cookie settings</button> · <a href="https://github.com/alvinmb/Hlayout/issues" target="_blank" rel="noopener">Report an issue</a> · <a href="#services">Consultancy</a> · <a href="/download/#policies">Licence, code signing and privacy</a></span>
   </div>
 </footer>
 
@@ -695,7 +593,7 @@ python hlayout_app.py hlayout/examples/notch_filter.gds</pre>
   // can't (offline, rate-limited, repository private) -- keep it at a
   // release that really exists. File names follow
   // .github/workflows/build-installers.yml.
-  var FALLBACK_VERSION = "0.6.0";
+  var FALLBACK_VERSION = "0.9.0";
   var REPO = "https://github.com/alvinmb/Hlayout";
   var API = "https://api.github.com/repos/alvinmb/Hlayout/releases/latest";
   var names = {windows:"Windows", linux:"Linux", mac:"macOS"};
@@ -768,30 +666,17 @@ python hlayout_app.py hlayout/examples/notch_filter.gds</pre>
     return null;
   }
   var mine = detect();
-  if (mine){
-    var card = document.querySelector('.plat[data-os="' + mine + '"]');
+  var card = mine && document.querySelector('.plat[data-os="' + mine + '"]');
+  if (card){
     card.classList.add("rec"); card.querySelector(".yours").hidden = false;
     card.parentNode.insertBefore(card, card.parentNode.firstChild);
+  }
+  if (mine){
     document.querySelectorAll("[data-dl-main]").forEach(function(a){ a.textContent = "Download for " + names[mine]; });
   }
 
-  var home = document.getElementById("view-home"), dl = document.getElementById("view-download");
-  function route(){
-    var h = (location.hash || "").replace("#","");
-    var isDl = h === "download";
-    home.hidden = isDl; dl.hidden = !isDl;
-    if (isDl){ window.scrollTo(0,0); return; }
-    var t = h && h !== "home" ? document.getElementById(h) : null;
-    if (t) t.scrollIntoView({block:"start"}); else window.scrollTo(0,0);
-  }
-  window.addEventListener("hashchange", route); route();
-  document.addEventListener("click", function(e){
-    var a = e.target.closest && e.target.closest("[data-go-policies]");
-    if (!a) return;
-    e.preventDefault();
-    if (location.hash !== "#download") location.hash = "download";
-    setTimeout(function(){ var t = document.getElementById("policies"); if (t) t.scrollIntoView({block: "start"}); }, 30);
-  });
+  // Download has its own page now: old links to #download go there
+  if ((location.hash || "") === "#download") location.replace("/download/");
 
 
   var eb = document.getElementById("copy-email");
@@ -802,7 +687,7 @@ python hlayout_app.py hlayout/examples/notch_filter.gds</pre>
     try { navigator.clipboard.writeText(addr.textContent).then(done, sel); } catch(e){ sel(); }
   });
   var btn = document.getElementById("copy-src");
-  btn.addEventListener("click", function(){
+  if (btn) btn.addEventListener("click", function(){
     var txt = document.getElementById("src-cmds").innerText;
     function done(){ btn.textContent = "Copied"; setTimeout(function(){ btn.textContent = "Copy"; }, 1600); }
     function fallback(){ var r = document.createRange(); r.selectNodeContents(document.getElementById("src-cmds")); var s = getSelection(); s.removeAllRanges(); s.addRange(r); btn.textContent = "Selected"; }
@@ -812,7 +697,7 @@ python hlayout_app.py hlayout/examples/notch_filter.gds</pre>
 </script>
 
 <div class="consent" id="consent" role="dialog" aria-live="polite" aria-label="Cookie consent" hidden>
-  <p>We would like to use Google Analytics cookies to count visits and downloads, so we know which pages help. Nothing is set unless you accept. <a href="#policies" data-go-policies>Privacy policy</a></p>
+  <p>We would like to use Google Analytics cookies to count visits and downloads, so we know which pages help. Nothing is set unless you accept. <a href="/download/#policies">Privacy policy</a></p>
   <div class="row">
     <button class="btn btn-gold btn-sm" type="button" id="consent-yes">Accept analytics</button>
     <button class="btn btn-line btn-sm" type="button" id="consent-no">Reject</button>
