@@ -200,7 +200,10 @@ def _flatten(library, cell, copper_layers, pad_layers, bond_layer,
                 pad[2].append(NetPin(ref_des=ref_des, pin=ref.pin))
 
     for ref in cell.srefs:
-        _descend(ref, ref.label)
+        # an unlabelled instance inside a part (2N2219 -> its 2N3906 die,
+        # say) is still that part: it keeps the enclosing ref, so its pads
+        # are Q1.3, not an I/O pad IO.3
+        _descend(ref, ref.label or ref_des)
     for ref in expand_arefs_to_srefs(cell.arefs):
         # ARef has no per-instance label; elements inherit this level's.
         _descend(ref, ref_des)

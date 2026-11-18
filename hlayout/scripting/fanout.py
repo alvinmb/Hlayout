@@ -93,6 +93,75 @@ def _place_row(items, pitch):
     return {k: p + shift for (k, _w), p in zip(items, pos)}
 
 
+def predict_fingers(body, pads, use, fw, fl, sp, gp, lo, tan_a):
+    """Where fan_out() puts a die's fingers, in the die cell's coordinates:
+    {pin: ((x, y) finger centre, (x0, y0, x1, y1) finger)} for the pads
+    ``use`` of ``pads`` {pin: (x, y)} round ``body`` (the die and its attach
+    pad). Auto Place uses it to size a die's footprint."""
+    bx0, by0, bx1, by1 = body
+    cx, cy = (bx0 + bx1) / 2.0, (by0 + by1) / 2.0
+    hx, hy = max((bx1 - bx0) / 2.0, 1.0), max((by1 - by0) / 2.0, 1.0)
+    sides = {"L": [], "R": [], "B": [], "T": []}
+    for p in use:
+        x, y = pads[p]
+        dx, dy = (x - cx) / hx, (y - cy) / hy
+        if abs(dx) >= abs(dy):
+            sides["R" if dx > 0 else "L"].append(p)
+        else:
+            sides["T" if dy > 0 else "B"].append(p)
+    out = {}
+    for side, pins in sides.items():
+        if not pins:
+            continue
+        horiz = side in ("B", "T")          # fingers in a row along x
+        along = (lambda p: pads[p][0]) if horiz else (lambda p: pads[p][1])
+        out_sign = 1.0 if side in ("R", "T") else -1.0
+        edge = {"L": bx0, "R": bx1, "B": by0, "T": by1}[side]
+        perp = (lambda p: pads[p][1]) if horiz else (lambda p: pads[p][0])
+        row = _place_row(sorted(((p, along(p)) for p in pins), key=lambda t: t[1]), fw + sp)
+        # how far out the row's centre line must be
+        d = abs(edge - (cy if horiz else cx)) + gp + fl / 2.0
+        base = (cy if horiz else cx) + out_sign * d
+        need = 0.0
+        for p in pins:
+            off = abs(row[p] - along(p))
+            depth = max(off / tan_a, math.sqrt(max(0.0, lo * lo - off * off)))
+            need = max(need, out_sign * (perp(p) + out_sign * depth - base))
+        base += out_sign * max(0.0, need)
+        for p in pins:
+            if horiz:
+                out[p] = ((row[p], base), (row[p] - fw / 2.0, base - fl / 2.0,
+                                           row[p] + fw / 2.0, base + fl / 2.0))
+            else:
+                out[p] = ((base, row[p]), (base - fl / 2.0, row[p] - fw / 2.0,
+                                           base + fl / 2.0, row[p] + fw / 2.0))
+    return out
+
+
+def fan_params(session, finger_w=None, finger_l=None, spacing=None, gap=None):
+    """(fw, fl, sp, gp, lo, hi, tan_a) as fan_out() uses them."""
+    from ..io.techfile import load_bond_rules
+    br = load_bond_rules(session.library)
+    fw = float(DEFAULTS["finger_w"] if finger_w is None else finger_w)
+    fl = float(DEFAULTS["finger_l"] if finger_l is None else finger_l)
+    sp = float(DEFAULTS["spacing"] if spacing is None else spacing)
+    if gap is None:
+        try:
+            R = session._rules_with_drc(session.freerouting_rules())
+            gp = max(DEFAULTS["gap"], float(R.get("die_keepout", 200) or 0)
+                     + float(R.get("clearance", 100) or 0) + 50.0)
+        except Exception:
+            gp = DEFAULTS["gap"]
+    else:
+        gp = float(gap)
+    try:
+        ang = float(session._hybrid_bond_rules().get("angle", 45.0))
+    except Exception:
+        ang = 45.0
+    tan_a = math.tan(math.radians(max(5.0, min(85.0, ang))))
+    return fw, fl, sp, gp, float(br["min_length"]), float(br["max_length"]), tan_a
+
+
 def fan_out(session, cell_name: Optional[str] = None, refs=None, all_pads: bool = False,
             finger_w: Optional[float] = None, finger_l: Optional[float] = None,
             spacing: Optional[float] = None, gap: Optional[float] = None,
@@ -156,10 +225,18 @@ def fan_out(session, cell_name: Optional[str] = None, refs=None, all_pads: bool 
               "cell": name}
     # other parts' footprints and copper the new fingers should keep clear of
     others = []
+    try:
+        from ..io.techfile import load_resistor_geometry_rules
+        ko = load_resistor_geometry_rules(lib).get("keepout_layer")
+        skip = {blay} | ({int(ko)} if isinstance(ko, int) and ko >= 0 else set())
+    except Exception:
+        skip = {blay}
     for r in cell.srefs:
         if not r.label:                 # the header / substrate round everything
             continue
-        b = lib.cell_bbox(r.cell_name)
+        # a printed resistor's dielectric keep-out is no clash for a finger
+        # (copper): only its terminations, ink and glaze are
+        b = _body_bbox(lib, r.cell_name, skip_layers=skip) or lib.cell_bbox(r.cell_name)
         if b:
             f = _xf(r)
             pts = [f((b[0], b[1])), f((b[2], b[3])), f((b[0], b[3])), f((b[2], b[1]))]
@@ -170,9 +247,6 @@ def fan_out(session, cell_name: Optional[str] = None, refs=None, all_pads: bool 
         for r, pads in dies:
             f = _xf(r)
             body = _body_bbox(lib, r.cell_name, skip_layers={blay}) or (-500, -500, 500, 500)
-            bx0, by0, bx1, by1 = body
-            cx, cy = (bx0 + bx1) / 2.0, (by0 + by1) / 2.0
-            hx, hy = max((bx1 - bx0) / 2.0, 1.0), max((by1 - by0) / 2.0, 1.0)
             use = [p for p in pads
                    if all_pads or not _unconnected(names.get(f"{r.label}.{p}"))]
             # -- take this die's old fan-out off (its bonds and their fingers)
@@ -200,66 +274,33 @@ def fan_out(session, cell_name: Optional[str] = None, refs=None, all_pads: bool 
                                 and sh.bbox()[1] <= far[1] <= sh.bbox()[3]
                                 and (sh.bbox()[2] - sh.bbox()[0]) * (sh.bbox()[3] - sh.bbox()[1])
                                 <= 4 * fw * fl)]
-            # -- group the pads by side (in the die's own coordinates)
-            sides = {"L": [], "R": [], "B": [], "T": []}
-            for p in use:
-                x, y = pads[p]
-                dx, dy = (x - cx) / hx, (y - cy) / hy
-                if abs(dx) >= abs(dy):
-                    sides["R" if dx > 0 else "L"].append(p)
-                else:
-                    sides["T" if dy > 0 else "B"].append(p)
             made = []
-            for side, pins in sides.items():
-                if not pins:
+            for p, (fc, rect) in sorted(predict_fingers(body, pads, use, fw, fl, sp, gp, lo,
+                                                        tan_a).items()):
+                wpad, wland = f(pads[p]), f(fc)
+                span = math.hypot(wland[0] - wpad[0], wland[1] - wpad[1])
+                if span > hi:
+                    report["skipped"][f"{r.label}.{p}"] = (
+                        f"bond {span / 1000:.2f} mm longer than the maximum {hi / 1000:.2f} mm")
                     continue
-                horiz = side in ("B", "T")          # fingers in a row along x
-                along = (lambda p: pads[p][0]) if horiz else (lambda p: pads[p][1])
-                out_sign = 1.0 if side in ("R", "T") else -1.0
-                edge = {"L": bx0, "R": bx1, "B": by0, "T": by1}[side]
-                perp = (lambda p: pads[p][1]) if horiz else (lambda p: pads[p][0])
-                row = _place_row(sorted(((p, along(p)) for p in pins), key=lambda t: t[1]),
-                                 fw + sp)
-                # how far out the row's centre line must be
-                d = abs(edge - (cy if horiz else cx)) + gp + fl / 2.0
-                base = (cy if horiz else cx) + out_sign * d
-                need = 0.0
-                for p in pins:
-                    off = abs(row[p] - along(p))
-                    depth = max(off / tan_a, math.sqrt(max(0.0, lo * lo - off * off)))
-                    need = max(need, out_sign * (perp(p) + out_sign * depth - base))
-                base += out_sign * max(0.0, need)
-                for p in pins:
-                    if horiz:
-                        fc = (row[p], base)
-                        rect = (row[p] - fw / 2.0, base - fl / 2.0, row[p] + fw / 2.0,
-                                base + fl / 2.0)
-                    else:
-                        fc = (base, row[p])
-                        rect = (base - fl / 2.0, row[p] - fw / 2.0, base + fl / 2.0,
-                                row[p] + fw / 2.0)
-                    wpad, wland = f(pads[p]), f(fc)
-                    span = math.hypot(wland[0] - wpad[0], wland[1] - wpad[1])
-                    if span > hi:
-                        report["skipped"][f"{r.label}.{p}"] = (
-                            f"bond {span / 1000:.2f} mm longer than the maximum {hi / 1000:.2f} mm")
+                c = [f((rect[0], rect[1])), f((rect[2], rect[3]))]
+                wr = (round(min(c[0][0], c[1][0])), round(min(c[0][1], c[1][1])),
+                      round(max(c[0][0], c[1][0])), round(max(c[0][1], c[1][1])))
+                try:
+                    session.wire_bond([wpad, wland], layer=blay, cell_name=name)
+                except LayoutError as e:
+                    report["skipped"][f"{r.label}.{p}"] = str(e)
+                    continue
+                cell.add_rectangle(flay, *wr)
+                made.append(p)
+                for o, ob in others:
+                    if o is r:
                         continue
-                    c = [f((rect[0], rect[1])), f((rect[2], rect[3]))]
-                    wr = (round(min(c[0][0], c[1][0])), round(min(c[0][1], c[1][1])),
-                          round(max(c[0][0], c[1][0])), round(max(c[0][1], c[1][1])))
-                    try:
-                        session.wire_bond([wpad, wland], layer=blay, cell_name=name)
-                    except LayoutError as e:
-                        report["skipped"][f"{r.label}.{p}"] = str(e)
-                        continue
-                    cell.add_rectangle(flay, *wr)
-                    made.append(p)
-                    for o, ob in others:
-                        if o is r:
-                            continue
-                        if wr[0] < ob[2] and wr[2] > ob[0] and wr[1] < ob[3] and wr[3] > ob[1]:
-                            report["overlaps"].append(f"{r.label}.{p} on {o.label or o.cell_name}")
-                            break
+                    if ob[0] <= r.origin[0] <= ob[2] and ob[1] <= r.origin[1] <= ob[3]:
+                        continue      # the package round the substrate: not a clash
+                    if wr[0] < ob[2] and wr[2] > ob[0] and wr[1] < ob[3] and wr[3] > ob[1]:
+                        report["overlaps"].append(f"{r.label}.{p} on {o.label or o.cell_name}")
+                        break
             report["dies"][r.label] = sorted(made, key=lambda t: (len(t), t))
             report["fingers"] += len(made)
     session._notify()

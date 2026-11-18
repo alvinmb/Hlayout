@@ -117,7 +117,7 @@ def route(design: dict, cell: float = 100.0, iterations: int = 60,
           on_line=None, cancel=None, local_dielectric: bool = True, cond2_keepouts=None,
           time_budget: Optional[float] = None, via_cost: float = 3000.0,
           cond2_factor: float = 2.5, bend_cost: Optional[float] = None, rescue: bool = True,
-          full_dielectric: bool = False, **_ignored) -> dict:
+          full_dielectric: bool = False, _maps_only: bool = False, **_ignored) -> dict:
     """Route ``design`` (the hybrid.json design dict) with PathFinder. See the
     module doc. ``iterations`` caps the negotiation rounds, ``time_budget``
     (s) the run; ``via_cost`` (um of track) is what a crossover's via pair
@@ -297,6 +297,12 @@ def route(design: dict, cell: float = 100.0, iterations: int = 60,
             av = a2
         allow[n] = (a1.ravel().tolist(), a2.ravel().tolist(), av.ravel().tolist())
     padin = pad_in.ravel().tolist()
+    if _maps_only:
+        # the routability check (hlayout.scripting.routability): what each net
+        # may use, exactly as the router sees it, without routing
+        return {"G": G, "P": P, "allow": allow, "nets": nets, "net_id": net_id,
+                "width": width, "two_cond": two_cond, "maps1": maps1, "sp": sp,
+                "full": full}
 
     # clearance between nets: two nets' centre lines must be at least ``need``
     # apart -- half of each one's copper plus the spacing (a via land counts

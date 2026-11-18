@@ -39,7 +39,7 @@ SETTINGS_KEY = "autoplace_settings"
 DEFAULTS = {
     "grid": 50,
     "clearance": 250,          # um between part footprints
-    "edge": 1000,              # um kept clear inside the substrate / I/O ring
+    "edge": 300,               # um kept clear inside the substrate / I/O ring
     "bond_reach": 1500,        # um from a die pad to its bond-finger landing
     "thermal": 1.0,            # strength of the thermal term (0 = off)
     #: um of wire one crossing of two nets' SLI lines is worth (0 = ignore):
@@ -51,6 +51,19 @@ DEFAULTS = {
     #: crossover room: a straight-line crossing near a printed resistor or
     #: a part body (no room for a crossover strip) counts 1 + this crossings
     "xo_room": 0.0,
+    #: routing room (0 = off): um of wire one track^2 of overflow is worth --
+    #: track demand vs the tracks the gaps between parts can hold, on a grid
+    #: of 4 track pitches over the area inside the I/O ring (hlayout.core.routeroom)
+    "routing_room": 0.0,
+    #: pin access (um, 0 = off): extra room on the sides a part's pins face --
+    #: two facing pin sides get this much more between them (one routing
+    #: channel = track + 2 spacings, less the clearance)
+    "pin_halo": 0.0,
+    #: soft gap (um, 0 = off): parts nearer each other than this beyond the
+    #: clearance cost soft_gap_weight * shortfall^2 / 1000 um of wire --
+    #: evens the whitespace out instead of packing parts at the clearance
+    "soft_gap": 0.0,
+    "soft_gap_weight": 1.0,
     "effort": 1.0,
     "seed": 0,
     "resistor_layer": None,    # conductor for generated resistors (None: tech file)
@@ -438,7 +451,17 @@ def build_job(session, netlist, cell_name=None, overrides=None, settings=None, o
     # short (a C11 pad against R12's at clearance 0), so never closer than
     # the copper spacing the router keeps
     clr = max(clr, _copper_space(session))
+    # pin access halo (um, 0 = off): extra room on the sides a part's pins face
+    halo = float(S.get("pin_halo", 0.0) or 0.0)
     reach = float(S["bond_reach"])
+    try:
+        from ..io.techfile import load_resistor_geometry_rules
+        _rg = load_resistor_geometry_rules(lib)
+        res_ink = {int(v) for v in (_rg.get("ink_layers") or {}).values()}
+        res_ko = _rg.get("keepout_layer")
+        res_ko = int(res_ko) if isinstance(res_ko, int) and res_ko >= 0 else None
+    except Exception:
+        res_ink, res_ko = set(), None
     parts, info = [], {"skipped": [], "generated": [], "unmapped": [], "missing_pins": []}
     idx = {}
     for ref, comp in nl.components.items():
@@ -460,7 +483,10 @@ def build_job(session, netlist, cell_name=None, overrides=None, settings=None, o
         if cellname is None:
             (info["unmapped"] if comp.footprint else info["skipped"]).append(ref)
             continue
-        if sref is None and fam != "die" and _is_header(ref, comp, cellname):
+        # a placed package (J1 -> 30_PIN_pkg round the substrate) is no part
+        # either: its pins act as anchors below; a placed connector stays a part
+        if fam != "die" and _is_header(ref, comp, cellname) and (
+                sref is None or any(w in cellname.lower() for w in ("pkg", "package", "kovar"))):
             # the module's header / package (J30 -> 30_PIN_pkg): the
             # substrate sits inside it, so it is no part to place on the
             # substrate -- its pins reach the circuit through the I/O pads
@@ -470,39 +496,68 @@ def build_job(session, netlist, cell_name=None, overrides=None, settings=None, o
         # wire bonds a die part carries are not its body (bond_reach
         # already leaves room for them, below)
         body = _body_bbox(lib, cellname, skip_layers=bond_layers) or (-500, -500, 500, 500)
+        if res_ko is not None and _has_layers(lib, cellname, res_ink):
+            # a printed resistor's footprint is its copper, ink and glaze --
+            # not its dielectric keep-out, which only keeps crossovers off
+            # the ink (another part may sit in it; the router keeps the ink
+            # itself clear of tracks)
+            body = _body_bbox(lib, cellname, skip_layers=bond_layers | {res_ko}) or body
         if fam == "die":
-            # a die part may carry its own numbered bond fingers: they ARE
-            # where its nets reach the substrate
-            fingers = {}
-            dcell = lib.cells.get(cellname)
-            for sh in (dcell.shapes if dcell is not None else []):
-                if getattr(sh, "pin", "") and sh.layer not in die_layers and \
-                        isinstance(sh, (Rectangle, Polygon)):
-                    b = sh.bbox()
-                    fingers.setdefault(str(sh.pin), ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0, b))
-            core = _body_bbox(lib, cellname, skip_layers=die_layers | bond_layers,
-                              skip_pinned_layers=set(range(256))) or body
-            cx, cy = (core[0] + core[2]) / 2.0, (core[1] + core[3]) / 2.0
-            hx, hy = (core[2] - core[0]) / 2.0, (core[3] - core[1]) / 2.0
+            from .fanout import die_pads, fan_params, predict_fingers
+            # numbered pads off the die pad layers -- the die's own bond
+            # fingers, or its attach pad / backside contact (a transistor's
+            # collector): those nets reach the substrate where they are
+            lands = {}
+            for pin, lay, b in _pinned_shapes(lib, cellname):
+                if lay not in die_layers:
+                    lands.setdefault(pin, b)
+            # the other die pads are bonded out by Fan Out Die Bonds: the
+            # footprint is the die and its attach pad plus the fingers that
+            # will draw, exactly where it will draw them
+            # an attach pad's rim narrower than a track is widened outward by the
+            # router to take one (hybridroute: the backside contact's strips) --
+            # that copper is part of the footprint too
+            core_d = _body_bbox(lib, cellname, skip_layers=set(range(256)) - set(die_layers))
+            if core_d:
+                wmin = _track_width(session)
+                for q, lb_ in list(lands.items()):
+                    if lb_[0] <= core_d[0] and lb_[1] <= core_d[1] and \
+                            lb_[2] >= core_d[2] and lb_[3] >= core_d[3]:
+                        lands[q] = (min(lb_[0], core_d[0] - wmin), min(lb_[1], core_d[1] - wmin),
+                                    max(lb_[2], core_d[2] + wmin), max(lb_[3], core_d[3] + wmin))
+            dpads = die_pads(lib, cellname, sorted(die_layers))
+            wire = [q for q in dpads if q not in lands]
+            die_box = _body_bbox(lib, cellname, skip_layers=bond_layers) or body
+            fw, fl, fsp, fgp, flo, _fhi, ftan = fan_params(session)
+            pred = predict_fingers(die_box, dpads, wire, fw, fl, fsp, fgp, flo, ftan) if wire else {}
             out = {}
-            for p, (x, y) in pins.items():
-                if p in fingers:
-                    out[p] = fingers[p][:2]
-                    continue
-                dx, dy = x - cx, y - cy
-                if abs(dx) / max(hx, 1) >= abs(dy) / max(hy, 1):
-                    out[p] = (x + math.copysign(reach, dx or 1), y)
+            for q, xy in pins.items():
+                if q in pred:
+                    out[q] = pred[q][0]
+                elif q in lands:
+                    b = lands[q]
+                    out[q] = ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0)
                 else:
-                    out[p] = (x, y + math.copysign(reach, dy or 1))
+                    out[q] = xy
             pins = out
-            if fingers:
-                fb = [f[2] for f in fingers.values()]
-                body = (min(core[0], *(b[0] for b in fb)) - 300, min(core[1], *(b[1] for b in fb)) - 300,
-                        max(core[2], *(b[2] for b in fb)) + 300, max(core[3], *(b[3] for b in fb)) + 300)
-            else:
-                body = (body[0] - reach - 300, body[1] - reach - 300,
-                        body[2] + reach + 300, body[3] + reach + 300)
+            boxes = [die_box] + list(lands.values()) + [rect for _c, rect in pred.values()]
+            body = (min(b[0] for b in boxes), min(b[1] for b in boxes),
+                    max(b[2] for b in boxes), max(b[3] for b in boxes))
         bb = (body[0] - clr / 2, body[1] - clr / 2, body[2] + clr / 2, body[3] + clr / 2)
+        if halo > 0 and pins:
+            # pin access: a side the part's pins face gets half a routing
+            # channel more, so two facing pin sides leave a track's way out
+            # between them (the escape a hand placement leaves); bare sides
+            # keep just the clearance
+            w_, h_ = max(body[2] - body[0], 1.0), max(body[3] - body[1], 1.0)
+            near = lambda v, e, span: abs(v - e) <= span / 3.0
+            sides = [any(near(x, body[0], w_) for x, _y in pins.values()),
+                     any(near(y, body[1], h_) for _x, y in pins.values()),
+                     any(near(x, body[2], w_) for x, _y in pins.values()),
+                     any(near(y, body[3], h_) for _x, y in pins.values())]
+            hh = halo / 2.0
+            bb = (bb[0] - (hh if sides[0] else 0), bb[1] - (hh if sides[1] else 0),
+                  bb[2] + (hh if sides[2] else 0), bb[3] + (hh if sides[3] else 0))
         power = _f(o.get("power_mw") or comp.fields.get("HL_Power_mW"),
                    S["family_power_mw"].get(fam, 0.0))
         locked = (ref in board_locked or
@@ -603,10 +658,88 @@ def build_job(session, netlist, cell_name=None, overrides=None, settings=None, o
                     cross_weight=float(S.get("sli_crossing", 3000.0) or 0.0),
                     cong_weight=float(S.get("congestion", 0.0) or 0.0),
                     pitch=_track_pitch(session),
-                    xo_room=float(S.get("xo_room", 0.0) or 0.0))
+                    xo_room=float(S.get("xo_room", 0.0) or 0.0),
+                    room_weight=float(S.get("routing_room", 0.0) or 0.0),
+                    room_area=_route_area(session, cell, region))
+    placer.gap_soft = float(S.get("soft_gap", 0.0) or 0.0)
+    placer.gap_weight = float(S.get("soft_gap_weight", 1.0) or 1.0)
     info.update(settings=S, netlist=nl, cell=name, region=region)
     return placer, info
 
+
+def _route_area(session, cell, region):
+    """The area tracks may use: inside the I/O ring (pads' inner edge plus
+    the entry strip), else the substrate, else the placement region."""
+    from ..core.routeroom import route_area
+    try:
+        ring = session._io_ring_box(cell)
+    except Exception:
+        ring = None
+    try:
+        sub = session._substrate_box(cell)
+    except Exception:
+        sub = None
+    return route_area(region, ring, sub)
+
+
+
+
+def _has_layers(library, cell_name, layers, _depth=0):
+    """True if the cell (or anything it places) draws on one of ``layers``."""
+    c = library.cells.get(cell_name)
+    if c is None or not layers or _depth > 16:
+        return False
+    return any(sh.layer in layers for sh in c.shapes) or any(
+        _has_layers(library, r.cell_name, layers, _depth + 1) for r in c.srefs)
+
+def _pinned_shapes(library, cell_name, _depth=0, _xform=None):
+    """[(pin, layer, bbox)] of a cell's numbered pads through its hierarchy
+    -- numbered shapes, and numbered instances (a die's chip_pin pads) on
+    each layer they draw -- in the cell's coordinates."""
+    out = []
+    cell = library.cells.get(cell_name)
+    if cell is None or _depth > 16:
+        return out
+    xf = _xform or (lambda p: p)
+
+    def box(b, f):
+        pts = [f((b[0], b[1])), f((b[2], b[3])), f((b[0], b[3])), f((b[2], b[1]))]
+        return (min(p[0] for p in pts), min(p[1] for p in pts),
+                max(p[0] for p in pts), max(p[1] for p in pts))
+
+    def layers_of(cn, depth=0):
+        c = library.cells.get(cn)
+        if c is None or depth > 16:
+            return set()
+        ls = {sh.layer for sh in c.shapes}
+        for r in c.srefs:
+            ls |= layers_of(r.cell_name, depth + 1)
+        return ls
+
+    for sh in cell.shapes:
+        pin = getattr(sh, "pin", "")
+        if pin and isinstance(sh, (Rectangle, Polygon)):
+            out.append((str(pin), sh.layer, box(sh.bbox(), xf)))
+    for r in cell.srefs:
+        comp = (lambda f, g: (lambda p: f(g(p))))(xf, _xf(r))
+        if getattr(r, "pin", ""):
+            b = library.cell_bbox(r.cell_name)
+            if b:
+                for lay in sorted(layers_of(r.cell_name)):
+                    out.append((str(r.pin), lay, box(b, comp)))
+        else:
+            out.extend(_pinned_shapes(library, r.cell_name, _depth + 1, comp))
+    return out
+
+
+def _track_width(session) -> float:
+    """The widest routed track (signal / power width of the Autoroute rules)."""
+    try:
+        R = session.freerouting_rules()
+        return float(max(float(R.get("signal_width", 300) or 300),
+                         float(R.get("power_width", 0) or 0)))
+    except Exception:
+        return 300.0
 
 def _copper_space(session) -> float:
     """The minimum copper-to-copper spacing (Autoroute clearance, raised to
@@ -634,8 +767,10 @@ _HEADER_WORDS = ("pkg", "package", "header", "conn", "socket", "dip_kovar", "kov
 def _is_header(ref, comp, cellname):
     """A part that is the module's header / package or a connector (J30,
     Conn_01x30_Socket, 30_PIN_pkg) -- not something placed on the substrate."""
-    text = " ".join(str(t or "") for t in (cellname, getattr(comp, "value", ""),
-                                           getattr(comp, "footprint", ""))).lower()
+    # a KiCad footprint's library nickname is no clue: Package_TO_SOT_THT:TO-39-3
+    # is a transistor, not a package -- only the footprint's own name counts
+    fp = str(getattr(comp, "footprint", "") or "").rsplit(":", 1)[-1]
+    text = " ".join(str(t or "") for t in (cellname, getattr(comp, "value", ""), fp)).lower()
     return bool(_HEADER_REF.match(str(ref))) or any(w in text for w in _HEADER_WORDS)
 
 
@@ -793,6 +928,22 @@ def sli(session, cell_name=None, nets=None, unrouted_only=True):
                 landing.setdefault(rp, (float(x), float(y)))
     except Exception:
         landing = {}
+    # header bonds: a package pin bonded to its I/O pad reaches the circuit
+    # through that pad (already a point of the net), so it is no SLI end
+    hb_ends = []
+    try:
+        from .iopads import _header_bond_layer
+        hbl = {_header_bond_layer(session)}
+        try:
+            from ..io.techfile import load_bond_rules
+            hbl.add(int(load_bond_rules(lib)["layer"]))
+        except Exception:
+            pass
+        for sh in cell.shapes:
+            if sh.layer in hbl and isinstance(sh, Path) and len(sh.points) >= 2:
+                hb_ends += [tuple(sh.points[0]), tuple(sh.points[-1])]
+    except Exception:
+        hb_ends = []
     cache = {}
     for r in cell.srefs:
         if not r.label:
@@ -800,11 +951,16 @@ def sli(session, cell_name=None, nets=None, unrouted_only=True):
         if r.cell_name not in cache:
             cache[r.cell_name] = cell_pins(lib, r.cell_name)
         f = _xf(r)
+        header = bool(hb_ends) and _is_header(r.label, None, r.cell_name)
         for pin, xy in cache[r.cell_name].items():
             key = f"{r.label}.{pin}"
             net = names.get(key)
             if net:
-                pts.setdefault(net, []).append(landing.get(key) or f(xy))
+                p_ = landing.get(key) or f(xy)
+                if header and any(abs(e[0] - p_[0]) <= 900 and abs(e[1] - p_[1]) <= 900
+                                  for e in hb_ends):
+                    continue
+                pts.setdefault(net, []).append(p_)
     tracer = _routed_tracer(session, cell, name) if unrouted_only else None
     out, total, complete = [], 0.0, 0
     for net, p in pts.items():

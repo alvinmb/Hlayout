@@ -3997,6 +3997,46 @@ class Session:
         from .autoplace_session import save_settings
         return save_settings(self.library, settings)
 
+    def open_channels(self, netlist=None, passes: int = 6, cell_name: Optional[str] = None,
+                      on_line=None) -> dict:
+        """After Auto Place (and Fan Out Die Bonds): move only the parts that
+        wall pads in -- each pass checks routability, moves a blocking part
+        straight away from its wall by the wall's length where it fits, and
+        is kept only if fewer connections are walled in (one undo step per
+        kept pass). Locked parts never move. -> {"passes", "moves",
+        "walled_before", "walled_after", "log", "report"}. See
+        hlayout.scripting.open_channels."""
+        from .open_channels import open_channels
+        return open_channels(self, netlist=netlist, passes=passes, cell_name=cell_name,
+                             on_line=on_line)
+
+    def auto_place_tries(self, netlist, tries: int = 3, seeds=None,
+                         cell_name: Optional[str] = None, on_line=None, **settings) -> dict:
+        """Auto Place with ``tries`` seeds (or the given ``seeds``), keeping
+        the placement the routability check rates best -- fewest walled-in
+        connections, then crossings with no room for a crossover, then track
+        demand, then net length. Bare dies are fanned out for the check and
+        on the kept placement. -> {"seed", "tries", "legal", "fanned_out",
+        ...}. See hlayout.scripting.autoplace_tries."""
+        from .autoplace_tries import auto_place_tries
+        r = auto_place_tries(self, netlist, tries=tries, seeds=seeds, cell_name=cell_name,
+                             on_line=on_line, **settings)
+        r.pop("placer", None)
+        r.pop("info", None)
+        return r
+
+    def check_routability(self, cell_name: Optional[str] = None, text: bool = False):
+        """Will the placement route? In seconds, without routing: the
+        connections no path can ever reach (walled in by the parts round
+        them, no room for a crossover) with the parts in the way, the SLI
+        crossings with no room for a crossover, and the track demand
+        against the free space (RUDY). Run it after Fan Out Die Bonds and
+        Bond Header. -> the report dict (``text``: as text). See
+        hlayout.scripting.routability."""
+        from .routability import check, to_text
+        rep = check(self, cell_name=cell_name)
+        return to_text(rep) if text else rep
+
     def auto_place(self, netlist, overrides: Optional[str] = None, cell_name: Optional[str] = None,
                    improve: bool = False, only=None, on_progress=None, cancel=None,
                    **settings) -> dict:
@@ -4014,7 +4054,8 @@ class Session:
         merged into the design's net names.
         Returns {"placed", "fixed", "generated", "skipped", "unmapped",
         "missing_pins", "length_before", "length_after", "overlaps",
-        "outside", "legal"}. ``legal`` False: the parts did not fit --
+        "outside", "legal", "report"} -- ``report`` the full text report
+        (problems with a suggested move each, SLI crossings, longest nets). ``legal`` False: the parts did not fit --
         overlapping footprints (their pads touching: shorts) or parts off
         the substrate; the placement is applied so it can be fixed by hand.
         Footprints never come closer than the copper spacing (the Autoroute
@@ -4029,6 +4070,11 @@ class Session:
         with self._batch():
             apply(self, placer, info)
         self._notify()
+        from .autoplace_report import build_report, to_text
+        try:
+            report = to_text(build_report(self, placer, info))
+        except Exception as e:                   # the placement stands either way
+            report = f"(no report: {e})"
         return {"placed": sum(1 for p in placer.parts if not p.fixed),
                 "fixed": sum(1 for p in placer.parts if p.fixed),
                 "generated": info["generated"], "skipped": info["skipped"],
@@ -4036,7 +4082,9 @@ class Session:
                 "length_before": before, "length_after": placer.wirelength(),
                 "overlaps": bad, "outside": out,
                 # overlapping footprints include their pads: a short circuit
-                "legal": not bad and not out}
+                "legal": not bad and not out,
+                # the full report (Auto Place window, Report tab) as text
+                "report": report}
 
     def sli(self, cell_name: Optional[str] = None, nets=None, unrouted_only: bool = True) -> dict:
         """Straight-line interconnects (SLIs) of the design as placed: for
@@ -4916,7 +4964,8 @@ class Session:
     def _single_layer_route(self, R) -> bool:
         """Route on the 1st conductor alone? rules layer_mode "single" /
         "two", or "auto": yes when nothing anywhere is drawn on the 2nd
-        conductor (a one-conductor chip-and-wire hybrid)."""
+        conductor (a one-conductor chip-and-wire hybrid) and the process
+        has no routing dielectric (Dielectric Fill Rules layer)."""
         mode = str(R.get("layer_mode", "auto")).lower()
         if mode.startswith("s") or mode == "1":
             return True
@@ -4925,6 +4974,18 @@ class Session:
         if self._fingers_on_second(R):
             return False            # bond fingers on the 2nd conductor need both
         _la, lb = self._route_layers()
+        if lb is None or int(lb) < 0:
+            return True
+        # a process with a routing dielectric can cross over: two conductors,
+        # whether or not anything is on the 2nd yet (an unrouted board has
+        # nothing there, and must not fall back to wire-bond jumpers)
+        try:
+            from ..io.techfile import load_dielectric_rules
+            dl = load_dielectric_rules(self.library).get("layer")
+            if isinstance(dl, int) and dl >= 0:
+                return False
+        except Exception:
+            pass
         return not any(sh.layer == lb for c in self.library.cells.values() for sh in c.shapes)
 
     @staticmethod

@@ -181,7 +181,8 @@ class Placer:
     def __init__(self, parts: List[Part], nets: List[PNet], region, grid: float = 50.0,
                  thermal: float = 0.0, obstacles=(), seed: int = 0, cross_weight: float = 0.0,
                  cong_weight: float = 0.0, pitch: float = 400.0, cong_cell: float = 0.0,
-                 xo_room: float = 0.0):
+                 xo_room: float = 0.0, room_weight: float = 0.0, room_area=None,
+                 room_cell: float = 0.0):
         self._stop = None
         #: what run() is doing now, for a progress display (read from another
         #: thread; only ever replaced, never mutated)
@@ -213,6 +214,15 @@ class Placer:
         self.cong = float(cong_weight or 0.0)
         self.pitch = max(1.0, float(pitch or 400.0))
         self.cong_cell = float(cong_cell or 0.0) or 2.5 * self.pitch
+        #: routing room (hlayout.core.routeroom): um of wire one track^2 of
+        #: overflow is worth (0 = off); the area tracks may use (default the
+        #: placement region) and the gcell (default 4 track pitches)
+        self.room_weight = float(room_weight or 0.0)
+        self.room = None
+        if self.room_weight:
+            from .routeroom import RouteRoom
+            self.room = RouteRoom(room_area or self.region, self.pitch,
+                                  float(room_cell or 0.0) or 4.0 * self.pitch)
         self._refresh()
 
     def _net_geom(self, k):
@@ -228,6 +238,8 @@ class Placer:
             self.net_len = [g[0] for g in geo]
             self.net_segs = [g[1] for g in geo]
             self._cong_build()
+            if self.room is not None:
+                self.room.build(self)
             return
         for k in ks:
             self.net_len[k], self.net_segs[k] = self._net_geom(k)
@@ -366,9 +378,23 @@ class Placer:
     def wirelength(self):
         return sum(self.nets[k].weight * self.net_len[k] for k in range(len(self.nets)))
 
+    #: soft gap (um, 0 = off): parts closer than this (footprint to footprint,
+    #: clearance already included) pay gap_weight * shortfall^2 / 1000 um of
+    #: wire -- spreads the whitespace evenly, as a hand placement does,
+    #: instead of packing parts at the hard clearance
+    gap_soft = 0.0
+    gap_weight = 1.0
+
     def _pair(self, i, j):
         a, b = self.parts[i], self.parts[j]
-        c = LAM_OVERLAP * _ov(a.world_bbox(), b.world_bbox()) / 1000.0
+        ba, bb = a.world_bbox(), b.world_bbox()
+        c = LAM_OVERLAP * _ov(ba, bb) / 1000.0
+        if self.gap_soft:
+            dx = max(0.0, max(ba[0], bb[0]) - min(ba[2], bb[2]))
+            dy = max(0.0, max(ba[1], bb[1]) - min(ba[3], bb[3]))
+            d = math.hypot(dx, dy)
+            if d < self.gap_soft:
+                c += self.gap_weight * (self.gap_soft - d) ** 2 / 1000.0
         if self.thermal and a.power and b.power:
             d = max(MIN_THERMAL_D, math.hypot(a.x - b.x, a.y - b.y))
             c += self.thermal * K_THERMAL * a.power * b.power / d
@@ -400,6 +426,9 @@ class Placer:
     def cost(self):
         c = self.wirelength() + self.cross_weight * (self.crossings() if self.cross_weight else 0)
         c += self.cong * self.congestion()
+        if self.room is not None:
+            self.room.build(self)
+            c += self.room_weight * self.room.overflow2
         for i in range(len(self.parts)):
             c += self._single(i)
             for j in range(i + 1, len(self.parts)):
@@ -432,6 +461,7 @@ class Placer:
             if not ok:
                 return 0.0, False
         old_boxes = [self.parts[i].world_bbox() for i in moved] if self.cong else []
+        r0 = self.room.overflow2 if self.room is not None else 0.0
         before, nets = self._local(moved)
         old_len = {k: self.net_len[k] for k in nets}
         before += sum(self.nets[k].weight * old_len[k] for k in nets)
@@ -467,6 +497,9 @@ class Placer:
             o2 = self._overflow(win) if win else 0.0
             after += self.cong * (o2 - o1) / self.pitch
             cong_undo = lambda: swap_in(-1.0)
+        if self.room is not None:
+            self.room.update(moved)
+            after += self.room_weight * (self.room.overflow2 - r0)
         d = after - before
         if d <= 0 or (T > 0 and self.rng.random() < math.exp(-d / T)):
             for k, (L, sg) in geo.items():
@@ -476,6 +509,8 @@ class Placer:
         if cong_undo:
             cong_undo()
         undo()
+        if self.room is not None:
+            self.room.update(moved)
         return d, False
 
     def _shift(self, i, sigma):
@@ -706,6 +741,8 @@ class Placer:
         part is left a quarter turn from its best. Returns how many turns
         were kept."""
         kept = 0
+        if self.room is not None:
+            self.room.build(self)
         for _ in range(sweeps):
             better = 0
             for i in self.movable:
@@ -730,11 +767,15 @@ class Placer:
                         self._refresh(self.part_nets[i])
                         if self.cong:
                             self._cong_build()
+                        if self.room is not None:
+                            self.room.update([i])
                 if best is not None:
                     p.rot = best[1]
                     self._refresh(self.part_nets[i])
                     if self.cong:
                         self._cong_build()
+                    if self.room is not None:
+                        self.room.update([i])
                     better += 1
             kept += better
             if not better:

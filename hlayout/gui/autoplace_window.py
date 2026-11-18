@@ -35,7 +35,7 @@ class AutoPlaceWindow(tk.Toplevel):
         self.nl = None
         self.v = {k: tk.StringVar() for k in ("netlist", "overrides", "grid", "thermal", "effort",
                                                "seed", "clearance", "bond_reach", "res_layer",
-                                               "sli_crossing")}
+                                               "sli_crossing", "edge")}
         self._build()
         self.reload()
         self.protocol("WM_DELETE_WINDOW", self.close)
@@ -132,12 +132,51 @@ class AutoPlaceWindow(tk.Toplevel):
             self.cw[cls] = tk.StringVar()
             ttk.Spinbox(row, textvariable=self.cw[cls], from_=0, to=20, increment=0.5, width=6).pack(side="left")
         ttk.Label(side2, text="0 = leave the net out", foreground="#666").pack(anchor="w", pady=(6, 0))
+        # report: what the last run did and what needs attention
+        rf = ttk.Frame(nb, padding=4)
+        nb.add(rf, text="Report")
+        self.nb, self.report_tab = nb, rf
+        rf.columnconfigure(0, weight=1)
+        rf.rowconfigure(0, weight=1)
+        self.rep = ttk.Treeview(rf, columns=("detail",), show="tree headings", height=8,
+                                style="AP.Treeview")
+        self.rep.heading("#0", text="Item")
+        self.rep.heading("detail", text="Detail")
+        self.rep.column("#0", width=230, stretch=False)
+        self.rep.column("detail", width=560)
+        self.rep.tag_configure("error", foreground="#c5221f")
+        self.rep.tag_configure("warning", foreground="#b35c00")
+        self.rep.tag_configure("section", font=("Segoe UI", 10, "bold"))
+        self.rep.grid(row=0, column=0, sticky="nsew")
+        sb3 = ttk.Scrollbar(rf, command=self.rep.yview)
+        self.rep.configure(yscrollcommand=sb3.set)
+        sb3.grid(row=0, column=1, sticky="ns")
+        side3 = ttk.Frame(rf)
+        side3.grid(row=0, column=2, sticky="n", padx=6)
+        ttk.Button(side3, text="Show on board", command=self._rep_show).pack(fill="x")
+        self.fix_btn = ttk.Button(side3, text="Apply fix", command=self._rep_fix, state="disabled")
+        self.fix_btn.pack(fill="x", pady=4)
+        self.fixall_btn = ttk.Button(side3, text="Apply all fixes", command=self._rep_fix_all,
+                                     state="disabled")
+        self.fixall_btn.pack(fill="x")
+        ttk.Button(side3, text="Check Routability", command=self._rep_check).pack(fill="x", pady=(12, 0))
+        ttk.Button(side3, text="Open Channels", command=self._rep_open).pack(fill="x", pady=(4, 0))
+        ttk.Button(side3, text="Copy", command=self._rep_copy).pack(fill="x", pady=(12, 4))
+        ttk.Button(side3, text="Save...", command=self._rep_save).pack(fill="x")
+        ttk.Label(side3, text="Double-click a row to\nselect its parts and\nzoom to them.",
+                  foreground="#666", justify="left").pack(anchor="w", pady=(10, 0))
+        self.rep_text = tk.Text(rf, height=3, wrap="word", relief="flat", background="#f4f4f4")
+        self.rep_text.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(4, 0))
+        self.rep_text.configure(state="disabled")
+        self.rep.bind("<<TreeviewSelect>>", self._rep_selected, add="+")
+        self.rep.bind("<Double-1>", lambda e: self._rep_show())
+        self._rep_rows, self._report, self._last = {}, None, None
         # settings
         sf = ttk.LabelFrame(f, text="Settings (saved with the design)", padding=8)
         sf.pack(fill="x", pady=(8, 0))
         items = (("Grid (um)", "grid"), ("Clearance (um)", "clearance"), ("Bond reach (um)", "bond_reach"),
                  ("Thermal (0 = off)", "thermal"), ("Effort", "effort"), ("Seed", "seed"),
-                 ("SLI crossing (um)", "sli_crossing"))
+                 ("SLI crossing (um)", "sli_crossing"), ("Edge (um)", "edge"))
         for k, (label, key) in enumerate(items):
             r, c = divmod(k, 4)
             ttk.Label(sf, text=label + ":").grid(row=r, column=c * 2, sticky="e", padx=4, pady=2)
@@ -171,7 +210,7 @@ class AutoPlaceWindow(tk.Toplevel):
         S = self.session.autoplace_settings()
         for key, sk in (("grid", "grid"), ("clearance", "clearance"), ("bond_reach", "bond_reach"),
                         ("thermal", "thermal"), ("effort", "effort"), ("seed", "seed"),
-                        ("sli_crossing", "sli_crossing")):
+                        ("sli_crossing", "sli_crossing"), ("edge", "edge")):
             self.v[key].set(f"{float(S.get(sk, 0) or 0):g}")
         self._fill_res_layers(S)
         for cls, var in self.cw.items():
@@ -219,7 +258,7 @@ class AutoPlaceWindow(tk.Toplevel):
         for key, sk, typ in (("grid", "grid", float), ("clearance", "clearance", float),
                              ("bond_reach", "bond_reach", float), ("thermal", "thermal", float),
                              ("effort", "effort", float), ("seed", "seed", int),
-                             ("sli_crossing", "sli_crossing", float)):
+                             ("sli_crossing", "sli_crossing", float), ("edge", "edge", float)):
             try:
                 out[sk] = typ(float(self.v[key].get()))
             except ValueError:
@@ -540,7 +579,8 @@ class AutoPlaceWindow(tk.Toplevel):
             self.stop_btn.config(state="disabled")
         if err is not None:
             if alive:
-                self._say(f"FAILED -- {err}", "err")
+                self._say(f"FAILED -- {str(err).splitlines()[0][:120]} (full text on the Report tab)", "err")
+                self._show_error(err)
             return
         from ..scripting.autoplace_session import apply
         s = self.session
@@ -549,42 +589,237 @@ class AutoPlaceWindow(tk.Toplevel):
         s._notify()
         self.app.refresh_all() if hasattr(self.app, "refresh_all") else self.app.canvas.redraw()
         self.app.set_sli(True)
-        d = s.sli()
-        bad, out = placer.overlaps()
-        msg = (f"PLACED in {secs:.0f} s -- {sum(1 for p in placer.parts if not p.fixed)} parts, "
-               f"SLI total {d['total'] / 1000:.1f} mm, {placer.crossings()} SLI crossing(s)")
-        notes = []
-        if info["skipped"]:
-            notes.append("not placed: " + ", ".join(info["skipped"]))
-        if info.get("header"):
-            notes.append("header / connector, not placed on the substrate: "
-                         + ", ".join(info["header"]))
-        if info["unmapped"]:
-            notes.append("no cell for: " + ", ".join(info["unmapped"]))
-        if bad or out:
-            pairs = ", ".join(f"{a}-{b}" for a, b in bad[:8]) + (" ..." if len(bad) > 8 else "")
-            notes.append("NOT LEGAL -- the parts don't fit: "
-                         + (f"{len(bad)} overlapping ({pairs})" if bad else "")
-                         + (", " if bad and out else "")
-                         + (f"{len(out)} off the substrate ({', '.join(out[:8])})" if out else "")
-                         + ". Overlapping pads are short circuits: move them apart, enlarge the "
-                         "substrate or lower Clearance (it can't go below the copper spacing)")
-        cb = info.get("carried") or {}
-        if cb.get("bonds"):
-            notes.append(f"{cb['bonds']} wire bond(s) and {cb.get('fingers', 0)} bond finger(s) "
-                         "moved with their dies")
-        if getattr(placer, "stuck", None):
-            notes.append("no legal spot (left where they were): " + ", ".join(placer.stuck))
-        if info["missing_pins"]:
-            notes.append(f"{len(info['missing_pins'])} netlist pin(s) not on the footprint")
+        self._last = (placer, info, secs)
+        rep = self._show_report(placer, info, secs)
         if alive:
-            self._say(msg + ("; " + "; ".join(notes) if notes else ""),
-                      "err" if (bad or out) else ("warn" if info["unmapped"] else "ok"), 100)
+            self._say(rep["headline"], "err" if rep["errors"] else ("warn" if rep["warnings"] else "ok"),
+                      100)
             try:
+                if rep["errors"] or rep["warnings"]:
+                    self.nb.select(self.report_tab)
                 self.bell()
                 self.lift()
             except tk.TclError:
                 pass
+
+    # ------------------------------------------------------------- report
+    def _show_report(self, placer, info, secs):
+        from ..scripting.autoplace_report import build_report
+        rep = build_report(self.session, placer, info, secs)
+        self._report = rep
+        try:
+            if not self.winfo_exists():
+                return rep
+        except tk.TclError:
+            return rep
+        self._fill_tree(rep)
+        return rep
+
+    def _fill_tree(self, rep):
+        self.rep.delete(*self.rep.get_children())
+        self._rep_rows = {}
+        for sec in rep["sections"]:
+            sid = self.rep.insert("", "end", text=sec["title"], open=True, tags=("section",))
+            if not sec["rows"]:
+                self.rep.insert(sid, "end", text="(none)")
+            for row in sec["rows"]:
+                iid = self.rep.insert(sid, "end", text=row["item"], values=(row["detail"],),
+                                      tags=(row["sev"],))
+                self._rep_rows[iid] = row
+        n = sum(1 for r in self._rep_rows.values() if r.get("fix"))
+        self.fixall_btn.config(state="normal" if n else "disabled",
+                               text=f"Apply all fixes ({n})" if n else "Apply all fixes")
+        self.fix_btn.config(state="disabled")
+        self._rep_note("")
+
+    def _rep_check(self):
+        """Check Routability: the router's own view of the board, no routing
+        (hlayout.scripting.routability) -- added to the report."""
+        from ..scripting.routability import check
+        try:
+            rr = check(self.session)
+        except Exception as e:
+            self._say(f"Check Routability failed -- {e}", "err")
+            return
+        rep = self._report or {"headline": "", "sections": [], "errors": 0, "warnings": 0}
+        rep["sections"] = [sc for sc in rep["sections"]
+                           if not sc["title"].startswith("Routability")] + rr["sections"]
+        self._report = rep
+        self._fill_tree(rep)
+        try:
+            self.nb.select(self.report_tab)
+            last = self.rep.get_children()[-1]
+            self.rep.see(last)
+        except (tk.TclError, IndexError):
+            pass
+        self._say(rr["headline"], "err" if rr["errors"] else ("warn" if rr["warnings"] else "ok"), None)
+
+    def _rep_open(self):
+        """Open Channels: move only the parts that wall pads in, re-checking
+        after every pass (hlayout.scripting.open_channels)."""
+        if self._running:
+            return
+        from ..scripting.open_channels import open_channels
+        path = self.v["netlist"].get().strip() or None
+        self._say("Opening channels...", "run", None)
+        self.update_idletasks()
+        try:
+            r = open_channels(self.session, netlist=path,
+                              on_line=lambda m: (self._say("Open Channels: " + m, "run", None),
+                                                 self.update_idletasks()))
+        except Exception as e:
+            self._say(f"Open Channels failed -- {e}", "err")
+            return
+        self.app.refresh_all() if hasattr(self.app, "refresh_all") else self.app.canvas.redraw()
+        self._last = None                     # the placement moved: old fixes no longer apply
+        rows = [{"sev": "info", "item": "Open Channels",
+                 "detail": f"{r['moves']} move(s) in {r['passes']} pass(es): walled-in connections "
+                           f"{r['walled_before']} -> {r['walled_after']} of {r['connections']}",
+                 "refs": [], "box": None, "fix": None}]
+        rows += [{"sev": "info", "item": ln.split(":", 1)[0], "detail": ln.split(":", 1)[1].strip(),
+                  "refs": [w for w in ln.split() if w[:1] in "QRCUDL" and w[1:2].isdigit()][:2],
+                  "box": None, "fix": None} for ln in r["log"]]
+        rep = self._report or {"headline": "", "sections": [], "errors": 0, "warnings": 0}
+        rep["sections"] = [sc for sc in rep["sections"]
+                           if not sc["title"].startswith(("Routability", "Open Channels"))]
+        rep["sections"] += [{"title": "Open Channels", "rows": rows}] + r["report"]["sections"]
+        self._report = rep
+        self._fill_tree(rep)
+        try:
+            self.nb.select(self.report_tab)
+        except tk.TclError:
+            pass
+        self._say(f"Open Channels: walled-in {r['walled_before']} -> {r['walled_after']} "
+                  f"({r['moves']} move(s), one undo step per pass) -- "
+                  + r["report"]["headline"], "ok" if not r["walled_after"] else "warn", None)
+
+    def _show_error(self, err):
+        self._report = {"headline": f"FAILED -- {err}", "sections": [
+            {"title": "Problems (1)", "rows": [{"sev": "error", "item": "Auto Place failed",
+                                                "detail": str(err), "refs": [], "box": None,
+                                                "fix": None}]}]}
+        self.rep.delete(*self.rep.get_children())
+        self._rep_rows = {}
+        sid = self.rep.insert("", "end", text="Problems (1)", open=True, tags=("section",))
+        row = self._report["sections"][0]["rows"][0]
+        iid = self.rep.insert(sid, "end", text=row["item"], values=(row["detail"],), tags=("error",))
+        self._rep_rows[iid] = row
+        self.fix_btn.config(state="disabled")
+        self.fixall_btn.config(state="disabled", text="Apply all fixes")
+        self.rep.selection_set(iid)
+        self.nb.select(self.report_tab)
+
+    def _rep_note(self, text):
+        self.rep_text.configure(state="normal")
+        self.rep_text.delete("1.0", "end")
+        self.rep_text.insert("1.0", text)
+        self.rep_text.configure(state="disabled")
+
+    def _rep_row(self):
+        sel = self.rep.selection()
+        return self._rep_rows.get(sel[0]) if sel else None
+
+    def _rep_selected(self, _e=None):
+        row = self._rep_row()
+        if row is None:
+            self.fix_btn.config(state="disabled")
+            self._rep_note("")
+            return
+        fix = row.get("fix")
+        self.fix_btn.config(state="normal" if fix and self._last else "disabled")
+        self._rep_note(f"{row['item']}: {row['detail']}"
+                       + (f"\nParts: {', '.join(row['refs'])}" if row.get("refs") else ""))
+
+    def _rep_show(self):
+        row = self._rep_row()
+        if row is None:
+            return
+        cv = self.app.canvas
+        cell = self.session.library.cells.get(self.session.current_cell_name)
+        refs = set(row.get("refs") or [])
+        hits = [r for r in (cell.srefs if cell is not None else []) if r.label in refs]
+        cv.selected = None
+        cv.selected_multi = [("sref", r) for r in hits]
+        box = row.get("box")
+        if box is None and hits:
+            from ..scripting.autoplace_session import _xf
+            pts = []
+            for r in hits:
+                b = self.session.library.cell_bbox(r.cell_name)
+                if b:
+                    f = _xf(r)
+                    pts += [f((b[0], b[1])), f((b[2], b[3]))]
+            if pts:
+                box = (min(x for x, _ in pts) - 1000, min(y for _, y in pts) - 1000,
+                       max(x for x, _ in pts) + 1000, max(y for _, y in pts) + 1000)
+        if box:
+            cv.zoom_to_window(*box, padding=0.1)
+        cv.redraw()
+
+    def _apply_fixes(self, rows):
+        if not self._last or self._running:
+            return
+        placer, info, secs = self._last
+        by = {p.ref: p for p in placer.parts}
+        done = []
+        for row in rows:
+            fix = row.get("fix")
+            p = by.get(fix["ref"]) if fix else None
+            if p is None:
+                continue
+            p.x += fix["dx"]
+            p.y += fix["dy"]
+            done.append(fix["ref"])
+        if not done:
+            return
+        from ..scripting.autoplace_session import apply
+        s = self.session
+        with s._batch():
+            apply(s, placer, info)
+        s._notify()
+        self.app.refresh_all() if hasattr(self.app, "refresh_all") else self.app.canvas.redraw()
+        rep = self._show_report(placer, info, secs)
+        self._say(f"Moved {', '.join(done)} (one undo step) -- " + rep["headline"],
+                  "err" if rep["errors"] else ("warn" if rep["warnings"] else "ok"), None)
+
+    def _rep_fix(self):
+        row = self._rep_row()
+        if row and row.get("fix"):
+            self._apply_fixes([row])
+
+    def _rep_fix_all(self):
+        # one at a time: each fix was worked out against the placement as it
+        # was, so re-check after every move and stop when none is left
+        for _ in range(50):
+            rows = [r for r in self._rep_rows.values() if r.get("fix")]
+            if not rows or not self._last:
+                break
+            self._apply_fixes(rows[:1])
+
+    def _rep_copy(self):
+        if not self._report:
+            return
+        from ..scripting.autoplace_report import to_text
+        self.clipboard_clear()
+        self.clipboard_append(to_text(self._report))
+        self._rep_note("Report copied to the clipboard.")
+
+    def _rep_save(self):
+        if not self._report:
+            return
+        from ..scripting.autoplace_report import to_text
+        dp = getattr(self.session, "design_path", "") or ""
+        dp = dp if isinstance(dp, str) else ""
+        base = os.path.splitext(dp)[0] if dp else "autoplace"
+        path = filedialog.asksaveasfilename(parent=self, title="Save Auto Place report",
+                                            defaultextension=".txt",
+                                            initialdir=os.path.dirname(dp) or None,
+                                            initialfile=os.path.basename(base) + "_autoplace.txt",
+                                            filetypes=(("Text", "*.txt"), ("All files", "*.*")))
+        if path:
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(to_text(self._report))
+            self._rep_note(f"Saved {path}")
 
     def _stop(self):
         self._cancel = True

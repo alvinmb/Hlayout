@@ -49,6 +49,12 @@ def _pinned_points(library, cell_name, depth=0, xform=None):
     for r in cell.srefs:
         child = _xf(r)
         comp = (lambda f, g: (lambda p: f(g(p))))(xf, child)
+        if getattr(r, "pin", ""):
+            # a numbered instance (a package's Header_Pin_Round pins): the pad
+            # is the instance itself, at its body's centre
+            b = library.cell_bbox(r.cell_name)
+            c = ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0) if b else (0.0, 0.0)
+            out.append((str(r.pin), comp(c)))
         out.extend(_pinned_points(library, r.cell_name, depth + 1, comp))
     return out
 
