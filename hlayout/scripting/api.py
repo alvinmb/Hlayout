@@ -4964,8 +4964,7 @@ class Session:
     def _single_layer_route(self, R) -> bool:
         """Route on the 1st conductor alone? rules layer_mode "single" /
         "two", or "auto": yes when nothing anywhere is drawn on the 2nd
-        conductor (a one-conductor chip-and-wire hybrid) and the process
-        has no routing dielectric (Dielectric Fill Rules layer)."""
+        conductor (a one-conductor chip-and-wire hybrid)."""
         mode = str(R.get("layer_mode", "auto")).lower()
         if mode.startswith("s") or mode == "1":
             return True
@@ -4974,18 +4973,6 @@ class Session:
         if self._fingers_on_second(R):
             return False            # bond fingers on the 2nd conductor need both
         _la, lb = self._route_layers()
-        if lb is None or int(lb) < 0:
-            return True
-        # a process with a routing dielectric can cross over: two conductors,
-        # whether or not anything is on the 2nd yet (an unrouted board has
-        # nothing there, and must not fall back to wire-bond jumpers)
-        try:
-            from ..io.techfile import load_dielectric_rules
-            dl = load_dielectric_rules(self.library).get("layer")
-            if isinstance(dl, int) and dl >= 0:
-                return False
-        except Exception:
-            pass
         return not any(sh.layer == lb for c in self.library.cells.values() for sh in c.shapes)
 
     @staticmethod
