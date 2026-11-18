@@ -366,6 +366,7 @@ td:first-child{font-weight:600;white-space:nowrap}
 h1.eyebrow{font:500 .78rem/1 var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 .display{font-family:var(--f-display);line-height:1.08;margin:0;text-wrap:balance;letter-spacing:-.01em;font-size:clamp(2.6rem,6vw,4.4rem);font-weight:700}
 .hero-copy .display span{color:var(--gold)}
+.footnav{display:block;margin-top:6px}
 </style>
 </head>
 <body>
@@ -402,7 +403,7 @@ h1.eyebrow{font:500 .78rem/1 var(--f-mono);letter-spacing:.08em;text-transform:u
           <a class="btn btn-gold" href="/download/" data-dl-main>Download HLayout</a>
           <a class="btn btn-line" href="https://github.com/alvinmb/Hlayout" target="_blank" rel="noopener">View on GitHub</a>
         </div>
-        <span class="hint">Free and open source · GPL-3.0 · Windows, Linux and macOS</span>
+        <span class="hint"><a href="/free-open-source-hybrid-layout-software/">Free and open source</a> · GPL-3.0 · Windows, Linux and macOS</span>
       </div>
       <div class="tile">
         <img src="img/hero-alu16-window.jpg" alt="HLayout main window showing the ALU16 module: ten LCC packages on a two-conductor thick-film substrate with the layer list on the right" width="1100" height="697">
@@ -460,10 +461,10 @@ h1.eyebrow{font:500 .78rem/1 var(--f-mono);letter-spacing:.08em;text-transform:u
       </div>
       <div class="feat">
         <div><span class="tag">ROUTE</span><h3>Autorouting with Freerouting</h3><p>Your DRC rules set the widths and clearance. Wire-bond landings become bond fingers. The ALU16 chip-and-wire build routes 85 of 85 nets.</p></div>
-        <div><span class="tag">BOND</span><h3>Chip-and-wire router</h3><p>Single-conductor hybrids routed with wire-bond jumpers, plus a bond diagram CSV in bonding order for the wire bonder.</p></div>
-        <div><span class="tag">PLACE</span><h3>Auto Place</h3><p>Shortest weighted net length with power and ground counted, hot parts kept apart, and straight-line interconnects that follow every drag.</p></div>
+        <div><span class="tag">BOND</span><h3>Chip-and-wire router</h3><p>Single-conductor hybrids routed with wire-bond jumpers, plus a bond diagram CSV in bonding order for the wire bonder. <a href="/chip-and-wire/">Chip-and-wire layout</a></p></div>
+        <div><span class="tag">PLACE</span><h3>Auto Place</h3><p>Shortest weighted net length with power and ground counted, hot parts kept apart, and straight-line interconnects that follow every drag. <a href="/kicad-to-hybrid/">From KiCad to hybrid</a></p></div>
         <div><span class="tag">CHECK</span><h3>DRC and netlist extraction</h3><p>Widths, spacings, substrate-edge clearance and wire-bond length and angle, then copper connectivity compared against your nets.</p></div>
-        <div><span class="tag">HEAT</span><h3>Thermal, resistor shapes and trim</h3><p>Die and resistor temperatures against their limits; top-hat, U and angle resistors sized from their real outline; plunge and L-cut trims step by step. <a href="/thermal-and-trim.htm">See the tools</a></p></div>
+        <div><span class="tag">HEAT</span><h3>Thermal, resistor shapes and trim</h3><p>Die and resistor temperatures against their limits; top-hat, U and angle resistors sized from their real outline; plunge and L-cut trims step by step. <a href="/thermal-and-trim.htm">See the tools</a> · <a href="/thick-film-resistor-designer/">Resistor designer</a></p></div>
         <div><span class="tag">CAM</span><h3>Manufacturing outputs</h3><p>Gerber per print layer, DXF, pick-and-place centroids, test netlists and a one-step assembly drawing with pin, resistor and bond tables.</p></div>
       </div>
     </div>
@@ -512,7 +513,7 @@ h1.eyebrow{font:500 .78rem/1 var(--f-mono);letter-spacing:.08em;text-transform:u
           <button class="btn btn-line btn-sm" type="button" id="copy-email">Copy address</button>
           <a class="btn btn-gold btn-sm" href="mailto:support@h-layout.co.uk?subject=HLayout%20consultancy%20enquiry">Write an email</a>
         </div>
-        <p class="hint">Tell us about your process, the parts you use and what you want HLayout to do.</p>
+        <p class="hint">Tell us about your process, the parts you use and what you want HLayout to do. <a href="/services/">More about our services</a></p>
       </div>
       <div class="svc-grid">
         <article class="svc-card">
@@ -582,6 +583,7 @@ h1.eyebrow{font:500 .78rem/1 var(--f-mono);letter-spacing:.08em;text-transform:u
   <div class="wrap">
     <span>HLayout · thick-film hybrid layout CAD · GPL-3.0 · support@h-layout.co.uk</span>
     <span><a href="https://github.com/alvinmb/Hlayout" target="_blank" rel="noopener">GitHub</a> · <a href="https://github.com/alvinmb/Hlayout/releases" target="_blank" rel="noopener">Releases</a> · <a href="/download/#policies">Privacy</a> · <button class="linklike" type="button" data-consent-open>Cookie settings</button> · <a href="https://github.com/alvinmb/Hlayout/issues" target="_blank" rel="noopener">Report an issue</a> · <a href="#services">Consultancy</a> · <a href="/download/#policies">Licence, code signing and privacy</a></span>
+  <span class="footnav"><a href="/chip-and-wire/">Chip-and-wire layout</a> · <a href="/thick-film-resistor-designer/">Resistor designer</a> · <a href="/thermal-and-trim.htm">Thermal and trim</a> · <a href="/kicad-to-hybrid/">KiCad to hybrid</a> · <a href="/free-open-source-hybrid-layout-software/">Free and open source</a> · <a href="/services/">Services</a> · <a href="/download/">Download</a></span>
   </div>
 </footer>
 

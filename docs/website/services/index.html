@@ -1,0 +1,560 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thick-Film Hybrid Layout Services, Consultancy and Training | HLayout</title>
+<meta name="description" content="Thick-film and chip-and-wire hybrid layout design, process setup, part libraries, custom features and training from the author of HLayout, the free open-source tool.">
+<link rel="canonical" href="https://www.h-layout.co.uk/services/">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta name="author" content="Alvin Brown">
+<meta name="theme-color" content="#16202E">
+<link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
+<link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="HLayout">
+<meta property="og:locale" content="en_GB">
+<meta property="og:url" content="https://www.h-layout.co.uk/services/">
+<meta property="og:title" content="Thick-Film Hybrid Layout Services, Consultancy and Training | HLayout">
+<meta property="og:description" content="Thick-film and chip-and-wire hybrid layout design, process setup, part libraries, custom features and training from the author of HLayout, the free open-source tool.">
+<meta property="og:image" content="https://www.h-layout.co.uk/img/og-image.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="An 8-bit ALU chip-and-wire hybrid designed in HLayout, shown in 3D in its Kovar package">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Thick-Film Hybrid Layout Services, Consultancy and Training | HLayout">
+<meta name="twitter:description" content="Thick-film and chip-and-wire hybrid layout design, process setup, part libraries, custom features and training from the author of HLayout, the free open-source tool.">
+<meta name="twitter:image" content="https://www.h-layout.co.uk/img/og-image.jpg">
+<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@graph": [
+  {
+   "@type": "ProfessionalService",
+   "name": "HLayout consultancy and training",
+   "url": "https://www.h-layout.co.uk/services/",
+   "email": "support@h-layout.co.uk",
+   "areaServed": "Worldwide",
+   "description": "Process setup, part libraries, custom features, thick-film and chip-and-wire hybrid layout design, training and support for the free, open-source HLayout software.",
+   "provider": {
+    "@type": "Person",
+    "name": "Alvin Brown"
+   }
+  },
+  {
+   "@type": "BreadcrumbList",
+   "itemListElement": [
+    {
+     "@type": "ListItem",
+     "position": 1,
+     "name": "HLayout",
+     "item": "https://www.h-layout.co.uk/"
+    },
+    {
+     "@type": "ListItem",
+     "position": 2,
+     "name": "Services",
+     "item": "https://www.h-layout.co.uk/services/"
+    }
+   ]
+  },
+  {
+   "@type": "FAQPage",
+   "mainEntity": [
+    {
+     "@type": "Question",
+     "name": "Is HLayout still free if I pay for consultancy?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Yes. The software stays free and open source under GPL-3.0. You pay for the time spent on your process, your libraries, your features or your layouts."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "Who owns the features you build for us?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Changes built into HLayout itself are released as open source under GPL-3.0, so everyone benefits and you are never locked in. Your own designs, technology files and part libraries stay yours."
+     }
+    },
+    {
+     "@type": "Question",
+     "name": "Do you lay out hybrids for other companies?",
+     "acceptedAnswer": {
+      "@type": "Answer",
+      "text": "Yes: from a KiCad schematic to placement, routing, design rule check, thermal check and the manufacturing files, using HLayout."
+     }
+    }
+   ]
+  }
+ ]
+}
+</script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+/* Layout: a fired alumina tile. Pages read like a substrate seen from above, with the film stack as the signature cross-section. */
+:root{
+  --alumina:#F7F8F6;      /* page ground: fired ceramic */
+  --tile:#FFFFFF;
+  --ink:#16202E;          /* text */
+  --muted:#5A6676;
+  --rule:#DCE1E4;
+  --gold:#B88A12;         /* fired gold conductor, accent */
+  --gold-soft:#F3E7C2;
+  --diel:#2C7A67;         /* dielectric green */
+  --diel-soft:#DDEFE8;
+  --resist:#2F3B4F;       /* resistor ink */
+  --glaze:#C9D7E6;
+  --code-bg:#16202E; --code-fg:#E5ECF4;
+  --svc-bg:#16202E; --svc-fg:#F2F5F7; --svc-card:#1C2838; --svc-rule:#2E3B4E; --svc-muted:#A9B5C3;
+  --btn-fg:#FFFFFF;
+  --f-display:"IBM Plex Sans Condensed","Arial Narrow",Arial,sans-serif;
+  --f-body:"IBM Plex Sans","Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,"Cascadia Mono",Menlo,Consolas,monospace;
+  --wrap:1120px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --alumina:#0F151D; --tile:#161E29; --ink:#E8EDF2; --muted:#9AA6B4; --rule:#28323F;
+  --gold:#E2B33C; --gold-soft:#3A3018; --diel:#4FB496; --diel-soft:#16302A; --resist:#8D9BB2; --glaze:#34465C;
+  --code-bg:#0A0F15; --code-fg:#E5ECF4; --btn-fg:#14100A; color-scheme:dark }}
+:root[data-theme="dark"]{
+  --alumina:#0F151D; --tile:#161E29; --ink:#E8EDF2; --muted:#9AA6B4; --rule:#28323F;
+  --gold:#E2B33C; --gold-soft:#3A3018; --diel:#4FB496; --diel-soft:#16302A; --resist:#8D9BB2; --glaze:#34465C;
+  --code-bg:#0A0F15; --code-fg:#E5ECF4; --btn-fg:#14100A; color-scheme:dark }
+
+*{box-sizing:border-box}
+body{background:var(--alumina);color:var(--ink);font:16px/1.6 var(--f-body);margin:0}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--tile)}
+.wrap{max-width:var(--wrap);margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+h1,h2,h3{font-family:var(--f-display);line-height:1.08;margin:0;text-wrap:balance;letter-spacing:-.01em}
+h1{font-size:clamp(2.6rem,6vw,4.4rem);font-weight:700}
+h2{font-size:clamp(1.8rem,3.4vw,2.6rem);font-weight:600}
+h3{font-size:1.25rem;font-weight:600}
+p{margin:0}
+a{color:inherit}
+.mono{font-family:var(--f-mono)}
+.eyebrow{font:500 .78rem/1 var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.lede{font-size:1.15rem;color:var(--muted);max-width:60ch}
+:focus-visible{outline:2px solid var(--gold);outline-offset:3px;border-radius:4px}
+
+/* header */
+header{position:sticky;top:env(safe-area-inset-top,0px);z-index:9;background:var(--tile);border-bottom:1px solid var(--rule)}
+.bar{display:flex;align-items:center;gap:24px;min-height:62px}
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none;font:700 1.3rem var(--f-display)}
+.brand .mark{width:32px;height:32px;flex:none;border-radius:7px}
+nav{display:flex;gap:20px;margin-left:auto;align-items:center}
+nav a{text-decoration:none;color:var(--muted);font-weight:500}
+nav a:hover{color:var(--ink)}
+@media (max-width:640px){nav .hide-sm{display:none}}
+
+.btn{display:inline-flex;align-items:center;gap:10px;padding:12px 20px;border-radius:6px;font:600 1rem var(--f-body);text-decoration:none;border:1px solid transparent;cursor:pointer}
+.btn-gold{background:var(--gold);color:var(--btn-fg)}
+.btn-gold:hover{filter:brightness(1.07)}
+.btn-line{border-color:var(--rule);background:var(--tile);color:var(--ink)}
+.btn-line:hover{border-color:var(--muted)}
+.btn-sm{padding:8px 14px;font-size:.92rem}
+.btn small{font:400 .8rem var(--f-mono);opacity:.85}
+
+section{padding-block:72px}
+.sec-head{display:grid;gap:12px;margin-bottom:36px}
+
+/* hero */
+.hero{padding-block:64px 40px}
+.hero-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:48px;align-items:center}
+.hero-copy{display:grid;gap:22px;min-width:0}
+.hero-copy h1 span{color:var(--gold)}
+.hero-mark{display:flex;align-items:center;gap:16px}
+.hero-mark img{width:88px;height:88px;border-radius:18px;box-shadow:0 10px 24px -14px rgba(10,20,30,.45)}
+.cta{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.hint{font:400 .85rem var(--f-mono);color:var(--muted)}
+.tile{position:relative;background:var(--tile);border:1px solid var(--rule);border-radius:10px;padding:14px;box-shadow:0 18px 40px -24px rgba(10,20,30,.35);min-width:0}
+.tile img{display:block;width:100%;height:auto;border-radius:4px}
+.ticks{display:flex;justify-content:space-between;font:400 .7rem var(--f-mono);color:var(--muted);padding:8px 2px 0}
+@media (max-width:860px){.hero-grid{grid-template-columns:1fr}}
+
+/* film stack */
+.stack-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:48px;align-items:center}
+.xsec{display:grid;gap:0;border-radius:8px;overflow:hidden;border:1px solid var(--rule)}
+.film{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:0 16px;font:500 .85rem var(--f-mono)}
+.film span:last-child{opacity:.8}
+.f-glaze{background:var(--glaze);color:var(--ink);height:34px}
+.f-res{background:var(--resist);color:#fff;height:30px;margin:0 22% 0 34%}
+.f-c2{background:var(--gold);color:#1a1405;height:30px}
+.f-diel{background:var(--diel);color:#fff;height:40px}
+.f-c1{background:var(--gold);color:#1a1405;height:30px;opacity:.85}
+.f-sub{background:var(--tile);color:var(--ink);height:86px;border-top:1px dashed var(--rule)}
+.stack-list{display:grid;gap:18px}
+.stack-list div{display:grid;gap:4px}
+.stack-list b{font-family:var(--f-display);font-size:1.15rem;font-weight:600}
+.stack-list p{color:var(--muted)}
+@media (max-width:860px){.stack-grid{grid-template-columns:1fr}}
+
+/* workflow */
+.flow{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px;counter-reset:st}
+.st{background:var(--tile);border:1px solid var(--rule);border-radius:8px;padding:16px 14px;display:grid;gap:8px;align-content:start;min-width:0}
+.st.ext{background:var(--gold-soft);border-color:transparent}
+.st .n{font:500 .8rem var(--f-mono);color:var(--muted)}
+.st h3{font-size:1.05rem}
+.st p{font-size:.88rem;color:var(--muted)}
+.st .tool{font:500 .74rem var(--f-mono);color:var(--diel)}
+.st.ext .tool{color:var(--gold)}
+.legend{display:flex;flex-wrap:wrap;gap:20px;margin-top:18px;font-size:.9rem;color:var(--muted)}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:8px;vertical-align:-1px}
+.formats{margin-top:24px;font:400 .85rem var(--f-mono);color:var(--muted);overflow-wrap:anywhere}
+@media (max-width:980px){.flow{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media (max-width:560px){.flow{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* features */
+.feat{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:10px;overflow:hidden}
+.feat div{background:var(--tile);padding:24px;display:grid;gap:8px;align-content:start}
+.feat .tag{font:500 .75rem var(--f-mono);color:var(--gold)}
+.feat p{color:var(--muted);font-size:.95rem}
+@media (max-width:860px){.feat{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:520px){.feat{grid-template-columns:1fr}}
+
+
+.ex-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;align-items:start}
+.ex-wide{grid-column:1/-1}
+.ex-grid figcaption b{color:var(--ink);font-weight:600}
+.ex-grid .tile img{background:#fff}
+@media (max-width:760px){.ex-grid{grid-template-columns:1fr}}
+
+.pol-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;align-items:start}
+.pol{background:var(--tile);border:1px solid var(--rule);border-radius:10px;padding:22px;display:grid;gap:10px;align-content:start;min-width:0}
+.pol p{color:var(--muted);font-size:.94rem}
+@media (max-width:760px){.pol-grid{grid-template-columns:1fr}}
+
+/* services */
+.svc-band{background:var(--svc-bg);color:var(--svc-fg);border-block:1px solid var(--svc-rule)}
+.svc-band .eyebrow,.svc-band .lede,.svc-band .hint{color:var(--svc-muted)}
+.svc{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:48px;align-items:start}
+.svc-head{display:grid;gap:16px;min-width:0}
+.svc-head h2{color:var(--svc-fg)}
+.contact{display:flex;flex-wrap:wrap;align-items:center;gap:10px 12px;padding:14px 16px;border:1px solid var(--svc-rule);border-radius:8px;margin-top:4px}
+.contact-label{font:500 .72rem var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--svc-muted)}
+.contact-addr{font:500 1.05rem var(--f-mono);color:var(--gold);user-select:all;overflow-wrap:anywhere;flex:1 1 200px}
+.svc-band .btn-line{background:transparent;color:var(--svc-fg);border-color:var(--svc-rule)}
+.svc-band .btn-line:hover{border-color:var(--svc-muted)}
+.svc-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--svc-rule);border:1px solid var(--svc-rule);border-radius:10px;overflow:hidden}
+.svc-card{background:var(--svc-card);padding:22px;display:grid;gap:8px;align-content:start;min-width:0}
+.svc-card h3{color:var(--svc-fg)}
+.svc-card p{color:var(--svc-muted);font-size:.94rem}
+.svc-card .tag{font:500 .72rem var(--f-mono);color:var(--gold);letter-spacing:.06em}
+.svc-wide{grid-column:1/-1}
+@media (max-width:900px){.svc{grid-template-columns:1fr}}
+@media (max-width:520px){.svc-grid{grid-template-columns:1fr}}
+.new{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;background:var(--diel-soft);border-radius:8px;padding:12px 16px;max-width:70ch;font-size:.94rem}
+.new b{font:600 .8rem var(--f-mono);color:var(--diel);text-transform:uppercase;letter-spacing:.06em}
+/* 3d */
+.pair{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px}
+figure{margin:0;display:grid;gap:10px}
+figcaption{font-size:.88rem;color:var(--muted)}
+@media (max-width:760px){.pair{grid-template-columns:1fr}}
+
+.band{background:var(--tile);border-block:1px solid var(--rule)}
+.end-logo{width:120px;height:120px;border-radius:24px;flex:none}
+.end{display:flex;flex-wrap:wrap;gap:24px;align-items:center;justify-content:space-between}
+
+footer{padding-block:32px;color:var(--muted);font-size:.9rem}
+footer .wrap{display:flex;flex-wrap:wrap;gap:16px 28px;justify-content:space-between}
+
+/* download view */
+.dl-head{padding-block:56px 28px;display:grid;gap:14px}
+.ver{display:inline-flex;gap:10px;align-items:center;font:500 .85rem var(--f-mono);color:var(--muted)}
+.ver b{color:var(--ink);background:var(--gold-soft);padding:3px 8px;border-radius:4px;font-weight:500}
+.plats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
+.plat{background:var(--tile);border:1px solid var(--rule);border-radius:10px;padding:24px;display:grid;gap:16px;align-content:start;min-width:0;position:relative}
+.plat.rec{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold)}
+.plat .yours{position:absolute;top:-11px;left:20px;background:var(--gold);color:var(--btn-fg);font:500 .72rem var(--f-mono);padding:3px 8px;border-radius:4px;letter-spacing:.04em}
+.plat .os{display:flex;align-items:center;gap:12px}
+.plat .os svg{width:30px;height:30px;flex:none;fill:var(--ink)}
+.file{font:400 .82rem var(--f-mono);color:var(--muted);overflow-wrap:anywhere}
+.plat ol{margin:0;padding-left:20px;color:var(--muted);font-size:.93rem;display:grid;gap:6px}
+.alt{font-size:.88rem;color:var(--muted);margin:0}
+.alt a{color:inherit;font-weight:600}
+.req{font-size:.85rem;color:var(--muted);border-top:1px solid var(--rule);padding-top:12px}
+@media (max-width:900px){.plats{grid-template-columns:1fr}}
+
+.src{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:36px;align-items:start}
+.code{position:relative;background:var(--code-bg);color:var(--code-fg);border-radius:8px;padding:18px 18px 18px 18px;font:400 .88rem/1.7 var(--f-mono);overflow-x:auto;min-width:0}
+.code pre{margin:0;white-space:pre}
+.code .c{color:#8FA0B5}
+.copy{position:absolute;top:10px;right:10px;background:transparent;color:var(--code-fg);border:1px solid #3B4757;border-radius:4px;font:500 .75rem var(--f-mono);padding:4px 8px;cursor:pointer}
+@media (max-width:860px){.src{grid-template-columns:1fr}}
+
+.tbl-wrap{overflow-x:auto;border:1px solid var(--rule);border-radius:10px;background:var(--tile)}
+table{border-collapse:collapse;width:100%;min-width:560px}
+th,td{text-align:left;padding:14px 18px;border-bottom:1px solid var(--rule);vertical-align:top;font-size:.94rem}
+th{font:500 .75rem var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+tr:last-child td{border-bottom:0}
+td:first-child{font-weight:600;white-space:nowrap}
+.pill{display:inline-block;font:500 .72rem var(--f-mono);padding:2px 8px;border-radius:999px;background:var(--diel-soft);color:var(--diel)}
+.pill.opt{background:var(--gold-soft);color:var(--gold)}
+@media (prefers-reduced-motion:no-preference){.view{animation:in .35s ease both}@keyframes in{from{opacity:.4;transform:translateY(6px)}to{opacity:1;transform:none}}}
+[hidden]{display:none!important}
+.faq{display:grid;gap:10px;max-width:880px}
+.faq details{background:var(--tile);border:1px solid var(--rule);border-radius:10px;padding:16px 20px}
+.faq summary{cursor:pointer;font-weight:600;list-style:none;display:flex;justify-content:space-between;gap:16px}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary::after{content:"+";font:500 1.1rem var(--f-mono);color:var(--gold)}
+.faq details[open] summary::after{content:"\2212"}
+.faq details p{color:var(--muted);margin-top:10px;font-size:.96rem}
+.consent{position:fixed;left:16px;right:16px;bottom:16px;z-index:50;max-width:640px;margin-inline:auto;background:var(--ink);color:#fff;border-radius:12px;padding:18px 20px;display:grid;gap:12px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+.consent p{font-size:.92rem;color:#D6DEE8}
+.consent a{color:var(--gold-soft)}
+.consent .row{display:flex;flex-wrap:wrap;gap:10px}
+.linklike{background:none;border:0;padding:0;font:inherit;color:inherit;text-decoration:underline;cursor:pointer}
+h1.eyebrow{font:500 .78rem/1 var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.display{font-family:var(--f-display);line-height:1.08;margin:0;text-wrap:balance;letter-spacing:-.01em;font-size:clamp(2.6rem,6vw,4.4rem);font-weight:700}
+.hero-copy .display span{color:var(--gold)}
+.steps{counter-reset:s;list-style:none;padding:0;margin:0;display:grid;gap:18px;max-width:860px}
+.steps li{counter-increment:s;position:relative;padding-left:54px}
+.steps li::before{content:counter(s);position:absolute;left:0;top:0;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font:600 1rem var(--f-mono);background:var(--gold);color:#fff}
+.steps h3{margin:4px 0 6px}
+.tbl{overflow-x:auto}.tbl table{border-collapse:collapse;width:100%;max-width:860px}.tbl th,.tbl td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--rule)}.tbl thead th{font-family:var(--f-display)}
+.footnav{display:block;margin-top:6px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap bar">
+    <a class="brand" href="/" aria-label="HLayout home">
+      <img class="mark" src="/img/logo-mark.png" alt="" width="32" height="32">
+      HLayout
+    </a>
+    <nav>
+      <a class="hide-sm" href="/#features">Features</a>
+      <a class="hide-sm" href="/#workflow">Workflow</a>
+      <a class="hide-sm" href="/#example">Example</a>
+      <a class="hide-sm" href="/#three-d">3D</a>
+      <a class="hide-sm" href="/#services">Services</a>
+      <a class="hide-sm" href="/thermal-and-trim.htm">Thermal &amp; resistors</a>
+      <a class="hide-sm" href="/#faq">FAQ</a>
+      <a class="btn btn-gold btn-sm" href="/download/">Download</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<section class="hero">
+  <div class="wrap">
+    <div class="hero-mark"><img src="/img/logo-hero.png" alt="HLayout logo" width="88" height="88"><span class="eyebrow">Services</span></div>
+    <h1>Hybrid layout services, consultancy and training</h1>
+    <p class="lede">Process setup, part libraries, custom features, hybrid layout design and training, from the author of HLayout. The software stays free and open source.</p>
+    <div class="cta">
+      <a class="btn btn-gold" href="/download/">Download HLayout free</a>
+      <a class="btn btn-line" href="https://github.com/alvinmb/Hlayout" target="_blank" rel="noopener">Source on GitHub</a>
+    </div>
+    <span class="hint">Free and open source · GPL-3.0 · Windows, Linux and macOS</span>
+  </div>
+</section>
+
+<section class="svc-band">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">What we offer</span>
+      <h2>Consultancy, layout and training for thick-film hybrids</h2>
+      <p class='lede'>HLayout is free to use. When you need it adapted to your line, extended with your own tools, or a design laid out for you, the author offers paid help built on the same open-source code.</p>
+    </div>
+    <div class="svc-grid"><article class="svc-card"><span class="tag">PROCESS</span><h3>Process setup</h3><p>Your layer stack in print order, film thicknesses, design rules, resistor inks and DRC rule sets, saved as a technology file your team reuses on every job.</p></article><article class="svc-card"><span class="tag">LIBRARY</span><h3>Part libraries and 3D models</h3><p>Footprints, bare-die cells with numbered pads, headers and packages, each with a matching STEP model for the 3D view.</p></article><article class="svc-card"><span class="tag">BUILD</span><h3>Custom features</h3><p>New tools, import and export formats, router rules or scripts for your workflow. Work built into HLayout stays open source under GPL-3.0.</p></article><article class="svc-card"><span class="tag">LAYOUT</span><h3>Hybrid layout design</h3><p>From your KiCad schematic to placement, routing, DRC, thermal check, Gerbers, bond diagram and assembly drawing.</p></article><article class="svc-card"><span class="tag">TEAM</span><h3>Training</h3><p>A three-day hands-on course takes an 8-bit ALU chip-and-wire design from netlist to Gerbers and 3D; or sessions built round your own parts and rules.</p></article><article class="svc-card"><span class="tag">HELP</span><h3>Support</h3><p>Priority help when something stops your line, from the author of HLayout.</p></article></div><div style="margin-top:22px"><div class="contact">
+          <span class="contact-label">Email</span>
+          <span class="contact-addr" id="svc-email">support@h-layout.co.uk</span>
+          <button class="btn btn-line btn-sm" type="button" id="copy-email">Copy address</button>
+          <a class="btn btn-gold btn-sm" href="mailto:support@h-layout.co.uk?subject=HLayout%20consultancy%20enquiry">Write an email</a>
+        </div>
+        <p class="hint">Tell us about your process, the parts you use and what you want HLayout to do.</p></div>
+  </div>
+</section>
+
+<section class="">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Questions</span>
+      <h2>Working with us</h2>
+    </div>
+    <div class="faq"><details><summary>Is HLayout still free if I pay for consultancy?</summary><p>Yes. The software stays free and open source under GPL-3.0. You pay for the time spent on your process, your libraries, your features or your layouts.</p></details><details><summary>Who owns the features you build for us?</summary><p>Changes built into HLayout itself are released as open source under GPL-3.0, so everyone benefits and you are never locked in. Your own designs, technology files and part libraries stay yours.</p></details><details><summary>Do you lay out hybrids for other companies?</summary><p>Yes: from a KiCad schematic to placement, routing, design rule check, thermal check and the manufacturing files, using HLayout.</p></details></div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>HLayout · thick-film hybrid layout CAD · GPL-3.0 · support@h-layout.co.uk</span>
+    <span><a href="https://github.com/alvinmb/Hlayout" target="_blank" rel="noopener">GitHub</a> · <a href="https://github.com/alvinmb/Hlayout/releases" target="_blank" rel="noopener">Releases</a> · <a href="/download/#policies">Privacy</a> · <button class="linklike" type="button" data-consent-open>Cookie settings</button> · <a href="https://github.com/alvinmb/Hlayout/issues" target="_blank" rel="noopener">Report an issue</a> · <a href="/#services">Consultancy</a> · <a href="/download/#policies">Licence, code signing and privacy</a></span>
+  <span class="footnav"><a href="/chip-and-wire/">Chip-and-wire layout</a> · <a href="/thick-film-resistor-designer/">Resistor designer</a> · <a href="/thermal-and-trim.htm">Thermal and trim</a> · <a href="/kicad-to-hybrid/">KiCad to hybrid</a> · <a href="/free-open-source-hybrid-layout-software/">Free and open source</a> · <a href="/services/">Services</a> · <a href="/download/">Download</a></span>
+  </div>
+</footer>
+
+<script>
+(function(){
+  // Download links follow the newest published GitHub release: on load the
+  // page asks the GitHub API for releases/latest and uses its tag and
+  // installer files. FALLBACK_VERSION is used until that answers, or if it
+  // can't (offline, rate-limited, repository private) -- keep it at a
+  // release that really exists. File names follow
+  // .github/workflows/build-installers.yml.
+  var FALLBACK_VERSION = "0.9.0";
+  var REPO = "https://github.com/alvinmb/Hlayout";
+  var API = "https://api.github.com/repos/alvinmb/Hlayout/releases/latest";
+  var names = {windows:"Windows", linux:"Linux", mac:"macOS"};
+  var patterns = {windows: /-windows-setup\.exe$/i, linux: /_amd64\.deb$/i, mac: /-macos\.dmg$/i, portable: /-windows-x64-portable\.zip$/i};
+
+  function fileNames(v){
+    return {
+      windows: "HLayout-" + v + "-windows-setup.exe",
+      linux:   "hlayout_" + v + "_amd64.deb",
+      mac:     "HLayout-" + v + "-macos.dmg"
+    };
+  }
+
+  function apply(version, urls){
+    var files = fileNames(version);
+    var base = REPO + "/releases/download/v" + version + "/";
+    document.querySelectorAll("[data-ver]").forEach(function(el){ el.textContent = "v" + version; });
+    // show the "New in X.Y" note for this release, or the newest one older than it
+    // notes are newest first; a note's version may be X.Y or X.Y.Z
+    var notes = document.querySelectorAll("[data-new]"), shown = null;
+    var cur = version.split(".").map(Number);
+    notes.forEach(function(el){
+      var a = el.getAttribute("data-new").split(".").map(Number), older = true;
+      for (var i = 0; i < 3; i++) {
+        var x = a[i] || 0, y = cur[i] || 0;
+        if (x !== y) { older = x < y; break; }
+      }
+      if (!shown && older) shown = el;
+    });
+    notes.forEach(function(el){ el.hidden = el !== shown; });
+    document.querySelectorAll(".plat").forEach(function(card){
+      var os = card.getAttribute("data-os");
+      var url = (urls && urls[os]) || base + files[os];
+      var file = url.split("/").pop();
+      card.querySelector("[data-file]").textContent = file;
+      card.querySelector("[data-link]").href = url;
+      var f = card.querySelector("[data-fname]"); if (f) f.textContent = file;
+    });
+    // portable zip: only offered when the release actually has one
+    var pr = document.querySelector("[data-portable-row]");
+    if (pr){
+      pr.hidden = !(urls && urls.portable);
+      if (urls && urls.portable) pr.querySelector("[data-portable]").href = urls.portable;
+    }
+  }
+
+  apply(FALLBACK_VERSION);
+  if (window.fetch){
+    fetch(API, {headers: {"Accept": "application/vnd.github+json"}})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(rel){
+        if (!rel || !rel.tag_name || rel.draft) return;
+        var urls = {};
+        (rel.assets || []).forEach(function(a){
+          for (var os in patterns) if (patterns[os].test(a.name)) urls[os] = a.browser_download_url;
+        });
+        if (!urls.windows && !urls.linux && !urls.mac) return;
+        apply(rel.tag_name.replace(/^v/i, ""), urls);
+      })
+      .catch(function(){});
+  }
+
+  function detect(){
+    var p = ((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent || "").toLowerCase();
+    var ua = (navigator.userAgent || "").toLowerCase();
+    if (/iphone|ipad|android/.test(ua)) return null;
+    if (p.indexOf("win") > -1) return "windows";
+    if (p.indexOf("mac") > -1) return "mac";
+    if (p.indexOf("linux") > -1 || p.indexOf("x11") > -1) return "linux";
+    return null;
+  }
+  var mine = detect();
+  var card = mine && document.querySelector('.plat[data-os="' + mine + '"]');
+  if (card){
+    card.classList.add("rec"); card.querySelector(".yours").hidden = false;
+    card.parentNode.insertBefore(card, card.parentNode.firstChild);
+  }
+  if (mine){
+    document.querySelectorAll("[data-dl-main]").forEach(function(a){ a.textContent = "Download for " + names[mine]; });
+  }
+
+
+
+  var eb = document.getElementById("copy-email");
+  if (eb) eb.addEventListener("click", function(){
+    var addr = document.getElementById("svc-email");
+    function done(){ eb.textContent = "Copied"; setTimeout(function(){ eb.textContent = "Copy address"; }, 1600); }
+    function sel(){ var r = document.createRange(); r.selectNodeContents(addr); var g = getSelection(); g.removeAllRanges(); g.addRange(r); eb.textContent = "Selected"; }
+    try { navigator.clipboard.writeText(addr.textContent).then(done, sel); } catch(e){ sel(); }
+  });
+  var btn = document.getElementById("copy-src");
+  if (btn) btn.addEventListener("click", function(){
+    var txt = document.getElementById("src-cmds").innerText;
+    function done(){ btn.textContent = "Copied"; setTimeout(function(){ btn.textContent = "Copy"; }, 1600); }
+    function fallback(){ var r = document.createRange(); r.selectNodeContents(document.getElementById("src-cmds")); var s = getSelection(); s.removeAllRanges(); s.addRange(r); btn.textContent = "Selected"; }
+    try { navigator.clipboard.writeText(txt).then(done, fallback); } catch(e){ fallback(); }
+  });
+})();
+</script>
+
+<div class="consent" id="consent" role="dialog" aria-live="polite" aria-label="Cookie consent" hidden>
+  <p>We would like to use Google Analytics cookies to count visits and downloads, so we know which pages help. Nothing is set unless you accept. <a href="/download/#policies">Privacy policy</a></p>
+  <div class="row">
+    <button class="btn btn-gold btn-sm" type="button" id="consent-yes">Accept analytics</button>
+    <button class="btn btn-line btn-sm" type="button" id="consent-no">Reject</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  // Google Analytics 4, loaded only after the visitor accepts.
+  // Put your measurement ID (Admin > Data streams > Web) here. While it is
+  // the placeholder, no banner is shown and nothing is loaded.
+  var GA_ID = "G-GJ9DW8QXK0";
+  var KEY = "hl-analytics-consent";
+  var box = document.getElementById("consent");
+  if (!/^G-[A-Z0-9]{6,}$/.test(GA_ID) || GA_ID === "G-XXXXXXXXXX") {
+    document.querySelectorAll("[data-consent-open]").forEach(function(b){ b.hidden = true; });
+    return;
+  }
+  function get(){ try { return localStorage.getItem(KEY); } catch(e){ return null; } }
+  function set(v){ try { localStorage.setItem(KEY, v); } catch(e){} }
+  var loaded = false;
+  function load(){
+    if (loaded) return; loaded = true;
+    window.dataLayer = window.dataLayer || [];
+    window.gtag = function(){ dataLayer.push(arguments); };
+    gtag("js", new Date());
+    gtag("config", GA_ID, {page_path: location.pathname + location.hash});
+    var sc = document.createElement("script");
+    sc.async = true; sc.src = "https://www.googletagmanager.com/gtag/js?id=" + GA_ID;
+    document.head.appendChild(sc);
+  }
+  function track(name, params){ if (loaded && window.gtag) gtag("event", name, params || {}); }
+  window.hlTrack = track;
+  // the download view is a #download hash route: count it as a page
+  window.addEventListener("hashchange", function(){
+    if (loaded) gtag("event", "page_view", {page_location: location.href, page_path: location.pathname + location.hash, page_title: document.title});
+  });
+  document.addEventListener("click", function(e){
+    var a = e.target.closest && e.target.closest("[data-link]");
+    if (a) {
+      var card = a.closest(".plat");
+      track("file_download", {file_name: (a.href || "").split("/").pop(), link_url: a.href, os: card ? card.getAttribute("data-os") : ""});
+    }
+  });
+  function show(){ box.hidden = false; }
+  document.getElementById("consent-yes").addEventListener("click", function(){ set("granted"); box.hidden = true; load(); });
+  document.getElementById("consent-no").addEventListener("click", function(){
+    var was = get(); set("denied"); box.hidden = true;
+    if (was === "granted") location.reload();   // stop a running tag
+  });
+  document.querySelectorAll("[data-consent-open]").forEach(function(b){ b.addEventListener("click", show); });
+  var c = get();
+  if (c === "granted") load(); else if (c !== "denied") show();
+})();
+</script>
+</body>
+</html>
