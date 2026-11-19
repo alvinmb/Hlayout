@@ -36,10 +36,10 @@ manufacturer's package drawing -- adjust them (or the matching CLI
 flags) to match the real substrate you're targeting.
 
 Usage:
-    python examples/generate_ceramic_substrates.py
-    python examples/generate_ceramic_substrates.py --start 20 --stop 50 --step 10
-    python examples/generate_ceramic_substrates.py --hole-diameter 1.0 --out my_subs.gds
-    python examples/generate_ceramic_substrates.py --step-dir step_out --run-freecad
+    python 2D_Part_Generator_scripts/generate_ceramic_substrates.py
+    python 2D_Part_Generator_scripts/generate_ceramic_substrates.py --start 20 --stop 50 --step 10
+    python 2D_Part_Generator_scripts/generate_ceramic_substrates.py --hole-diameter 1.0 --out my_subs.gds
+    python 2D_Part_Generator_scripts/generate_ceramic_substrates.py --step-dir step_out --run-freecad
 """
 import argparse
 import os
@@ -177,7 +177,7 @@ def main(argv=None):
                     help=f"substrate short dimension, mm (default: {DEPTH_MM})")
     ap.add_argument("--margin", type=float, default=MARGIN_MM,
                     help=f"body edge to nearest pad centre, mm (default: {MARGIN_MM})")
-    ap.add_argument("-o", "--out", default=os.path.join(_here, "ceramic_substrates.gds"),
+    ap.add_argument("-o", "--out", default=os.path.join(_root, "examples", "ceramic_substrates.gds"),
                     help="output .gds path (default: examples/ceramic_substrates.gds)")
     ap.add_argument("--step-dir", default=None,
                     help="also write a FreeCAD macro building a matching 3D STEP model "

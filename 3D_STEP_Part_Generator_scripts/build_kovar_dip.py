@@ -14,7 +14,7 @@ Pin 1 bottom left (−X, −Y), numbered counter-clockwise from above (the
 DIP convention), so pin n/2 is bottom right and pin n top left. The
 origin is the BOTTOM-LEFT corner of the body (body spanning (0, 0) to
 (L, W)) -- the same origin as the 2D cells from
-examples/generate_kovar_dip_packages.py -- and Z = 0 is the top of the
+2D_Part_Generator_scripts/generate_kovar_dip_packages.py -- and Z = 0 is the top of the
 package floor, where the substrate sits (the underside is at Z = -1 mm),
 like the chip_wire header models: give the part's component model
 z_ref = substrate_bottom, or just let HLayout's FreeCAD export place it
@@ -22,7 +22,7 @@ z_ref = substrate_bottom, or just let HLayout's FreeCAD export place it
 automatically). Each STEP is an assembly of three coloured parts: body (Kovar),
 seals (glass) and pins.
 
-Run:  python build_STEP_parts/build_kovar_dip.py [out_dir]     (needs cadquery)
+Run:  python 3D_STEP_Part_Generator_scripts/build_kovar_dip.py [out_dir]     (needs cadquery)
       -- writes to examples/step_models/kovar_dip by default.
 """
 import os

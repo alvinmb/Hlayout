@@ -74,7 +74,7 @@ def test_match_passive_by_name_rejects_an_ambiguous_name():
 
 def test_gullwing_package_table_derives_sot23():
     table = gullwing_package_table()
-    assert table["SOT_23"] == {"pin_count": 3, "x_span_mm": pytest.approx(0.95)}
+    assert table["SOT_23"] == {"pin_count": 3, "x_span_mm": pytest.approx(1.9)}
 
 
 def test_gullwing_package_table_derives_pkg20_from_soic_leads():
@@ -105,10 +105,10 @@ def test_gullwing_package_table_respects_overrides():
 # --- footprint_pin_stats -----------------------------------------------------
 
 def _add_sot23_like_shapes(cell):
-    cell.add_rectangle(0, mm_to_dbu(-0.475) - mm_to_dbu(0.2), mm_to_dbu(-0.65),
-                        mm_to_dbu(-0.475) + mm_to_dbu(0.2), mm_to_dbu(-0.45), pin="1")
-    cell.add_rectangle(0, mm_to_dbu(0.475) - mm_to_dbu(0.2), mm_to_dbu(-0.65),
-                        mm_to_dbu(0.475) + mm_to_dbu(0.2), mm_to_dbu(-0.45), pin="2")
+    cell.add_rectangle(0, mm_to_dbu(-0.95) - mm_to_dbu(0.2), mm_to_dbu(-0.65),
+                        mm_to_dbu(-0.95) + mm_to_dbu(0.2), mm_to_dbu(-0.45), pin="1")
+    cell.add_rectangle(0, mm_to_dbu(0.95) - mm_to_dbu(0.2), mm_to_dbu(-0.65),
+                        mm_to_dbu(0.95) + mm_to_dbu(0.2), mm_to_dbu(-0.45), pin="2")
     cell.add_rectangle(0, mm_to_dbu(-0.2), mm_to_dbu(0.45),
                         mm_to_dbu(0.2), mm_to_dbu(0.65), pin="3")
     cell.add_path(61, [(-100, -100), (100, -100)], width=1000)
@@ -125,7 +125,7 @@ def test_footprint_pin_stats_on_a_sot23_like_cell():
     _lib, cell = _sot23_like_cell()
     stats = footprint_pin_stats(cell)
     assert stats["pin_count"] == 3
-    assert stats["x_span_mm"] == pytest.approx(0.95, abs=0.01)
+    assert stats["x_span_mm"] == pytest.approx(1.9, abs=0.01)
 
 
 def _sot23_like_cell_via_srefs():
@@ -138,8 +138,8 @@ def _sot23_like_cell_via_srefs():
     via = lib.new_cell("VIA")
     via.add_circle(0, (0, 0), mm_to_dbu(0.2), segments=16)
     cell = lib.new_cell("Q1")
-    cell.add_sref("VIA", (mm_to_dbu(-0.475), mm_to_dbu(-0.55)), pin="1")
-    cell.add_sref("VIA", (mm_to_dbu(0.475), mm_to_dbu(-0.55)), pin="2")
+    cell.add_sref("VIA", (mm_to_dbu(-0.95), mm_to_dbu(-0.55)), pin="1")
+    cell.add_sref("VIA", (mm_to_dbu(0.95), mm_to_dbu(-0.55)), pin="2")
     cell.add_sref("VIA", (0, mm_to_dbu(0.55)), pin="3")
     cell.add_path(61, [(-100, -100), (100, -100)], width=1000)
     return lib, cell
@@ -149,7 +149,7 @@ def test_footprint_pin_stats_on_a_sot23_like_cell_built_from_via_srefs():
     _lib, cell = _sot23_like_cell_via_srefs()
     stats = footprint_pin_stats(cell)
     assert stats["pin_count"] == 3
-    assert stats["x_span_mm"] == pytest.approx(0.95, abs=0.01)
+    assert stats["x_span_mm"] == pytest.approx(1.9, abs=0.01)
 
 
 def test_footprint_pin_stats_ignores_an_unpinned_sref():
@@ -193,23 +193,23 @@ def test_footprint_pin_stats_averages_a_pin_shared_by_two_shapes():
 
 def test_match_gullwing_by_footprint_exact():
     table = gullwing_package_table()
-    assert match_gullwing_by_footprint({"pin_count": 3, "x_span_mm": 0.95, "y_span_mm": 0.95},
+    assert match_gullwing_by_footprint({"pin_count": 3, "x_span_mm": 1.9, "y_span_mm": 1.9},
                                         table) == "SOT_23"
 
 
 def test_match_gullwing_by_footprint_within_tolerance():
     table = gullwing_package_table()
-    assert match_gullwing_by_footprint({"pin_count": 3, "x_span_mm": 1.1, "y_span_mm": 1.1},
+    assert match_gullwing_by_footprint({"pin_count": 3, "x_span_mm": 2.05, "y_span_mm": 2.05},
                                         table) == "SOT_23"
 
 
 def test_match_gullwing_by_footprint_wrong_axis_still_matches():
     # x_span way off, but y_span hits the table value -- the real-world
-    # case examples/generate_sot_packages.py's SOT-23 footprint hits
+    # case 2D_Part_Generator_scripts/generate_sot_packages.py's SOT-23 footprint hits
     # (its two pad rows run along the opposite local axis from
     # component_library.py's own SOT_23 model).
     table = gullwing_package_table()
-    assert match_gullwing_by_footprint({"pin_count": 3, "x_span_mm": 2.3, "y_span_mm": 0.95},
+    assert match_gullwing_by_footprint({"pin_count": 3, "x_span_mm": 2.3, "y_span_mm": 1.9},
                                         table) == "SOT_23"
 
 
@@ -238,37 +238,37 @@ def test_match_gullwing_by_footprint_ambiguous_returns_none():
 
 def test_rotation_correction_zero_when_x_axis_matched():
     table = gullwing_package_table()
-    stats = {"pin_count": 3, "x_span_mm": 0.95, "y_span_mm": 5.0}  # X is the real signal
+    stats = {"pin_count": 3, "x_span_mm": 1.9, "y_span_mm": 5.0}  # X is the real signal
     assert _gullwing_rotation_correction(stats, table, "SOT_23") == 0.0
 
 
 def test_rotation_correction_90_when_only_y_axis_matched():
     table = gullwing_package_table()
-    # mirrors the real examples/generate_sot_packages.py SOT-23 numbers:
-    # row separation (2.3) on X, real pitch (0.95) on Y
-    stats = {"pin_count": 3, "x_span_mm": 2.3, "y_span_mm": 0.95}
+    # mirrors the real 2D_Part_Generator_scripts/generate_sot_packages.py SOT-23 numbers:
+    # row separation (2.3) on X, real pin 1-2 spacing (1.9) on Y
+    stats = {"pin_count": 3, "x_span_mm": 2.3, "y_span_mm": 1.9}
     assert _gullwing_rotation_correction(stats, table, "SOT_23") == 90.0
 
 
 def test_rotation_correction_zero_when_both_axes_happen_to_match():
     table = gullwing_package_table()
-    stats = {"pin_count": 3, "x_span_mm": 0.95, "y_span_mm": 0.95}
+    stats = {"pin_count": 3, "x_span_mm": 1.9, "y_span_mm": 1.9}
     assert _gullwing_rotation_correction(stats, table, "SOT_23") == 0.0
 
 
 def test_build_match_report_sets_rotation_deg_for_a_y_axis_footprint(tmp_path):
     """End-to-end: a footprint drawn with its pitch along Y (the
-    examples/generate_sot_packages.py convention) still matches SOT_23
+    2D_Part_Generator_scripts/generate_sot_packages.py convention) still matches SOT_23
     by footprint, and the resulting Match carries the 90-degree
     correction write_freecad_macro() needs to render it right-side-round."""
     lib = Library("ROTTEST")
     top = lib.new_cell("TOP")
     q1 = lib.new_cell("Q1")
-    # 3 pads: 2 in a row along Y at x=-1.15 (pitch 0.95), 1 alone at x=+1.15
-    q1.add_rectangle(0, mm_to_dbu(-1.15) - mm_to_dbu(0.2), mm_to_dbu(-0.475) - mm_to_dbu(0.2),
-                      mm_to_dbu(-1.15) + mm_to_dbu(0.2), mm_to_dbu(-0.475) + mm_to_dbu(0.2), pin="1")
-    q1.add_rectangle(0, mm_to_dbu(-1.15) - mm_to_dbu(0.2), mm_to_dbu(0.475) - mm_to_dbu(0.2),
-                      mm_to_dbu(-1.15) + mm_to_dbu(0.2), mm_to_dbu(0.475) + mm_to_dbu(0.2), pin="2")
+    # 3 pads: 2 in a row along Y at x=-1.15 (1.9 apart), 1 alone at x=+1.15
+    q1.add_rectangle(0, mm_to_dbu(-1.15) - mm_to_dbu(0.2), mm_to_dbu(-0.95) - mm_to_dbu(0.2),
+                      mm_to_dbu(-1.15) + mm_to_dbu(0.2), mm_to_dbu(-0.95) + mm_to_dbu(0.2), pin="1")
+    q1.add_rectangle(0, mm_to_dbu(-1.15) - mm_to_dbu(0.2), mm_to_dbu(0.95) - mm_to_dbu(0.2),
+                      mm_to_dbu(-1.15) + mm_to_dbu(0.2), mm_to_dbu(0.95) + mm_to_dbu(0.2), pin="2")
     q1.add_rectangle(0, mm_to_dbu(1.15) - mm_to_dbu(0.2), -mm_to_dbu(0.2),
                       mm_to_dbu(1.15) + mm_to_dbu(0.2), mm_to_dbu(0.2), pin="3")
     q1.add_path(61, [(-100, -100), (100, -100)], width=1000)
@@ -282,15 +282,15 @@ def test_build_match_report_sets_rotation_deg_for_a_y_axis_footprint(tmp_path):
     assert match.entry["rotation_deg"] == 90.0
 
 
-# --- against the real examples/generate_sot_packages.py fixture -------------
+# --- against the real 2D_Part_Generator_scripts/generate_sot_packages.py fixture -------------
 
 def test_matcher_hits_the_real_example_sot23_footprint():
-    """examples/generate_sot_packages.py is a real, pre-existing footprint
+    """2D_Part_Generator_scripts/generate_sot_packages.py is a real, pre-existing footprint
     generator in this repo that happens to lay its two pad rows out
     along the opposite axis from component_library.py's 3D model --
     proving the either-axis check actually works on real data, not
     just synthetic numbers."""
-    examples_dir = os.path.join(os.path.dirname(__file__), "..", "examples")
+    examples_dir = os.path.join(os.path.dirname(__file__), "..", "2D_Part_Generator_scripts")
     sys.path.insert(0, examples_dir)
     from generate_sot_packages import build, PACKAGES
 

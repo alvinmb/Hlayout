@@ -67,9 +67,9 @@ TERMINAL_LENGTH_MAX_MM = 0.6
 # manufacturer). "pitch" is pin-to-pin spacing; "width" is the lead's
 # footprint along the pitch direction; "extension" is how far the lead
 # projects outward past the body edge.
-SOT23_PIN_PITCH_MM = 0.95     # TO-236 pitch between the 2 leads on one side
-SOT23_LEAD_WIDTH_MM = 0.4
-SOT23_LEAD_EXTENSION_MM = 0.4
+SOT23_PIN_PITCH_MM = 1.9      # TO-236: pins 1 and 2 are 1.9 apart, pin 3 centred opposite
+SOT23_LEAD_WIDTH_MM = 0.43    # 0.38-0.48
+SOT23_LEAD_EXTENSION_MM = 0.5  # lead span 2.3 (2.1-2.5) over a 1.3 body
 
 SOD123_LEAD_WIDTH_MM = 1.0
 SOD123_LEAD_EXTENSION_MM = 0.4
@@ -99,7 +99,7 @@ CHIP_SIZES_MM = {
 # "kind" selects which lead layout _add_leads() draws; "pins" is only
 # used for the SOIC kind (leads-per-side = pins // 2).
 OTHER_PACKAGES_MM = {
-    "T_SOT23": ("T", 2.90, 1.30, "sot23", 3),
+    "T_SOT23": ("T", 2.80, 1.30, "sot23", 3),
     "D_SOD123": ("D", 3.70, 1.70, "sod123", 2),
     "IC_SOIC14": ("IC", 8.65, 3.90, "soic", 14),
     "IC_SOIC16": ("IC", 9.90, 3.90, "soic", 16),

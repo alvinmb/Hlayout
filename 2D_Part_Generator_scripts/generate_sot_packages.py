@@ -38,9 +38,9 @@ practice, NOT per-manufacturer datasheet land patterns. Check a real
 datasheet / IPC-7351 land pattern before committing a board.
 
 Usage:
-    python examples/generate_sot_packages.py
-    python examples/generate_sot_packages.py --out my_sot.gds
-    python examples/generate_sot_packages.py --step-dir step_out --run-freecad
+    python 2D_Part_Generator_scripts/generate_sot_packages.py
+    python 2D_Part_Generator_scripts/generate_sot_packages.py --out my_sot.gds
+    python 2D_Part_Generator_scripts/generate_sot_packages.py --step-dir step_out --run-freecad
 """
 import argparse
 import os
@@ -102,9 +102,27 @@ PACKAGES = {
     # SOT-223 stay "lr": their row_gap sits close to body_l (their
     # long axis), not body_w, confirming their tab/leads really do
     # exit the SHORT ends, unlike this family.
-    "SOT-23":   dict(pins=3, body=(2.9, 1.3), pitch=0.95, row_gap=2.3, pad=(0.55, 1.0), rows="tb"),
-    "SOT-23-5": dict(pins=5, body=(2.9, 1.6), pitch=0.95, row_gap=2.6, pad=(0.55, 1.1), rows="tb"),
-    "SOT-23-6": dict(pins=6, body=(2.9, 1.6), pitch=0.95, row_gap=2.6, pad=(0.55, 1.1), rows="tb"),
+    # 2026-11-19: SOT-23 (TO-236) to the datasheet drawing -- body
+    # 2.8 x 1.3 (1.2-1.4), pins 1 and 2 are 1.9 apart on the bottom
+    # row with pin 3 centred on the top row (pitch=1.9 with 2+1 pins
+    # gives exactly that; the old 0.95 put pins 1/2 only 0.95 apart),
+    # overall lead span 2.3 (2.1-2.5), lead width 0.43 (0.38-0.48),
+    # lead thickness 0.12 (0.09-0.15), foot 0.35 (0.15-0.45), seated
+    # height 0.9. span/lead_* override the generic lead estimates for
+    # both the layer-61 lead outline and the 3D model.
+    "SOT-23":   dict(pins=3, body=(2.8, 1.3), pitch=1.9, row_gap=2.3, pad=(0.6, 1.0), rows="tb",
+                     span=2.3, lead_w=0.43, lead_t=0.12, lead_out=0.15, lead_foot=0.35),
+    # SOT-23-5: pins 4 and 5 sit at the two ENDS of the top row (over
+    # pins 3 and 1), 1.9 apart -- not packed together in the middle at
+    # the 0.95 pitch. row2 gives the top row's centre-relative
+    # positions in pin order (pin 4 right, pin 5 left).
+    "SOT-23-5": dict(pins=5, body=(2.9, 1.6), pitch=0.95, row_gap=2.6, pad=(0.55, 1.1), rows="tb",
+                     row2=(0.95, -0.95),
+                     span=2.8, lead_w=0.4, lead_t=0.12, lead_out=0.15, lead_foot=0.45),
+    # SOT-23-5/-6 leads (JEDEC MO-178): span 2.8 (2.6-3.0), lead width
+    # 0.4 (0.3-0.5), foot 0.45 (0.3-0.6).
+    "SOT-23-6": dict(pins=6, body=(2.9, 1.6), pitch=0.95, row_gap=2.6, pad=(0.55, 1.1), rows="tb",
+                     span=2.8, lead_w=0.4, lead_t=0.12, lead_out=0.15, lead_foot=0.45),
     "SOT-89":   dict(pins=4, body=(4.5, 2.5), pitch=1.5, row_gap=4.6, pad=(1.2, 0.6),
                      tab_pin=4, tab=(1.8, 2.0)),
     "SOT-143":  dict(pins=4, body=(2.9, 1.3), pitch=0.95, row_gap=2.3, pad=(0.55, 1.0),
@@ -147,7 +165,7 @@ PACKAGES = {
 #: applied to the whole gull-wing sub-family since package height
 #: doesn't vary much with pin count/body width the way length does.
 HEIGHT_MM = {
-    "SOT-23": 1.1, "SOT-23-5": 1.1, "SOT-23-6": 1.1,
+    "SOT-23": 0.9, "SOT-23-5": 1.1, "SOT-23-6": 1.1,
     "SOT-89": 1.5, "SOT-143": 1.1, "SOT-223": 1.6, "SOT-363": 0.95,
     "SOT-8": 2.5, "SOT-16": 2.5, "SOT-18": 2.5,
     "SOT-20": 2.5, "SOT-24": 2.5, "SOT-28": 2.5,
@@ -235,7 +253,8 @@ def _lead(cell, cx_mm, cy_mm, l_mm, w_mm):
     cell.add_rectangle(OUTLINE_LAYER, cx - hx, cy - hy, cx + hx, cy + hy)
 
 
-def _lead_bend(cell, rows, row_coord, wall, direction, across_centre, across_mm, along_mm, stub_cap):
+def _lead_bend(cell, rows, row_coord, wall, direction, across_centre, across_mm, along_mm, stub_cap,
+               reach=None):
     """Draw one lead as two abutting rectangles on OUTLINE_LAYER instead
     of one -- the gull-wing bend (stub near the body, foot flat under
     the pad), projected to its top-view footprint (2026-09 bug report:
@@ -252,6 +271,10 @@ def _lead_bend(cell, rows, row_coord, wall, direction, across_centre, across_mm,
     0.5 mm for "lr" -- the same split step_parts() uses for the 3D
     model, so the 2D knee lines up with the 3D one)."""
     reach_total = direction * (across_centre - wall) + across_mm / 2.0
+    if reach is not None:
+        # spec gives the real lead tip-to-tip span -- the lead stops
+        # there, short of the (deliberately longer) land pad's toe.
+        reach_total = reach
     stub_len = min(stub_cap, max(0.0, reach_total))
     foot_len = max(0.0, reach_total - stub_len)
     stub_far = wall + direction * stub_len
@@ -295,10 +318,16 @@ def build_package(cell, spec):
     # physical length, not land overhang. Axis matches PACKAGES's own
     # (along-row, across-row) convention: index 0 for "tb", 1 for "lr".
     along_idx = 0 if rows == "tb" else 1
-    lead_l, lead_w_mm = (LEAD_WIDTH_MM, pad_w) if along_idx == 0 else (pad_l, LEAD_WIDTH_MM)
+    lw = spec.get("lead_w", LEAD_WIDTH_MM)
+    lead_l, lead_w_mm = (lw, pad_w) if along_idx == 0 else (pad_l, lw)
     # Stub-segment cap for _lead_bend() -- matches step_parts()'s own
     # split so the 2D knee lines up with the 3D one.
-    stub_cap = 0.25 if rows == "tb" else 0.5
+    stub_cap = spec.get("lead_out", 0.25 if rows == "tb" else 0.5)
+    # Real lead reach from the body wall, when the spec gives the
+    # overall lead span (tip to tip across the rows).
+    span = spec.get("span")
+    body_across = body_w if rows == "tb" else body_l
+    reach = (span - body_across) / 2.0 if span else None
 
     n = 1
     if rows == "tb":
@@ -311,6 +340,8 @@ def build_package(cell, spec):
         top_y = row_gap / 2.0 + oy
         bottom_xs = _row_positions(per_row, ox)
         top_xs = list(reversed(_row_positions(pins - per_row, ox)))
+        if spec.get("row2"):
+            top_xs = [ox + p for p in spec["row2"]]
         for x in bottom_xs:
             if tab_pin == n and tab:
                 _pad(cell, x, bottom_y, tab[0], tab[1], n)
@@ -319,7 +350,7 @@ def build_package(cell, spec):
             else:
                 _pad(cell, x, bottom_y, pad_l, pad_w, n)
                 _oversized_pad(cell, x, bottom_y, pad_l, pad_w)
-                _lead_bend(cell, rows, x, 0.0, -1.0, bottom_y, pad_w, lead_l, stub_cap)
+                _lead_bend(cell, rows, x, 0.0, -1.0, bottom_y, pad_w, lead_l, stub_cap, reach)
             _pin_label(cell, x, bottom_y, n)
             n += 1
         for x in top_xs:
@@ -330,7 +361,7 @@ def build_package(cell, spec):
             else:
                 _pad(cell, x, top_y, pad_l, pad_w, n)
                 _oversized_pad(cell, x, top_y, pad_l, pad_w)
-                _lead_bend(cell, rows, x, body_w, 1.0, top_y, pad_w, lead_l, stub_cap)
+                _lead_bend(cell, rows, x, body_w, 1.0, top_y, pad_w, lead_l, stub_cap, reach)
             _pin_label(cell, x, top_y, n)
             n += 1
     else:
@@ -349,7 +380,7 @@ def build_package(cell, spec):
             else:
                 _pad(cell, left_x, y, pad_l, pad_w, n)
                 _oversized_pad(cell, left_x, y, pad_l, pad_w)
-                _lead_bend(cell, rows, y, 0.0, -1.0, left_x, pad_l, lead_w_mm, stub_cap)
+                _lead_bend(cell, rows, y, 0.0, -1.0, left_x, pad_l, lead_w_mm, stub_cap, reach)
             _pin_label(cell, left_x, y, n)
             n += 1
         for y in right_ys:
@@ -360,7 +391,7 @@ def build_package(cell, spec):
             else:
                 _pad(cell, right_x, y, pad_l, pad_w, n)
                 _oversized_pad(cell, right_x, y, pad_l, pad_w)
-                _lead_bend(cell, rows, y, body_l, 1.0, right_x, pad_l, lead_w_mm, stub_cap)
+                _lead_bend(cell, rows, y, body_l, 1.0, right_x, pad_l, lead_w_mm, stub_cap, reach)
             _pin_label(cell, right_x, y, n)
             n += 1
 
@@ -426,7 +457,10 @@ def _spec_step_leads(spec, lead_w=None):
         return out
 
     row1 = _leads(_positions(per_row), 1)
-    row2 = list(reversed(_leads(_positions(pins - per_row), per_row + 1)))
+    if spec.get("row2"):
+        row2 = _leads(list(spec["row2"]), per_row + 1)
+    else:
+        row2 = list(reversed(_leads(_positions(pins - per_row), per_row + 1)))
     return row1, row2
 
 
@@ -461,7 +495,7 @@ def step_parts():
         # gull-wing ICs (SOT-8 and up) get their real, narrower metal
         # lead width in 3D; the transistor-family entries keep using
         # their pad width as before.
-        lead_w = LEAD_WIDTH_MM if spec["pins"] >= 8 else None
+        lead_w = spec.get("lead_w", LEAD_WIDTH_MM if spec["pins"] >= 8 else None)
         row1, row2 = _spec_step_leads(spec, lead_w)
         # Reach the leads/feet need to cover, from the 3D body's own
         # wall out to roughly where the 2D pad's own outer edge sits --
@@ -491,6 +525,11 @@ def step_parts():
         total_budget = max(reach - lead_t, 0.02) + lead_t + 0.35
         lead_out = min(0.5, max(0.15, total_budget * 0.25)) if rows != "tb" else min(0.25, max(0.15, total_budget * 0.25))
         lead_foot = min(1.0, max(0.15, total_budget - lead_out - lead_t))
+        if "lead_out" in spec:
+            # datasheet lead geometry given -- use it as-is
+            lead_t = spec.get("lead_t", lead_t)
+            lead_out = spec["lead_out"]
+            lead_foot = spec.get("lead_foot", lead_foot)
         if rows == "tb":
             parts.append((name, "make_dip", dict(
                 L=body_l, W=body_w, H=HEIGHT_MM[name],
@@ -509,7 +548,7 @@ def step_parts():
 def main(argv=None):
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("-o", "--out", default=os.path.join(_here, "sot_packages.gds"),
+    ap.add_argument("-o", "--out", default=os.path.join(_root, "examples", "sot_packages.gds"),
                     help="output .gds path (default: examples/sot_packages.gds)")
     ap.add_argument("--step-dir", default=None,
                     help="also write a FreeCAD macro building a matching 3D STEP model "

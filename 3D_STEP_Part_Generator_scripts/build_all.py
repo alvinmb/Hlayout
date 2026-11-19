@@ -16,10 +16,10 @@ The macros leave a STEP file alone when it already exists; --clean
 deletes the old STEP files first so everything is rebuilt.
 
 Usage:
-    python build_STEP_parts\\build_all.py
-    python build_STEP_parts\\build_all.py --out D:\\models --clean
-    python build_STEP_parts\\build_all.py --only lcc kovar_dip
-    python build_STEP_parts\\build_all.py --freecad "C:\\Program Files\\FreeCAD 1.0\\bin\\FreeCADCmd.exe"
+    python 3D_STEP_Part_Generator_scripts\\build_all.py
+    python 3D_STEP_Part_Generator_scripts\\build_all.py --out D:\\models --clean
+    python 3D_STEP_Part_Generator_scripts\\build_all.py --only lcc kovar_dip
+    python 3D_STEP_Part_Generator_scripts\\build_all.py --freecad "C:\\Program Files\\FreeCAD 1.0\\bin\\FreeCADCmd.exe"
 
 Needs FreeCAD for the macros and the cadquery package (pip install
 cadquery) for the CadQuery scripts; a step that can't run is reported

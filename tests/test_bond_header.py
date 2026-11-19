@@ -6,7 +6,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "examples"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "2D_Part_Generator_scripts"))
 
 from hlayout.core.shapes import Path, Rectangle
 from hlayout.gui.commands import CommandInterpreter

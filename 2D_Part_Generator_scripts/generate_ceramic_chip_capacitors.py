@@ -43,9 +43,9 @@ committing a board (same caveat generate_tantalum_capacitors.py
 documents).
 
 Usage:
-    python examples/generate_ceramic_chip_capacitors.py
-    python examples/generate_ceramic_chip_capacitors.py --out my_caps.gds
-    python examples/generate_ceramic_chip_capacitors.py --step-dir step_out --run-freecad
+    python 2D_Part_Generator_scripts/generate_ceramic_chip_capacitors.py
+    python 2D_Part_Generator_scripts/generate_ceramic_chip_capacitors.py --out my_caps.gds
+    python 2D_Part_Generator_scripts/generate_ceramic_chip_capacitors.py --step-dir step_out --run-freecad
 """
 import argparse
 import os
@@ -184,7 +184,7 @@ def step_parts():
 def main(argv=None):
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("-o", "--out", default=os.path.join(_here, "ceramic_chip_capacitors.gds"),
+    ap.add_argument("-o", "--out", default=os.path.join(_root, "examples", "ceramic_chip_capacitors.gds"),
                     help="output .gds path (default: examples/ceramic_chip_capacitors.gds)")
     ap.add_argument("--step-dir", default=None,
                     help="also write a FreeCAD macro building a matching 3D STEP model "

@@ -35,7 +35,7 @@ Two independent strategies, chosen by category:
     own lead-position kwargs (not a hand-duplicated table). A real
     footprint may lay its
     two pad rows out along either local axis (this repo's own
-    examples/generate_sot_packages.py puts the pitch along Y where
+    2D_Part_Generator_scripts/generate_sot_packages.py puts the pitch along Y where
     component_library.py's 3D generator puts it along X, for the same
     physical SOT-23) -- so both axes are measured and either one
     matching the table's value counts, making the match orientation-
@@ -186,7 +186,7 @@ def _has_wide_tab_lead(entry: dict) -> bool:
     uniform-width family: empirically, matching against them produced
     a confirmed false positive (a real SOT-89 footprint's body-width
     measurement coincided numerically with SOT-223's combined-lead
-    span) when tested against examples/generate_sot_packages.py's real
+    span) when tested against 2D_Part_Generator_scripts/generate_sot_packages.py's real
     fixture data. Excluded from the auto-footprint-matching table
     entirely rather than risk a confidently wrong substitution --
     still perfectly buildable/usable via a manual component_models
@@ -302,7 +302,7 @@ def match_gullwing_by_footprint(stats: dict, table: Optional[dict] = None,
     x_span = stats["x_span_mm"]
     y_span = stats.get("y_span_mm", x_span)
 
-    found = set()
+    found = []
     for name, spec in table.items():
         if spec["pin_count"] != pin_count:
             continue
@@ -310,9 +310,18 @@ def match_gullwing_by_footprint(stats: dict, table: Optional[dict] = None,
         if expected <= 0:
             continue
         lo, hi = expected * (1 - tolerance), expected * (1 + tolerance)
-        if lo <= x_span <= hi or lo <= y_span <= hi:
-            found.add(name)
-    return next(iter(found)) if len(found) == 1 else None
+        errs = [abs(s - expected) / expected for s in (x_span, y_span) if lo <= s <= hi]
+        if errs:
+            found.append((min(errs), name))
+    if len(found) == 1:
+        return found[0][1]
+    if len(found) > 1:
+        # More than one package in range (e.g. SOT_23's 1.9 vs SOT_323's
+        # 1.3): take the clearly closest one, else leave it unmatched.
+        found.sort()
+        if found[0][0] < 0.5 * found[1][0]:
+            return found[0][1]
+    return None
 
 
 def _gullwing_rotation_correction(stats: dict, table: dict, package: str,
@@ -332,9 +341,14 @@ def _gullwing_rotation_correction(stats: dict, table: dict, package: str,
     if expected <= 0:
         return 0.0
     lo, hi = expected * (1 - tolerance), expected * (1 + tolerance)
-    if lo <= stats["x_span_mm"] <= hi:
-        return 0.0
-    if lo <= stats.get("y_span_mm", stats["x_span_mm"]) <= hi:
+    x_span = stats["x_span_mm"]
+    y_span = stats.get("y_span_mm", x_span)
+    x_ok, y_ok = lo <= x_span <= hi, lo <= y_span <= hi
+    if x_ok and y_ok:
+        # Both in range (a SOT-23's 2.3 row gap is within 30% of its 1.9
+        # pin span): the axis nearer the pin span is the pitch axis.
+        return 90.0 if abs(y_span - expected) < abs(x_span - expected) else 0.0
+    if y_ok:
         return 90.0
     return 0.0
 

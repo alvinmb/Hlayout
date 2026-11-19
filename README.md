@@ -716,7 +716,7 @@ before that shared folder existed. A two-part strategy:
 
 Recognizing a package by footprint works regardless of which local axis
 a real design lays its lead pitch out on (checked against this repo's
-own `examples/generate_sot_packages.py`, which uses the opposite
+own `2D_Part_Generator_scripts/generate_sot_packages.py`, which uses the opposite
 convention from the 3D library's own models) — but the SUBSTITUTED body
 still only exists in the library's own default orientation, so a
 footprint drawn the "other" way gets a correctly-identified model
@@ -1764,12 +1764,12 @@ circuit with pads and a thick-film resistor), and
 `hlayout/scripting/api.py` for the full `Session` API. Loading an
 existing file: `Session.open("design.gds")`.
 
-`examples/generate_sot_packages.py` builds a small ready-to-attach
+`2D_Part_Generator_scripts/generate_sot_packages.py` builds a small ready-to-attach
 parts library of standard SOT (Small-Outline Transistor) package
 footprints — SOT-23, SOT-23-5, SOT-23-6, SOT-89, SOT-143, SOT-223, and
 SOT-363 — each with pads, a body outline, and a reference label, saved
 as a named GDSII library (`sot_packages.gds`, library name
-`SOT-PACKAGES`). Run it once (`python examples/generate_sot_packages.py`),
+`SOT-PACKAGES`). Run it once (`python 2D_Part_Generator_scripts/generate_sot_packages.py`),
 then attach the result and place a package the normal way:
 
 ```python

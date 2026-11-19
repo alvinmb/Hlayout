@@ -33,7 +33,7 @@ from hlayout.core.units import mm_to_dbu
 from hlayout.io.gdsio import load_gds, save_gds
 from hlayout.scripting.api import Session
 
-GDS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lcc_packages.gds")
+GDS_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "examples", "lcc_packages.gds")
 
 DIELECTRIC_LAYER = 3
 MARGIN_MM = 0.3

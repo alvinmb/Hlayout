@@ -8,13 +8,13 @@ import sys
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, ROOT)
-sys.path.insert(0, os.path.join(ROOT, "examples"))
+sys.path.insert(0, os.path.join(ROOT, "2D_Part_Generator_scripts"))
 
 from hlayout.core.shapes import Path, Rectangle
 from hlayout.io.gdsio import load_gds
 from hlayout.scripting import Session
 
-SCRIPT = os.path.join(ROOT, "examples", "generate_tantalum_capacitors.py")
+SCRIPT = os.path.join(ROOT, "2D_Part_Generator_scripts", "generate_tantalum_capacitors.py")
 OUT_GDS = os.path.join(ROOT, "examples", "tantalum_capacitors.gds")
 
 EXPECTED_CASES = [

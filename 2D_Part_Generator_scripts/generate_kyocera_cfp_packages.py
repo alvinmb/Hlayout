@@ -38,10 +38,10 @@ match the real package you're targeting. --row-pitch/--pin-pitch
 default to real 0.9"/0.1" JEDEC side-braze dimensions, though.
 
 Usage:
-    python examples/generate_kyocera_cfp_packages.py
-    python examples/generate_kyocera_cfp_packages.py --start 20 --stop 64 --step 10
-    python examples/generate_kyocera_cfp_packages.py --row-pitch 22.86 --lid-inset 2.0
-    python examples/generate_kyocera_cfp_packages.py --step-dir step_out --run-freecad
+    python 2D_Part_Generator_scripts/generate_kyocera_cfp_packages.py
+    python 2D_Part_Generator_scripts/generate_kyocera_cfp_packages.py --start 20 --stop 64 --step 10
+    python 2D_Part_Generator_scripts/generate_kyocera_cfp_packages.py --row-pitch 22.86 --lid-inset 2.0
+    python 2D_Part_Generator_scripts/generate_kyocera_cfp_packages.py --step-dir step_out --run-freecad
 """
 import argparse
 import os
@@ -203,7 +203,7 @@ def main(argv=None):
                     help=f"body edge to nearest pad centre, mm (default: {MARGIN_MM})")
     ap.add_argument("--lid-inset", type=float, default=LID_INSET_MM,
                     help=f"body outline to lid edge, mm (default: {LID_INSET_MM})")
-    ap.add_argument("-o", "--out", default=os.path.join(_here, "kyocera_cfp_packages.gds"),
+    ap.add_argument("-o", "--out", default=os.path.join(_root, "examples", "kyocera_cfp_packages.gds"),
                     help="output .gds path (default: examples/kyocera_cfp_packages.gds)")
     ap.add_argument("--step-dir", default=None,
                     help="also write a FreeCAD macro building a matching 3D STEP model "

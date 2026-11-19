@@ -31,8 +31,8 @@ Origin: the BOTTOM-LEFT corner of the body, the body spanning (0, 0) to
 origin, underside at Z = 0.
 
 Usage:
-    python examples/generate_kovar_dip_packages.py
-    python examples/generate_kovar_dip_packages.py --pins 20 24 28 --out my_kovar.gds
+    python 2D_Part_Generator_scripts/generate_kovar_dip_packages.py
+    python 2D_Part_Generator_scripts/generate_kovar_dip_packages.py --pins 20 24 28 --out my_kovar.gds
 """
 import argparse
 import math
@@ -162,7 +162,7 @@ def build(pin_counts):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--pins", type=int, nargs="+", default=[20, 30, 40])
-    ap.add_argument("--out", default=os.path.join(_here, "kovar_dip_packages.gds"))
+    ap.add_argument("--out", default=os.path.join(_root, "examples", "kovar_dip_packages.gds"))
     args = ap.parse_args()
     lib = build(args.pins)
     save_gds(lib, args.out)

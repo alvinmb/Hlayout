@@ -221,7 +221,7 @@ function rows(s, items, x, y, w, rowH, fill){
     {text:'Auto-match: ', options:{bold:true, color:INK}}, {text:'parts tied to STEP bodies by size code or pad footprint; overrides in the Component Library Manager', options:{color:MUTED, breakLine:true}},
     {text:'SolidCraft: ', options:{bold:true, color:INK}}, {text:'3D view through its MCP server; writes STEP, 3MF, STL or OBJ', options:{color:MUTED}},
   ], { x:6.05, y:1.55, w:3.45, h:3.4, fontSize:12, margin:0, valign:'top', paraSpaceAfter:9, isTextBox:true });
-  s.addNotes('Components rest on whatever film lies under their footprint, so a die sits on its conductor rather than floating. Headers can be referenced to the substrate underside. build_STEP_parts/build_all.py rebuilds every family.');
+  s.addNotes('Components rest on whatever film lies under their footprint, so a die sits on its conductor rather than floating. Headers can be referenced to the substrate underside. 3D_STEP_Part_Generator_scripts/build_all.py rebuilds every family.');
 }
 
 

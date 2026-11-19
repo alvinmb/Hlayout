@@ -4,7 +4,7 @@
 
 """Generate a GDSII library of SMD inductor footprints for hybrid
 assembly -- one cell per inductor, named exactly as its 3D STEP model
-from build_STEP_parts/build_smd_inductors.py, plus an INDEX cell that
+from 3D_STEP_Part_Generator_scripts/build_smd_inductors.py, plus an INDEX cell that
 places them all in labelled rows.
 
 Three families (the same sizes as the STEP models -- the numbers come
@@ -36,8 +36,8 @@ IMPORTANT: round-number catalogue outlines for layout practice, not a
 maker's land pattern -- check the datasheet before committing a design.
 
 Usage:
-    python examples/generate_smd_inductors.py
-    python examples/generate_smd_inductors.py --out my_inductors.gds --epoxy-layer 21
+    python 2D_Part_Generator_scripts/generate_smd_inductors.py
+    python 2D_Part_Generator_scripts/generate_smd_inductors.py --out my_inductors.gds --epoxy-layer 21
 """
 import argparse
 import importlib.util
@@ -71,7 +71,7 @@ INDEX_GAP_MM = 3.0
 
 def _models():
     """The 3D script's module: its tables and footprint()."""
-    path = os.path.join(_root, "build_STEP_parts", "build_smd_inductors.py")
+    path = os.path.join(_root, "3D_STEP_Part_Generator_scripts", "build_smd_inductors.py")
     spec = importlib.util.spec_from_file_location("build_smd_inductors", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -135,7 +135,7 @@ def build(pad_layer=PAD_LAYER, epoxy_layer=EPOXY_LAYER):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--out", default=os.path.join(_here, "smd_inductors.gds"))
+    ap.add_argument("--out", default=os.path.join(_root, "examples", "smd_inductors.gds"))
     ap.add_argument("--pad-layer", type=int, default=PAD_LAYER)
     ap.add_argument("--epoxy-layer", type=int, default=EPOXY_LAYER)
     a = ap.parse_args()

@@ -144,11 +144,15 @@ def _soic_leads(n_per_side, pitch, lead_w=0.4):
 #:   extrapolated from the same lead-span-plus-margin the 14/16-pin
 #:   sizes follow.
 DEFAULT_SOT_PACKAGES = {
-    "SOT_23": dict(L=2.9, W=1.3, H=1.1, lead_t=0.1, lead_out=0.4, lead_foot=0.4,
-                   leads_neg_y=[(-0.475, 0.4), (0.475, 0.4)],
-                   leads_pos_y=[(0.0, 0.4)]),
+    # SOT-23 (TO-236) to the datasheet drawing: body 2.8 x 1.3, pins 1/2
+    # 1.9 apart, pin 3 centred opposite, lead span 2.3 (lead_out +
+    # lead_foot = 0.5 per side), lead width 0.43, thickness 0.12,
+    # seated height 0.9.
+    "SOT_23": dict(L=2.8, W=1.3, H=0.9, lead_t=0.12, lead_out=0.15, lead_foot=0.35,
+                   leads_neg_y=[(-0.95, 0.43), (0.95, 0.43)],
+                   leads_pos_y=[(0.0, 0.43)]),
     "SOT_323": dict(L=2.0, W=1.25, H=0.95, lead_t=0.1, lead_out=0.3, lead_foot=0.3,
-                    leads_neg_y=[(-0.325, 0.25), (0.325, 0.25)],
+                    leads_neg_y=[(-0.65, 0.25), (0.65, 0.25)],
                     leads_pos_y=[(0.0, 0.25)]),
     "SOT_89": dict(L=4.5, W=2.5, H=1.5, lead_t=0.2, lead_out=0.6, lead_foot=0.8,
                    leads_neg_y=[(-1.5, 0.6), (0.0, 0.6), (1.5, 0.6)],

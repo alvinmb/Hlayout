@@ -23,16 +23,16 @@ coloured parts: body (ferrite), terminations (tin) and, for the drum
 cores, the winding (copper). Sizes are typical catalogue outlines, not
 any one maker's drawing.
 
-Run:  python build_STEP_parts/build_smd_inductors.py [out_dir]     (needs cadquery)
+Run:  python 3D_STEP_Part_Generator_scripts/build_smd_inductors.py [out_dir]     (needs cadquery)
       -- writes to examples/step_models/smd_inductors by default;
-      build_STEP_parts/build_all.py runs it with the other model scripts.
+      3D_STEP_Part_Generator_scripts/build_all.py runs it with the other model scripts.
 """
 import os
 import sys
 
 # cadquery is imported only to build the solids, so the dimension tables
 # and footprint() below can be read without it -- the 2D cells
-# (examples/generate_smd_inductors.py) come from the same numbers
+# (2D_Part_Generator_scripts/generate_smd_inductors.py) come from the same numbers
 cq = None
 
 FERRITE = (0.22, 0.22, 0.24)

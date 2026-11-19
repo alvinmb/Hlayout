@@ -54,10 +54,10 @@ them (or pass the matching --pad-width/--pad-depth flags) if your
 fab's own land pattern differs.
 
 Usage:
-    python examples/generate_lcc_packages.py
-    python examples/generate_lcc_packages.py --start 8 --stop 44 --step 4
-    python examples/generate_lcc_packages.py --pitch 1.0 --out my_lcc.gds
-    python examples/generate_lcc_packages.py --step-dir step_out --run-freecad
+    python 2D_Part_Generator_scripts/generate_lcc_packages.py
+    python 2D_Part_Generator_scripts/generate_lcc_packages.py --start 8 --stop 44 --step 4
+    python 2D_Part_Generator_scripts/generate_lcc_packages.py --pitch 1.0 --out my_lcc.gds
+    python 2D_Part_Generator_scripts/generate_lcc_packages.py --step-dir step_out --run-freecad
 """
 import argparse
 import math
@@ -361,7 +361,7 @@ def main(argv=None):
                     help=f"pad size straddling the edge, mm (default: {PAD_DEPTH_MM})")
     ap.add_argument("--corner-margin", type=float, default=CORNER_MARGIN_MM,
                     help=f"corner to nearest pad centre, mm (default: {CORNER_MARGIN_MM})")
-    ap.add_argument("-o", "--out", default=os.path.join(_here, "lcc_packages.gds"),
+    ap.add_argument("-o", "--out", default=os.path.join(_root, "examples", "lcc_packages.gds"),
                     help="output .gds path (default: examples/lcc_packages.gds)")
     ap.add_argument("--step-dir", default=None,
                     help="also write a FreeCAD macro building a matching 3D STEP model "

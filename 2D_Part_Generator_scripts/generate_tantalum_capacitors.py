@@ -33,9 +33,9 @@ KEMET T491, etc. all differ slightly). Check a real datasheet /
 IPC-7351 land pattern before committing a board.
 
 Usage:
-    python examples/generate_tantalum_capacitors.py
-    python examples/generate_tantalum_capacitors.py --out my_tants.gds
-    python examples/generate_tantalum_capacitors.py --step-dir step_out --run-freecad
+    python 2D_Part_Generator_scripts/generate_tantalum_capacitors.py
+    python 2D_Part_Generator_scripts/generate_tantalum_capacitors.py --out my_tants.gds
+    python 2D_Part_Generator_scripts/generate_tantalum_capacitors.py --step-dir step_out --run-freecad
 """
 import argparse
 import os
@@ -160,7 +160,7 @@ def step_parts():
 def main(argv=None):
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("-o", "--out", default=os.path.join(_here, "tantalum_capacitors.gds"),
+    ap.add_argument("-o", "--out", default=os.path.join(_root, "examples", "tantalum_capacitors.gds"),
                     help="output .gds path (default: examples/tantalum_capacitors.gds)")
     ap.add_argument("--step-dir", default=None,
                     help="also write a FreeCAD macro building a matching 3D STEP model "
