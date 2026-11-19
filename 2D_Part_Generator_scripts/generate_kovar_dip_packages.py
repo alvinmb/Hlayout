@@ -162,7 +162,7 @@ def build(pin_counts):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--pins", type=int, nargs="+", default=[20, 30, 40])
-    ap.add_argument("--out", default=os.path.join(_root, "examples", "kovar_dip_packages.gds"))
+    ap.add_argument("-o", "--out", default=os.path.join(_root, "examples", "kovar_dip_packages.gds"))
     args = ap.parse_args()
     lib = build(args.pins)
     save_gds(lib, args.out)

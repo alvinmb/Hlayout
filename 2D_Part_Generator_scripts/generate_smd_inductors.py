@@ -135,7 +135,7 @@ def build(pad_layer=PAD_LAYER, epoxy_layer=EPOXY_LAYER):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--out", default=os.path.join(_root, "examples", "smd_inductors.gds"))
+    ap.add_argument("-o", "--out", default=os.path.join(_root, "examples", "smd_inductors.gds"))
     ap.add_argument("--pad-layer", type=int, default=PAD_LAYER)
     ap.add_argument("--epoxy-layer", type=int, default=EPOXY_LAYER)
     a = ap.parse_args()
