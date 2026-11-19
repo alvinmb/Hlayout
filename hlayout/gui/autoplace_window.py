@@ -101,8 +101,10 @@ class AutoPlaceWindow(tk.Toplevel):
         self.cell_box.pack(anchor="w")
         self.cell_box.bind("<<ComboboxSelected>>", lambda e: self._map_footprint())
         ttk.Button(side, text="Map footprint", command=self._map_footprint).pack(anchor="w", pady=4)
+        ttk.Button(side, text="Clear mapping", command=self._clear_mapping).pack(anchor="w")
         ttk.Label(side, text="Choosing a cell maps it at once;\nthe map is saved with the design\n"
-                             "and next to the netlist\n(<netlist>.cellmap.json).",
+                             "and next to the netlist\n(<netlist>.cellmap.json).\n"
+                             "Clear mapping takes the selected\nparts' cell off again.",
                   foreground="#666", justify="left").pack(anchor="w", pady=(6, 0))
         self.parts.bind("<<TreeviewSelect>>", self._part_selected, add="+")
         # nets
@@ -388,12 +390,53 @@ class AutoPlaceWindow(tk.Toplevel):
             self.summary.config(text=f"{', '.join(still)} already placed as another cell -- "
                                      "delete the placed part to remap it")
 
+    def _clear_mapping(self):
+        """Take the cell off the selected parts: drop their entries
+        (footprint name, or ref:<ref> for a part with no footprint) from
+        the footprint map, in the design and in <netlist>.cellmap.json --
+        the file too, or loading the netlist would add them back. A part
+        already placed keeps its cell until the placed part is deleted."""
+        sel = self.parts.selection()
+        if not sel:
+            self.summary.config(text="Select the part(s) to clear first.")
+            return
+        S = self.session.autoplace_settings()
+        fmap = dict(S["footprint_map"])
+        cell = self.session.library.cells.get(self.session.current_cell_name)
+        placed = {r.label for r in (cell.srefs if cell else []) if r.label}
+        cleared, kept = [], []
+        for ref in sel:
+            if ref in placed:
+                kept.append(ref)
+                continue
+            fp = self.parts.set(ref, "footprint")
+            for key in ((fp,) if fp else ()) + (f"ref:{ref}",):
+                if fmap.pop(key, None) is not None:
+                    cleared.append(ref)
+        self.session.set_autoplace_settings(footprint_map=fmap)
+        self._save_cellmap(fmap)
+        self._load_netlist()
+        keep = [r for r in sel if self.parts.exists(r)]
+        if keep:
+            self.parts.selection_set(keep)
+            self.parts.see(keep[-1])
+        msg = []
+        if cleared:
+            msg.append(f"mapping cleared: {', '.join(sorted(set(cleared)))}")
+        if kept:
+            msg.append(f"{', '.join(kept)} already placed -- delete the placed part to clear it")
+        if not msg:
+            msg.append("nothing mapped to clear (the cell was matched by its footprint name)")
+        self.summary.config(text="; ".join(msg))
+        self._part_selected()
+
     def _save_cellmap(self, fmap=None):
         from ..scripting.autoplace_session import save_cellmap
         path = self.v["netlist"].get().strip()
         if fmap is None:
             fmap = self.session.autoplace_settings()["footprint_map"]
-        return save_cellmap(path, fmap) if path and fmap else None
+        # written even when empty, so a cleared mapping stays cleared
+        return save_cellmap(path, fmap) if path and fmap is not None else None
 
     def _part_selected(self, _e=None):
         """Show the selected part's cell in the cell box."""
