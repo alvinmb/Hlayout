@@ -1,0 +1,46 @@
+2026-10-25 17:06:33.476 INFO   Freerouting v2.5.0 (build-date: 2026-10-05)
+2026-10-25 17:06:33.811 INFO   Hardware: 8 CPU cores, 409 CPU score, 4050 MB RAM
+2026-10-25 17:06:33.812 WARN   Deprecated settings path '-mp / --router.max_passes'; use '--router.autorouter.max_passes' instead. The old path will be removed in a future release.
+2026-10-25 17:06:33.815 WARN   GUI is disabled and you don't have a console available, so the only feedback from Freerouting is in the log.
+2026-10-25 17:06:35.064 WARN   Deprecated settings path 'router.max_passes'; use 'router.autorouter.max_passes' instead. The old path will be removed in a future release.
+2026-10-25 17:06:35.349 INFO   [201B07\2B8442] Loading board file 'cheapv.dsn'...
+2026-10-25 17:06:35.936 INFO   [201B07\2B8442] Job '201B07\2B8442' started at 2026-10-25T17:06:35.936433200Z.
+2026-10-25 17:06:36.237 INFO   [201B07\2B8442] Pipeline thread limits: autorouter pass is single-threaded, optimizer.max_threads=7.
+2026-10-25 17:06:36.396 INFO   [201B07\2B8442] Auto-routing stage started on board 'b13517699dacfa695bae697320d71655' with baseline score 1000.00 for 0 unrouted items.
+2026-10-25 17:06:36.593 INFO   [201B07\2B8442] Auto-routing pass #1 on board 'b13517699dacfa695bae697320d71655' was completed in 0.02 seconds with score 1000.00 (0 unrouted and 0 violations).
+2026-10-25 17:06:36.697 INFO   [201B07\2B8442] Auto-routing stage completed: started with 0 unrouted nets, completed in 0.44 seconds, final score: 1000.00 (0 unrouted and 0 violations), using 0.00 total CPU seconds, 0.00 GB total allocated, and 0.0 MB peak heap usage.
+2026-10-25 17:06:36.827 INFO   [201B07\2B8442] Optimization stage started on board 'b13517699dacfa695bae697320d71655'. Baseline router score: 1000.00, optimizer score: 0.00, incomplete connections: 0, clearance violations: 0.
+2026-10-25 17:06:42.670 INFO   [201B07\2B8442] Optimizer pass #1 on board 'ecb16c13436952e677974e9b857576fd' was completed in 5.75 seconds with the score of 0.00 (0 unrouted and 0 violations).
+2026-10-25 17:06:42.676 INFO   [201B07\2B8442] Optimizer pass #1 candidate rejected: OPTIMIZER_SCORE_NOT_IMPROVED. Restoring incumbent (optimizer score 0.00, incomplete connections: 0, clearance violations: 0).
+2026-10-25 17:06:42.704 INFO   [201B07\2B8442] Optimizer pass #1: optimizer score 0.00 -> 0.00 (UNCHANGED, n/a (baseline was 0.00)), router score: 1000.00, incomplete connections: 0, clearance violations: 0.
+2026-10-25 17:06:49.522 INFO   [201B07\2B8442] Optimizer pass #2 on board '149c4750d43b7335e31f03e2f5574af4' was completed in 6.75 seconds with the score of 0.00 (0 unrouted and 0 violations).
+2026-10-25 17:06:49.528 INFO   [201B07\2B8442] Optimizer pass #2 candidate rejected: OPTIMIZER_SCORE_NOT_IMPROVED. Restoring incumbent (optimizer score 0.00, incomplete connections: 0, clearance violations: 0).
+2026-10-25 17:06:49.555 INFO   [201B07\2B8442] Optimizer pass #2: optimizer score 0.00 -> 0.00 (UNCHANGED, n/a (baseline was 0.00)), router score: 1000.00, incomplete connections: 0, clearance violations: 0.
+2026-10-25 17:06:54.688 INFO   [201B07\2B8442] Optimizer pass #3 on board '84115f4c8e01cdf51cc5c7a0772fd991' was completed in 5.05 seconds with the score of 0.00 (0 unrouted and 0 violations).
+2026-10-25 17:06:54.712 INFO   [201B07\2B8442] Optimizer pass #3 candidate rejected: OPTIMIZER_SCORE_NOT_IMPROVED. Restoring incumbent (optimizer score 0.00, incomplete connections: 0, clearance violations: 0).
+2026-10-25 17:06:54.781 INFO   [201B07\2B8442] Optimizer pass #3: optimizer score 0.00 -> 0.00 (UNCHANGED, n/a (baseline was 0.00)), router score: 1000.00, incomplete connections: 0, clearance violations: 0.
+2026-10-25 17:06:59.282 INFO   [201B07\2B8442] Optimizer pass #4 on board '149c4750d43b7335e31f03e2f5574af4' was completed in 4.40 seconds with the score of 0.00 (0 unrouted and 0 violations).
+2026-10-25 17:06:59.293 INFO   [201B07\2B8442] Optimizer pass #4 candidate rejected: OPTIMIZER_SCORE_NOT_IMPROVED. Restoring incumbent (optimizer score 0.00, incomplete connections: 0, clearance violations: 0).
+2026-10-25 17:06:59.330 INFO   [201B07\2B8442] Optimizer pass #4: optimizer score 0.00 -> 0.00 (UNCHANGED, n/a (baseline was 0.00)), router score: 1000.00, incomplete connections: 0, clearance violations: 0.
+2026-10-25 17:07:03.653 INFO   [201B07\2B8442] Optimizer pass #5 on board '84115f4c8e01cdf51cc5c7a0772fd991' was completed in 4.26 seconds with the score of 0.00 (0 unrouted and 0 violations).
+2026-10-25 17:07:03.659 INFO   [201B07\2B8442] Optimizer pass #5 candidate rejected: OPTIMIZER_SCORE_NOT_IMPROVED. Restoring incumbent (optimizer score 0.00, incomplete connections: 0, clearance violations: 0).
+2026-10-25 17:07:03.677 INFO   [201B07\2B8442] Optimizer pass #5: optimizer score 0.00 -> 0.00 (UNCHANGED, n/a (baseline was 0.00)), router score: 1000.00, incomplete connections: 0, clearance violations: 0.
+2026-10-25 17:07:06.953 INFO   [201B07\2B8442] Optimizer pass #6 on board '149c4750d43b7335e31f03e2f5574af4' was completed in 3.25 seconds with the score of 0.00 (0 unrouted and 0 violations).
+2026-10-25 17:07:06.969 INFO   [201B07\2B8442] Optimizer pass #6 candidate rejected: OPTIMIZER_SCORE_NOT_IMPROVED. Restoring incumbent (optimizer score 0.00, incomplete connections: 0, clearance violations: 0).
+2026-10-25 17:07:06.988 INFO   [201B07\2B8442] Optimizer pass #6: optimizer score 0.00 -> 0.00 (UNCHANGED, n/a (baseline was 0.00)), router score: 1000.00, incomplete connections: 0, clearance violations: 0.
+2026-10-25 17:07:09.587 INFO   [201B07\2B8442] Optimizer pass #7 on board '84115f4c8e01cdf51cc5c7a0772fd991' was completed in 2.55 seconds with the score of 0.00 (0 unrouted and 0 violations).
+2026-10-25 17:07:09.604 INFO   [201B07\2B8442] Optimizer pass #7 candidate rejected: OPTIMIZER_SCORE_NOT_IMPROVED. Restoring incumbent (optimizer score 0.00, incomplete connections: 0, clearance violations: 0).
+2026-10-25 17:07:09.640 INFO   [201B07\2B8442] Optimizer pass #7: optimizer score 0.00 -> 0.00 (UNCHANGED, n/a (baseline was 0.00)), router score: 1000.00, incomplete connections: 0, clearance violations: 0.
+2026-10-25 17:07:11.795 INFO   [201B07\2B8442] Optimizer pass #8 on board '149c4750d43b7335e31f03e2f5574af4' was completed in 2.12 seconds with the score of 0.00 (0 unrouted and 0 violations).
+2026-10-25 17:07:11.802 INFO   [201B07\2B8442] Optimizer pass #8 candidate rejected: OPTIMIZER_SCORE_NOT_IMPROVED. Restoring incumbent (optimizer score 0.00, incomplete connections: 0, clearance violations: 0).
+2026-10-25 17:07:11.816 INFO   [201B07\2B8442] Optimizer pass #8: optimizer score 0.00 -> 0.00 (UNCHANGED, n/a (baseline was 0.00)), router score: 1000.00, incomplete connections: 0, clearance violations: 0.
+2026-10-25 17:07:13.784 INFO   [201B07\2B8442] Optimizer pass #9 on board '84115f4c8e01cdf51cc5c7a0772fd991' was completed in 1.94 seconds with the score of 0.00 (0 unrouted and 0 violations).
+2026-10-25 17:07:13.788 INFO   [201B07\2B8442] Optimizer pass #9 candidate rejected: OPTIMIZER_SCORE_NOT_IMPROVED. Restoring incumbent (optimizer score 0.00, incomplete connections: 0, clearance violations: 0).
+2026-10-25 17:07:13.802 INFO   [201B07\2B8442] Optimizer pass #9: optimizer score 0.00 -> 0.00 (UNCHANGED, n/a (baseline was 0.00)), router score: 1000.00, incomplete connections: 0, clearance violations: 0.
+2026-10-25 17:07:15.419 INFO   [201B07\2B8442] Optimizer pass #10 on board '149c4750d43b7335e31f03e2f5574af4' was completed in 1.60 seconds with the score of 0.00 (0 unrouted and 0 violations).
+2026-10-25 17:07:15.419 INFO   [201B07\2B8442] Optimizer pass #10 candidate rejected: OPTIMIZER_SCORE_NOT_IMPROVED. Restoring incumbent (optimizer score 0.00, incomplete connections: 0, clearance violations: 0).
+2026-10-25 17:07:15.437 INFO   [201B07\2B8442] Optimizer pass #10: optimizer score 0.00 -> 0.00 (UNCHANGED, n/a (baseline was 0.00)), router score: 1000.00, incomplete connections: 0, clearance violations: 0.
+2026-10-25 17:07:15.452 INFO   [201B07\2B8442] Optimization stage completed:. Baseline router score: 1000.00, baseline optimizer score: 0.00, final router score: 1000.00, final optimizer score: 0.00, completed in 38.62 seconds, using 51.61 total CPU seconds, 11.35 GB total allocated, and 233.6 MB peak heap usage.
+2026-10-25 17:07:15.458 INFO   [201B07\2B8442] Job '201B07\2B8442' finished with state: COMPLETED (elapsed: 39.52 seconds, finished at UTC: 2026-10-25T17:07:15.458665800Z).
+2026-10-25 17:07:15.467 INFO   Saving output file 'C:\dev\HLayout\example5\_frtest\cvAR.ses' (SES)...
+2026-10-25 17:07:15.473 INFO   Successfully saved output file 'C:\dev\HLayout\example5\_frtest\cvAR.ses' (7788 bytes).

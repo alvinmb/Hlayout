@@ -1,0 +1,524 @@
+{
+  "format": "hlayout-sidecar",
+  "version": 1,
+  "technology": {
+    "format": "hlayout-tech",
+    "version": 1,
+    "layers": [
+      {
+        "number": 0,
+        "name": "L0",
+        "color": "#e6194b",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 1,
+        "name": "L1",
+        "color": "#3cb44b",
+        "stipple": 1,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 2,
+        "name": "L2",
+        "color": "#ffe119",
+        "stipple": 2,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 3,
+        "name": "L3",
+        "color": "#4363d8",
+        "stipple": 3,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 4,
+        "name": "L4",
+        "color": "#f58231",
+        "stipple": 4,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 5,
+        "name": "L5",
+        "color": "#911eb4",
+        "stipple": 5,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 6,
+        "name": "L6",
+        "color": "#46f0f0",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 7,
+        "name": "L7",
+        "color": "#f032e6",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 8,
+        "name": "L8",
+        "color": "#bcf60c",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 9,
+        "name": "L9",
+        "color": "#fabebe",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 10,
+        "name": "L10",
+        "color": "#008080",
+        "stipple": 1,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 11,
+        "name": "L11",
+        "color": "#e6beff",
+        "stipple": 2,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 12,
+        "name": "L12",
+        "color": "#9a6324",
+        "stipple": 3,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 13,
+        "name": "L13",
+        "color": "#fffac8",
+        "stipple": 4,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 14,
+        "name": "L14",
+        "color": "#800000",
+        "stipple": 5,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 15,
+        "name": "L15",
+        "color": "#aaffc3",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 16,
+        "name": "L16",
+        "color": "#e6194b",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 17,
+        "name": "L17",
+        "color": "#3cb44b",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 18,
+        "name": "L18",
+        "color": "#ffe119",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 19,
+        "name": "L19",
+        "color": "#4363d8",
+        "stipple": 1,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 20,
+        "name": "L20",
+        "color": "#f58231",
+        "stipple": 2,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 21,
+        "name": "L21",
+        "color": "#911eb4",
+        "stipple": 3,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 22,
+        "name": "L22",
+        "color": "#46f0f0",
+        "stipple": 4,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 23,
+        "name": "L23",
+        "color": "#f032e6",
+        "stipple": 5,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 24,
+        "name": "L24",
+        "color": "#bcf60c",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 25,
+        "name": "L25",
+        "color": "#fabebe",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 26,
+        "name": "L26",
+        "color": "#008080",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 27,
+        "name": "L27",
+        "color": "#e6beff",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 28,
+        "name": "L28",
+        "color": "#9a6324",
+        "stipple": 1,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 29,
+        "name": "L29",
+        "color": "#fffac8",
+        "stipple": 2,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 30,
+        "name": "L30",
+        "color": "#800000",
+        "stipple": 3,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 31,
+        "name": "L31",
+        "color": "#aaffc3",
+        "stipple": 4,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 32,
+        "name": "L32",
+        "color": "#e6194b",
+        "stipple": 5,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 33,
+        "name": "L33",
+        "color": "#3cb44b",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 34,
+        "name": "L34",
+        "color": "#ffe119",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 35,
+        "name": "L35",
+        "color": "#4363d8",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 36,
+        "name": "L36",
+        "color": "#f58231",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 37,
+        "name": "L37",
+        "color": "#911eb4",
+        "stipple": 1,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 38,
+        "name": "L38",
+        "color": "#46f0f0",
+        "stipple": 2,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 39,
+        "name": "L39",
+        "color": "#f032e6",
+        "stipple": 3,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 40,
+        "name": "L40",
+        "color": "#bcf60c",
+        "stipple": 4,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 41,
+        "name": "L41",
+        "color": "#fabebe",
+        "stipple": 5,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 42,
+        "name": "L42",
+        "color": "#008080",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 43,
+        "name": "L43",
+        "color": "#e6beff",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 44,
+        "name": "L44",
+        "color": "#9a6324",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 45,
+        "name": "L45",
+        "color": "#fffac8",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 46,
+        "name": "L46",
+        "color": "#800000",
+        "stipple": 1,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 47,
+        "name": "L47",
+        "color": "#aaffc3",
+        "stipple": 2,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 48,
+        "name": "L48",
+        "color": "#e6194b",
+        "stipple": 3,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 49,
+        "name": "L49",
+        "color": "#3cb44b",
+        "stipple": 4,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 50,
+        "name": "L50",
+        "color": "#ffe119",
+        "stipple": 5,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 51,
+        "name": "L51",
+        "color": "#4363d8",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 52,
+        "name": "L52",
+        "color": "#f58231",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 53,
+        "name": "L53",
+        "color": "#911eb4",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 54,
+        "name": "L54",
+        "color": "#46f0f0",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 55,
+        "name": "L55",
+        "color": "#f032e6",
+        "stipple": 1,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 56,
+        "name": "L56",
+        "color": "#bcf60c",
+        "stipple": 2,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 57,
+        "name": "L57",
+        "color": "#fabebe",
+        "stipple": 3,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 58,
+        "name": "L58",
+        "color": "#008080",
+        "stipple": 4,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 59,
+        "name": "L59",
+        "color": "#e6beff",
+        "stipple": 5,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 60,
+        "name": "L60",
+        "color": "#9a6324",
+        "stipple": 6,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 61,
+        "name": "L61",
+        "color": "#fffac8",
+        "stipple": 7,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 62,
+        "name": "L62",
+        "color": "#800000",
+        "stipple": 8,
+        "fill": true,
+        "visible": true
+      },
+      {
+        "number": 63,
+        "name": "L63",
+        "color": "#aaffc3",
+        "stipple": 0,
+        "fill": true,
+        "visible": true
+      }
+    ],
+    "params": {}
+  },
+  "attached_libraries": []
+}

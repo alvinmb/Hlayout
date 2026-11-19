@@ -1,0 +1,10 @@
+{
+  "netlist": "op_amp.net",
+  "footprint_map": {
+    "Package_TO_SOT_THT:TO-39-3": "SOT-23",
+    "Package_TO_SOT_THT:TO-92_Inline": "SOT-23",
+    "ref:C1": "EIA-0805",
+    "ref:J4": "SOT-23-6",
+    "ref:J6": "EDGE_PAD"
+  }
+}

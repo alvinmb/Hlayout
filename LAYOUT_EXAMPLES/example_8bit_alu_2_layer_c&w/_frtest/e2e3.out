@@ -1,0 +1,1 @@
+{"plain": {"complete": 12, "nets": 12, "vias": 22, "wires": 38, "vias_before": null, "vias_after": null, "via_optimize_skipped": null, "unrouted": []}, "vo": {"complete": 12, "nets": 12, "vias": 22, "wires": 38, "vias_before": 22, "vias_after": 5, "via_optimize_skipped": null, "unrouted": []}}

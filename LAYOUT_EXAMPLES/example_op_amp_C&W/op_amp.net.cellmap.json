@@ -1,0 +1,10 @@
+{
+  "netlist": "op_amp.net",
+  "footprint_map": {
+    "EDGE_PAD": "20_pin_substrate",
+    "Package_TO_SOT_THT:TO-39-3": "2N2219",
+    "Package_TO_SOT_THT:TO-92_Inline": "2N3906",
+    "ref:C1": "CAP_0805",
+    "ref:J1": "20_PIN_pkg"
+  }
+}

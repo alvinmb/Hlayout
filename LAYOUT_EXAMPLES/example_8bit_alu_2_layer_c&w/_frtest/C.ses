@@ -1,0 +1,1666 @@
+(session C
+  (base_design C)
+  (placement
+    (resolution um 1)
+    (component "IMG_IO"
+      (place IO 0 0 front 0)
+    )
+    (component "IMG_HL_IOREST"
+      (place "HL_IOREST" 42399 -12828 front 0)
+    )
+    (component "IMG_BOND"
+      (place BOND 43947 -11738 front 0)
+    )
+    (component "IMG_HL_EDGE"
+      (place "HL_EDGE" 0 0 front 0)
+    )
+    (component "IMG_HL_KEEP"
+      (place "HL_KEEP" 0 0 front 0)
+    )
+  )
+  (was_is
+  )
+  (routes 
+    (resolution um 1)
+    (parser
+      (host_cad HLayout)
+      (host_version "1")
+    )
+    (library_out 
+      (padstack "VIA_SIG"
+        (shape
+          (rect L5 -200 -200 200 200)
+        )
+        (shape
+          (rect L3 -200 -200 200 200)
+        )
+        (attach off)
+      )
+      (padstack "VIA_PWR"
+        (shape
+          (rect L5 -350 -350 350 350)
+        )
+        (shape
+          (rect L3 -350 -350 350 350)
+        )
+        (attach off)
+      )
+    )
+    (network_out 
+      (net B0
+        (via "VIA_SIG" 41681 -18829
+          (type protect)
+        )
+        (via "VIA_SIG" 43544 -16255
+          (type protect)
+        )
+        (via "VIA_SIG" 49446 -16230
+          (type protect)
+        )
+        (wire
+          (path L5 224
+            49446 -14869
+            49446 -14850
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            43544 -16255
+            43544 -16230
+            49446 -16230
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            49446 -16230
+            49446 -14869
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            41681 -18829
+            37020 -18829
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 224
+            37020 -18829
+            37020 -19500
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            41681 -18829
+            43544 -18829
+            43544 -16255
+          )
+          (type protect)
+        )
+      )
+      (net F1
+        (wire
+          (path L3 300
+            51891 -5588
+            51891 -4450
+          )
+        )
+        (wire
+          (path L3 224
+            51891 -4450
+            51910 -4450
+          )
+        )
+        (via "VIA_SIG" 51891 -5588
+        )
+      )
+      (net F2
+        (wire
+          (path L5 300
+            62175 -7231
+            60750 -7231
+          )
+        )
+        (via "VIA_SIG" 62175 -7231
+        )
+        (wire
+          (path L5 300
+            50143 -5504
+            50778 -5504
+            50778 -5965
+          )
+        )
+        (wire
+          (path L3 300
+            50778 -5965
+            49351 -5965
+            49351 -4450
+          )
+        )
+        (wire
+          (path L3 224
+            49351 -4450
+            49370 -4450
+          )
+        )
+        (wire
+          (path L5 224
+            50143 -5504
+            50143 -10150
+          )
+        )
+        (via "VIA_SIG" 50778 -5965
+        )
+      )
+      (net GND
+        (wire
+          (path L5 600
+            56981 -15300
+            56833 -15300
+            56833 -14016
+          )
+        )
+        (wire
+          (path L5 600
+            39696 -8100
+            39696 -10731
+          )
+        )
+        (via "VIA_PWR" 63522 -18731
+        )
+        (via "VIA_SIG" 39696 -8100
+        )
+        (wire
+          (path L5 600
+            48465 -5800
+            48806 -5800
+            48806 -9381
+          )
+        )
+        (via "VIA_PWR" 48465 -5800
+        )
+        (wire
+          (path L5 600
+            62021 -9450
+            61319 -9450
+          )
+        )
+        (via "VIA_PWR" 56833 -14016
+        )
+        (via "VIA_PWR" 62021 -9450
+        )
+      )
+      (net F3
+        (wire
+          (path L3 224
+            47180 -4919
+            47180 -4900
+          )
+        )
+        (wire
+          (path L3 300
+            47528 -6120
+            47180 -6120
+            47180 -4919
+          )
+        )
+        (wire
+          (path L5 300
+            47528 -6120
+            47528 -10133
+          )
+        )
+        (wire
+          (path L5 224
+            47528 -10133
+            47528 -10150
+            48054 -10150
+          )
+        )
+        (via "VIA_SIG" 47528 -6120
+        )
+      )
+      (net C4
+        (wire
+          (path L5 224
+            41650 -12554
+            41650 -12874
+            41966 -12874
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            41966 -12874
+            43196 -12874
+            43196 -10411
+            46381 -10411
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 224
+            46381 -10411
+            46400 -10411
+          )
+          (type protect)
+        )
+      )
+      (net B3
+        (via "VIA_SIG" 42588 -18157
+          (type protect)
+        )
+        (via "VIA_SIG" 42588 -15675
+          (type protect)
+        )
+        (via "VIA_SIG" 45693 -12482
+          (type protect)
+        )
+        (wire
+          (path L3 224
+            41666 -15675
+            41666 -12654
+            42682 -12654
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 224
+            46381 -11804
+            46400 -11804
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            42588 -15675
+            41666 -15675
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 224
+            45609 -19500
+            44640 -19500
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            42682 -12654
+            45693 -12654
+            45693 -12482
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            46381 -11804
+            45693 -11804
+            45693 -12482
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            42588 -18157
+            45609 -18157
+            45609 -19500
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            42588 -18157
+            42588 -15675
+          )
+          (type protect)
+        )
+      )
+      (net A3
+        (via "VIA_SIG" 25908 -18951
+          (type protect)
+        )
+        (via "VIA_SIG" 34808 -10155
+          (type protect)
+        )
+        (via "VIA_SIG" 44420 -11084
+          (type protect)
+        )
+        (wire
+          (path L3 224
+            25908 -18951
+            25908 -19950
+            24670 -19950
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 224
+            46381 -13196
+            46400 -13196
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            46381 -13196
+            44420 -13196
+            44420 -11084
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            44420 -11084
+            44420 -9440
+            34808 -9440
+            34808 -10155
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 224
+            34713 -10750
+            34713 -10155
+            34808 -10155
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            25908 -18951
+            25908 -13344
+            33404 -13344
+            33404 -11284
+            34713 -11284
+            34713 -10750
+          )
+          (type protect)
+        )
+      )
+      (net B2
+        (via "VIA_SIG" 44864 -18825
+          (type protect)
+        )
+        (wire
+          (path L5 180
+            46083 -15460
+            46083 -15160
+            45715 -15160
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            45715 -15160
+            45715 -13893
+            46317 -13893
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 224
+            46317 -13893
+            46400 -13893
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 224
+            42100 -19481
+            42100 -19500
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            42100 -19481
+            43366 -19481
+            43366 -18825
+            44864 -18825
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            44864 -18825
+            44864 -15460
+            46083 -15460
+          )
+          (type protect)
+        )
+      )
+      (net A2
+        (wire
+          (path L3 224
+            23368 -18949
+            23368 -19950
+            22130 -19950
+          )
+        )
+        (via "VIA_SIG" 23368 -18949
+        )
+      )
+      (net A0
+        (via "VIA_SIG" 18288 -18948
+          (type protect)
+        )
+        (via "VIA_SIG" 50143 -16793
+          (type protect)
+        )
+        (wire
+          (path L3 224
+            18288 -18948
+            18288 -19950
+            17050 -19950
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 224
+            50143 -16793
+            50143 -14850
+          )
+          (type protect)
+        )
+      )
+      (net A1
+        (wire
+          (path L3 300
+            20300 -19097
+            20300 -19950
+            19609 -19950
+          )
+        )
+        (wire
+          (path L3 224
+            19609 -19950
+            19590 -19950
+          )
+        )
+        (via "VIA_SIG" 20300 -19097
+        )
+        (wire
+          (path L5 300
+            48129 -18945
+            47357 -18945
+            47357 -18261
+          )
+        )
+        (wire
+          (path L5 224
+            47357 -18261
+            47357 -14850
+          )
+        )
+        (via "VIA_SIG" 48129 -18945
+        )
+      )
+      (net VCC
+        (wire
+          (path L3 600
+            19809 -5475
+            19809 -4450
+            17219 -4450
+          )
+        )
+        (wire
+          (path L5 600
+            35715 -16227
+            35715 -18484
+            38927 -18484
+            38927 -15769
+          )
+        )
+        (via "VIA_PWR" 19809 -5475
+        )
+        (via "VIA_PWR" 48644 -17049
+        )
+        (via "VIA_PWR" 35715 -16227
+        )
+        (via "VIA_SIG" 57750 -13049
+        )
+      )
+      (net B4
+        (via "VIA_SIG" 39996 -17017
+          (type protect)
+        )
+        (wire
+          (path L3 224
+            47180 -19481
+            47180 -19500
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 224
+            39996 -15600
+            39996 -17017
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            47180 -19481
+            47180 -17017
+            39996 -17017
+          )
+          (type protect)
+        )
+      )
+      (net A4
+        (via "VIA_SIG" 40718 -17809
+          (type protect)
+        )
+        (wire
+          (path L5 224
+            40718 -16171
+            40718 -15600
+            40693 -15600
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 224
+            28448 -18881
+            28448 -19950
+            27210 -19950
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            28448 -18881
+            28448 -17809
+            40718 -17809
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            40718 -16171
+            40718 -17809
+          )
+          (type protect)
+        )
+      )
+      (net S3
+        (wire
+          (path L3 300
+            63471 -5288
+            63471 -4450
+            64591 -4450
+          )
+        )
+        (wire
+          (path L3 224
+            64591 -4450
+            64610 -4450
+          )
+        )
+        (via "VIA_SIG" 63471 -5288
+        )
+      )
+      (net S2
+        (wire
+          (path L3 300
+            58628 -17670
+            60832 -17670
+            60832 -17804
+          )
+        )
+        (wire
+          (path L3 224
+            60832 -17804
+            60832 -19950
+            62070 -19950
+          )
+        )
+        (via "VIA_SIG" 58628 -17670
+        )
+      )
+      (net S1
+        (via "VIA_SIG" 58292 -18911
+          (type protect)
+        )
+        (via "VIA_SIG" 52341 -14868
+          (type protect)
+        )
+        (via "VIA_SIG" 42340 -14868
+          (type protect)
+        )
+        (wire
+          (path L3 224
+            58292 -18911
+            58292 -19950
+            59530 -19950
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 224
+            41650 -14643
+            42340 -14643
+            42340 -14868
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            58292 -18911
+            58292 -18898
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 224
+            58292 -18898
+            57748 -18898
+            57748 -18441
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            57748 -18441
+            57096 -18441
+            57096 -14868
+            52341 -14868
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            42340 -14868
+            52341 -14868
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 224
+            51100 -13893
+            52341 -13893
+            52341 -14868
+          )
+          (type protect)
+        )
+      )
+      (net S0
+        (wire
+          (path L5 300
+            52454 -9017
+            52518 -9017
+            52518 -13196
+            51119 -13196
+          )
+        )
+        (wire
+          (path L5 224
+            51119 -13196
+            51100 -13196
+          )
+        )
+        (via "VIA_SIG" 52454 -9017
+        )
+        (via "VIA_SIG" 42332 -13941
+          (type protect)
+        )
+        (via "VIA_SIG" 43928 -15537
+          (type protect)
+        )
+        (wire
+          (path L3 224
+            56971 -19950
+            56990 -19950
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            55842 -19093
+            55842 -19950
+            56971 -19950
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 224
+            41650 -13946
+            42332 -13946
+            42332 -13941
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            42332 -13941
+            43928 -13941
+            43928 -15537
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            55842 -19093
+            55842 -15537
+            43928 -15537
+          )
+          (type protect)
+        )
+      )
+      (net M
+        (via "VIA_SIG" 51785 -11065
+          (type protect)
+        )
+        (via "VIA_SIG" 61460 -5452
+          (type protect)
+        )
+        (via "VIA_SIG" 42423 -7848
+          (type protect)
+        )
+        (wire
+          (path L5 224
+            51100 -11107
+            51100 -11065
+            51785 -11065
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 224
+            62070 -4450
+            62070 -5452
+            61460 -5452
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            58952 -7512
+            61460 -7512
+            61460 -5452
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            51785 -11065
+            55777 -11065
+            55777 -7848
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            56187 -7848
+            55777 -7848
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 224
+            41669 -11857
+            41650 -11857
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            42423 -7848
+            55777 -7848
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            42423 -7848
+            42423 -11857
+            41669 -11857
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 224
+            56187 -7848
+            58952 -7848
+            58952 -7512
+          )
+          (type protect)
+        )
+      )
+      (net F5
+        (wire
+          (path L3 224
+            42100 -5576
+            42100 -4900
+          )
+        )
+        (via "VIA_SIG" 42100 -5576
+        )
+      )
+      (net F6
+        (wire
+          (path L3 224
+            39560 -4919
+            39560 -4900
+          )
+        )
+        (wire
+          (path L3 300
+            40787 -6108
+            39560 -6108
+            39560 -4919
+          )
+        )
+        (wire
+          (path L5 300
+            40787 -6108
+            40787 -8557
+          )
+        )
+        (wire
+          (path L5 224
+            40787 -8557
+            40787 -10900
+            40693 -10900
+          )
+        )
+        (via "VIA_SIG" 40787 -6108
+        )
+      )
+      (net F7
+        (wire
+          (path L3 300
+            30988 -5519
+            30988 -6521
+            33168 -6521
+          )
+        )
+        (wire
+          (path L5 300
+            61420 -11340
+            61420 -10650
+            61369 -10650
+          )
+        )
+        (wire
+          (path L3 224
+            30988 -5519
+            30988 -4450
+            29750 -4450
+          )
+        )
+        (via "VIA_SIG" 33168 -6521
+        )
+        (via "VIA_SIG" 61420 -11340
+        )
+        (wire
+          (path L5 300
+            38604 -5602
+            38604 -7817
+          )
+        )
+        (wire
+          (path L3 224
+            37020 -4900
+            37020 -5602
+            38604 -5602
+          )
+        )
+        (wire
+          (path L5 224
+            38604 -7817
+            38604 -10900
+          )
+        )
+        (via "VIA_SIG" 38604 -5602
+        )
+      )
+      (net CN8
+        (via "VIA_SIG" 36950 -10481
+          (type protect)
+        )
+        (via "VIA_SIG" 23328 -11340
+          (type protect)
+        )
+        (wire
+          (path L5 224
+            23600 -10909
+            23600 -10650
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 224
+            23600 -11069
+            23600 -11052
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            23600 -11052
+            23600 -11050
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            23600 -11050
+            23600 -10909
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 224
+            23600 -11050
+            24000 -11050
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            23328 -11340
+            23328 -11069
+            23600 -11069
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 224
+            36950 -11161
+            36950 -10481
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            36950 -10481
+            36950 -10937
+            30110 -10937
+            30110 -11340
+            23328 -11340
+          )
+          (type protect)
+        )
+      )
+      (net B7
+        (via "VIA_SIG" 53175 -16952
+          (type protect)
+        )
+        (via "VIA_SIG" 53175 -6810
+          (type protect)
+        )
+        (via "VIA_SIG" 35325 -6810
+          (type protect)
+        )
+        (wire
+          (path L5 224
+            34560 -8400
+            34100 -8400
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 224
+            36931 -12554
+            36950 -12554
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            36931 -12554
+            35330 -12554
+            35330 -10937
+            35570 -10937
+            35570 -9603
+            35325 -9603
+            35325 -8400
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            35325 -8400
+            34560 -8400
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            35325 -6810
+            35325 -8400
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            35325 -6810
+            53175 -6810
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            53175 -16952
+            53175 -6810
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            53175 -16952
+            53212 -16952
+            53212 -18881
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 224
+            53212 -18881
+            53212 -19950
+            54450 -19950
+          )
+          (type protect)
+        )
+      )
+      (net A7
+        (via "VIA_SIG" 34480 -18788
+          (type protect)
+        )
+        (via "VIA_SIG" 34560 -13249
+          (type protect)
+        )
+        (via "VIA_SIG" 29154 -12674
+          (type protect)
+        )
+        (wire
+          (path L5 224
+            36931 -13946
+            36950 -13946
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 224
+            34480 -18788
+            34480 -19500
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            36931 -13946
+            34560 -13946
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            34560 -13946
+            34480 -13946
+            34480 -18788
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            34560 -13946
+            34560 -13249
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 224
+            32500 -7381
+            32500 -7400
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            34560 -13249
+            29154 -13249
+            29154 -12674
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            32500 -7381
+            32500 -6496
+            29154 -6496
+            29154 -12674
+          )
+          (type protect)
+        )
+      )
+      (net B6
+        (via "VIA_SIG" 53842 -16263
+          (type protect)
+        )
+        (via "VIA_SIG" 53842 -13893
+          (type protect)
+        )
+        (via "VIA_SIG" 54092 -13136
+          (type protect)
+        )
+        (via "VIA_SIG" 54092 -10148
+          (type protect)
+        )
+        (via "VIA_SIG" 36187 -8770
+          (type protect)
+        )
+        (via "VIA_SIG" 36187 -11848
+          (type protect)
+        )
+        (via "VIA_SIG" 36247 -14643
+          (type protect)
+        )
+        (wire
+          (path L5 224
+            36931 -14643
+            36950 -14643
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 224
+            46398 -10148
+            54092 -10148
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            53842 -16263
+            53842 -13893
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            53842 -16263
+            51908 -16263
+            51908 -17575
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 224
+            51908 -17575
+            51908 -19950
+            51910 -19950
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            46398 -10148
+            46398 -8770
+            36187 -8770
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            36187 -11848
+            36187 -8770
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            53842 -13893
+            54092 -13893
+            54092 -13136
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            54092 -10148
+            54092 -13136
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            36187 -11848
+            36187 -14643
+            36247 -14643
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            36247 -14643
+            36931 -14643
+          )
+          (type protect)
+        )
+      )
+      (net B5
+        (wire
+          (path L3 224
+            49368 -18814
+            49368 -19950
+            49370 -19950
+          )
+        )
+        (via "VIA_SIG" 49368 -18814
+        )
+      )
+      (net A5
+        (via "VIA_SIG" 30521 -18948
+          (type protect)
+        )
+        (via "VIA_SIG" 30521 -17118
+          (type protect)
+        )
+        (via "VIA_SIG" 37907 -17118
+          (type protect)
+        )
+        (wire
+          (path L5 224
+            37907 -15619
+            37907 -15600
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 224
+            29750 -19950
+            29750 -18948
+            30521 -18948
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            37907 -15619
+            37907 -17118
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            30521 -18948
+            30521 -17118
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            30521 -17118
+            37907 -17118
+          )
+          (type protect)
+        )
+      )
+      (net N1
+        (via "VIA_SIG" 60468 -11743
+        )
+        (via "VIA_SIG" 58568 -11735
+        )
+      )
+      (net N2
+        (wire
+          (path L5 300
+            59651 -11712
+            59651 -13681
+            60150 -13681
+            60150 -13699
+          )
+        )
+        (wire
+          (path L5 224
+            59800 -11067
+            59800 -11050
+            60150 -11050
+          )
+        )
+        (wire
+          (path L5 300
+            59651 -11712
+            59800 -11712
+            59800 -11067
+          )
+        )
+        (via "VIA_SIG" 59651 -11712
+        )
+      )
+      (net N0
+        (via "VIA_SIG" 63156 -13386
+        )
+        (wire
+          (path L5 224
+            61630 -15300
+            60950 -15300
+          )
+        )
+        (via "VIA_SIG" 61630 -15300
+        )
+      )
+      (net ZN
+        (wire
+          (path L5 300
+            55594 -14186
+            55594 -16500
+            55821 -16500
+          )
+        )
+        (wire
+          (path L5 224
+            55821 -16500
+            57750 -16500
+          )
+        )
+        (via "VIA_SIG" 55594 -14186
+        )
+      )
+      (net SUB
+        (wire
+          (path L5 300
+            34671 -7447
+            34671 -7749
+          )
+        )
+        (wire
+          (path L5 224
+            34656 -7160
+            34671 -7160
+            34671 -7447
+          )
+        )
+        (wire
+          (path L5 300
+            34646 -7160
+            34656 -7160
+          )
+        )
+        (wire
+          (path L5 300
+            34646 -6419
+            34646 -7160
+          )
+        )
+        (wire
+          (path L5 224
+            34665 -6288
+            34665 -6419
+            34646 -6419
+          )
+        )
+        (wire
+          (path L5 300
+            35371 -5513
+            34665 -5513
+            34665 -6288
+          )
+        )
+        (via "VIA_SIG" 35371 -5513
+        )
+      )
+      (net CN
+        (via "VIA_SIG" 55159 -6374
+          (type protect)
+        )
+        (via "VIA_SIG" 55159 -11781
+          (type protect)
+        )
+        (via "VIA_SIG" 51810 -11804
+          (type protect)
+        )
+        (wire
+          (path L3 224
+            59530 -4450
+            59528 -4450
+            59528 -5502
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 224
+            51119 -11804
+            51100 -11804
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            55159 -11781
+            51810 -11781
+            51810 -11804
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            51810 -11804
+            51119 -11804
+          )
+          (type protect)
+        )
+        (wire
+          (path L5 300
+            55159 -6374
+            55159 -11781
+          )
+          (type protect)
+        )
+        (wire
+          (path L3 300
+            55159 -6374
+            59528 -6374
+            59528 -5502
+          )
+          (type protect)
+        )
+      )
+      (net B7X
+        (wire
+          (path L5 150
+            30663 -11077
+            30843 -11077
+          )
+        )
+        (wire
+          (path L5 180
+            30663 -11077
+            30843 -11077
+          )
+        )
+      )
+      (net VA
+        (wire
+          (path L5 224
+            27402 -8850
+            26800 -8850
+          )
+        )
+        (wire
+          (path L5 300
+            27402 -9448
+            27402 -8850
+          )
+        )
+        (via "VIA_SIG" 27402 -9448
+        )
+      )
+      (net VB
+        (wire
+          (path L5 300
+            27002 -7231
+            27466 -7231
+          )
+        )
+        (wire
+          (path L5 300
+            26800 -7231
+            27002 -7231
+          )
+        )
+        (wire
+          (path L5 300
+            28131 -8233
+            28131 -7231
+            27466 -7231
+          )
+        )
+        (wire
+          (path L5 300
+            27466 -7231
+            27466 -7381
+          )
+        )
+        (wire
+          (path L5 300
+            28131 -8233
+            28131 -8250
+            28019 -8250
+          )
+        )
+        (wire
+          (path L5 224
+            30191 -9600
+            30900 -9600
+          )
+        )
+        (via "VIA_SIG" 30191 -9600
+        )
+        (via "VIA_SIG" 28131 -8233
+        )
+      )
+      (net Z
+        (wire
+          (path L5 224
+            32500 -11635
+            32500 -10600
+          )
+        )
+        (via "VIA_SIG" 32500 -11635
+        )
+        (wire
+          (path L3 300
+            36044 -7613
+            34287 -7613
+            34287 -5804
+          )
+        )
+        (wire
+          (path L3 224
+            34287 -5804
+            34287 -4900
+            34480 -4900
+          )
+        )
+        (via "VIA_SIG" 36044 -7613
+        )
+      )
+      (net V
+        (wire
+          (path L5 300
+            23398 -7056
+            23398 -7231
+          )
+        )
+        (wire
+          (path L5 300
+            23600 -7056
+            23398 -7056
+          )
+        )
+        (wire
+          (path L5 300
+            23600 -7056
+            23600 -7231
+          )
+        )
+        (wire
+          (path L5 300
+            23600 -6881
+            23600 -7056
+          )
+        )
+        (wire
+          (path L5 300
+            23600 -6881
+            23398 -6881
+          )
+        )
+        (wire
+          (path L5 300
+            23600 -6532
+            23600 -6881
+          )
+        )
+        (wire
+          (path L5 300
+            23398 -5833
+            23600 -5833
+            23600 -6532
+          )
+        )
+        (wire
+          (path L5 300
+            23398 -5833
+            23398 -6095
+          )
+        )
+        (wire
+          (path L5 300
+            23398 -5572
+            23398 -5833
+          )
+        )
+        (wire
+          (path L3 300
+            27212 -5519
+            27212 -5572
+            23398 -5572
+          )
+        )
+        (wire
+          (path L3 224
+            27212 -5519
+            27212 -4450
+            27210 -4450
+          )
+        )
+        (via "VIA_SIG" 23398 -5572
+        )
+      )
+      (net C
+        (wire
+          (path L3 300
+            32309 -5567
+            32309 -4450
+          )
+        )
+        (wire
+          (path L3 224
+            32309 -4450
+            32290 -4450
+          )
+        )
+        (via "VIA_SIG" 32309 -5567
+        )
+        (wire
+          (path L5 224
+            22918 -10050
+            23600 -10050
+          )
+        )
+        (via "VIA_SIG" 22918 -10050
+        )
+      )
+    )
+  )
+)

@@ -38,3 +38,6 @@ _upload/
 
 # KiCad local history (its own git repo)
 .history/
+# local scratch and Windows shortcuts
+/_bench/
+*.lnk

@@ -1,0 +1,72 @@
+2026-10-26 08:59:46.972 INFO   Freerouting v2.5.0 (build-date: 2026-10-05)
+2026-10-26 08:59:47.304 INFO   Hardware: 8 CPU cores, 351 CPU score, 4050 MB RAM
+2026-10-26 08:59:47.305 WARN   Deprecated settings path '-mp / --router.max_passes'; use '--router.autorouter.max_passes' instead. The old path will be removed in a future release.
+2026-10-26 08:59:47.309 WARN   GUI is disabled and you don't have a console available, so the only feedback from Freerouting is in the log.
+2026-10-26 08:59:48.544 WARN   Deprecated settings path 'router.max_passes'; use 'router.autorouter.max_passes' instead. The old path will be removed in a future release.
+2026-10-26 08:59:48.828 INFO   [143F35\C1CDA1] Loading board file 'nofan_250.dsn'...
+2026-10-26 08:59:48.938 INFO   [143F35\C1CDA1] Job '143F35\C1CDA1' started at 2026-10-26T08:59:48.937049200Z.
+2026-10-26 08:59:49.018 WARN   Design Warning: Board has 4 pre-existing clearance violation(s) in the loaded design (before routing):
+  - 4 unfixable violation(s) (cannot be resolved by Freerouting):
+      * 4 pin-to-pin clearance violations:
+          - HL_EDGE.E3 <-> HL_EDGE.E1
+          - HL_EDGE.E3 <-> HL_EDGE.E0
+          - HL_EDGE.E2 <-> HL_EDGE.E1
+          - HL_EDGE.E2 <-> HL_EDGE.E0
+  - 0 potentially fixable violations
+Notice: Freerouting does not modify component placement, board outlines, or fixed items.
+Resolving these 4 unfixable violation(s) is the responsibility of the board author in their EDA tool (e.g. KiCad).
+2026-10-26 08:59:49.063 INFO   [143F35\C1CDA1] Pipeline thread limits: autorouter pass is single-threaded, optimizer.max_threads=7.
+2026-10-26 08:59:49.130 INFO   [143F35\C1CDA1] Auto-routing stage started on board '5904d5ea26b7b016ba9fe7cfeb392de5' with baseline score 0.00 for 85 unrouted items.
+2026-10-26 09:00:15.737 INFO   [143F35\C1CDA1] Auto-routing pass #1 on board '5904d5ea26b7b016ba9fe7cfeb392de5' was completed in 26.49 seconds with score 685.07 (20 unrouted and 4 violations), using 17.91 CPU seconds and the job allocated 3.05 GB of memory so far.
+2026-10-26 09:00:28.152 INFO   [143F35\C1CDA1] Auto-routing pass #2 on board '80eda5018fb36b13d9cc7d4de3d073ed' was completed in 12.27 seconds with score 700.76 (19 unrouted and 4 violations), using 28.91 CPU seconds and the job allocated 5.45 GB of memory so far.
+2026-10-26 09:00:40.117 INFO   [143F35\C1CDA1] Auto-routing pass #3 on board '19b3c2dca6a42b3f455e7d32d3260f92' was completed in 11.89 seconds with score 763.50 (15 unrouted and 4 violations), using 39.52 CPU seconds and the job allocated 7.94 GB of memory so far.
+2026-10-26 09:00:52.139 INFO   [143F35\C1CDA1] Auto-routing pass #4 on board 'f96f1f161713b3b3ae02fd6e41578d69' was completed in 11.96 seconds with score 779.19 (14 unrouted and 4 violations), using 51.13 CPU seconds and the job allocated 10.76 GB of memory so far.
+2026-10-26 09:01:05.689 INFO   [143F35\C1CDA1] Auto-routing pass #5 on board '7aaaba816de33e873799a7d68db63fec' was completed in 13.47 seconds with score 747.82 (16 unrouted and 4 violations), using 64.94 CPU seconds and the job allocated 14.11 GB of memory so far.
+2026-10-26 09:01:18.092 INFO   [143F35\C1CDA1] Auto-routing pass #6 on board '8225601b59ecf64f364dbf91ba6a0b9a' was completed in 12.32 seconds with score 763.50 (15 unrouted and 4 violations), using 76.81 CPU seconds and the job allocated 17.03 GB of memory so far.
+2026-10-26 09:01:31.144 INFO   [143F35\C1CDA1] Auto-routing pass #7 on board 'fa31cc1268c1afcf182e137d5ce4871e' was completed in 12.99 seconds with score 794.88 (13 unrouted and 4 violations), using 89.66 CPU seconds and the job allocated 20.21 GB of memory so far.
+2026-10-26 09:01:43.353 INFO   [143F35\C1CDA1] Auto-routing pass #8 on board 'cef1a32fdf98a06f591354e2d226f262' was completed in 12.14 seconds with score 826.25 (11 unrouted and 4 violations), using 101.55 CPU seconds and the job allocated 22.97 GB of memory so far.
+2026-10-26 09:02:00.016 INFO   [143F35\C1CDA1] Auto-routing pass #9 on board '707a1dd025805264b00102174214e9d2' was completed in 16.57 seconds with score 763.50 (15 unrouted and 4 violations), using 118.28 CPU seconds and the job allocated 27.22 GB of memory so far.
+2026-10-26 09:02:14.904 INFO   [143F35\C1CDA1] Auto-routing pass #10 on board '87d4c17d6ca8f18a7f572ff17aa1d366' was completed in 14.81 seconds with score 779.19 (14 unrouted and 4 violations), using 132.97 CPU seconds and the job allocated 30.84 GB of memory so far.
+2026-10-26 09:02:26.818 INFO   [143F35\C1CDA1] Auto-routing pass #11 on board 'c97b429c73ee13af1ac569cab88ad1fa' was completed in 11.82 seconds with score 810.56 (12 unrouted and 4 violations), using 143.87 CPU seconds and the job allocated 33.69 GB of memory so far.
+2026-10-26 09:02:32.573 INFO   [143F35\C1CDA1] Auto-routing pass #12 on board '707a1dd025805264b00102174214e9d2' was completed in 0.00 seconds with score 826.25 (11 unrouted and 4 violations), using 149.81 CPU seconds and the job allocated 35.75 GB of memory so far.
+2026-10-26 09:02:45.576 INFO   [143F35\C1CDA1] Auto-routing pass #13 on board '707a1dd025805264b00102174214e9d2' was completed in 12.99 seconds with score 763.50 (15 unrouted and 4 violations), using 162.59 CPU seconds and the job allocated 39.89 GB of memory so far.
+2026-10-26 09:02:58.207 INFO   [143F35\C1CDA1] Auto-routing pass #14 on board '0cb2f2b3a0d26805fea890a290e18138' was completed in 12.57 seconds with score 794.88 (13 unrouted and 4 violations), using 174.37 CPU seconds and the job allocated 43.00 GB of memory so far.
+2026-10-26 09:03:05.933 INFO   [143F35\C1CDA1] Auto-routing pass #15 on board 'c566d517c23acbd8f3da3a4605f8a09e' was completed in 7.67 seconds with score 810.56 (12 unrouted and 4 violations), using 182.23 CPU seconds and the job allocated 46.02 GB of memory so far.
+2026-10-26 09:03:13.318 INFO   [143F35\C1CDA1] Auto-routing pass #16 on board '4f63e06e1915be6e56545c977d023cc1' was completed in 7.32 seconds with score 841.94 (10 unrouted and 4 violations), using 189.19 CPU seconds and the job allocated 48.44 GB of memory so far.
+2026-10-26 09:03:22.137 INFO   [143F35\C1CDA1] Auto-routing pass #17 on board '4062b365afec0a8d8228d82ac3483daf' was completed in 8.72 seconds with score 779.19 (14 unrouted and 4 violations), using 198.06 CPU seconds and the job allocated 51.68 GB of memory so far.
+2026-10-26 09:03:30.292 INFO   [143F35\C1CDA1] Auto-routing pass #18 on board '18f46b40c2230fcd27619ab1d464f271' was completed in 8.07 seconds with score 810.56 (12 unrouted and 4 violations), using 205.94 CPU seconds and the job allocated 54.33 GB of memory so far.
+2026-10-26 09:03:37.786 INFO   [143F35\C1CDA1] Auto-routing pass #19 on board 'e04a6a81ecb46246fdd0f46e18f79b26' was completed in 7.43 seconds with score 779.19 (14 unrouted and 4 violations), using 213.83 CPU seconds and the job allocated 57.14 GB of memory so far.
+2026-10-26 09:03:48.286 INFO   [143F35\C1CDA1] Auto-routing pass #20 on board '4062b365afec0a8d8228d82ac3483daf' was completed in 0.00 seconds with score 841.94 (10 unrouted and 4 violations), using 223.78 CPU seconds and the job allocated 60.50 GB of memory so far.
+2026-10-26 09:03:56.410 INFO   [143F35\C1CDA1] Auto-routing pass #21 on board '4062b365afec0a8d8228d82ac3483daf' was completed in 8.11 seconds with score 826.25 (11 unrouted and 4 violations), using 231.73 CPU seconds and the job allocated 63.08 GB of memory so far.
+2026-10-26 09:04:02.852 INFO   [143F35\C1CDA1] Auto-routing pass #22 on board '1fb67be994d66f0ee08efba917742468' was completed in 6.39 seconds with score 794.88 (13 unrouted and 4 violations), using 238.62 CPU seconds and the job allocated 65.54 GB of memory so far.
+2026-10-26 09:04:08.926 INFO   [143F35\C1CDA1] Auto-routing pass #23 on board 'd2b687cbf0f1ab82d312572dc5843880' was completed in 6.02 seconds with score 826.25 (11 unrouted and 4 violations), using 244.56 CPU seconds and the job allocated 67.62 GB of memory so far.
+2026-10-26 09:04:15.529 INFO   [143F35\C1CDA1] Auto-routing pass #24 on board '4062b365afec0a8d8228d82ac3483daf' was completed in 0.00 seconds with score 841.94 (10 unrouted and 4 violations), using 250.52 CPU seconds and the job allocated 69.55 GB of memory so far.
+2026-10-26 09:04:22.424 INFO   [143F35\C1CDA1] Auto-routing pass #25 on board '4062b365afec0a8d8228d82ac3483daf' was completed in 6.88 seconds with score 841.94 (10 unrouted and 4 violations), using 257.42 CPU seconds and the job allocated 72.09 GB of memory so far.
+2026-10-26 09:04:29.913 INFO   [143F35\C1CDA1] Auto-routing pass #26 on board 'a5ad0b78c089de52cc0d1cb559022732' was completed in 7.42 seconds with score 841.94 (10 unrouted and 4 violations), using 265.28 CPU seconds and the job allocated 74.91 GB of memory so far.
+2026-10-26 09:04:29.928 INFO   [143F35\C1CDA1] The router's best score (841.94) has not improved by more than 0.5 points since pass #16. Stopping the auto-router after 26 passes (10 items still unconnected).
+The following connections could not be routed -- please review your design (e.g. check pad clearances, trace width rules, and available routing space):
+  Net 'B1' (1 unrouted connection):
+    - IO-10  ->  U1-22
+  Net 'B3' (1 unrouted connection):
+    - IO-12  ->  U1-18
+  Net 'B7' (1 unrouted connection):
+    - U2-18  ->  IO-16
+  Net 'S2' (1 unrouted connection):
+    - via  ->  IO-19
+  Net 'A1' (1 unrouted connection):
+    - IO-2  ->  U1-23
+  Net 'GND' (1 unrouted connection):
+    - via  ->  U1-12
+  Net 'F2' (1 unrouted connection):
+    - U1-11  ->  IO-27
+  Net 'F5' (1 unrouted connection):
+    - via  ->  U3-5
+  Net 'F6' (1 unrouted connection):
+    - U2-11  ->  IO-31
+  Net 'ZN' (1 unrouted connection):
+    - U4-8  ->  U5-12
+2026-10-26 09:04:30.064 INFO   [143F35\C1CDA1] Auto-routing stage completed: started with 85 unrouted nets, completed in 280.96 seconds, final score: 841.94 (10 unrouted and 4 violations), using 265.28 total CPU seconds, 74.91 GB total allocated, and 217.3 MB peak heap usage.
+2026-10-26 09:04:30.125 INFO   [143F35\C1CDA1] Skipping optimization stage: the board has 10 unrouted connection(s) (optimizer only runs on completely routed boards).
+2026-10-26 09:04:30.158 INFO   Saving output file 'C:\dev\HLayout\example5\_frtest\why\nofan_250.ses' (SES)...
+2026-10-26 09:04:30.159 INFO   [143F35\C1CDA1] Job '143F35\C1CDA1' finished with state: COMPLETED (elapsed: 4 minutes 41.22 seconds, finished at UTC: 2026-10-26T09:04:30.157465200Z).
+2026-10-26 09:04:30.166 INFO   Successfully saved output file 'C:\dev\HLayout\example5\_frtest\why\nofan_250.ses' (37507 bytes).

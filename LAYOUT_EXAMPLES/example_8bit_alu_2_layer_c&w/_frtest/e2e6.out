@@ -1,0 +1,1 @@
+{"False": {"vias": 22, "complete": 12, "broken": [], "shorted": 0, "min_gap_um": 102.0}, "True": {"vias": 5, "complete": 12, "broken": ["H4", "H5", "V1", "V3", "V4"], "shorted": 5, "min_gap_um": 117.0}}

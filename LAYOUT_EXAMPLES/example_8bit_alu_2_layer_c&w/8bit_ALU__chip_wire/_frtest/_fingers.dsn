@@ -1,0 +1,67 @@
+(pcb FINGERS_TOP
+  (parser
+    (string_quote ")
+    (space_in_quoted_tokens on)
+    (host_cad "HLayout")
+    (host_version "1")
+  )
+  (resolution um 1)
+  (unit um)
+  (structure
+    (layer L5 (type signal) (property (index 0)))
+    (layer L3 (type signal) (property (index 1)))
+    (boundary (path pcb 0  -9000 -700  10000 -700  10000 1700  -9000 1700  -9000 -700))
+    (via VIA_SIG VIA_PWR)
+    (rule (width 300) (clearance 100))
+    (snap_angle ninety_degree)
+    (autoroute_settings (autoroute on) (postroute on) (vias on) (via_costs 50)
+      (layer_rule L3 (active on) (preferred_direction horizontal) (preferred_direction_trace_costs 1.0) (against_preferred_direction_trace_costs 3))
+      (layer_rule L5 (active on) (preferred_direction vertical) (preferred_direction_trace_costs 1.0) (against_preferred_direction_trace_costs 3)))
+  )
+  (placement
+    (component IMG_IO (place IO 0 0 front 0))
+    (component IMG_HL_IOREST (place HL_IOREST 500 500 front 0))
+    (component IMG_U1 (place U1 500 500 front 0))
+    (component IMG_HL_KEEP (place HL_KEEP 0 0 front 0))
+  )
+  (library
+    (image IMG_IO
+      (pin PAD_L3_300x400 1 -7150 500)
+      (pin PAD_L3_300x400 2 8150 500)
+    )
+    (image IMG_HL_IOREST
+      (pin PAD_L3_600x400 1 -8200 0)
+      (pin PAD_L3_600x400 2 8200 0)
+    )
+    (image IMG_U1
+      (pin PAD_L5_300x300 1 -1400 0)
+      (pin PAD_L5_300x300 2 1400 0)
+    )
+    (image IMG_HL_KEEP
+      (pin HL_KEEP_0 K0 500 500)
+      (pin HL_KEEP_1 K1 500 500)
+    )
+    (padstack PAD_L3_300x400 (shape (rect L3 -150 -200 150 200)) (attach off))
+    (padstack PAD_L3_600x400 (shape (rect L3 -300 -200 300 200)) (attach off))
+    (padstack PAD_L5_300x300 (shape (rect L5 -150 -150 150 150)) (attach off))
+    (padstack HL_KEEP_0 (shape (polygon L3 0 -700 -700 -700 700 700 700 700 -700 -700 -700)) (attach off))
+    (padstack HL_KEEP_1 (shape (polygon L5 0 -700 -700 -700 700 700 700 700 -700 -700 -700)) (attach off))
+    (padstack VIA_SIG
+      (shape (rect L5 -200 -200 200 200))
+      (shape (rect L3 -200 -200 200 200))
+      (attach off))
+    (padstack VIA_PWR
+      (shape (rect L5 -350 -350 350 350))
+      (shape (rect L3 -350 -350 350 350))
+      (attach off))
+  )
+  (network
+    (net A (pins IO-1 U1-1))
+    (net B (pins IO-2 U1-2))
+    (class HL_SIGNAL A B
+      (circuit (use_via VIA_SIG))
+      (rule (width 300) (clearance 100)))
+  )
+  (wiring
+  )
+)
