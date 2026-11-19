@@ -83,11 +83,12 @@ class AutoPlaceWindow(tk.Toplevel):
         # parts
         pf = ttk.Frame(nb, padding=4)
         nb.add(pf, text="Parts")
-        self.parts = ttk.Treeview(pf, columns=("ref", "value", "footprint", "cell", "family"),
+        self.parts = ttk.Treeview(pf, columns=("ref", "value", "footprint", "cell", "family", "lock"),
                                   show="headings", height=8, style="AP.Treeview")
-        for col, w in (("ref", 60), ("value", 140), ("footprint", 200), ("cell", 150), ("family", 70)):
-            self.parts.heading(col, text=col.capitalize())
-            self.parts.column(col, width=w, anchor="w")
+        for col, w in (("ref", 60), ("value", 140), ("footprint", 200), ("cell", 150), ("family", 70),
+                       ("lock", 60)):
+            self.parts.heading(col, text="Locked" if col == "lock" else col.capitalize())
+            self.parts.column(col, width=w, anchor="center" if col == "lock" else "w")
         self.parts.pack(side="left", fill="both", expand=True)
         sb = ttk.Scrollbar(pf, command=self.parts.yview)
         self.parts.configure(yscrollcommand=sb.set)
@@ -102,9 +103,16 @@ class AutoPlaceWindow(tk.Toplevel):
         self.cell_box.bind("<<ComboboxSelected>>", lambda e: self._map_footprint())
         ttk.Button(side, text="Map footprint", command=self._map_footprint).pack(anchor="w", pady=4)
         ttk.Button(side, text="Clear mapping", command=self._clear_mapping).pack(anchor="w")
+        lk = ttk.Frame(side)
+        lk.pack(anchor="w", pady=(10, 0))
+        ttk.Button(lk, text="Lock", command=lambda: self._lock_selected(True)).pack(side="left")
+        ttk.Button(lk, text="Unlock", command=lambda: self._lock_selected(False)).pack(
+            side="left", padx=(4, 0))
         ttk.Label(side, text="Choosing a cell maps it at once;\nthe map is saved with the design\n"
                              "and next to the netlist\n(<netlist>.cellmap.json).\n"
-                             "Clear mapping takes the selected\nparts' cell off again.",
+                             "Clear mapping takes the selected\nparts' cell off again.\n"
+                             "Lock keeps placed parts where\nthey are: Run / Improve / Spread\n"
+                             "and the router's nudge leave\nthem, and the canvas won't move them.",
                   foreground="#666", justify="left").pack(anchor="w", pady=(6, 0))
         self.parts.bind("<<TreeviewSelect>>", self._part_selected, add="+")
         # nets
@@ -308,6 +316,10 @@ class AutoPlaceWindow(tk.Toplevel):
         avail = _Cells(self.session)
         cell = lib.cells.get(self.session.current_cell_name)
         placed = {r.label: r.cell_name for r in (cell.srefs if cell else []) if r.label}
+        try:
+            locked = self.session.locked_parts(self.session.current_cell_name)
+        except Exception:
+            locked = set()
         self.parts.delete(*self.parts.get_children())
         natural = lambda r: [int(t) if t.isdigit() else t for t in re.findall(r"\d+|\D+", r)]
         for ref, c in sorted(self.nl.components.items(), key=lambda kv: natural(kv[0])):
@@ -316,7 +328,8 @@ class AutoPlaceWindow(tk.Toplevel):
             fam = _family(avail, c, cn or None, set()) or ("no cell -- map one" if not cn else "")
             if fam != "die" and ref not in placed and _is_header(ref, c, cn or ""):
                 fam = "header (not placed)"
-            self.parts.insert("", "end", iid=ref, values=(ref, c.value, c.footprint, cn, fam))
+            self.parts.insert("", "end", iid=ref, values=(ref, c.value, c.footprint, cn, fam,
+                                                          "locked" if ref in locked else ""))
         self.nets.delete(*self.nets.get_children())
         for n in self.nl.nets:
             cls = _net_class(n, S)
@@ -429,6 +442,40 @@ class AutoPlaceWindow(tk.Toplevel):
             msg.append("nothing mapped to clear (the cell was matched by its footprint name)")
         self.summary.config(text="; ".join(msg))
         self._part_selected()
+
+    def _lock_selected(self, lock=True):
+        """Lock (or unlock) the selected parts where they are placed --
+        Session.lock_parts, one undo step. Only placed parts can be locked."""
+        sel = self.parts.selection()
+        if not sel:
+            self.summary.config(text="Select the part(s) to lock first.")
+            return
+        name = self.session.current_cell_name
+        cell = self.session.library.cells.get(name)
+        placed = {r.label for r in (cell.srefs if cell else []) if r.label}
+        refs = [r for r in sel if r in placed]
+        missing = [r for r in sel if r not in placed]
+        if refs:
+            try:
+                self.session.lock_parts(refs, cell_name=name, lock=lock)
+            except Exception as e:
+                self.summary.config(text=str(e))
+                return
+        self._load_netlist()
+        keep = [r for r in sel if self.parts.exists(r)]
+        if keep:
+            self.parts.selection_set(keep)
+            self.parts.see(keep[-1])
+        msg = []
+        if refs:
+            msg.append(f"{'locked' if lock else 'unlocked'}: {', '.join(refs)}")
+        if missing:
+            msg.append(f"{', '.join(missing)} not placed yet -- place first, then lock")
+        self.summary.config(text="; ".join(msg))
+        try:
+            self.app.canvas.redraw()
+        except Exception:
+            pass
 
     def _save_cellmap(self, fmap=None):
         from ..scripting.autoplace_session import save_cellmap

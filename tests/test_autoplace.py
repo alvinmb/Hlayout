@@ -223,6 +223,14 @@ def test_auto_place_window_runs_and_shows_slis(tmp_path):
     assert win.banner.cget("text").startswith("PLACED")
     assert app.sli is True
     assert {x.label for x in s.library.cells["TOP"].srefs} == {"U1", "U2"}
+    # lock / unlock placed parts from the Parts list
+    win.parts.selection_set(("U1",))
+    win._lock_selected(True)
+    assert s.locked_parts("TOP") == {"U1"}
+    assert win.parts.set("U1", "lock") == "locked" and win.parts.set("U2", "lock") == ""
+    win.parts.selection_set(("U1",))
+    win._lock_selected(False)
+    assert s.locked_parts("TOP") == set() and win.parts.set("U1", "lock") == ""
     win.destroy()
     root.destroy()
 
