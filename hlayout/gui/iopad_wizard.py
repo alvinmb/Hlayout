@@ -107,11 +107,24 @@ class IOPadWizard(tk.Toplevel):
         self.shape = shp if isinstance(shp, (Rectangle, Polygon, SRef)) else None
         self._preview()
 
+    #: what each box holds, for a readable message when it can't be read
+    _WHAT = {"margin": ("Distance from edge", "a distance in mm, e.g. 0.3"),
+             "w": ("Pad width", "a size in mm, e.g. 2.54"),
+             "l": ("Pad length", "a size in mm, e.g. 3"),
+             "pitch": ("Pitch", "a distance in mm, e.g. 2.54"),
+             "n": ("Pads per edge", "a whole number of pads, e.g. 10, or blank for as many "
+                                    "as fit -- it is a count, not a distance"),
+             "start": ("First pin number", "a whole number, e.g. 1")}
+
     def _num(self, key, conv=float, blank=None):
         t = self.v[key].get().strip()
         if not t:
             return blank
-        return conv(t)
+        try:
+            return conv(t)
+        except ValueError:
+            label, want = self._WHAT.get(key, (key, "a number"))
+            raise ValueError(f"{label}: '{t}' isn't valid -- it needs {want}.") from None
 
     def _kwargs(self):
         sides = ("B" if self.v["bottom"].get() else "") + ("T" if self.v["top"].get() else "")
