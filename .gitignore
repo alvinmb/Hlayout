@@ -41,3 +41,5 @@ _upload/
 # local scratch and Windows shortcuts
 /_bench/
 *.lnk
+# router test scratch
+_frtest/
