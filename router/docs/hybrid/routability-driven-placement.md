@@ -2,7 +2,7 @@
 
 Status: spec, 2026-11-15. Nothing here is implemented yet.
 Owner module: `hlayout/core/autoplace.py` (Placer), `hlayout/scripting/autoplace_session.py`,
-`hlayout/scripting/route_improve.py` (uncommitted, router-in-the-loop refine).
+`hlayout/scripting/route_improve.py` (experimental, router-in-the-loop refine).
 
 ## 1. Why
 
