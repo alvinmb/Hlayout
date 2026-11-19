@@ -5171,70 +5171,202 @@ class App(tk.Tk):
         win.bind("<Escape>", lambda e: win.destroy())
 
     def show_library_cells(self):
-        """Setup > Library Cells...: every cell (Sref target) in the
-        design and in each attached library with its created and
-        last-modified date/time (Session.cell_stamps). The stamps live
-        in each cell's GDSII BGNSTR record, so a part placed from an
-        attached library keeps its library dates until it is edited
-        here; 'modified' moves when a changed cell is saved. Click a
-        heading to sort; type to filter."""
-        win = tk.Toplevel(self)
-        win.title("Library Cells")
-        win.transient(self)
-        win.geometry("760x460")
+        """Setup > Library Cells...: the Library Cells & Place dialog
+        (see _library_cells_dialog)."""
+        self._library_cells_dialog()
 
+    def find_and_place_cell(self):
+        """Create > Find && Place Cell...: the same Library Cells & Place
+        dialog as Setup > Library Cells... (see _library_cells_dialog)."""
+        self._library_cells_dialog()
+
+    def _library_cells_dialog(self):
+        """One dialog to browse and place cells: every cell (Sref target)
+        in the design and in each attached library, with its size, pin
+        count and created / last-modified date (Session.cell_stamps --
+        the stamps live in each cell's GDSII BGNSTR record, so a part
+        placed from a library keeps its library dates until it is edited
+        here). Filter by name, show one library or all, click a heading
+        to sort. Pick a row and Place (or double-click / Enter) to put an
+        instance in the current cell at the given point, rotation, mirror
+        and label; the dialog stays open so several parts can be placed
+        one after another."""
+        old = getattr(self, "_library_cells_win", None)
+        if old is not None and old.winfo_exists():
+            old.deiconify()
+            old.lift()
+            old._refresh()
+            return
+
+        title = "Library Cells & Place"
+        win = tk.Toplevel(self)
+        self._library_cells_win = win
+        win.title(title)
+        win.transient(self)
+        win.geometry("900x540")
+
+        # --- filter row ---------------------------------------------------
         top = ttk.Frame(win)
         top.pack(fill="x", padx=8, pady=(8, 4))
         ttk.Label(top, text="Filter:").pack(side="left")
         filt_var = tk.StringVar()
         filt = ttk.Entry(top, textvariable=filt_var, width=24)
         filt.pack(side="left", padx=4)
+        ttk.Label(top, text="Library:").pack(side="left", padx=(12, 0))
+        lib_var = tk.StringVar(value="All")
+        lib_box = ttk.Combobox(top, textvariable=lib_var, state="readonly", width=30)
+        lib_box.pack(side="left", padx=4)
         count_var = tk.StringVar()
         ttk.Label(top, textvariable=count_var, foreground="#8b949e").pack(side="right")
 
-        cols = ("library", "cell", "created", "modified")
+        # --- cell table ---------------------------------------------------
+        cols = ("library", "cell", "size", "pins", "created", "modified")
         frame = ttk.Frame(win)
         frame.pack(fill="both", expand=True, padx=8)
         tree = ttk.Treeview(frame, columns=cols, show="headings", selectmode="browse")
         vbar = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=vbar.set)
-        for col, label, width in (("library", "Library", 170), ("cell", "Cell", 230),
-                                  ("created", "Created", 150), ("modified", "Modified", 150)):
+        for col, label, width, anchor in (
+                ("library", "Library", 170, "w"), ("cell", "Cell", 200, "w"),
+                ("size", "Size (mm)", 110, "e"), ("pins", "Pins", 50, "e"),
+                ("created", "Created", 140, "w"), ("modified", "Modified", 140, "w")):
             tree.heading(col, text=label, command=lambda c=col: sort_by(c))
-            tree.column(col, width=width, anchor="w")
+            tree.column(col, width=width, anchor=anchor)
         tree.pack(side="left", fill="both", expand=True)
         vbar.pack(side="right", fill="y")
 
-        lib_names = {"current": f"Design ({self.session.library.name})"}
-        for l in self.session.list_attached_libraries():
-            lib_names[l["index"]] = f"[{l['index']}] {l['name']}"
-        state = {"key": "cell", "reverse": False}
+        state = {"key": "cell", "reverse": False, "rows": {}, "libs": {}}
 
         def fmt(iso):
             return iso.replace("T", " ") if iso else "not saved yet"
 
+        def lib_of(src):
+            if src == "current":
+                return self.session.library
+            return self.session.attached_libraries[src]
+
+        def detail(src, name):
+            """(width, height) in mm and the pin count of one cell."""
+            try:
+                lib = lib_of(src)
+                cell = lib.cells[name]
+                box = lib.cell_bbox(name)
+            except Exception:
+                return None, None, 0
+            pins = {getattr(sh, "pin", "") for sh in cell.shapes} | \
+                   {getattr(r, "pin", "") for r in cell.srefs}
+            pins.discard("")
+            if box is None:
+                return None, None, len(pins)
+            return dbu_to_mm(box[2] - box[0]), dbu_to_mm(box[3] - box[1]), len(pins)
+
+        def lib_choices():
+            names = {"current": f"Design ({self.session.library.name})"}
+            for l in self.session.list_attached_libraries():
+                names[l["index"]] = f"[{l['index']}] {l['name']}"
+            state["libs"] = names
+            lib_box["values"] = ["All"] + list(names.values())
+            if lib_var.get() not in lib_box["values"]:
+                lib_var.set("All")
+
         def refresh(*_):
+            lib_choices()
             q = filt_var.get().strip().lower()
-            rows = [r for r in self.session.cell_stamps() if q in r["name"].lower()]
+            want = lib_var.get()
+            rows = []
+            for r in self.session.cell_stamps():
+                if q not in r["name"].lower():
+                    continue
+                lib_label = state["libs"].get(r["source"], str(r["source"]))
+                if want != "All" and lib_label != want:
+                    continue
+                w, h, pins = detail(r["source"], r["name"])
+                rows.append({**r, "lib_label": lib_label, "w": w, "h": h, "pins": pins})
             key = state["key"]
-            getter = {"library": lambda r: str(r["source"]), "cell": lambda r: r["name"].lower(),
-                      "created": lambda r: r["created"] or "", "modified": lambda r: r["modified"] or ""}[key]
+            getter = {"library": lambda r: r["lib_label"], "cell": lambda r: r["name"].lower(),
+                      "size": lambda r: (r["w"] or 0) * (r["h"] or 0), "pins": lambda r: r["pins"],
+                      "created": lambda r: r["created"] or "",
+                      "modified": lambda r: r["modified"] or ""}[key]
             rows.sort(key=getter, reverse=state["reverse"])
+            keep = tree.selection()
+            keep = state["rows"].get(keep[0]) if keep else None
             tree.delete(*tree.get_children())
+            state["rows"] = {}
             for r in rows:
-                tree.insert("", "end", values=(lib_names.get(r["source"], str(r["source"])), r["name"],
-                                               fmt(r["created"]), fmt(r["modified"])))
+                size = f"{r['w']:.2f} x {r['h']:.2f}" if r["w"] is not None else "empty"
+                iid = tree.insert("", "end", values=(r["lib_label"], r["name"], size, r["pins"] or "",
+                                                     fmt(r["created"]), fmt(r["modified"])))
+                state["rows"][iid] = (r["source"], r["name"])
+                if keep == (r["source"], r["name"]):
+                    tree.selection_set(iid)
+                    tree.see(iid)
             count_var.set(f"{len(rows)} cell(s)")
 
         def sort_by(col):
-            state["reverse"] = (not state["reverse"]) if state["key"] == col else col in ("created", "modified")
+            state["reverse"] = (not state["reverse"]) if state["key"] == col \
+                else col in ("created", "modified", "size", "pins")
             state["key"] = col
             refresh()
 
+        win._refresh = refresh
         filt_var.trace_add("write", refresh)
+        lib_box.bind("<<ComboboxSelected>>", refresh)
+
+        # --- place row ------------------------------------------------------
+        place = ttk.LabelFrame(win, text="Place in the current cell")
+        place.pack(fill="x", padx=8, pady=(6, 0))
+        ttk.Label(place, text="At x,y:").pack(side="left", padx=(6, 2), pady=6)
+        coord_var = tk.StringVar(value="0,0")
+        ttk.Entry(place, textvariable=coord_var, width=14).pack(side="left")
+        ttk.Label(place, text="Rotation:").pack(side="left", padx=(10, 2))
+        rot_var = tk.StringVar(value="0")
+        ttk.Combobox(place, textvariable=rot_var, values=("0", "90", "180", "270"),
+                     width=5).pack(side="left")
+        mirror_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(place, text="Mirror", variable=mirror_var).pack(side="left", padx=(10, 0))
+        ttk.Label(place, text="Label:").pack(side="left", padx=(10, 2))
+        label_var = tk.StringVar()
+        ttk.Entry(place, textvariable=label_var, width=10).pack(side="left")
+        place_btn = ttk.Button(place, text="Place")
+        place_btn.pack(side="right", padx=6)
+
+        def do_place(event=None):
+            sel = tree.selection()
+            if not sel:
+                dialogs.show_error(title, "Select a cell from the list first.", parent=win)
+                return
+            src, name = state["rows"][sel[0]]
+            try:
+                origin = _parse_point(coord_var.get())
+                rotation = float(rot_var.get() or 0)
+            except (CommandError, ValueError) as e:
+                dialogs.show_error(title, str(e), parent=win)
+                return
+            try:
+                self.session.place_cell(name, origin, source=src, rotation=rotation,
+                                        x_reflection=mirror_var.get(),
+                                        label=label_var.get().strip())
+            except LayoutError as e:
+                dialogs.show_error(title, str(e), parent=win)
+                return
+            # Placing a cell should make everything in it visible right
+            # away, not leave it off-screen until the user separately hits
+            # Fit -- so refresh the panels, then fit the view.
+            self.refresh_all()
+            self.canvas.fit_view()
+            where = "" if src == "current" else f" from {state['libs'].get(src, src)}"
+            self.status.set(f"Placed {name}{where} at {coord_var.get()}")
+            label_var.set("")
+            refresh()     # a library part is now also a design cell
+
+        place_btn.configure(command=do_place)
+        tree.bind("<Double-Button-1>", do_place)
+        tree.bind("<Return>", do_place)
+
         ttk.Label(win, foreground="#8b949e",
                   text="Created/modified are stored with each cell in the GDS file; "
-                       "modified updates when a changed cell is saved.").pack(anchor="w", padx=8, pady=(4, 0))
+                       "modified updates when a changed cell is saved. Placing a library "
+                       "part copies it into the design.").pack(anchor="w", padx=8, pady=(4, 0))
         btns = ttk.Frame(win)
         btns.pack(fill="x", padx=8, pady=8)
         ttk.Button(btns, text="Refresh", command=refresh).pack(side="left")
@@ -5242,70 +5374,6 @@ class App(tk.Tk):
         win.bind("<Escape>", lambda e: win.destroy())
         refresh()
         filt.focus_set()
-
-    def find_and_place_cell(self):
-        win = tk.Toplevel(self)
-        win.title("Find & Place Cell")
-        win.geometry("420x440")
-
-        ttk.Label(win, text="Search cell/Sref name:").pack(anchor="w", padx=8, pady=(8, 0))
-        query_var = tk.StringVar()
-        entry = ttk.Entry(win, textvariable=query_var)
-        entry.pack(fill="x", padx=8)
-
-        listbox = tk.Listbox(win)
-        listbox.pack(fill="both", expand=True, padx=8, pady=8)
-        matches = []
-
-        def do_search(event=None):
-            matches[:] = self.session.find_cells(query_var.get())
-            listbox.delete(0, tk.END)
-            for m in matches:
-                src = "current" if m["source"] == "current" else f"lib {m['source']}"
-                when = (m.get("modified") or "").replace("T", " ")[:16]
-                listbox.insert(tk.END, f"{m['name']}  ({src})" + (f"  modified {when}" if when else ""))
-
-        entry.bind("<Return>", do_search)
-        entry.bind("<KeyRelease>", do_search)
-        entry.focus_set()
-        do_search()
-
-        coord_row = ttk.Frame(win)
-        coord_row.pack(fill="x", padx=8, pady=(0, 8))
-        ttk.Label(coord_row, text="Place at x,y:").pack(side="left")
-        coord_var = tk.StringVar(value="0,0")
-        ttk.Entry(coord_row, textvariable=coord_var, width=16).pack(side="left", padx=4)
-
-        def do_place(event=None):
-            sel = listbox.curselection()
-            if not sel:
-                dialogs.show_error("Find & Place Cell", "Select a cell from the list first.", parent=self)
-                return
-            m = matches[sel[0]]
-            try:
-                origin = _parse_point(coord_var.get())
-            except CommandError as e:
-                dialogs.show_error("Find & Place Cell", str(e), parent=self)
-                return
-            try:
-                self.session.place_cell(m["name"], origin, source=m["source"])
-            except LayoutError as e:
-                dialogs.show_error("Find & Place Cell", str(e), parent=self)
-                return
-            # Placing a cell should make everything in it visible right
-            # away, not leave it off-screen until the user separately
-            # hits Fit — so refresh the panels, then fit the view to
-            # include the newly placed geometry.
-            self.refresh_all()
-            self.canvas.fit_view()
-            win.destroy()
-
-        # Selecting a match and confirming with double-click or Enter
-        # places it directly, without needing to also click the button.
-        listbox.bind("<Double-Button-1>", do_place)
-        listbox.bind("<Return>", do_place)
-
-        ttk.Button(win, text="Place", command=do_place).pack(padx=8, pady=(0, 8))
 
     def show_user_manual(self):
         """Help > User Manual: open the user manual PDF
