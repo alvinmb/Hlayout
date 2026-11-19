@@ -55,7 +55,7 @@ sys.path.insert(0, _root)
 
 from hlayout.core.library import Library
 from hlayout.core.shapes import circle_points
-from hlayout.io.gdsio import save_gds
+from hlayout.io.gdsio import save_gds, save_gds_merged
 from hlayout.core.units import mm_to_dbu
 from hlayout.io.example_step3d import run_step_macro, write_step_macro
 
@@ -185,6 +185,9 @@ def main(argv=None):
     ap.add_argument("--run-freecad", action="store_true",
                     help="with --step-dir, also run the macro with freecadcmd to produce "
                          "the .step files now (requires FreeCAD installed)")
+    ap.add_argument("--overwrite", action="store_true",
+                    help="replace the output file instead of adding to it "
+                         "(by default an existing file keeps its other cells)")
     args = ap.parse_args(argv)
 
     if args.step <= 0 or args.start <= 0 or args.stop < args.start:
@@ -198,7 +201,10 @@ def main(argv=None):
 
     lib, sizes, names = build(pin_counts, args.pitch, args.pad_diameter,
                               args.hole_diameter, args.depth, args.margin)
-    save_gds(lib, args.out)
+    res = save_gds_merged(lib, args.out, overwrite=args.overwrite)
+    if res["mode"] == "merged":
+        print(f"added to existing {args.out}: {len(res['added'])} new, "
+              f"{len(res['replaced'])} updated, {len(res['kept'])} other cells kept")
 
     print(f"{len(names)} ceramic substrate cells + INDEX -> {args.out}")
     for name in names:

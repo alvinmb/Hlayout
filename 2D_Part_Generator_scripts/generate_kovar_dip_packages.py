@@ -49,7 +49,7 @@ sys.path.insert(0, _root)
 
 from hlayout.core.library import Library
 from hlayout.core.units import mm_to_dbu
-from hlayout.io.gdsio import save_gds
+from hlayout.io.gdsio import save_gds, save_gds_merged
 
 SEAL_LAYER = 49
 OUTLINE_LAYER = 61
@@ -163,9 +163,15 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--pins", type=int, nargs="+", default=[20, 30, 40])
     ap.add_argument("-o", "--out", default=os.path.join(_root, "examples", "kovar_dip_packages.gds"))
+    ap.add_argument("--overwrite", action="store_true",
+                    help="replace the output file instead of adding to it "
+                         "(by default an existing file keeps its other cells)")
     args = ap.parse_args()
     lib = build(args.pins)
-    save_gds(lib, args.out)
+    res = save_gds_merged(lib, args.out, overwrite=args.overwrite)
+    if res["mode"] == "merged":
+        print(f"added to existing {args.out}: {len(res['added'])} new, "
+              f"{len(res['replaced'])} updated, {len(res['kept'])} other cells kept")
     for n in args.pins:
         L, W, il, iw = body_size(n)
         print(f"KOVAR_DIP{n}: body {L:.2f} x {W:.2f} mm, cavity {il:.2f} x {iw:.2f} mm")

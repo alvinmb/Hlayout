@@ -407,3 +407,43 @@ def load_gds(path: str, library_name: Optional[str] = None) -> Library:
             stacklevel=2,
         )
     return library
+
+
+def save_gds_merged(library: Library, path: str, overwrite: bool = False) -> dict:
+    """Save ``library`` to ``path`` without losing what is already there.
+
+    If ``path`` exists (and ``overwrite`` is False) its cells are kept:
+    ``library``'s cells are added, a cell of the same name is replaced by
+    the new one, and ``library``'s "INDEX" cell is stored as
+    "INDEX_<library name>" (unless the file's own "INDEX" is this
+    library's, from an earlier run) so several generators can share one
+    file.
+    Otherwise the file is written fresh, as save_gds() does.
+
+    Returns {"path", "mode": "new"|"merged", "added", "replaced", "kept"}.
+    """
+    if overwrite or not os.path.exists(path):
+        save_gds(library, path)
+        return {"path": path, "mode": "new", "added": list(library.cells),
+                "replaced": [], "kept": []}
+    target = load_gds(path)
+    before = set(target.cells)
+    added, replaced = [], []
+    # This generator's own index: the file's "INDEX" if it only places
+    # this library's cells (a re-run), else "INDEX_<library name>".
+    own_index = "INDEX"
+    if "INDEX" in target.cells:
+        old = target.cells["INDEX"]
+        placed = {r.cell_name for r in old.srefs} | {r.cell_name for r in old.arefs}
+        if not placed <= set(library.cells):
+            own_index = f"INDEX_{library.name}"
+    for name, cell in library.cells.items():
+        out = own_index if name == "INDEX" else name
+        if out != name:
+            cell.name = out
+        (replaced if out in target.cells else added).append(out)
+        target.cells[out] = cell
+    save_gds(target, path)
+    kept = sorted(before - set(added) - set(replaced))
+    return {"path": path, "mode": "merged", "added": added,
+            "replaced": replaced, "kept": kept}

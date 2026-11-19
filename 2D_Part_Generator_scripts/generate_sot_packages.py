@@ -55,7 +55,7 @@ for _ in range(4):
 sys.path.insert(0, _root)
 
 from hlayout.core.library import Library
-from hlayout.io.gdsio import save_gds
+from hlayout.io.gdsio import save_gds, save_gds_merged
 from hlayout.core.units import mm_to_dbu
 from hlayout.io.example_step3d import run_step_macro, write_step_macro
 
@@ -556,10 +556,16 @@ def main(argv=None):
     ap.add_argument("--run-freecad", action="store_true",
                     help="with --step-dir, also run the macro with freecadcmd to produce "
                          "the .step files now (requires FreeCAD installed)")
+    ap.add_argument("--overwrite", action="store_true",
+                    help="replace the output file instead of adding to it "
+                         "(by default an existing file keeps its other cells)")
     args = ap.parse_args(argv)
 
     lib = build()
-    save_gds(lib, args.out)
+    res = save_gds_merged(lib, args.out, overwrite=args.overwrite)
+    if res["mode"] == "merged":
+        print(f"added to existing {args.out}: {len(res['added'])} new, "
+              f"{len(res['replaced'])} updated, {len(res['kept'])} other cells kept")
 
     print(f"{len(PACKAGES)} SOT package cells + INDEX -> {args.out}")
     for name, spec in PACKAGES.items():

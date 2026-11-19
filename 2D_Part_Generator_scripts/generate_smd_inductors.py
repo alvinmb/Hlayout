@@ -54,7 +54,7 @@ sys.path.insert(0, _root)
 
 from hlayout.core.library import Library
 from hlayout.core.units import mm_to_dbu
-from hlayout.io.gdsio import save_gds
+from hlayout.io.gdsio import save_gds, save_gds_merged
 
 PAD_LAYER = 3            # 1st conductor -- the metal pads
 EPOXY_LAYER = 20         # conductive epoxy
@@ -138,9 +138,15 @@ def main():
     ap.add_argument("-o", "--out", default=os.path.join(_root, "examples", "smd_inductors.gds"))
     ap.add_argument("--pad-layer", type=int, default=PAD_LAYER)
     ap.add_argument("--epoxy-layer", type=int, default=EPOXY_LAYER)
+    ap.add_argument("--overwrite", action="store_true",
+                    help="replace the output file instead of adding to it "
+                         "(by default an existing file keeps its other cells)")
     a = ap.parse_args()
     lib = build(a.pad_layer, a.epoxy_layer)
-    save_gds(lib, a.out)
+    res = save_gds_merged(lib, a.out, overwrite=a.overwrite)
+    if res["mode"] == "merged":
+        print(f"added to existing {a.out}: {len(res['added'])} new, "
+              f"{len(res['replaced'])} updated, {len(res['kept'])} other cells kept")
     print(f"wrote {a.out}: {len(lib.cells) - 1} inductors (pads on layer {a.pad_layer}, "
           f"epoxy on layer {a.epoxy_layer})")
 
