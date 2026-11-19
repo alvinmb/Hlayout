@@ -4300,6 +4300,20 @@ def _set_locked_refs(library, cell_name, refs):
     library.tech_params["locked_parts"] = _json.dumps(d)
 
 
+def _rect_to_polygon_in_place(canvas, rect):
+    """Swap ``rect`` for a Polygon with the same corners, layer, datatype
+    and pin (LayoutCanvas._promote_rect_to_polygon) and point the canvas
+    selection at the new polygon. Returns the polygon."""
+    poly = canvas._promote_rect_to_polygon(rect)
+    sel = getattr(canvas, "selected", None)
+    if sel and len(sel) > 1 and sel[1] is rect:
+        canvas.selected = ("shape", poly)
+    multi = getattr(canvas, "selected_multi", None)
+    if multi:
+        canvas.selected_multi = [(k, poly if s is rect else s) for k, s in multi]
+    return poly
+
+
 def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
     """A small property-edit form for the selected shape or sref.
     `checkpoint`, if given, is called once -- right before the shape's
@@ -4339,6 +4353,8 @@ def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
         row += 1
 
     error_var = tk.StringVar(value="")
+    # set by the "Convert to Polygon" button on a Rectangle's form
+    convert = {"to_polygon": False, "new": None}
 
     if kind == "shape":
         add_layer_field(shape.layer)
@@ -4426,6 +4442,8 @@ def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
                     x1, x2, y1, y2 = int(round(x1)), int(round(x2)), int(round(y1)), int(round(y2))
                     shape.points = [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
                     shape.pin = entries["Pin"].get().strip()
+                    if convert["to_polygon"] and hasattr(parent, "_promote_rect_to_polygon"):
+                        convert["new"] = _rect_to_polygon_in_place(parent, shape)
                 elif isinstance(shape, Polygon):
                     pts = _parse_points_str(entries["Points (x,y x,y ...)"].get())
                     if len(pts) < 3:
@@ -4517,14 +4535,23 @@ def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
                 shape.magnification = mag
                 shape.x_reflection = bool(int(entries["Mirror (0/1)"].get()))
         except Exception as exc:
+            convert["to_polygon"] = False
             error_var.set(str(exc))
             return
         win.destroy()
         if on_done:
             on_done()
+        if convert["new"] is not None:
+            # carry on editing it as a polygon (its points can now be changed)
+            parent.after(0, lambda: _open_edit_dialog(parent, "shape", convert["new"],
+                                                      on_done=on_done, checkpoint=checkpoint))
 
     def on_cancel(event=None):
         win.destroy()
+
+    def on_to_polygon():
+        convert["to_polygon"] = True
+        on_ok()
 
     tk.Label(win, textvariable=error_var, fg="#c0392b").grid(
         row=row, column=0, columnspan=2, padx=6, pady=(0, 3))
@@ -4533,6 +4560,8 @@ def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
     btns.grid(row=row, column=0, columnspan=2, pady=(2, 8))
     tk.Button(btns, text="OK", command=on_ok).pack(side="left", padx=4)
     tk.Button(btns, text="Cancel", command=on_cancel).pack(side="left", padx=4)
+    if kind == "shape" and isinstance(shape, Rectangle) and hasattr(parent, "_promote_rect_to_polygon"):
+        tk.Button(btns, text="Convert to Polygon", command=on_to_polygon).pack(side="left", padx=(12, 4))
     win.bind("<Return>", on_ok)
     win.bind("<Escape>", on_cancel)
 

@@ -1925,3 +1925,54 @@ def test_tools_menu_mcp_server_item_starts_and_stops_the_bridge(tmp_path, monkey
         assert bridge.read_bridge_info()["token"] != first["token"]
     finally:
         app._on_quit()
+
+
+def test_edit_selected_converts_a_rectangle_to_a_polygon():
+    from hlayout.core.shapes import Polygon
+    app = _make_app()
+    try:
+        top = app.session.library.cells["TOP"]
+        top.add_rectangle(5, 0, 0, 100, 50, pin="1")
+        app.canvas.redraw()
+        app.canvas.selected = ("shape", top.shapes[0])
+        seen = {"titles": []}
+
+        def press(text):
+            def find(w):
+                for c in w.winfo_children():
+                    if isinstance(c, tk.Button) and c.cget("text") == text:
+                        return c
+                    hit = find(c)
+                    if hit is not None:
+                        return hit
+                return None
+
+            def tick():
+                tops = _find_toplevels(app)
+                if not tops:
+                    app.after(20, tick)
+                    return
+                seen["titles"].append(tops[0].title())
+                btn = find(tops[0])
+                if btn is None:
+                    tops[0].destroy()
+                else:
+                    btn.invoke()
+            app.after(20, tick)
+
+        press("Convert to Polygon")
+        assert app.canvas.edit_selected() is True
+        poly = top.shapes[0]
+        assert isinstance(poly, Polygon)
+        assert sorted(poly.points) == [(0, 0), (0, 50), (100, 0), (100, 50)]
+        assert (poly.layer, poly.pin) == (5, "1")
+        assert app.canvas.selected == ("shape", poly)
+        # the form reopens for the new polygon; close it
+        press("Cancel")
+        for _ in range(50):
+            app.update()
+            if len(seen["titles"]) == 2 and not _find_toplevels(app):
+                break
+        assert seen["titles"] == ["Edit Rectangle", "Edit Polygon"]
+    finally:
+        app.destroy()
