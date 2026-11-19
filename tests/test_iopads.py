@@ -213,3 +213,23 @@ def test_optimize_io_pins_leaves_locked_pins_alone():
     assert r["changes"] == []
     assert {p["pin"]: p.get("net") for p in s.header_pinout()}.get("5") == "S"
 
+
+def test_a_locked_io_pad_is_kept_by_the_wizard_and_unlocks_again():
+    s = _sub_session()
+    s.rect(57, 0, 0, 37600, 17500)
+    s.edge_io_pads(n=4, sides="B", pitch=2540, pad_w=300, pad_l=600, edge_margin=250)
+    assert s.io_pad_pins() == ["1", "2", "3", "4"]
+    before = _pads(s)["2"]
+    assert s.lock_parts("IO.2") == ["IO.2"]
+    with pytest.raises(Exception, match="no placed part"):
+        s.lock_parts("IO.9")
+    r = s.edge_io_pads(n=4, sides="B", pitch=2540, pad_w=300, pad_l=600, edge_margin=1000)
+    assert r["skipped"] == {"2": "locked"}
+    p = _pads(s)
+    assert p["2"] == before and p["1"][1] == 1000          # pad 2 kept, the rest redrawn
+    assert s.unlock_parts("IO.2") == []
+    assert s.lock_parts("*") == []                         # "*" is the placed parts only
+    assert s.lock_parts("IO.*") == ["IO.1", "IO.2", "IO.3", "IO.4"]
+    assert s.unlock_parts("IO.*") == []
+    s.edge_io_pads(n=4, sides="B", pitch=2540, pad_w=300, pad_l=600, edge_margin=1000)
+    assert _pads(s)["2"][1] == 1000

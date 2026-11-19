@@ -1976,3 +1976,63 @@ def test_edit_selected_converts_a_rectangle_to_a_polygon():
         assert seen["titles"] == ["Edit Rectangle", "Edit Polygon"]
     finally:
         app.destroy()
+
+
+def test_canvas_puts_back_a_locked_io_pad():
+    app = _make_app()
+    try:
+        top = app.session.library.cells["TOP"]
+        pad = top.add_rectangle(3, 0, 0, 300, 600, pin="1")
+        other = top.add_rectangle(3, 1000, 0, 1300, 600, pin="2")
+        app.session._set_locked("TOP", {"IO.1"})
+        start = list(pad.points)
+        # a canvas move: checkpoint, change, then the edit callback
+        app.canvas.checkpoint()
+        pad.points = [(x + 500, y) for x, y in pad.points]
+        other.points = [(x + 500, y) for x, y in other.points]
+        app.canvas.on_edit()
+        assert pad.points == start                     # locked: put back
+        assert other.points[0][0] == 1500              # unlocked: moved
+        assert "locked I/O pad" in app.status.get()
+        # a delete is undone too
+        app.canvas.checkpoint()
+        top.shapes.remove(pad)
+        app.canvas.on_edit()
+        assert pad in top.shapes
+    finally:
+        app.destroy()
+
+
+def test_edit_selected_locks_an_io_pad():
+    app = _make_app()
+    try:
+        top = app.session.library.cells["TOP"]
+        pad = top.add_rectangle(3, 0, 0, 300, 600, pin="7")
+        app.canvas.redraw()
+        app.canvas.selected = ("shape", pad)
+
+        def tick_lock_and_ok():
+            tops = _find_toplevels(app)
+            if not tops:
+                app.after(20, tick_lock_and_ok)
+                return
+            def walk(w):
+                yield w
+                for c in w.winfo_children():
+                    yield from walk(c)
+            cb = [w for w in walk(tops[0]) if isinstance(w, ttk.Checkbutton)
+                  and "IO.7" in str(w.cget("text"))]
+            assert cb, "no Locked box for the pad"
+            cb[0].invoke()
+            [w for w in walk(tops[0]) if isinstance(w, tk.Button) and w.cget("text") == "OK"][0].invoke()
+
+        app.after(20, tick_lock_and_ok)
+        app.canvas.edit_selected()
+        assert "IO.7" in app.session.locked_parts("TOP")
+        start = list(pad.points)
+        app.canvas.checkpoint()
+        pad.points = [(x + 500, y) for x, y in pad.points]
+        app.canvas.on_edit()
+        assert pad.points == start
+    finally:
+        app.destroy()

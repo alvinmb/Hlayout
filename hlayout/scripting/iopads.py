@@ -488,14 +488,19 @@ def edge_pads(session, cell_name: Optional[str] = None, shape=None, n: Optional[
         mode = "header"
 
     made, skipped = [], {}
+    # locked I/O pads (Session.lock_parts "IO.<pin>") are kept as they are
+    held = {r[3:] for r in session.locked_parts(name) if r.startswith("IO.")}
     with session._batch():
-        want = {p for s in sides for p, _x in rows[s]}
+        want = {p for s in sides for p, _x in rows[s]} - held
         cell.shapes[:] = [sh for sh in cell.shapes
                           if not (isinstance(sh, Rectangle) and sh.layer == la
                                   and str(getattr(sh, "pin", "")) in want)]
         for side in sides:
             top = side == "T"
             for pin, x in rows[side]:
+                if pin in held:
+                    skipped[pin] = "locked"
+                    continue
                 ey = _edge_y(outline, x, top)
                 if ey is None:
                     skipped[pin] = "off the substrate"

@@ -328,8 +328,12 @@ class AutoPlaceWindow(tk.Toplevel):
             fam = _family(avail, c, cn or None, set()) or ("no cell -- map one" if not cn else "")
             if fam != "die" and ref not in placed and _is_header(ref, c, cn or ""):
                 fam = "header (not placed)"
+            pads = [] if ref in placed else self._io_pads_of(ref)
+            is_locked = ref in locked or (pads and all(f"IO.{p}" in locked for p in pads))
             self.parts.insert("", "end", iid=ref, values=(ref, c.value, c.footprint, cn, fam,
-                                                          "locked" if ref in locked else ""))
+                                                          ("locked" if ref in placed else
+                                                           f"pad {','.join(pads)} locked")
+                                                          if is_locked else ""))
         self.nets.delete(*self.nets.get_children())
         for n in self.nl.nets:
             cls = _net_class(n, S)
@@ -443,6 +447,23 @@ class AutoPlaceWindow(tk.Toplevel):
         self.summary.config(text="; ".join(msg))
         self._part_selected()
 
+    def _io_pads_of(self, ref):
+        """The I/O pad numbers a part that is not placed (an edge pad / header
+        part such as J1) stands for: the pads whose IO.<pin> net is one of
+        the part's nets."""
+        if self.nl is None or ref not in self.nl.components:
+            return []
+        try:
+            from ..io.techfile import load_net_names
+            names = load_net_names(self.session.library)
+            pins = set(self.session.io_pad_pins(self.session.current_cell_name))
+        except Exception:
+            return []
+        nets = {n.name for n in self.nl.nets if any(nd.ref == ref for nd in n.nodes)}
+        return sorted((k[3:] for k, v in names.items()
+                       if k.startswith("IO.") and v in nets and k[3:] in pins),
+                      key=lambda p: (len(p), p))
+
     def _lock_selected(self, lock=True):
         """Lock (or unlock) the selected parts where they are placed --
         Session.lock_parts, one undo step. Only placed parts can be locked."""
@@ -453,8 +474,17 @@ class AutoPlaceWindow(tk.Toplevel):
         name = self.session.current_cell_name
         cell = self.session.library.cells.get(name)
         placed = {r.label for r in (cell.srefs if cell else []) if r.label}
-        refs = [r for r in sel if r in placed]
-        missing = [r for r in sel if r not in placed]
+        refs, missing, via_pad = [], [], []
+        for r in sel:
+            if r in placed:
+                refs.append(r)
+                continue
+            pads = self._io_pads_of(r)      # an edge-pad part: its I/O pad
+            if pads:
+                refs.extend(f"IO.{p}" for p in pads)
+                via_pad.append(f"{r} (pad {','.join(pads)})")
+            else:
+                missing.append(r)
         if refs:
             try:
                 self.session.lock_parts(refs, cell_name=name, lock=lock)
@@ -467,10 +497,13 @@ class AutoPlaceWindow(tk.Toplevel):
             self.parts.selection_set(keep)
             self.parts.see(keep[-1])
         msg = []
-        if refs:
-            msg.append(f"{'locked' if lock else 'unlocked'}: {', '.join(refs)}")
+        parts = [r for r in refs if not r.startswith("IO.")] + via_pad
+        if parts:
+            msg.append(f"{'locked' if lock else 'unlocked'}: {', '.join(parts)}")
         if missing:
-            msg.append(f"{', '.join(missing)} not placed yet -- place first, then lock")
+            msg.append(f"{', '.join(missing)}: not placed, and no I/O pad has its net yet -- "
+                       "place it, or give a pad its net (Assign I/O Pads), or lock the pad "
+                       "itself (Edit Selected... > Locked)")
         self.summary.config(text="; ".join(msg))
         try:
             self.app.canvas.redraw()

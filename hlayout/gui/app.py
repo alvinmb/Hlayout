@@ -5498,11 +5498,68 @@ class App(tk.Tk):
     def _canvas_checkpoint(self):
         self.session.checkpoint()
         self._die_place = self._die_placements()
+        self._pad_place = self._locked_pad_shapes()
+
+    def _locked_pad_shapes(self):
+        """(cell name, [(shape, points)]) of the locked I/O pads ("IO.<pin>"
+        in Session.locked_parts) in the current cell, taken at a canvas
+        checkpoint so _after_canvas_edit can put them back."""
+        try:
+            name = self.session.current_cell_name
+            cell = self.session.library.cells.get(name) if name else None
+            if cell is None:
+                return None
+            pins = {r[3:] for r in self.session.locked_parts(name) if r.startswith("IO.")}
+            if not pins:
+                return None
+            return name, [(sh, [tuple(p) for p in sh.points]) for sh in cell.shapes
+                          if str(getattr(sh, "pin", "")) in pins and hasattr(sh, "points")]
+        except Exception:
+            return None
+
+    def _hold_locked_pads(self):
+        """Put back any locked I/O pad a canvas edit moved, reshaped or
+        deleted. Returns the pad numbers held."""
+        snap, self._pad_place = getattr(self, "_pad_place", None), None
+        if not snap:
+            return []
+        name, pads = snap
+        cell = self.session.library.cells.get(name)
+        if cell is None:
+            return []
+        try:        # a pad unlocked in this edit (Edit Selected) may change
+            still = {r[3:] for r in self.session.locked_parts(name) if r.startswith("IO.")}
+        except Exception:
+            still = set()
+        held = []
+        for sh, pts in pads:
+            pin = str(getattr(sh, "pin", ""))
+            if pin not in still:
+                continue
+            if sh in cell.shapes:
+                if [tuple(p) for p in sh.points] != pts:
+                    sh.points = list(pts)
+                    held.append(pin)
+                continue
+            # gone -- deleted, or swapped for a polygon by a vertex edit
+            twin = [x for x in cell.shapes if x is not sh and str(getattr(x, "pin", "")) == pin
+                    and x.layer == sh.layer and type(x) is not type(sh)]
+            sh.points = list(pts)
+            if twin:
+                cell.shapes[cell.shapes.index(twin[0])] = sh
+            else:
+                cell.shapes.append(sh)
+            held.append(pin)
+        return held
 
     def _after_canvas_edit(self):
         """After a canvas move / rotate / mirror / edit: any bare die that
         moved or turned takes its wire bonds and bond fingers with it
         (fanout.carry_bonds; same undo step as the edit), then refresh."""
+        held_pads = self._hold_locked_pads()
+        if held_pads:
+            self.status.set(f"locked I/O pad(s) not changed: {', '.join(held_pads)} "
+                            "(unlock IO.<pin> to edit)")
         snap, self._die_place = getattr(self, "_die_place", None), None
         if snap:
             name, before = snap

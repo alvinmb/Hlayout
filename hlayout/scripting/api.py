@@ -6352,13 +6352,18 @@ class Session:
 
     def lock_parts(self, refs, cell_name: Optional[str] = None, lock: bool = True) -> list:
         """Lock (``lock`` False: unlock) the placed parts ``refs`` (ref-des;
-        "*" = every labelled part) in the cell. Unknown refs raise. Returns
-        the cell's locked refs afterwards. One undo step."""
+        "*" = every labelled part) in the cell. An I/O pad is locked as
+        "IO.<pin>" (its pad number, as in the IO.<pin> net names; "IO.*" =
+        every I/O pad drawn in the cell): the canvas puts it back if it is
+        moved, edited or deleted, and the I/O Pad Wizard leaves it. Unknown
+        refs raise. Returns the cell's locked refs afterwards. One undo step."""
         name = cell_name or self.current_cell_name
         if name is None:
             raise LayoutError("no current cell")
         cell = self.library.get_cell(name)
         placed = {r.label for r in cell.srefs if r.label}
+        pads = {f"IO.{p}" for p in self.io_pad_pins(name)}
+        cur = self.locked_parts(name)
         want = set()
         for r in ([refs] if isinstance(refs, str) else list(refs)):
             for t in str(r).replace(";", ",").split(","):
@@ -6367,17 +6372,32 @@ class Session:
                     continue
                 if t == "*":
                     want |= placed
-                elif t in placed:
+                elif t.upper() == "IO.*":
+                    want |= pads | ({x for x in cur if x.startswith("IO.")} if not lock else set())
+                elif t in placed or t in pads or (not lock and t in cur):
                     want.add(t)
                 else:
                     raise LayoutError(f"no placed part {t} in {name}")
-        cur = self.locked_parts(name)
         new = (cur | want) if lock else (cur - want)
         if new != cur:
             self.checkpoint()
             self._set_locked(name, new)
             self._notify()
         return sorted(new, key=lambda r: (len(r), r))
+
+    def io_pad_pins(self, cell_name: Optional[str] = None) -> list:
+        """Pin numbers of the I/O pads drawn in the cell itself (pinned
+        shapes on the cell's own geometry, as the I/O Pad Wizard makes
+        them) -- the ones that can be locked as "IO.<pin>"."""
+        from .autoplace_session import io_pads
+        name = cell_name or self.current_cell_name
+        cell = self.library.get_cell(name)
+        own = {str(getattr(sh, "pin", "")) for sh in cell.shapes if getattr(sh, "pin", "")}
+        try:
+            pins = {str(p) for p, _b in io_pads(self.library, cell, self._boundary_layer())}
+        except Exception:
+            pins = set()
+        return sorted(pins & own, key=lambda p: (len(p), p))
 
     def unlock_parts(self, refs="*", cell_name: Optional[str] = None) -> list:
         """Unlock the parts ``refs`` ("*" = all). Returns the refs still locked."""

@@ -4358,6 +4358,17 @@ def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
 
     if kind == "shape":
         add_layer_field(shape.layer)
+        if getattr(shape, "pin", "") and not isinstance(shape, (Text, Path)):
+            # a numbered pad (an I/O pad from the I/O Pad Wizard) can be
+            # locked as IO.<pin>: the canvas puts it back if it's moved,
+            # edited or deleted, and the wizard leaves it
+            pad_key = f"IO.{shape.pin}"
+            lock_var = tk.BooleanVar(value=pad_key in _locked_refs(
+                parent.library, getattr(parent, "cell_name", None)))
+            entries["__padlock__"] = (pad_key, lock_var)
+            entries["__padlock_cb__"] = ttk.Checkbutton(
+                win, text=f"Locked (I/O pad {pad_key}: the canvas and the I/O Pad Wizard "
+                "leave it)", variable=lock_var)
         if isinstance(shape, Rectangle):
             (x1, y1), _, (x2, y2), _ = shape.points
             add_field("X1", x1)
@@ -4378,6 +4389,10 @@ def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
             add_field("Y", shape.origin[1])
             add_field("Height", shape.height)
             add_field("Font (0-3)", shape.font)
+        if "__padlock_cb__" in entries:
+            entries.pop("__padlock_cb__").grid(row=row, column=0, columnspan=2, sticky="w",
+                                               padx=6, pady=3)
+            row += 1
     elif kind == "aref":
         tk.Label(win, text="Cell").grid(row=row, column=0, sticky="e", padx=6, pady=3)
         tk.Label(win, text=shape.cell_name).grid(row=row, column=1, sticky="w", padx=6, pady=3)
@@ -4431,6 +4446,20 @@ def _open_edit_dialog(parent, kind, shape, on_done=None, checkpoint=None):
             if checkpoint:
                 checkpoint()
             if kind == "shape":
+                pad_lock = entries.get("__padlock__")
+                cname = getattr(parent, "cell_name", None)
+                if pad_lock and cname:
+                    key, var = pad_lock
+                    refs = _locked_refs(parent.library, cname)
+                    was, want = key in refs, bool(var.get())
+                    (refs.add if want else refs.discard)(key)
+                    _set_locked_refs(parent.library, cname, refs)
+                    if was and want:
+                        # still locked: the pad stays as it is
+                        win.destroy()
+                        if on_done:
+                            on_done()
+                        return
                 shape.layer = int(str(entries["Layer"].get()).split(":", 1)[0].strip())
                 if isinstance(shape, Rectangle):
                     x1 = float(entries["X1"].get())
