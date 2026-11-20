@@ -1197,9 +1197,73 @@ def tidy(session, cell_name, dejog=None, orthogonal=None, clearance=None) -> dic
     if clearance:
         over["clearance"] = max(float(clearance), float(R.get("clearance", 0) or 0))
     try:
-        return {"dejog": session.remove_jogs(cell_name=cell_name, **over)}
+        out = {"dejog": session.remove_jogs(cell_name=cell_name, **over)}
     except Exception as e:
         return {"dejog": {"error": str(e)}}
+    # remove_jogs may slide a leg onto a track of the same net (it only
+    # refuses joining two nets): drop the copy and the doubled-up points
+    try:
+        out["redundant"] = drop_redundant_tracks(session, cell_name)
+    except Exception as e:
+        out["redundant"] = {"error": str(e)}
+    return out
+
+
+def drop_redundant_tracks(session, cell_name) -> dict:
+    """Tidy tracks a clean-up left doubled up: collapse repeated points in
+    every track (Path), and delete a track that lies wholly on other copper
+    of its own layer (another track, a pad) -- that copper already makes
+    the connection, so nothing is lost. One pass; call inside the caller's
+    undo step. Returns {"points": n collapsed, "removed": [[(x, y), ...]]}."""
+    from shapely.geometry import LineString, Polygon as _SP
+    from shapely.ops import unary_union
+    from ..core.shapes import Path as _Path
+    cell = session.library.get_cell(cell_name)
+    collapsed = 0
+    for sh in cell.shapes:
+        if isinstance(sh, _Path) and len(sh.points) > 2:
+            pts = [tuple(sh.points[0])]
+            for q in sh.points[1:]:
+                if tuple(q) != pts[-1]:
+                    pts.append(tuple(q))
+            if len(pts) >= 2 and len(pts) != len(sh.points):
+                collapsed += len(sh.points) - len(pts)
+                sh.points = pts
+
+    def geom(sh):
+        try:
+            if isinstance(sh, _Path):
+                if len(sh.points) < 2:
+                    return None
+                return LineString(sh.points).buffer(max(sh.width, 1) / 2.0, cap_style=2,
+                                                   join_style=2)
+            pts = getattr(sh, "points", None)
+            return _SP(pts).buffer(0) if pts and len(pts) >= 3 else None
+        except Exception:
+            return None
+    removed = []
+    by_layer = {}
+    for sh in cell.shapes:
+        by_layer.setdefault(sh.layer, []).append(sh)
+    for layer, shapes in by_layer.items():
+        tracks = [sh for sh in shapes if isinstance(sh, _Path) and len(sh.points) >= 2]
+        if len(shapes) < 2 or not tracks:
+            continue
+        gs = {id(sh): geom(sh) for sh in shapes}
+        for t in tracks:
+            g = gs.get(id(t))
+            if g is None or g.is_empty:
+                continue
+            others = [gs[id(o)] for o in shapes if o is not t and id(o) in gs
+                      and gs[id(o)] is not None and not any(o is r for r in removed)]
+            if not others:
+                continue
+            near = [o for o in others if o.intersects(g)]
+            if near and unary_union(near).buffer(1).contains(g):
+                removed.append(t)
+    for t in removed:
+        cell.shapes.remove(t)
+    return {"points": collapsed, "removed": [list(t.points) for t in removed]}
 
 
 def nudge_and_reroute(session, cell_name, st, routed, mapping, passes=None, max_move=None,
