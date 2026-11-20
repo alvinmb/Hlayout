@@ -143,6 +143,17 @@ def main():
             failed.append(name)
             for line in tail.splitlines():
                 print(f"    {line}")
+    # SOT models: moulded body black, leads silver (needs cadquery)
+    sys.path.insert(0, ROOT)
+    try:
+        from hlayout.io.step_colour import colour_sot_models
+        col = colour_sot_models(out)
+        print(f"SOT colours: {len(col['coloured'])} model(s) coloured (body black, leads silver)")
+        for p, why in col["skipped"].items():
+            if why != "already coloured":
+                print(f"  not coloured: {os.path.relpath(p, out)} -- {why}")
+    except Exception as e:
+        print(f"SOT colours: skipped ({e})")
     print()
     print(f"{step_count(out)} STEP files in {out}")
     if failed:

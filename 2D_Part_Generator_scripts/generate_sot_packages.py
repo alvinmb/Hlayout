@@ -576,6 +576,12 @@ def main(argv=None):
         print(f"wrote 3D STEP macro -> {macro_path}")
         if args.run_freecad:
             print(run_step_macro(macro_path))
+            # moulded body black, leads silver (needs cadquery)
+            from hlayout.io.step_colour import colour_sot_models
+            col = colour_sot_models(args.step_dir, force=True)
+            print(f"coloured {len(col['coloured'])} model(s): body black, leads silver")
+            for p, why in col["skipped"].items():
+                print(f"  not coloured: {p} -- {why}")
 
 
 if __name__ == "__main__":
