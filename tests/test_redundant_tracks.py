@@ -44,3 +44,30 @@ def test_two_identical_copies_keep_one():
     cell.add_path(3, [(0, 0), (5000, 0)], width=300)
     drop_redundant_tracks(s, "TOP")
     assert len([x for x in cell.shapes if x.layer == 3]) == 1
+
+
+def test_a_squeezed_shut_u_is_collapsed():
+    from hlayout.scripting.hybridroute import remove_hairpins
+    s, cell = _cell()
+    # the +V hairpin: up x=40.95, 0.3 mm jog, back down x=40.65 (two tracks)
+    cell.add_path(3, [(40950, -18750), (40950, -9350), (40650, -9350)], width=300)
+    cell.add_path(3, [(40650, -9350), (40650, -16950), (38550, -16950)], width=300)
+    r = remove_hairpins(s, "TOP")
+    paths = [x for x in cell.shapes if x.layer == 3]
+    assert r["hairpins"] == 1 and len(paths) == 1
+    assert paths[0].points == [(40950, -18750), (40950, -16950), (38550, -16950)]
+
+
+def test_a_hairpin_with_a_via_on_the_loop_stays():
+    from hlayout.scripting.hybridroute import remove_hairpins
+    s, cell = _cell()
+    cell.add_path(3, [(0, 0), (0, 10000), (300, 10000), (300, 2000)], width=300)
+    cell.add_rectangle(3, -150, 9850, 450, 10150)          # a via pad at the apex
+    assert remove_hairpins(s, "TOP")["hairpins"] == 0
+
+
+def test_a_real_u_with_a_gap_stays():
+    from hlayout.scripting.hybridroute import remove_hairpins
+    s, cell = _cell()
+    cell.add_path(3, [(0, 0), (0, 10000), (1000, 10000), (1000, 2000)], width=300)
+    assert remove_hairpins(s, "TOP")["hairpins"] == 0

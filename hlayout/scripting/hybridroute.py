@@ -1206,6 +1206,10 @@ def tidy(session, cell_name, dejog=None, orthogonal=None, clearance=None) -> dic
         out["redundant"] = drop_redundant_tracks(session, cell_name)
     except Exception as e:
         out["redundant"] = {"error": str(e)}
+    try:
+        out["hairpins"] = remove_hairpins(session, cell_name)
+    except Exception as e:
+        out["hairpins"] = {"error": str(e)}
     return out
 
 
@@ -1537,3 +1541,146 @@ def _route_fresh(session, cell_name, layers, dejog, on_line, cancel):
     st["cleanup"] = tidy(session, mapping["cell"], dejog, design["routing"]["orthogonal"],
                          design["rules"]["conductor"]["minSpaceUm"])
     return st, routed, mapping
+
+
+def remove_hairpins(session, cell_name) -> dict:
+    """Collapse hairpins a clean-up left: a track that runs one way, jogs
+    sideways by no more than its width (so the two legs' copper touches),
+    and runs straight back -- a U squeezed shut, the loop going nowhere.
+    The overlap is cut out and the legs joined where they stop
+    overlapping; the new jog lies inside the copper already there, so no
+    clearance changes. Tracks of one layer and width meeting end to end
+    (nothing else at the joint) are first joined so a U split over two
+    tracks is seen too. Call inside the caller's undo step. Returns
+    {"hairpins": n, "joined": n}."""
+    from shapely.geometry import Point as _Pt, Polygon as _SP
+    from ..core.shapes import Path as _Path
+    cell = session.library.get_cell(cell_name)
+
+    def clean(pts):
+        out = []
+        for q in pts:
+            q = (int(round(q[0])), int(round(q[1])))
+            if out and q == out[-1]:
+                continue
+            if len(out) >= 2:
+                (ax, ay), (bx, by) = out[-2], out[-1]
+                if (ax == bx == q[0]) or (ay == by == q[1]):
+                    # collinear: keep going straight (a reversal is kept
+                    # here -- it is what the hairpin pass looks for)
+                    if (bx - ax) * (q[0] - bx) + (by - ay) * (q[1] - by) > 0:
+                        out[-1] = q
+                        continue
+            out.append(q)
+        return out
+
+    # 1. join tracks meeting end to end with nothing else at the joint
+    joined = 0
+    others = [sh for sh in cell.shapes if not isinstance(sh, _Path)]
+    changed = True
+    while changed:
+        changed = False
+        paths = [sh for sh in cell.shapes if isinstance(sh, _Path) and len(sh.points) >= 2]
+        ends = {}
+        for p in paths:
+            for k in (0, -1):
+                ends.setdefault((p.layer, tuple(p.points[k])), []).append((p, k))
+        for (layer, pt), lst in ends.items():
+            if len(lst) != 2:
+                continue
+            (a, ka), (b, kb) = lst
+            if a is b or a.width != b.width or getattr(a, "datatype", 0) != getattr(b, "datatype", 0):
+                continue
+            hit = _Pt(pt).buffer(1)
+            if any(o.layer == layer and len(getattr(o, "points", []) or []) >= 3
+                   and _SP(o.points).buffer(0).intersects(hit) for o in others):
+                continue              # a pad / via there: keep the joint
+            pa = list(a.points) if ka == -1 else list(a.points)[::-1]
+            pb = list(b.points) if kb == 0 else list(b.points)[::-1]
+            a.points = clean(pa + pb[1:])
+            cell.shapes.remove(b)
+            joined += 1
+            changed = True
+            break
+
+    # 2. squeeze out hairpins -- only where nothing else (a pad, a via,
+    # another track, a part) touches the copper that is cut away
+    from shapely.geometry import LineString as _LS
+    from .autoplace_session import _xf
+
+    def body(pts, wd):
+        return _LS(pts).buffer(wd / 2.0, cap_style=2, join_style=2) if len(pts) >= 2 else None
+
+    def boxes():
+        out = []
+        for r in cell.srefs:
+            try:
+                bb = session.library.cell_bbox(r.cell_name)
+            except Exception:
+                bb = None
+            if bb:
+                f = _xf(r)
+                xs, ys = zip(*(f(q) for q in ((bb[0], bb[1]), (bb[2], bb[1]),
+                                               (bb[2], bb[3]), (bb[0], bb[3]))))
+                out.append(_SP([(min(xs), min(ys)), (max(xs), min(ys)),
+                                (max(xs), max(ys)), (min(xs), max(ys))]))
+        return out
+    part_boxes = boxes()
+
+    def touched(p, cut):
+        if cut is None or cut.is_empty:
+            return False
+        for o in cell.shapes:
+            if o is p or o.layer != p.layer:
+                continue
+            g = body(o.points, o.width) if isinstance(o, _Path) else (
+                _SP(o.points).buffer(0) if len(getattr(o, "points", []) or []) >= 3 else None)
+            if g is not None and g.intersects(cut):
+                return True
+        return any(b.intersects(cut) for b in part_boxes)
+
+    n = 0
+    for p in [sh for sh in cell.shapes if isinstance(sh, _Path)]:
+        w = max(int(p.width), 1)
+        again = True
+        while again:
+            again = False
+            pts = clean(p.points)
+            for i in range(1, len(pts) - 2):
+                a, b, c, d = pts[i - 1], pts[i], pts[i + 1], pts[i + 2]
+                jog = abs(c[0] - b[0]) + abs(c[1] - b[1])
+                if not (0 < jog <= w):
+                    continue
+                if a[0] == b[0] and c[0] == d[0] and b[1] == c[1]:       # vertical legs
+                    s1, s3 = b[1] - a[1], d[1] - c[1]
+                    if s1 * s3 >= 0:
+                        continue                                       # not a U
+                    back = min(abs(s1), abs(s3))
+                    if back <= w:
+                        continue
+                    if abs(s3) >= abs(s1):
+                        mid = (c[0], a[1])
+                    else:
+                        mid = (b[0], d[1])
+                elif a[1] == b[1] and c[1] == d[1] and b[0] == c[0]:     # horizontal legs
+                    s1, s3 = b[0] - a[0], d[0] - c[0]
+                    if s1 * s3 >= 0:
+                        continue
+                    back = min(abs(s1), abs(s3))
+                    if back <= w:
+                        continue
+                    if abs(s3) >= abs(s1):
+                        mid = (a[0], c[1])
+                    else:
+                        mid = (d[0], b[1])
+                else:
+                    continue
+                newp = clean(pts[:i] + [mid] + pts[i + 2:])
+                cut = body(pts, w).difference(body(newp, w)).buffer(-1)
+                if touched(p, cut):
+                    continue
+                p.points = newp
+                n += 1
+                again = True
+                break
+    return {"hairpins": n, "joined": joined}
