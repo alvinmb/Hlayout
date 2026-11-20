@@ -1713,9 +1713,16 @@ class LayoutCanvas(tk.Canvas):
             self._after_edit()
             return
         moved = self._drag_start_mouse is not None
+        snap = self._drag_snapshot
         self._drag_start_mouse = None
         self._drag_snapshot = None
-        if moved and any(a[0] == "shape" for a in (getattr(self, "_edge_attached", None) or [])):
+        # only a segment that really moved has moved its vias -- a click
+        # (a touch, no movement) must not set off the dielectric refill
+        sel = self.selected[1] if self.selected else None
+        shifted = (isinstance(snap, list) and sel is not None and hasattr(sel, "points")
+                   and [tuple(p) for p in sel.points] != [tuple(p) for p in snap])
+        if moved and shifted and any(a[0] == "shape"
+                                     for a in (getattr(self, "_edge_attached", None) or [])):
             self._vias_moved()
         self._edge_attached = None
         if moved and self.draw_mode == "select" and self.selected is not None:

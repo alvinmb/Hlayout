@@ -2036,3 +2036,32 @@ def test_edit_selected_locks_an_io_pad():
         assert pad.points == start
     finally:
         app.destroy()
+
+
+def test_clicking_a_track_without_moving_it_does_not_refill_the_dielectric():
+    app = _make_app()
+    try:
+        calls = []
+        app.canvas.on_vias_moved = lambda: calls.append(1)
+        top = app.session.library.cells["TOP"]
+        path = top.add_path(3, [(0, 0), (2000, 0), (2000, 2000)], width=200)
+        app.canvas.selected = ("shape", path)
+        # as if the edge was grabbed with a via attached, then released in place
+        app.canvas._drag_start_mouse = (1000, 0)
+        app.canvas._drag_snapshot = list(path.points)
+        app.canvas._edge_attached = [("shape", object())]
+
+        class E:
+            x = y = 0
+        app.canvas._on_release(E())
+        app.update()
+        assert calls == [] and getattr(app.canvas, "_via_fill_job", None) is None
+        # a real move does schedule the refill
+        app.canvas._drag_start_mouse = (1000, 0)
+        app.canvas._drag_snapshot = list(path.points)
+        app.canvas._edge_attached = [("shape", object())]
+        path.points = [(0, 500), (2000, 500), (2000, 2000)]
+        app.canvas._on_release(E())
+        assert getattr(app.canvas, "_via_fill_job", None) is not None
+    finally:
+        app.destroy()
