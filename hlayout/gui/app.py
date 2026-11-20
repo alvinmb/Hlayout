@@ -3219,9 +3219,14 @@ class App(tk.Tk):
             diel = int(load_dielectric_rules(self.session.library)["layer"])
         except Exception:
             return
-        if cell is None or diel < 0 or not any(
-                s.layer == diel and getattr(s, "datatype", 0) == self.session.DIELECTRIC_FILL_DATATYPE
-                for s in cell.shapes):
+        if cell is None or diel < 0:
+            return
+        if not self.session._has_full_dielectric(cell, diel):
+            # no fill, or the router's local crossover strips: regenerating
+            # would flood the substrate with a full sheet -- leave them
+            if any(s.layer == diel for s in cell.shapes):
+                self.status.set("via moved -- local dielectric strips left as they are "
+                                "(re-route, or check the strip at that via)")
             return
         self.status.set("via moved -- regenerating the dielectric...")
         self.update_idletasks()

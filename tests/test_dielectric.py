@@ -220,3 +220,21 @@ def test_fill_without_a_boundary_or_pads_never_leaves_the_substrate():
     s.generate_dielectric(layer=DIE, margin=1000)
     x0, y0, x1, y1 = _extent(s)
     assert x0 >= -10000 and y0 >= -10000 and x1 <= 10000 and y1 <= 10000
+
+
+def test_local_crossover_strips_are_not_a_full_dielectric_sheet():
+    """Moving a via regenerates a full dielectric sheet -- but the router's
+    local crossover strips must be left alone, not flooded over."""
+    from hlayout.scripting.api import Session
+    from hlayout.core import Library
+    lib = Library("D")
+    s = Session(lib)
+    s.new_cell("TOP")
+    cell = lib.cells["TOP"]
+    cell.add_rectangle(57, 0, 0, 20000, 10000)                       # substrate
+    fill = s.DIELECTRIC_FILL_DATATYPE
+    assert not s._has_full_dielectric(cell, 4)                       # no fill
+    cell.add_polygon(4, [(1000, 1000), (2000, 1000), (2000, 3000), (1000, 3000)], datatype=fill)
+    assert not s._has_full_dielectric(cell, 4)                       # a local strip
+    cell.add_polygon(4, [(0, 0), (20000, 0), (20000, 9000), (0, 9000)], datatype=fill)
+    assert s._has_full_dielectric(cell, 4)                           # a sheet

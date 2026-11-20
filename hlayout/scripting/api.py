@@ -3393,6 +3393,36 @@ class Session:
     #: datatype 1; clear_dielectric() removes only datatype 1.
     DIELECTRIC_FILL_DATATYPE = 1
 
+    def _has_full_dielectric(self, cell, diel) -> bool:
+        """True when ``cell``'s dielectric fill on layer ``diel`` is a full
+        sheet (generate_dielectric's), so an edit that moves a via should
+        regenerate it. False for no fill, and for the router's local
+        crossover strips: regenerating those would flood the substrate with
+        a full sheet. Full = there is fill input (datatype 0) on the layer,
+        or the fill covers at least half the substrate."""
+        fill = [sh for sh in cell.shapes if sh.layer == diel
+                and getattr(sh, "datatype", 0) == self.DIELECTRIC_FILL_DATATYPE]
+        if not fill:
+            return False
+        if any(sh.layer == diel and getattr(sh, "datatype", 0) == 0 for sh in cell.shapes):
+            return True
+        from shapely.geometry import Polygon as _SP
+        area = 0.0
+        for sh in fill:
+            try:
+                area += abs(_SP(sh.points).area)
+            except Exception:
+                pass
+        try:
+            sub = self._substrate_box(cell)
+            whole = sub.area if sub is not None else 0.0
+        except Exception:
+            whole = 0.0
+        if whole <= 0:
+            bb = self.library.cell_bbox(cell.name)
+            whole = (bb[2] - bb[0]) * (bb[3] - bb[1]) if bb else 0.0
+        return whole > 0 and area >= 0.5 * whole
+
     def generate_dielectric(self, layer=None, keepout_layers=None,
                              clearance=None, margin=None,
                              cell_name: Optional[str] = None) -> int:
@@ -5793,8 +5823,7 @@ class Session:
                          fill_datatype=fill_dt, via_size=vspec["pad"], via_margin=margin,
                          make_via=make_via, remove_via=remove_via, progress=progress,
                          pad_nets=load_net_names(self.library) or None)
-            if res["tracks"] and diel >= 0 and any(
-                    s.layer == diel and getattr(s, "datatype", 0) == fill_dt for s in cell.shapes):
+            if res["tracks"] and diel >= 0 and self._has_full_dielectric(cell, diel):
                 try:
                     self.generate_dielectric(cell_name=name)
                 except Exception:
@@ -5954,8 +5983,7 @@ class Session:
                     hw = sig["window"] / 2.0
                     vc.add_rectangle(diel, -hw, -hw, hw, hw)
                 rebuilt.add(vname)
-            if diel >= 0 and any(sh.layer == diel and getattr(sh, "datatype", 0) ==
-                                 self.DIELECTRIC_FILL_DATATYPE for sh in cell.shapes):
+            if diel >= 0 and self._has_full_dielectric(cell, diel):
                 try:
                     self.generate_dielectric(cell_name=name)
                 except Exception:
@@ -5995,9 +6023,7 @@ class Session:
                 diel = int(load_dielectric_rules(self.library)["layer"])
             except Exception:
                 diel = -1
-            if r["pads"] and diel >= 0 and any(
-                    s.layer == diel and getattr(s, "datatype", 0) == self.DIELECTRIC_FILL_DATATYPE
-                    for s in cell.shapes):
+            if r["pads"] and diel >= 0 and self._has_full_dielectric(cell, diel):
                 try:
                     self.generate_dielectric(cell_name=r["cell"])
                 except Exception:
@@ -6055,9 +6081,7 @@ class Session:
             except Exception:
                 diel = -1
             cell = self.library.get_cell(r["cell"])
-            if r["fingers"] and diel >= 0 and any(
-                    s.layer == diel and getattr(s, "datatype", 0) == self.DIELECTRIC_FILL_DATATYPE
-                    for s in cell.shapes):
+            if r["fingers"] and diel >= 0 and self._has_full_dielectric(cell, diel):
                 try:
                     self.generate_dielectric(cell_name=r["cell"])
                 except Exception:
@@ -6142,8 +6166,7 @@ class Session:
                 diel = int(load_dielectric_rules(self.library)["layer"])
             except Exception:
                 diel = -1
-            if diel >= 0 and any(s.layer == diel and getattr(s, "datatype", 0) ==
-                                 self.DIELECTRIC_FILL_DATATYPE for s in cell.shapes):
+            if diel >= 0 and self._has_full_dielectric(cell, diel):
                 try:
                     self.generate_dielectric(cell_name=p["cell"])
                 except Exception:
@@ -6559,9 +6582,7 @@ class Session:
                 diel = int(load_dielectric_rules(self.library)["layer"])
             except Exception:
                 diel = -1
-            if res["vias"] and diel >= 0 and any(
-                    s.layer == diel and getattr(s, "datatype", 0) == self.DIELECTRIC_FILL_DATATYPE
-                    for s in cell.shapes):
+            if res["vias"] and diel >= 0 and self._has_full_dielectric(cell, diel):
                 try:
                     self.generate_dielectric(cell_name=name)
                 except Exception:
