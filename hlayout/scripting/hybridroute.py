@@ -52,7 +52,12 @@ DEFAULTS = {"max_jumpers": 0, "jumper_cost": 50.0, "crossover_cost": 10.0, "grid
             "under_chips": False,
             # PathFinder, two conductors: the 2nd conductor a full routing
             # layer under a dielectric sheet, joined by vias (not local strips)
-            "full_dielectric": False}
+            "full_dielectric": False,
+            # after a PathFinder route with local crossovers: re-route each
+            # net that has one with crossovers priced out, and keep the
+            # result if it routes on the 1st conductor alone for less
+            # (xover_cleanup.remove_needless_crossovers)
+            "drop_needless_crossovers": True}
 
 
 def layers_for(session, rules=None) -> int:
@@ -1417,6 +1422,20 @@ def hybrid_route(session, cell_name: Optional[str] = None, layers: Optional[int]
         st["cleanup"] = finish(session, mapping["cell"], shorten, dejog,
                                design["routing"]["orthogonal"], via_optimize, layers)
     st["kept"] = mapping.get("kept") or {}
+
+    def needless(result):
+        # a crossover the finished routing no longer needs: re-route its net
+        # without one (local crossovers only; full dielectric = vias)
+        if engine == "pathfinder" and int(layers) >= 2 and \
+                H.get("drop_needless_crossovers", True) and \
+                not mapping.get("full_dielectric"):
+            from .xover_cleanup import remove_needless_crossovers
+            try:
+                result["needless_crossovers"] = remove_needless_crossovers(
+                    session, mapping["cell"], on_line=on_line)
+            except Exception as e:
+                result["needless_crossovers"] = {"error": str(e)}
+        return result
     # move unlocked parts to finish what PathFinder left open (best kept)
     np_ = int(H.get("nudge_passes", 3) if nudge_passes is None else nudge_passes)
     if engine == "pathfinder" and np_ > 0 and st.get("unrouted"):
@@ -1427,8 +1446,8 @@ def hybrid_route(session, cell_name: Optional[str] = None, layers: Optional[int]
         best = res["best"]
         best["nudge"] = {"moves": res["moves"], "log": res["log"]}
         best["kept"] = st["kept"]
-        return best
-    return st
+        return needless(best)
+    return needless(st)
 
 
 #: Auto engine: SLI crossings per connection from which a board without

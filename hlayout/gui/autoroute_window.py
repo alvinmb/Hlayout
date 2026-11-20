@@ -213,6 +213,9 @@ class AutorouteWindow(tk.Toplevel):
         self.run_btn.pack(side="left")
         self.stop_btn = ttk.Button(b, text="Stop", command=self.stop, state="disabled")
         self.stop_btn.pack(side="left", padx=4)
+        ttk.Button(b, text="Remove Needless Crossovers",
+                   command=lambda: self._drop_needless(self.session.current_cell_name,
+                                                       force=True)).pack(side="left", padx=4)
         ttk.Button(b, text="Close", command=self.close).pack(side="right")
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.reload()
@@ -605,6 +608,7 @@ class AutorouteWindow(tk.Toplevel):
                    best["routed"]["design"]["rules"]["conductor"]["minSpaceUm"])
             self._nudge_report(best["n"], best["conns"])
             self.app.refresh_all()
+            self._drop_needless(cell, mapping)
             return
         if best is not None:
             for r, (dx, dy) in N["last"].items():
@@ -616,6 +620,7 @@ class AutorouteWindow(tk.Toplevel):
         if not st.get("unrouted") or N["pass"] >= passes or passes <= 0:
             if N["pass"]:
                 self._nudge_report(n, N["best"]["conns"])
+            self._drop_needless(cell, mapping)
             return
         traces = [(t["net"], float(t["widthUm"]), [(q["x"], q["y"]) for q in t["points"]])
                   for t in routed.get("traces") or []]
@@ -624,6 +629,7 @@ class AutorouteWindow(tk.Toplevel):
                          locked=s.locked_parts(cell), max_move=cap, traces=traces)
         except Exception as e:
             self._say(f"nudge: {e}")
+            self._drop_needless(cell, mapping)
             return
         moves = {}
         for r, (dx, dy) in pl["moves"].items():
@@ -636,6 +642,7 @@ class AutorouteWindow(tk.Toplevel):
             self._say("nudge: no unlocked part can move to help -- stopping")
             if N["pass"]:
                 self._nudge_report(n, N["best"]["conns"])
+            self._drop_needless(cell, mapping)
             return
         N["pass"] += 1
         N["last"] = moves
@@ -650,6 +657,41 @@ class AutorouteWindow(tk.Toplevel):
             self.run()
         finally:
             self._nudging = False
+
+    def _drop_needless(self, cell, mapping=None, force=False):
+        """The last step of a PathFinder route with local crossovers (Router
+        setting drop_needless_crossovers, on by default), or the Remove
+        Needless Crossovers button (``force``): re-route each net that has a
+        crossover with crossovers priced out, keeping the result where it
+        routes on the 1st conductor alone for less (one undo step)."""
+        from ..scripting import hybridroute as H
+        s = self.session
+        own = H.load_settings(s.library)
+        if not force and (not own.get("drop_needless_crossovers", True)
+                          or (mapping or {}).get("full_dielectric")):
+            return
+        self._say("checking whether each crossover is still needed ...")
+        self.update_idletasks()
+        try:
+            r = s.remove_needless_crossovers(cell_name=cell, on_line=self._say)
+        except Exception as e:
+            self._say(f"crossover check failed: {e}")
+            return
+        if r.get("skipped"):
+            self._say(f"crossover check: {r['skipped']}")
+            return
+        gone = sum(x["crossovers"] for x in r["removed"])
+        txt = (f"\nNeedless crossovers: {gone} removed ("
+               + ", ".join(f"{x['net']} -{x['saved_um'] / 1000:.1f} mm" for x in r["removed"])
+               + f"); {len(r['kept'])} net(s) still need theirs."
+               if gone else
+               f"\nCrossovers: all {r['crossovers']} still needed.")
+        self._say(txt.strip())
+        try:
+            self.result.config(text=self.result.cget("text") + txt)
+        except Exception:
+            pass
+        self.app.refresh_all()
 
     def _nudge_report(self, n, conns):
         tot = getattr(self, "_nudge", {}).get("total") or {}

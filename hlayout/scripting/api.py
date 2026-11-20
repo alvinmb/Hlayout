@@ -3423,6 +3423,24 @@ class Session:
             whole = (bb[2] - bb[0]) * (bb[3] - bb[1]) if bb else 0.0
         return whole > 0 and area >= 0.5 * whole
 
+    def remove_needless_crossovers(self, cell_name: Optional[str] = None, on_line=None,
+                                   time_budget: float = 60.0) -> dict:
+        """Take out the crossovers the routing no longer needs: each net with
+        a local crossover is re-routed by PathFinder with crossovers priced
+        out, every other net kept as it is, and the result is kept only if the
+        net then routes on the 1st conductor alone, still reaches every pad in
+        one piece, adds no short and costs less (COND2 track x2.5 and 3 mm a
+        via pair). Autoroute runs this last (Router setting
+        drop_needless_crossovers). One undo step. Returns {"nets",
+        "crossovers", "removed": [{"net", "crossovers", "saved_um"}], "kept":
+        [{"net", "why"}]}. See hlayout.scripting.xover_cleanup."""
+        from .xover_cleanup import remove_needless_crossovers as _rnx
+        name = cell_name or self.current_cell_name
+        with self._batch():
+            r = _rnx(self, name, time_budget=time_budget, on_line=on_line)
+        self._notify()
+        return r
+
     def generate_dielectric(self, layer=None, keepout_layers=None,
                              clearance=None, margin=None,
                              cell_name: Optional[str] = None) -> int:
