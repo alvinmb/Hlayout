@@ -3177,8 +3177,10 @@ class LayoutCanvas(tk.Canvas):
         """Show markers on the canvas. `markers` is a list of dicts with
         "x", "y" (DBU, in `cell_name`'s coordinates), "kind" (a key of
         ISSUE_MARKER_COLORS), optional "label" and "active" (bool -- the
-        one the user picked, drawn larger with its label). Markers only
-        draw while the canvas shows `cell_name` (default: current)."""
+        one the user picked, drawn larger with its label), optional
+        "color" (overrides the kind's colour) and "points" (an outline to
+        draw too, e.g. a DRC violation's polygon). Markers only draw
+        while the canvas shows `cell_name` (default: current)."""
         self.issue_markers = list(markers)
         self.issue_marker_cell = cell_name or self.cell_name
         self.delete("issue_marker")
@@ -3194,17 +3196,31 @@ class LayoutCanvas(tk.Canvas):
             return
         tag = "issue_marker"
         actives = []
+
+        def colour(m):
+            return m.get("color") or self.ISSUE_MARKER_COLORS.get(m.get("kind"), "#ff3b30")
+
+        def outline(m, width):
+            pts = m.get("points") or []
+            if len(pts) < 2:
+                return
+            flat = []
+            for x, y in list(pts) + [pts[0]]:
+                flat.extend(self.to_px(x, y))
+            self.create_line(*flat, fill=colour(m), width=width, tags=tag)
         for m in self.issue_markers:
             if m.get("active"):
                 actives.append(m)
                 continue
             px, py = self.to_px(m["x"], m["y"])
-            col = self.ISSUE_MARKER_COLORS.get(m.get("kind"), "#ff3b30")
+            col = colour(m)
+            outline(m, 2)
             r = 6
             self.create_oval(px - r, py - r, px + r, py + r, outline=col, width=2, tags=tag)
         for m in actives:   # drawn last so they sit on top
             px, py = self.to_px(m["x"], m["y"])
-            col = self.ISSUE_MARKER_COLORS.get(m.get("kind"), "#ff3b30")
+            col = colour(m)
+            outline(m, 3)
             r, arm = 12, 22
             self.create_oval(px - r, py - r, px + r, py + r, outline=col, width=3, tags=tag)
             for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):

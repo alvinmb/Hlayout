@@ -314,6 +314,7 @@ class DrcWindow(tk.Toplevel):
         self._build()
         self._refresh_rules()
         self.bind("<Escape>", lambda e: self.destroy())
+        self.bind("<Destroy>", self._on_destroy, add="+")
 
     def _build(self):
         toolbar = ttk.Frame(self, padding=6)
@@ -371,6 +372,17 @@ class DrcWindow(tk.Toplevel):
             self.viol_table.heading(col, text=heading)
             self.viol_table.column(col, width=width, anchor="w")
         self.viol_table.pack(fill="both", expand=True, padx=4, pady=4)
+        self.viol_table.bind("<<TreeviewSelect>>", lambda e: self._show_selected())
+        self.viol_table.bind("<Double-Button-1>", lambda e: self._show_selected(zoom=True))
+        nav = ttk.Frame(bottom)
+        nav.pack(fill="x", padx=4, pady=(0, 4))
+        ttk.Label(nav, text="Click a violation to zoom to it on the layout.",
+                  foreground="#8b949e").pack(side="left")
+        ttk.Button(nav, text="Clear Markers", command=self._clear_markers).pack(side="right", padx=2)
+        ttk.Button(nav, text="Show All", command=self._show_all).pack(side="right", padx=2)
+        ttk.Button(nav, text="Next \u25b6", command=lambda: self._step(1)).pack(side="right", padx=2)
+        ttk.Button(nav, text="\u25c0 Previous", command=lambda: self._step(-1)).pack(
+            side="right", padx=2)
         body.add(bottom, weight=2)
 
         status = ttk.Frame(self, padding=(6, 3))
@@ -498,10 +510,106 @@ class DrcWindow(tk.Toplevel):
                 tags=self._row_tag(self.viol_table, v.rule.color))
         if error_layer is not None:
             self.app.refresh_all()
+        self._put_markers()
         if self.violations:
-            self.status_var.set(f"DRC: {len(self.violations)} violation(s) found")
+            self.status_var.set(f"DRC: {len(self.violations)} violation(s) found -- "
+                                "click one to zoom to it")
+            self.viol_table.selection_set("0")
+            self.viol_table.focus("0")
         else:
             self.status_var.set("DRC: no violations found")
+
+    # -- showing violations on the layout ----------------------------------
+    #: smallest area (um) a violation is zoomed to, so a tiny one has context
+    SHOW_MIN_UM = 1500.0
+
+    def _canvas(self):
+        return getattr(self.app, "canvas", None) if self.app is not None else None
+
+    def _marker(self, k, active=False):
+        v = self.violations[k]
+        x0, y0, x1, y1 = v.bbox()
+        m = {"x": (x0 + x1) / 2.0, "y": (y0 + y1) / 2.0, "kind": "open",
+             "color": v.rule.color or None, "points": list(v.points)}
+        if active:
+            m["active"] = True
+            m["label"] = f"{k + 1}/{len(self.violations)}  {self._violation_message(v)}"
+        return m
+
+    def _put_markers(self, active=None):
+        """Every violation in the shown cell drawn on the layout (its
+        outline in its rule's colour); ``active`` (an index) the picked one."""
+        cv = self._canvas()
+        if cv is None:
+            return
+        if not self.violations:
+            cv.clear_issue_markers()
+            return
+        cell = (self.violations[active].cell_name if active is not None
+                else getattr(cv, "cell_name", None))
+        ms = [self._marker(k, active=(k == active)) for k, v in enumerate(self.violations)
+              if v.cell_name == cell]
+        cv.set_issue_markers(ms, cell_name=cell)
+
+    def _show_selected(self, zoom=True):
+        sel = self.viol_table.selection()
+        if not sel:
+            return
+        k = int(sel[0])
+        if not (0 <= k < len(self.violations)):
+            return
+        v = self.violations[k]
+        cv = self._canvas()
+        if cv is None:
+            return
+        if getattr(cv, "cell_name", None) != v.cell_name:
+            # the violation is in another cell: show that cell
+            try:
+                self.app.session.use_cell(v.cell_name)
+                cv.set_cell(v.cell_name)
+                if hasattr(self.app, "cell_var"):
+                    self.app.cell_var.set(v.cell_name)
+            except Exception:
+                pass
+        self._put_markers(active=k)
+        x0, y0, x1, y1 = v.bbox()
+        if zoom:
+            cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+            half = max(x1 - x0, y1 - y0, self.SHOW_MIN_UM) * 0.75
+            cv.zoom_to_window(cx - half, cy - half, cx + half, cy + half)
+        self.status_var.set(f"Violation {k + 1} of {len(self.violations)}: "
+                            f"{self._violation_message(v)}  (in {v.cell_name}, at "
+                            f"{(x0 + x1) / 2000.0:.3f}, {(y0 + y1) / 2000.0:.3f} mm)")
+
+    def _step(self, d):
+        if not self.violations:
+            return
+        sel = self.viol_table.selection()
+        k = (int(sel[0]) + d) % len(self.violations) if sel else 0
+        self.viol_table.selection_set(str(k))
+        self.viol_table.focus(str(k))
+        self.viol_table.see(str(k))
+
+    def _show_all(self):
+        cv = self._canvas()
+        if cv is None:
+            return
+        self.viol_table.selection_remove(*self.viol_table.selection())
+        self._put_markers()
+        cv.fit_view()
+
+    def _clear_markers(self):
+        cv = self._canvas()
+        if cv is not None:
+            cv.clear_issue_markers()
+            cv.redraw()
+
+    def _on_destroy(self, event):
+        if event.widget is self:
+            try:
+                self._clear_markers()
+            except Exception:
+                pass
 
     def _violation_message(self, v):
         """GUI-facing version of DrcViolation.message: the underlying

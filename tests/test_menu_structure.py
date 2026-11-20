@@ -2065,3 +2065,41 @@ def test_clicking_a_track_without_moving_it_does_not_refill_the_dielectric():
         assert getattr(app.canvas, "_via_fill_job", None) is not None
     finally:
         app.destroy()
+
+
+def test_drc_violations_are_shown_on_the_layout():
+    from hlayout.core.drc import DrcRule
+    from hlayout.gui.drc_window import open_drc_window
+    app = _make_app()
+    try:
+        top = app.session.library.cells["TOP"]
+        top.add_rectangle(3, 0, 0, 1000, 1000)
+        top.add_rectangle(3, 1050, 0, 2000, 1000)            # 50 um apart
+        top.add_rectangle(3, 20000, 0, 21000, 1000)
+        top.add_rectangle(3, 21080, 0, 22000, 1000)          # 80 um apart
+        app.canvas.fit_view()
+        win = open_drc_window(app)
+        win.rules = [DrcRule("MIN_SPACE", layer_a=3, value=200, name="SP", color="#ff00ff")]
+        win.mark_var.set(False)
+        win._run_drc()
+        assert len(win.violations) == 2
+        ms = app.canvas.issue_markers
+        assert len(ms) == 2 and all(m["color"] == "#ff00ff" and m["points"] for m in ms)
+        win.viol_table.selection_set("1")
+        win._show_selected()
+        active = [m for m in app.canvas.issue_markers if m.get("active")]
+        assert len(active) == 1 and "2/2" in active[0]["label"]
+        # the view is zoomed onto violation 2 (x ~ 21 mm)
+        px, _py = app.canvas.to_px(active[0]["x"], active[0]["y"])
+        assert 0 < px < app.canvas.winfo_width()
+        x_left, _ = app.canvas.to_dbu(0, 0)
+        assert x_left > 10000
+        win._step(1)                                       # wraps round to the first
+        app.update()
+        win._show_selected()
+        assert [m for m in app.canvas.issue_markers if m.get("active")][0]["label"].startswith("1/2")
+        win.destroy()
+        app.update()
+        assert app.canvas.issue_markers == []
+    finally:
+        app.destroy()
