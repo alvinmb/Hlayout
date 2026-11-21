@@ -60,7 +60,19 @@ class ViewWindow(tk.Toplevel):
 
 
 
-class App(HelpMixin, MenuBarsMixin, HybridCommandsMixin, ExportsMixin, LibraryDialogsMixin, SetupDialogsMixin, WizardsMixin, tk.Tk):
+# App's methods by area: the window itself (layout, canvas commits, file
+# open / save / autosave, undo, cell lists, properties) is below; the rest
+# lives in the app_*.py mixins it inherits -- each one's methods are App's.
+class App(
+    HelpMixin,            # app_help: About, user manual, command reference
+    MenuBarsMixin,        # app_menubars: menu bar, toolbars, context bar
+    HybridCommandsMixin,  # app_hybrid: hybrid commands and canvas tools
+    ExportsMixin,         # app_exports: FreeCAD, pick-and-place, archive, mask ops
+    LibraryDialogsMixin,  # app_library_dialogs: attached libraries, library cells
+    SetupDialogsMixin,    # app_setup_dialogs: Technology Properties and setup
+    WizardsMixin,         # app_wizards: via / pad / chip wizards
+    tk.Tk,
+):
     # The Layers/Console panel keeps this fixed pixel width, anchored to
     # the right edge of the window (see _build_body). The canvas gets
     # everything else. 600px was much wider than the panel's own content
