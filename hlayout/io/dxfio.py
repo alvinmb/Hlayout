@@ -80,13 +80,13 @@ Format conventions:
     at the full 256-colour table (which isn't a simple formula).
 """
 
-import math
 import os
 import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from ..core.errors import CellError, GeometryError
+from ..core.hierarchy import chain_transform
 from ..core.layers import NUM_LAYERS
 from ..core.library import Library, _transform_bbox
 from ..core.maskops import _close_holes, _require_shapely, layer_to_shapely_flattened
@@ -196,23 +196,9 @@ def _flatten_texts_and_refdes(library: Library, cell_name: str,
             )
 
         for ref in cell.srefs + expand_arefs_to_srefs(cell.arefs):
-            theta = math.radians(ref.rotation)
-            cos_t, sin_t = math.cos(theta), math.sin(theta)
             mag = ref.magnification
-            ox, oy = ref.origin
             xr = ref.x_reflection
-            parent = transform
-
-            def child_transform(pt, cos_t=cos_t, sin_t=sin_t, mag=mag, ox=ox, oy=oy,
-                                 xr=xr, parent=parent):
-                x, y = pt
-                if xr:
-                    y = -y
-                x *= mag
-                y *= mag
-                rx = x * cos_t - y * sin_t
-                ry = x * sin_t + y * cos_t
-                return parent((rx + ox, ry + oy))
+            child_transform = chain_transform(transform, ref)
 
             if (ref.label and refdes_layer is not None and refdes_layer >= 0
                     and layer_ok(refdes_layer)):

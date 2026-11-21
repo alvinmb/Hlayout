@@ -44,7 +44,9 @@ operate on for a design built that way.
 
 import math
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Tuple
+from typing import List, Optional, Tuple
+
+from .hierarchy import sref_transform
 
 from .errors import GeometryError
 from .shapes import (
@@ -132,24 +134,7 @@ def layer_to_shapely(shapes):
     return unary_union(geoms)
 
 
-def _sref_point_transform(ref) -> Callable[[Tuple[float, float]], Tuple[float, float]]:
-    """The same point transform hlayout.gui.canvas uses to draw a
-    placed cell instance -- mirror, then scale by magnification, then
-    rotate, then translate to the instance's origin."""
-    theta = math.radians(ref.rotation)
-    cos_t, sin_t = math.cos(theta), math.sin(theta)
-    mag = ref.magnification
-    ox, oy = ref.origin
-
-    def transform(pt):
-        x, y = pt
-        if ref.x_reflection:
-            y = -y
-        x *= mag
-        y *= mag
-        return (x * cos_t - y * sin_t + ox, x * sin_t + y * cos_t + oy)
-
-    return transform
+_sref_point_transform = sref_transform   # (kept: drc/dejog import this name)
 
 
 def _compose_transforms(outer, inner):

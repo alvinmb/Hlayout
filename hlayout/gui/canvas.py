@@ -18,6 +18,7 @@ from ..core.shapes import (ARef, CIRCLE_SEGMENT_CHOICES, MAX_PATH_POINTS, MAX_PO
                            PathCap, Polygon, Rectangle, SRef, Text)
 from ..core.units import DBU_MM, dbu_to_mm, mm_to_dbu
 from . import dialogs
+from ..core.hierarchy import sref_transform
 from ..core.refdes import is_connector_refdes, refdes_pin1_offset
 from ..io.techfile import load_bond_rules, load_dielectric_rules, load_refdes_annotation_layer
 from .layer_util import layer_label as _layer_label
@@ -3653,20 +3654,7 @@ class LayoutCanvas(tk.Canvas):
         """Return a function mapping a point in `ref`'s cell to the
         parent cell's coordinates (mirror, then scale, then rotate, then
         translate -- GDSII SREF order)."""
-        theta = math.radians(ref.rotation)
-        cos_t, sin_t = math.cos(theta), math.sin(theta)
-        mag = ref.magnification
-        ox, oy = ref.origin
-
-        def transform(pt):
-            x, y = pt
-            if ref.x_reflection:
-                y = -y
-            x *= mag
-            y *= mag
-            return (x * cos_t - y * sin_t + ox, x * sin_t + y * cos_t + oy)
-
-        return transform
+        return sref_transform(ref)
 
     @staticmethod
     def _parent_delta_to_local(ref: SRef, dx, dy):

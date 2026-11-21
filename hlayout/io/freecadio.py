@@ -37,6 +37,7 @@ import os
 from typing import Optional
 
 from ..core.errors import LayoutError
+from ..core.hierarchy import chain_transform
 from ..core.library import Library
 from ..core.maskops import _require_shapely, layer_to_shapely_flattened
 from ..core.shapes import Path, expand_arefs_to_srefs
@@ -232,23 +233,8 @@ def _walk_instances(library, cell_name, film_layers, comp_models):
             return
         cell = library.cells[name]
         for ref in list(cell.srefs) + expand_arefs_to_srefs(cell.arefs):
-            theta = math.radians(ref.rotation)
-            cos_t, sin_t = math.cos(theta), math.sin(theta)
-            mag = ref.magnification
-            ox, oy = ref.origin
             xr = ref.x_reflection
-            parent = transform
-
-            def child_transform(pt, cos_t=cos_t, sin_t=sin_t, mag=mag,
-                                 ox=ox, oy=oy, xr=xr, parent=parent):
-                x, y = pt
-                if xr:
-                    y = -y
-                x *= mag
-                y *= mag
-                rx = x * cos_t - y * sin_t
-                ry = x * sin_t + y * cos_t
-                return parent((rx + ox, ry + oy))
+            child_transform = chain_transform(transform, ref)
 
             child_rot = (rot_deg + (-ref.rotation if mirrored else ref.rotation)) % 360
             child_mirror = mirrored ^ xr

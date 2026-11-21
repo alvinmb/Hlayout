@@ -52,6 +52,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from ..core.errors import GeometryError
+from ..core.hierarchy import chain_transform
 from ..core.library import Library
 from ..core.shapes import Path, Polygon, Rectangle, SRef, Text, expand_arefs_to_srefs
 from ..core.units import DBU_MM
@@ -103,23 +104,8 @@ def _flatten_layer_data(library: Library, cell_name: str,
             elif isinstance(shape, Text):
                 skipped_text += 1
         for ref in cell.srefs + expand_arefs_to_srefs(cell.arefs):
-            theta = math.radians(ref.rotation)
-            cos_t, sin_t = math.cos(theta), math.sin(theta)
             mag = ref.magnification
-            ox, oy = ref.origin
-            xr = ref.x_reflection
-            parent = transform
-
-            def child_transform(pt, cos_t=cos_t, sin_t=sin_t, mag=mag, ox=ox, oy=oy,
-                                 xr=xr, parent=parent):
-                x, y = pt
-                if xr:
-                    y = -y
-                x *= mag
-                y *= mag
-                rx = x * cos_t - y * sin_t
-                ry = x * sin_t + y * cos_t
-                return parent((rx + ox, ry + oy))
+            child_transform = chain_transform(transform, ref)
 
             walk(ref.cell_name, child_transform, scale * mag, depth + 1)
 
