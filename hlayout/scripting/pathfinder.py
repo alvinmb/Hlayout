@@ -81,6 +81,20 @@ class _Grid:
         j = int(np.argmin(np.abs(self.ys - y)))
         return j * self.nx + i
 
+    def idxs(self, x, y):
+        """Every cell nearest (x, y): one, or 2 / 4 when the point lies
+        exactly between cell centres -- as a pad centre on a 50 / 100 um
+        boundary usually does. A pad is reached at any of them: idx()'s
+        arbitrary pick of one could put the pad's only way in on a row or
+        column that is walled off just outside the pad, while the row next
+        to it is free (C1.A on the op-amp: no way in at all). Any of them is
+        within half a cell of the centre, which _align_ends() takes up."""
+        dx = np.abs(self.xs - x)
+        dy = np.abs(self.ys - y)
+        ii = np.nonzero(dx <= dx.min() + 1e-6)[0]
+        jj = np.nonzero(dy <= dy.min() + 1e-6)[0]
+        return [int(j) * self.nx + int(i) for j in jj for i in ii]
+
     def xy(self, k):
         return float(self.xs[k % self.nx]), float(self.ys[k // self.nx])
 
@@ -558,7 +572,7 @@ def route(design: dict, cell: float = 100.0, iterations: int = 60,
             vc = [1.0] * G.n
         groups = [list(gr) for gr in P.groups[n]]
         tree_terms = groups.pop(0)
-        tree = [(tl(t), G.idx(*t.centre)) for t in tree_terms]
+        tree = [(tl(t), k_) for t in tree_terms for k_ in G.idxs(*t.centre)]
         cells = list(tree)
         conns, fail = [], []
         while groups:
@@ -566,18 +580,18 @@ def route(design: dict, cell: float = 100.0, iterations: int = 60,
             groups.sort(key=lambda gr: min(math.hypot(s[0] - t.centre[0], s[1] - t.centre[1])
                                            for s in starts for t in gr))
             gr = groups.pop(0)
-            targets = {(tl(t), G.idx(*t.centre)) for t in gr}
+            targets = {(tl(t), k_) for t in gr for k_ in G.idxs(*t.centre)}
             srcs = [c_ for c_ in cells if c_[0] == 0 or full]
             path = astar(n, srcs, targets, c[0], c[1], vc)
             if path is None:
                 fail.append({"net": n, "from": tree_terms[0].tid, "to": gr[0].tid})
                 tree_terms = gr                              # grow on from here
-                cells += [(tl(t), G.idx(*t.centre)) for t in gr]
+                cells += [(tl(t), k_) for t in gr for k_ in G.idxs(*t.centre)]
                 continue
             path = straighten(n, path, c[0], c[1])
             conns.append(path)
             cells += path
-            cells += [(tl(t), G.idx(*t.centre)) for t in gr]
+            cells += [(tl(t), k_) for t in gr for k_ in G.idxs(*t.centre)]
             tree_terms = tree_terms + gr
         routes[n] = {"cells": list(dict.fromkeys(cells)), "conns": conns, "fail": fail}
 
@@ -758,10 +772,13 @@ def route(design: dict, cell: float = 100.0, iterations: int = 60,
                  full=full, via_half=hc_of)
 
 
-def _align_ends(pts, centre_of):
+def _align_ends(pts, centre_of, lateral=True):
     """Line a run's ends up on the pads they reach: the end becomes the pad
     centre and its last straight leg moves onto the pad's axis (a shift of
-    under half a cell), so the track meets the pad square and centred."""
+    under half a cell), so the track meets the pad square and centred.
+    ``lateral=False``: the leg stays where it is and only its end moves
+    along it to the pad's centre line -- for when shifting the leg would
+    bring it too near other copper."""
     pts = [list(p) for p in pts]
     for end, nxt in ((0, 1), (-1, -2)):
         c = centre_of(pts[end])
@@ -769,12 +786,14 @@ def _align_ends(pts, centre_of):
             continue
         a, b = pts[end], pts[nxt]
         if abs(a[1] - b[1]) < 1e-6:                 # horizontal leg: onto y = cy
-            a[1] = b[1] = c[1]
+            if lateral:
+                a[1] = b[1] = c[1]
             a[0] = c[0]
         elif abs(a[0] - b[0]) < 1e-6:               # vertical leg: onto x = cx
-            a[0] = b[0] = c[0]
+            if lateral:
+                a[0] = b[0] = c[0]
             a[1] = c[1]
-        else:
+        elif lateral:
             a[0], a[1] = c
     return [tuple(p) for p in pts]
 
@@ -869,7 +888,8 @@ def _emit(design, P, G, routes, drop, order, stopped, t_start, say, full=False, 
 
     cell_terms = {}
     for t in P.terminals:
-        cell_terms.setdefault(G.idx(*t.centre), []).append(t)
+        for k_ in G.idxs(*t.centre):
+            cell_terms.setdefault(k_, []).append(t)
 
     # a connection grows from the net's copper so far: one that started on a
     # connection now dropped would be left floating (a dangling track that
@@ -880,7 +900,7 @@ def _emit(design, P, G, routes, drop, order, stopped, t_start, say, full=False, 
         r = routes.get(n)
         if r is None or not drop.get(n):
             continue
-        reach = {G.idx(*t.centre) for gr in P.groups[n] for t in gr}
+        reach = {k_ for gr in P.groups[n] for t in gr for k_ in G.idxs(*t.centre)}
         kept = set()
         changed = True
         while changed:
@@ -1035,13 +1055,14 @@ def _emit(design, P, G, routes, drop, order, stopped, t_start, say, full=False, 
             pending[idx] = (n, w, st, centre_of)
     say(f"straightened: {jogs_before} -> {jogs_after} points")
     for n, w, pts, centre_of in pending:
-        al = _align_ends(pts, centre_of)
-        if al != pts:
-            others = [x for x in cop if x[0] != n]
-            if _clear_of(P, n, w, al, others, P.layers[0]):
+        others = [x for x in cop if x[0] != n]
+        for lateral in (True, False):
+            al = _align_ends(pts, centre_of, lateral)
+            if al != pts and _clear_of(P, n, w, al, others, P.layers[0]):
                 cop = [x for x in cop if not (x[0] == n and (x[2], x[3]) in set(zip(pts, pts[1:])))]
                 cop += [(n, w, a, b) for a, b in zip(al, al[1:])]
                 pts = al
+                break
         traces.append({"net": n, "layer": P.layers[0], "widthUm": int(round(w)),
                        "points": [{"x": int(round(x)), "y": int(round(y))} for x, y in pts]})
     length = 0.0

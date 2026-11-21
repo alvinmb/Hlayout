@@ -322,3 +322,49 @@ def test_auto_engine_by_crossing_density(monkeypatch):
     d2, m2 = H.export_design(s2, layers=2)
     x, c = H.sli_crossings(d2)
     assert x >= 0 and c > 0
+
+
+OP_AMP = os.path.join(os.path.dirname(__file__), "data", "op_amp_routed.gds")
+
+
+def test_grid_idxs_gives_every_tied_nearest_cell():
+    class _P:
+        edge, w, h = 0.0, 1000.0, 1000.0
+    g = PF._Grid(_P(), 100.0)                 # cell centres at 50, 150, ...
+    assert len(g.idxs(155.0, 160.0)) == 1     # off the midpoints: one cell
+    assert len(g.idxs(200.0, 160.0)) == 2     # between two columns
+    assert len(g.idxs(200.0, 300.0)) == 4     # between columns and rows
+    assert g.idx(200.0, 300.0) in g.idxs(200.0, 300.0)
+
+
+@pytest.mark.skipif(not os.path.exists(OP_AMP), reason="routed op-amp fixture not present")
+def test_a_pad_whose_centre_row_is_walled_off_is_still_reached():
+    """C1.A on the op-amp: its centre lies between two grid rows, and the
+    row idx() picked is blocked just outside the pad on both sides while
+    the row next to it is free. Re-routing OUTPUT on its own left
+    Q10_3 -> C1.A open; every tied centre cell is a way in now."""
+    from hlayout.io.sidecar import load_design
+    from hlayout.io.techfile import dielectric_layer_number, load_net_names
+    from hlayout.scripting.api import Session
+    from hlayout.scripting import xover_cleanup as X
+    net = "Net-(Q10-C)"
+    s = Session(load_design(OP_AMP).library)
+    s.use_cell("TOP")
+    lib, cell = s.library, s.library.cells["TOP"]
+    la, lb = s._route_layers()
+    diel = dielectric_layer_number(lib)
+    t = s.highlight_net(net, cell_name="TOP", notify=False)
+    pins = set(t.pins)
+    tracks, contacts, strips = X._net_copper(s, cell, t, la, lb, diel)
+    for sh in tracks + contacts + strips:
+        X._remove(cell, sh)
+    others = sorted({str(v) for v in load_net_names(lib).values() if v} - {net})
+    design, mapping = H.export_design(s, "TOP", layers=2, keep_existing=True, exclude_nets=others)
+    r = PF.route(design, local_dielectric=True, cond2_keepouts=mapping.get("local_keepouts"),
+                 time_budget=60)
+    assert r["unrouted"] == []
+    H.apply_routed(s, r, mapping, remove_existing=False)
+    after = s.highlight_net(net, cell_name="TOP", notify=False)
+    assert set(after.pins) >= pins
+    assert len(X._components(after, la, lb, X._diel_union(cell, diel))) == 1
+    assert s.find_shorts(cell_name="TOP") == []
