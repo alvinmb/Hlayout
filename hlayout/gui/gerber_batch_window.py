@@ -35,12 +35,9 @@ from .fonts import section_header_font
 from ..core.errors import LayoutError
 from ..io import toolsets
 from ..io.techfile import GERBER_JOBS_KEY, GERBER_OUTPUT_DIR_KEY, GERBER_SCALE_KEY
+from .layer_util import layer_label as _layer_label
 from ..io.gerberio import (GerberExportJob, check_gerber_scale,
                            default_gerber_output_dir, resolve_out_prefix)
-
-
-def _layer_label(library, number):
-    return f"{number} ({library.layers[number].name})"
 
 
 class JobDialog(tk.Toplevel):

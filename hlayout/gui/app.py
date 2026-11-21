@@ -58,6 +58,8 @@ from .gerber_batch_window import open_gerber_batch_window
 from .maskop_window import open_maskop_batch_window
 from .resistor_designer import open_resistor_designer
 from .thermal_window import open_thermal_window
+from .layer_util import layer_choices, layer_label
+from ..core.layers import NUM_LAYERS
 from .bug_report import get_log as _bug_log, install as _install_bug_log, open_bug_report_window
 
 
@@ -1290,10 +1292,10 @@ class App(tk.Tk):
             cancel_btn()
 
     def _layer_label(self, number):
-        return f"{number}: {self.session.library.layers[number].name}"
+        return layer_label(self.session.library, number, colon=True)
 
     def _layer_choices(self):
-        return [self._layer_label(n) for n in range(64)]
+        return layer_choices(self.session.library, colon=True, count=NUM_LAYERS)
 
     def _refresh_layer_choices(self):
         if not hasattr(self, "layer_combo"):

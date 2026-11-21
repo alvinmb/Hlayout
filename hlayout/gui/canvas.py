@@ -20,6 +20,7 @@ from ..core.units import DBU_MM, dbu_to_mm, mm_to_dbu
 from . import dialogs
 from ..core.refdes import is_connector_refdes, refdes_pin1_offset
 from ..io.techfile import load_bond_rules, load_dielectric_rules, load_refdes_annotation_layer
+from .layer_util import layer_label as _layer_label
 
 # Bitmaps used to approximate the 9 stipple/fill patterns on a Tk canvas.
 # Index 0 ("solid") is drawn as a plain filled polygon (no stipple).
@@ -3965,11 +3966,6 @@ class LayoutCanvas(tk.Canvas):
             cx, cy = corner
             self.create_rectangle(cx - 3, cy - 3, cx + 3, cy + 3, fill="#ffcc00",
                                    outline="", tags="selection")
-
-
-def _layer_label(library, layer_number):
-    layer = library.layers[layer_number]
-    return f"{layer_number} ({layer.name})"
 
 
 def _cell_stamp_line(library, cell_name) -> str:

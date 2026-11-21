@@ -26,6 +26,7 @@ from ..core.errors import LayoutError
 from ..core.layers import NUM_LAYERS
 from ..core.units import dbu_to_mm, mm_to_dbu
 from ..io.techfile import load_topview_settings, save_topview_settings
+from .layer_util import layer_choices, layer_label
 
 #: stacking order shown in the table, top of the view first
 ROLE_ORDER = ("epoxy", "resistor", "conductor", "other", "substrate", "glaze", "bond")
@@ -99,10 +100,10 @@ class TopViewWindow(tk.Toplevel):
         self.geometry(f"{w}x{h}")
 
     def _layer_label(self, n):
-        return f"{n}: {self.session.library.layers[n].name}"
+        return layer_label(self.session.library, n, colon=True)
 
     def _layer_choices(self):
-        return [self._layer_label(n) for n in range(NUM_LAYERS)]
+        return layer_choices(self.session.library, colon=True, count=NUM_LAYERS)
 
     @staticmethod
     def _force_checkbox(cb, var, value):

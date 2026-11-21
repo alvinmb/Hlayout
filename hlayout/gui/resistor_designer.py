@@ -58,6 +58,7 @@ from ..io.techfile import (
     save_resistor_list,
 )
 from ..core.units import dbu_to_mm, mm_to_dbu
+from .layer_util import layer_choices, layer_label
 
 # ─────────────────────────────────────────────────────────────────────────
 # Constants (unchanged from the original tool -- pure data, no UI toolkit
@@ -688,11 +689,11 @@ class PlaceResistorDialog(tk.Toplevel):
 # ─────────────────────────────────────────────────────────────────────────
 
 def _layer_choices(library):
-    return [f"{n}: {library.layers[n].name}" for n in range(len(library.layers))]
+    return layer_choices(library, colon=True)
 
 
 def _layer_label(library, number):
-    return f"{number}: {library.layers[number].name}"
+    return layer_label(library, number, colon=True)
 
 
 def _resolve_layer_choice(library, text):

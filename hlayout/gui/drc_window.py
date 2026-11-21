@@ -39,6 +39,7 @@ from ..core.errors import LayoutError
 from ..io import toolsets
 from ..io.techfile import DRC_RULES_KEY, load_bond_rules, load_drc_rules, save_drc_rules
 from ..core.units import DBU_MM, dbu_to_mm, mm_to_dbu
+from .layer_util import layer_choices as _layer_choices, layer_label as _layer_label, parse_layer_choice as _parse_layer_choice
 
 # Default palette a new rule's colour is picked from (cycling), so
 # every rule has a visible, distinct colour from the moment it's
@@ -103,23 +104,6 @@ def bond_rules_from_setup(library, existing=()):
     """The wire-bond DRC rules from Setup > Technology Properties (Wire Bonds tab) (see
     hlayout.core.drc.bond_rules_from_settings)."""
     return bond_rules_from_settings(load_bond_rules(library), existing)
-
-
-def _layer_choices(library):
-    return [f"{n} ({library.layers[n].name})" for n in range(len(library.layers))]
-
-
-def _layer_label(library, number):
-    if number is None:
-        return ""
-    return f"{number} ({library.layers[number].name})"
-
-
-def _parse_layer_choice(text):
-    text = text.strip()
-    if not text:
-        return None
-    return int(text.split(" ", 1)[0].split(":", 1)[0])
 
 
 class RuleDialog(tk.Toplevel):

@@ -19,6 +19,7 @@ from tkinter import ttk
 
 from ..core.errors import CellError, LayoutError
 from ..core.layers import NUM_LAYERS
+from .layer_util import layer_choices, layer_label
 from ..scripting.assembly import (STANDARD_SCALES, _scale_text, guess_pin_count,
                                   load_assembly_settings, save_assembly_settings)
 
@@ -67,10 +68,10 @@ class AssemblyWindow(tk.Toplevel):
         self.geometry(f"{w}x{h}")
 
     def _layer_label(self, n):
-        return f"{n}: {self.session.library.layers[n].name}"
+        return layer_label(self.session.library, n, colon=True)
 
     def _layer_choices(self):
-        return [self._layer_label(n) for n in range(NUM_LAYERS)]
+        return layer_choices(self.session.library, colon=True, count=NUM_LAYERS)
 
     @staticmethod
     def _layer_of(text):

@@ -37,23 +37,7 @@ from ..core.maskops import BOOLEAN_MASK_OPS, MASK_OPS, MaskOpStep
 from ..core.units import DBU_MM, dbu_to_mm, mm_to_dbu
 from ..io import toolsets
 from ..io.techfile import MASK_OP_STEPS_KEY, load_mask_op_steps, save_mask_op_steps
-
-
-def _layer_choices(library):
-    return [f"{n} ({library.layers[n].name})" for n in range(len(library.layers))]
-
-
-def _layer_label(library, number):
-    if number is None:
-        return ""
-    return f"{number} ({library.layers[number].name})"
-
-
-def _parse_layer_choice(text):
-    text = text.strip()
-    if not text:
-        return None
-    return int(text.split(" ", 1)[0].split(":", 1)[0])
+from .layer_util import layer_choices as _layer_choices, layer_label as _layer_label, parse_layer_choice as _parse_layer_choice
 
 
 class StepDialog(tk.Toplevel):

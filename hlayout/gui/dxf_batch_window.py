@@ -39,10 +39,7 @@ from ..core.errors import LayoutError
 from ..io import toolsets
 from ..io.dxfio import DxfExportJob
 from ..io.techfile import DXF_JOBS_KEY
-
-
-def _layer_label(library, number):
-    return f"{number} ({library.layers[number].name})"
+from .layer_util import layer_label as _layer_label
 
 
 def _layer_result_desc(requested, written_layers):
