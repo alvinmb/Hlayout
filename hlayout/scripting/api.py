@@ -65,7 +65,22 @@ from .session_nets import NetsMixin
 from .session_thermal import ThermalMixin
 
 
-class Session(LibrariesMixin, ResistorsMixin, DrawingsMixin, BondsMixin, DielectricMixin, AutoPlaceMixin, RoutingMixin, HybridMixin, LocksMixin, NetsMixin, ThermalMixin):
+# Session's methods by area: the core (files, technology, undo, cells,
+# shapes, mask ops, DRC, exports) is below; the rest lives in the
+# session_*.py mixins it inherits -- each one's methods are Session's own.
+class Session(
+    LibrariesMixin,      # session_libraries: attached libraries, via/pad/chip cells
+    ResistorsMixin,      # session_resistors: printed resistor generation
+    DrawingsMixin,       # session_drawings: tables, drawing sheet, top views
+    BondsMixin,          # session_bonds: wire bonds
+    DielectricMixin,     # session_dielectric: dielectric fill, needless crossovers
+    AutoPlaceMixin,      # session_autoplace: Auto Place
+    RoutingMixin,        # session_routing: hybrid router, Freerouting, vias
+    HybridMixin,         # session_hybrid: bond fingers, resistor resize, I/O, header
+    LocksMixin,          # session_locks: part locks
+    NetsMixin,           # session_nets: shorts, net tracing, netlists
+    ThermalMixin,        # session_thermal: thermal analysis
+):
     # An "attached" library is a second (read-mostly) GDSII file kept
     # alongside the current design purely as a source of cells to search
     # and place — like a symbol/part library. Capped at 2 by the spec.
@@ -935,6 +950,7 @@ class Session(LibrariesMixin, ResistorsMixin, DrawingsMixin, BondsMixin, Dielect
         self.cell.remove(shape)
         self._notify()
 
+    # --- mask operations and DRC -------------------------------------------
     def mask_op(self, op: str, layer_a, result_layer, layer_b=None,
                 amount: float = 0.0, cell_names: Optional[List[str]] = None,
                 datatype: int = 0, flatten: bool = True,
@@ -1274,6 +1290,7 @@ class Session(LibrariesMixin, ResistorsMixin, DrawingsMixin, BondsMixin, Dielect
 
 
 
+    # --- SolidCraft, pick-and-place, layer remap ---------------------------
     def send_to_solidcraft(self, cell_name: Optional[str] = None, window: bool = True,
                            export: Optional[str] = None, app: Optional[str] = None,
                            on_progress=None, cancel=None) -> dict:
