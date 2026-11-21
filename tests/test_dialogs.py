@@ -212,23 +212,26 @@ def test_dialog_labels_track_ui_font_size_not_a_hardcoded_size():
 # --- Export Gerber's message specifically (the reported example) -----------
 
 def test_export_gerber_no_data_message_goes_through_dialogs_not_messagebox(monkeypatch, tmp_path):
+    # Gerber export lives in the Gerber batch window now (Quick Export).
+    from hlayout.gui import gerber_batch_window as gbw
     app = _make_app()
     try:
-        from tkinter import filedialog
-
         out_path = str(tmp_path / "out.gbr")
-        monkeypatch.setattr(filedialog, "asksaveasfilename", lambda **kw: out_path)
+        monkeypatch.setattr(gbw.filedialog, "asksaveasfilename", lambda **kw: out_path)
 
         calls = []
-        from hlayout.gui import app as app_module
-        monkeypatch.setattr(app_module.dialogs, "show_info",
+        monkeypatch.setattr(gbw.dialogs, "show_info",
                              lambda title, msg, parent=None: calls.append((title, msg)))
 
-        app.export_gerber()
+        win = gbw.GerberBatchWindow(app, app.session.library, app=app)
+        try:
+            win._quick_export()
+        finally:
+            win.destroy()
 
         assert calls
         title, msg = calls[0]
-        assert title == "Export Gerber"
+        assert title == "Quick Export"
         assert "No visible layers" in msg
     finally:
         app.destroy()

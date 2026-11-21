@@ -131,6 +131,15 @@ def remember(library: Library, keys: Iterable[str], app=None,
     return done
 
 
+def _is_full_path(p: str) -> bool:
+    """A path tied to some folder: drive-qualified ("C:..."), UNC, or
+    rooted ("/home/...", "\\out"). Checked explicitly because from
+    Python 3.13 Windows' isabs() is False for a rooted path with no
+    drive, which would let a Linux/macOS folder slip through."""
+    return bool(p) and (os.path.isabs(p) or ntpath.isabs(p) or bool(ntpath.splitdrive(p)[0])
+                        or p.startswith(("/", "\\")))
+
+
 def gerber_jobs_for_another_design(raw: str) -> str:
     """Last-used Gerber jobs, made safe to reuse in a different design:
     a job that pointed at a full path (the OTHER design's folder) keeps
@@ -139,7 +148,7 @@ def gerber_jobs_for_another_design(raw: str) -> str:
     jobs = json.loads(raw)
     for job in jobs:
         prefix = job.get("out_prefix") or ""
-        if os.path.isabs(prefix) or ntpath.isabs(prefix) or ntpath.splitdrive(prefix)[0]:
+        if _is_full_path(prefix):
             job["out_prefix"] = ntpath.basename(prefix.replace("/", "\\")) or "gerber"
     return json.dumps(jobs)
 
@@ -153,7 +162,7 @@ def dxf_jobs_for_another_design(raw: str, out_dir: Optional[str] = None) -> str:
     jobs = json.loads(raw)
     for job in jobs:
         path = job.get("path") or ""
-        if os.path.isabs(path) or ntpath.isabs(path) or ntpath.splitdrive(path)[0]:
+        if _is_full_path(path):
             name = ntpath.basename(path.replace("/", "\\")) or "export.dxf"
             job["path"] = os.path.join(out_dir, name) if out_dir else name
     return json.dumps(jobs)

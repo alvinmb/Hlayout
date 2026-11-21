@@ -17,6 +17,7 @@ batches, one per body, so a progress bar can follow them.
 send_to_solidcraft() opens SolidCraft (or uses a running one) and plays
 them.
 """
+import json
 import math
 import os
 from typing import Callable, List, Optional, Tuple
@@ -437,14 +438,27 @@ def _finish(sc, result, fin):
 LEAD_MAX_MM = 3.0
 
 
+def _inspect(sc, **kw) -> dict:
+    """inspect_design as a dict. Newer SolidCraft builds return the
+    report as JSON text (followed by a trailing note) rather than an
+    object; anything unreadable comes back as {}."""
+    info = sc.call("inspect_design", **kw)
+    if isinstance(info, str):
+        try:
+            info = json.JSONDecoder().raw_decode(info.lstrip())[0]
+        except ValueError:
+            return {}
+    return info if isinstance(info, dict) else {}
+
+
 def _model_tops(sc, inserted) -> list:
     """[(x0, y0, x1, y1, z top)] in mm, world coordinates, of the small
     bodies (pins, leads, seals) the inserted STEP models brought in --
     measured in SolidCraft, where bodies are reported in their own
     component's frame, so each is moved by its model's placement."""
-    info = sc.call("inspect_design", measure=True, sketches=False) or {}
+    info = _inspect(sc, measure=True, sketches=False)
     by_name = {}
-    for b in info.get("bodies", []) if isinstance(info, dict) else []:
+    for b in info.get("bodies", []):
         if b.get("bbox"):
             by_name.setdefault(b.get("name"), []).append(b["bbox"])
     out = []
@@ -538,8 +552,8 @@ def send_to_solidcraft(library, cell_name: str, *, app: Optional[str] = None,
             sc.execute("browser.visibility", visible=False, folder="sketches")
         except Exception:
             pass
-        info = sc.call("inspect_design", measure=False, sketches=False) or {}
+        info = _inspect(sc, measure=False, sketches=False)
         if export:
             sc.call("export", path=export)
-    return {"bodies": len(info.get("bodies", [])) if isinstance(info, dict) else None,
+    return {"bodies": len(info.get("bodies", [])),
             "batches": total, "export": export, "errors": errors, "port": port}

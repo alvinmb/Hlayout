@@ -59,7 +59,7 @@ def test_default_export_dir_reuses_an_existing_folder(tmp_path):
         app.destroy()
 
 
-def test_export_freecad_macro_writes_even_with_unmatched_components(tmp_path):
+def test_export_freecad_macro_writes_even_with_unmatched_components(tmp_path, monkeypatch):
     """File > Export to FreeCAD (3D Macro)...: an unmatched component
     (or one whose STEP file isn't built yet) must never block the
     export -- the match report is purely informational, and the file
@@ -80,6 +80,8 @@ def test_export_freecad_macro_writes_even_with_unmatched_components(tmp_path):
         app.session.sref("MYSTERY", (0, 0))
         save_layer_thickness(app.session.library, {"0": 10})
 
+        # the closing "macro written" box is modal -- nobody clicks it here
+        monkeypatch.setattr(dialogs, "show_file_written", lambda *a, **kw: None)
         shown = []
         orig = dialogs.show_scrollable_text
         dialogs.show_scrollable_text = lambda title, lines, parent, **kw: shown.append(lines)

@@ -58,10 +58,15 @@ def test_sot_package_library_can_be_attached_found_and_placed():
     assert len(s.library.cells["SOT-89"].shapes) > 0
 
 
+def _pin_pads(cell):
+    """The package's numbered land pads (on the conductor layer)."""
+    return [sh for sh in cell.shapes if isinstance(sh, Rectangle) and getattr(sh, "pin", "")]
+
+
 def test_gullwing_ic_packages_have_the_right_pin_count_numbered_1_to_n():
     lib = load_gds(OUT_GDS)
     for name, pins in GULLWING_IC_PACKAGES.items():
-        pads = [sh for sh in lib.cells[name].shapes if isinstance(sh, Rectangle) and sh.layer == 20]
+        pads = _pin_pads(lib.cells[name])
         assert len(pads) == pins, name
         assert sorted(int(p.pin) for p in pads) == list(range(1, pins + 1)), name
 
@@ -94,13 +99,14 @@ def test_gullwing_ic_body_outline_is_not_rotated_90_degrees_from_the_pins():
         ox1 = max(p[0] for p in outline.points)
         oy0 = min(p[1] for p in outline.points)
         oy1 = max(p[1] for p in outline.points)
-        pads = [sh for sh in cell.shapes if isinstance(sh, Rectangle) and sh.layer == 20]
-        pin_ys = [sum(p[1] for p in sh.points) / len(sh.points) for sh in pads]
-        pin_span_y = max(pin_ys) - min(pin_ys)
-        # the body must be at least as long, along the row (Y), as the pins
-        # actually spread, and narrower across the two rows (X) than along Y.
-        assert (oy1 - oy0) >= pin_span_y, name
-        assert (ox1 - ox0) < (oy1 - oy0), name
+        pads = _pin_pads(cell)
+        pin_xs = [sum(p[0] for p in sh.points) / len(sh.points) for sh in pads]
+        pin_span_x = max(pin_xs) - min(pin_xs)
+        # rows run along X (top/bottom, "tb"): the body must be at least as
+        # long, along the row, as the pins actually spread, and narrower
+        # across the two rows (Y) than along X.
+        assert (ox1 - ox0) >= pin_span_x, name
+        assert (oy1 - oy0) < (ox1 - ox0), name
 
 
 def test_step_parts_covers_every_package_and_writes_a_valid_macro(tmp_path):
@@ -109,14 +115,19 @@ def test_step_parts_covers_every_package_and_writes_a_valid_macro(tmp_path):
 
     parts = gen.step_parts()
     assert {p[0] for p in parts} == set(EXPECTED_PACKAGES)
-    assert all(func == "make_dip_x" for _name, func, _kwargs in parts)
+    # the 3D builder follows each package's row axis: "tb" -> make_dip
+    for name, func, _kwargs in parts:
+        rows = gen.PACKAGES[name].get("rows")
+        assert func == ("make_dip" if rows == "tb" else "make_dip_x"), name
     # a tab_pin package's tab lead width made it into the 3D lead list too
     for name, spec in gen.PACKAGES.items():
         if spec.get("tab_pin"):
             kwargs = next(k for n, _f, k in parts if n == name)
-            all_leads = kwargs["leads_neg_x"] + kwargs["leads_pos_x"]
+            axis = "y" if spec.get("rows") == "tb" else "x"
+            all_leads = kwargs[f"leads_neg_{axis}"] + kwargs[f"leads_pos_{axis}"]
             widths = sorted({w for _pos, w in all_leads})
-            assert spec["tab"][1] in widths, name
+            along_row = 0 if spec.get("rows") == "tb" else 1   # tb specs are (along, across)
+            assert spec["tab"][along_row] in widths, name
 
     path = write_step_macro(parts, str(tmp_path / "step_out"))
     text = open(path).read()

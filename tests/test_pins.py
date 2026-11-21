@@ -336,11 +336,11 @@ def test_pin_numbering_tool_reclicking_a_numbered_instance_asks_for_confirmation
 
         asked = {"called": False}
 
-        def fake_askyesno(title, message):
+        def fake_askyesno(title, message, parent=None):
             asked["called"] = True
             return False   # decline the overwrite
 
-        monkeypatch.setattr(canvas_module.messagebox, "askyesno", fake_askyesno)
+        monkeypatch.setattr(canvas_module.dialogs, "ask_yes_no", fake_askyesno)
 
         cx, cy = app.canvas.to_px(500, 500)
         app.canvas._on_click(_ev(cx, cy))
@@ -481,11 +481,11 @@ def test_pin_numbering_tool_reclicking_a_numbered_pad_asks_for_confirmation(monk
 
         asked = {}
 
-        def fake_askyesno(title, message):
+        def fake_askyesno(title, message, parent=None):
             asked["called"] = True
             return False  # decline the overwrite
 
-        monkeypatch.setattr(canvas_module.messagebox, "askyesno", fake_askyesno)
+        monkeypatch.setattr(canvas_module.dialogs, "ask_yes_no", fake_askyesno)
 
         cx, cy = 500, 500
         app.canvas._on_click(_ev(*app.canvas.to_px(cx, cy)))

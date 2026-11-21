@@ -56,6 +56,7 @@ def test_bond_rules_round_trip_through_a_full_techfile(tmp_path):
     assert load_bond_rules(lib) == {
         "layer": 6, "width": 25, "pad": 90,
         "min_length": 150, "max_length": 3500,
+        "die_pad_layers": [],
     }
     path = str(tmp_path / "t.json")
     save_techfile(lib, path)

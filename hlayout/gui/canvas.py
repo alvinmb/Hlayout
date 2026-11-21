@@ -10,13 +10,14 @@ import copy
 import math
 import tkinter as tk
 from tkinter import font as tkfont
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import simpledialog, ttk
 
 from ..core.errors import CellError, GeometryError
 from ..core.maskops import layer_to_shapely, shapely_to_polygons
 from ..core.shapes import (ARef, CIRCLE_SEGMENT_CHOICES, MAX_PATH_POINTS, MAX_POLY_POINTS, Path,
                            PathCap, Polygon, Rectangle, SRef, Text)
 from ..core.units import DBU_MM, dbu_to_mm, mm_to_dbu
+from . import dialogs
 from ..core.refdes import is_connector_refdes, refdes_pin1_offset
 from ..io.techfile import load_bond_rules, load_dielectric_rules, load_refdes_annotation_layer
 
@@ -820,10 +821,11 @@ class LayoutCanvas(tk.Canvas):
                 "instance can take a pin number) -- try another shape; Esc stops")
             return
         if shape.pin and shape.pin != self.pin_number_next:
-            if not messagebox.askyesno(
+            if not dialogs.ask_yes_no(
                 "Renumber pad?",
                 f"This pad is already pin {shape.pin!r}. Reassign it to "
                 f"{self.pin_number_next!r}?",
+                parent=self,
             ):
                 return
         self.checkpoint()
@@ -978,7 +980,7 @@ class LayoutCanvas(tk.Canvas):
             self.create_cell_from_selection(name, (int(round(ox)), int(round(oy))),
                                              replace=replace)
         except CellError as err:
-            messagebox.showerror("Create Cell from Selection", str(err))
+            dialogs.show_error("Create Cell from Selection", str(err), parent=self)
             self.redraw()
             self.on_mode_status(self._mode_hint())
             return

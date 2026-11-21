@@ -103,6 +103,8 @@ def test_build_library_and_match_work_across_different_design_folders(monkeypatc
         from tkinter import filedialog
         shared_dir = str(tmp_path / "shared_lib")
         monkeypatch.setattr(filedialog, "askdirectory", lambda **kw: shared_dir)
+        # the "macro written" box is modal -- it would wait forever here
+        monkeypatch.setattr("hlayout.gui.dialogs.show_file_written", lambda *a, **kw: None)
 
         folder_a = tmp_path / "designA"
         folder_a.mkdir()
