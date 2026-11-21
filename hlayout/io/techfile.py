@@ -645,6 +645,15 @@ DEFAULT_DIELECTRIC_RULES = {
 }
 
 
+def dielectric_layer_number(library: Library) -> int:
+    """The Dielectric Fill rules' layer number, or -1 when none is set
+    (or the stored rules can't be read)."""
+    try:
+        return int(load_dielectric_rules(library).get("layer", -1))
+    except Exception:
+        return -1
+
+
 def load_dielectric_rules(library: Library) -> dict:
     """Read the Dielectric Fill rules from library.tech_params. Always
     returns a complete dict (falling back to DEFAULT_DIELECTRIC_RULES
@@ -1387,12 +1396,9 @@ def default_layer_thickness(library: Library) -> dict:
             out.setdefault(str(b), _DEFAULT_FILM_UM["conductor"])
     except Exception:
         pass
-    try:
-        d = int(load_dielectric_rules(library)["layer"])
-        if d >= 0:
-            out.setdefault(str(d), _DEFAULT_FILM_UM["dielectric"])
-    except Exception:
-        pass
+    d = dielectric_layer_number(library)
+    if d >= 0:
+        out.setdefault(str(d), _DEFAULT_FILM_UM["dielectric"])
 
     # every other layer that actually carries filled, visible geometry
     drawn = set()

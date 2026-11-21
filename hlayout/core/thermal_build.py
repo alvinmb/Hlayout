@@ -33,6 +33,7 @@ import numpy as np
 
 from ..io.techfile import (
     DEFAULT_THERMAL_PART,
+    dielectric_layer_number,
     _DEFAULT_FILM_UM,
     default_layer_thickness,
     load_bond_rules,
@@ -351,7 +352,7 @@ def build_thermal_model(library, cell_name: str, grid_um: Optional[float] = None
         sub_layer = -1 if found is None else found
     roles.pop(sub_layer, None)
     film_geom = {}
-    diel_layer = int(load_dielectric_rules(library).get("layer", -1))
+    diel_layer = dielectric_layer_number(library)
     for n in sorted(roles):
         geoms = []
         if n == diel_layer:

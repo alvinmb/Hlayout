@@ -283,7 +283,7 @@ def export_design(session, cell_name: Optional[str] = None, layers: int = 1,
     (via_spec). ``keep_existing``: the tracks, vias and jumpers already
     drawn stay -- the router joins on to them and routes only what is
     still open."""
-    from ..io.techfile import (load_bond_rules, load_dielectric_rules, load_net_names,
+    from ..io.techfile import (dielectric_layer_number, load_bond_rules, load_dielectric_rules, load_net_names,
                                load_resistor_geometry_rules)
     from .fanout import die_pads
     lib = session.library
@@ -743,14 +743,8 @@ def export_design(session, cell_name: Optional[str] = None, layers: int = 1,
         "pads": {"fingerWidthUm": max(250, width), "fingerLengthUm": max(400, width),
                  "jumperLandUm": max(200, width)},
     }
-    try:
-        diel = int(load_dielectric_rules(lib)["layer"]) if two else -1
-    except Exception:
-        diel = -1
-    try:
-        local_diel = int(load_dielectric_rules(lib)["layer"])   # for local crossovers (printed jumpers), any mode
-    except Exception:
-        local_diel = diel
+    local_diel = dielectric_layer_number(lib)   # for local crossovers (printed jumpers), any mode
+    diel = local_diel if two else -1
     mapping = {"local_keepouts": local_keepouts, "cell": name, "origin": [ox, oy], "layers": {"COND1": la, "COND2": lb},
                "dielectric": diel, "local_diel": local_diel, "bond_layer": blay,
                "full_dielectric": bool(two and diel >= 0
@@ -1108,12 +1102,9 @@ def unroute(session, cell_name: Optional[str] = None) -> dict:
     out = {"tracks": 0, "added": 0, "vias": 0}
     # flat vias (any router's): the pads on both conductors and the window
     from ..io.specctra import find_vias
-    from ..io.techfile import load_dielectric_rules
+    from ..io.techfile import dielectric_layer_number
     vsites = {(x, y) for x, y, _w in find_vias(cell, (la, lb))}
-    try:
-        diel = int(load_dielectric_rules(lib).get("layer", -1))
-    except Exception:
-        diel = -1
+    diel = dielectric_layer_number(lib)
 
     def via_part(sh):
         if getattr(sh, "pin", "") or sh.layer not in (la, lb, diel) or hasattr(sh, "width") \

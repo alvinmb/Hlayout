@@ -20,8 +20,8 @@ from ..core.units import DBU_MM, dbu_to_mm, mm_to_dbu
 from . import dialogs
 from ..core.hierarchy import sref_transform
 from ..core.refdes import is_connector_refdes, refdes_pin1_offset
-from ..io.techfile import load_bond_rules, load_dielectric_rules, load_refdes_annotation_layer
 from .layer_util import layer_label as _layer_label
+from ..io.techfile import dielectric_layer_number, load_bond_rules, load_refdes_annotation_layer
 
 # Bitmaps used to approximate the 9 stipple/fill patterns on a Tk canvas.
 # Index 0 ("solid") is drawn as a plain filled polygon (no stipple).
@@ -1514,10 +1514,7 @@ class LayoutCanvas(tk.Canvas):
             return []
         if la < 0 or lb < 0 or path.layer not in (la, lb):
             return []
-        try:
-            diel = int(load_dielectric_rules(self.library).get("layer", -1))
-        except Exception:
-            diel = -1
+        diel = dielectric_layer_number(self.library)
         via_cell = rr.get("via_cell") or ""
         cell = self.library.cells.get(self.cell_name)
         if cell is None:
@@ -2925,10 +2922,7 @@ class LayoutCanvas(tk.Canvas):
         # Cached once per redraw (not per shape) -- see _draw_shape's use
         # of it below. -1 (no layer configured) never matches a real
         # shape.layer, so the special-casing below is simply skipped.
-        try:
-            self._dielectric_layer_num = int(load_dielectric_rules(self.library)["layer"])
-        except Exception:
-            self._dielectric_layer_num = -1
+        self._dielectric_layer_num = dielectric_layer_number(self.library)
         if self.show_grid:
             self._draw_grid()
         if self.cell_name and self.cell_name in self.library.cells:

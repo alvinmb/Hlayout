@@ -3214,13 +3214,10 @@ class App(tk.Tk):
         """A via moved with its track (segment drag / arrow nudge): redo the
         dielectric fill, if the cell has one, so the via's window is open
         where the via now is."""
-        from ..io.techfile import load_dielectric_rules
+        from ..io.techfile import dielectric_layer_number
         name = self.canvas.cell_name
         cell = self.session.library.cells.get(name)
-        try:
-            diel = int(load_dielectric_rules(self.session.library)["layer"])
-        except Exception:
-            return
+        diel = dielectric_layer_number(self.session.library)
         if cell is None or diel < 0:
             return
         if not self.session._has_full_dielectric(cell, diel):

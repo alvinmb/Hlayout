@@ -53,6 +53,7 @@ from ..io.gdsio import load_gds, save_gds
 from ..io.gerberio import write_gerber_layers
 from ..io.sidecar import load_design, save_design
 from ..io.techfile import (
+    dielectric_layer_number,
     load_and_apply_techfile,
     load_bond_rules,
     load_component_models,
@@ -2910,8 +2911,7 @@ class Session:
         "substrate"/"other" are layers with drawn, visible, filled
         geometry not otherwise claimed. Components (placed parts) are not
         a layer role -- they are always composited on top."""
-        from ..io.techfile import load_bond_rules, load_dielectric_rules, \
-            load_resistor_geometry_rules, load_route_rules
+        from ..io.techfile import load_bond_rules, load_resistor_geometry_rules, load_route_rules
         resistor_layers, conductor_layers, glaze_layers, bond_layers = set(), set(), set(), set()
         try:
             rg = load_resistor_geometry_rules(self.library)
@@ -2939,12 +2939,9 @@ class Session:
                 bond_layers.add(b)
         except Exception:
             pass
-        try:
-            d = int(load_dielectric_rules(self.library)["layer"])
-            if d >= 0:
-                conductor_layers.add(d)
-        except Exception:
-            pass
+        d = dielectric_layer_number(self.library)
+        if d >= 0:
+            conductor_layers.add(d)
 
         # Every OTHER layer that actually has drawn, visible, filled
         # geometry anywhere in the library -- no thickness lookup,
@@ -3147,8 +3144,7 @@ class Session:
         know a layer's stacking ROLE and whether it has geometry, so a
         layer with no thickness saved in Setup is still fully
         considered here."""
-        from ..io.techfile import load_bond_rules, load_dielectric_rules, \
-            load_resistor_geometry_rules, load_route_rules
+        from ..io.techfile import load_bond_rules, load_resistor_geometry_rules, load_route_rules
 
         resolve = self.library.layers.resolve
         r_layer = resolve(result_layer)
@@ -3255,11 +3251,7 @@ class Session:
                 # cross-hatch the whole board (and, chopped up by every
                 # via window and track, run to hundreds of thousands of
                 # paths -- confirmed live, it froze the GUI)
-                try:
-                    from ..io.techfile import load_dielectric_rules
-                    _diel = int(load_dielectric_rules(self.library)["layer"])
-                except Exception:
-                    _diel = -1
+                _diel = dielectric_layer_number(self.library)
                 for n in sorted(conductor_layers, reverse=True):
                     layer_geoms.append(
                         (gather(n), True,
@@ -3624,7 +3616,7 @@ class Session:
         if layer is not None:
             r_layer = resolve(layer)
         else:
-            r_layer = int(load_dielectric_rules(self.library)["layer"])
+            r_layer = dielectric_layer_number(self.library)
         if r_layer is None or r_layer < 0:
             raise LayoutError(
                 "no dielectric layer set -- pass layer=... or configure "
@@ -4286,10 +4278,7 @@ class Session:
         rr = load_route_rules(lib)
         la = rr.get("layer_a") if isinstance(rr.get("layer_a"), int) and rr["layer_a"] >= 0 else 3
         lb = rr.get("layer_b") if isinstance(rr.get("layer_b"), int) and rr["layer_b"] >= 0 else 5
-        try:
-            diel = int(load_dielectric_rules(lib)["layer"])
-        except Exception:
-            diel = -1
+        diel = dielectric_layer_number(lib)
         if diel < 0:
             diel = named("dielectric", default=4)
         try:
@@ -5413,10 +5402,7 @@ class Session:
         # window, not just its pad
         R["signal_via_keep"] = max(self.via_spec(False, R)["window"], float(R["signal_via"]))
         R["power_via_keep"] = max(self.via_spec(True, R)["window"], float(R["power_via"]))
-        try:
-            diel = int(load_dielectric_rules(self.library)["layer"])
-        except Exception:
-            diel = -1
+        diel = dielectric_layer_number(self.library)
         band = None
         if diel >= 0:
             # Off the printed dielectric the two conductors aren't insulated
@@ -5513,10 +5499,7 @@ class Session:
         power = {n.upper() for n in R.get("power_nets") or []}
         ses = parse_ses(path)
         lmap = {layer_name(la): la, layer_name(lb): lb}
-        try:
-            diel = int(load_dielectric_rules(self.library)["layer"])
-        except Exception:
-            diel = -1
+        diel = dielectric_layer_number(self.library)
 
         keep = bool(R.get("keep_existing", True)) and not R.get("remove_existing", False)
         stats = {"wires": 0, "vias": 0, "skipped": 0}
@@ -5794,10 +5777,7 @@ class Session:
             if len(pts) >= 3:
                 keep.setdefault(int(lay), []).append(_SP(pts))
         keepin = self._substrate_box(cell)
-        try:
-            diel = int(load_dielectric_rules(self.library)["layer"])
-        except Exception:
-            diel = -1
+        diel = dielectric_layer_number(self.library)
         keepin_b = self._dielectric_area(cell, diel)
         vspec = self.via_spec(False, R)
         margin = (vspec["window"] - vspec["pad"]) / 2.0 if vspec["window"] else 0.0
@@ -5890,10 +5870,7 @@ class Session:
             if len(pts) >= 3:
                 keep.setdefault(int(lay), []).append(_SP(pts))
         keepin = self._substrate_box(cell)
-        try:
-            diel = int(load_dielectric_rules(self.library)["layer"])
-        except Exception:
-            diel = -1
+        diel = dielectric_layer_number(self.library)
         keepin_b = self._dielectric_area(cell, diel)
         before = {frozenset(x["nets"]) for x in self.find_shorts(cell_name=name)}
         keep_shapes = list(cell.shapes)
@@ -6037,10 +6014,7 @@ class Session:
             r = iopads.bond_header(self, cell_name=cell_name, pins=pins, all_pins=all_pins,
                                    layer=layer, width=width, **kw)
             cell = self.library.get_cell(r["cell"])
-            try:
-                diel = int(load_dielectric_rules(self.library)["layer"])
-            except Exception:
-                diel = -1
+            diel = dielectric_layer_number(self.library)
             if r["pads"] and diel >= 0 and self._has_full_dielectric(cell, diel):
                 try:
                     self.generate_dielectric(cell_name=r["cell"])
@@ -6094,10 +6068,7 @@ class Session:
             r = fanout.fan_out(self, cell_name=cell_name, refs=refs, all_pads=all_pads,
                                finger_w=finger_w, finger_l=finger_l, spacing=spacing,
                                gap=gap, layer=layer)
-            try:
-                diel = int(load_dielectric_rules(self.library)["layer"])
-            except Exception:
-                diel = -1
+            diel = dielectric_layer_number(self.library)
             cell = self.library.get_cell(r["cell"])
             if r["fingers"] and diel >= 0 and self._has_full_dielectric(cell, diel):
                 try:
@@ -6180,10 +6151,7 @@ class Session:
             r = iopads.apply(self, p, pad_w=pad_w, pad_l=pad_l, csv_path=csv_path,
                              bond_inset=bond_inset)
             cell = self.library.get_cell(p["cell"])
-            try:
-                diel = int(load_dielectric_rules(self.library)["layer"])
-            except Exception:
-                diel = -1
+            diel = dielectric_layer_number(self.library)
             if diel >= 0 and self._has_full_dielectric(cell, diel):
                 try:
                     self.generate_dielectric(cell_name=p["cell"])
@@ -6483,10 +6451,7 @@ class Session:
                 groups.setdefault(tr.dsu.find(tr.pin_node[p]), {}).setdefault(n, []).append(p)
         out = []
         cell = self.library.get_cell(name)
-        try:
-            diel = int(load_dielectric_rules(self.library)["layer"])
-        except Exception:
-            diel = -1
+        diel = dielectric_layer_number(self.library)
         wins = unary_union([_box(*sh.bbox()) for sh in cell.shapes if sh.layer == diel
                             and getattr(sh, "datatype", 0) == 0 and hasattr(sh, "bbox")]) \
             if diel >= 0 else None
@@ -6543,10 +6508,7 @@ class Session:
         R = self.freerouting_rules()
         R.update(rules)
         R = self._rules_with_drc(R)
-        try:
-            diel = int(load_dielectric_rules(self.library)["layer"])
-        except Exception:
-            diel = -1
+        diel = dielectric_layer_number(self.library)
         area = self._dielectric_area(cell, diel)
         with self._batch():
             res = _opt(self.library, cell, (la, lb), float(R.get("clearance", 100)),
@@ -6596,10 +6558,7 @@ class Session:
                     f"no track joins ({a[0] / 1000:.3f}, {a[1] / 1000:.3f}) and "
                     f"({b[0] / 1000:.3f}, {b[1] / 1000:.3f}) mm -- pick two points on tracks "
                     f"of one net (layer {la} or {lb})")
-            try:
-                diel = int(load_dielectric_rules(self.library)["layer"])
-            except Exception:
-                diel = -1
+            diel = dielectric_layer_number(self.library)
             if res["vias"] and diel >= 0 and self._has_full_dielectric(cell, diel):
                 try:
                     self.generate_dielectric(cell_name=name)
@@ -6630,10 +6589,7 @@ class Session:
         layers = [resolve(l) for l in layers]
         if not layers:
             raise LayoutError("no conductor layers -- pass layers=... or set Setup > Route Layers...")
-        try:
-            diel = int(load_dielectric_rules(self.library)["layer"])
-        except Exception:
-            diel = -1
+        diel = dielectric_layer_number(self.library)
         if diel in layers:
             diel = -1
         return NetTracer(self.library, self.library.get_cell(name), layers,

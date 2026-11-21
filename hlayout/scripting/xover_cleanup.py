@@ -202,7 +202,7 @@ def remove_needless_crossovers(session, cell_name: Optional[str] = None,
                                time_budget: float = 60.0, on_line=None) -> dict:
     """See the module doc. Returns {"nets", "crossovers", "removed": [{"net",
     "crossovers", "saved_um"}], "kept": [{"net", "why"}]}."""
-    from ..io.techfile import load_dielectric_rules, load_net_names
+    from ..io.techfile import dielectric_layer_number, load_net_names
     from . import hybridroute as H
     from . import pathfinder as PF
     say = on_line or (lambda _m: None)
@@ -210,10 +210,7 @@ def remove_needless_crossovers(session, cell_name: Optional[str] = None,
     lib = session.library
     cell = lib.get_cell(name)
     la, lb = session._route_layers()
-    try:
-        diel = int(load_dielectric_rules(lib)["layer"])
-    except Exception:
-        diel = -1
+    diel = dielectric_layer_number(lib)
     if diel >= 0 and session._has_full_dielectric(cell, diel):
         return {"nets": 0, "crossovers": 0, "removed": [], "kept": [],
                 "skipped": "full dielectric sheet -- crossovers there are vias"}

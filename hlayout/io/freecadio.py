@@ -44,6 +44,7 @@ from ..core.shapes import Path, expand_arefs_to_srefs
 from ..core.units import DBU_MM
 from .techfile import (
     DEFAULT_COMPONENT_HEIGHT_UM,
+    dielectric_layer_number,
     default_component_models,
     default_layer_thickness,
     load_bond_rules,
@@ -98,10 +99,7 @@ _DIELECTRIC_TRANSPARENCY = 40
 
 
 def dielectric_layer(library):
-    try:
-        n = int(load_dielectric_rules(library).get("layer", -1))
-    except Exception:
-        n = -1
+    n = dielectric_layer_number(library)
     return n if n >= 0 else None
 
 
