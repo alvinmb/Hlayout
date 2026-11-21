@@ -103,16 +103,6 @@ class _Grid:
         return out, (j0, j1, i0, i1)
 
 
-def _disk(r_cells):
-    """Cells strictly within r_cells: two halos of radii ha, hb share a cell
-    only when the centres are closer than about ha + hb -- the clearance."""
-    r = max(0, int(math.ceil(r_cells)))
-    yy, xx = np.mgrid[-r:r + 1, -r:r + 1]
-    m = (xx * xx + yy * yy) < r_cells * r_cells - 1e-9
-    m[r, r] = True
-    return m
-
-
 def route(design: dict, cell: float = 100.0, iterations: int = 60,
           on_line=None, cancel=None, local_dielectric: bool = True, cond2_keepouts=None,
           time_budget: Optional[float] = None, via_cost: float = 3000.0,

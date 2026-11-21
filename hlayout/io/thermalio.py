@@ -33,26 +33,6 @@ def write_thermal_csv(result, path: str) -> str:
     return path
 
 
-def _map_image(result, grid, t_min, t_max, max_px: int = 640) -> str:
-    from ..core.thermal import rgb_to_png, temps_to_rgb
-    rgb = temps_to_rgb(grid, t_min, t_max)
-    scale = max(1, min(8, max_px // max(rgb.shape[1], 1)))
-    data = base64.b64encode(rgb_to_png(rgb, scale)).decode("ascii")
-    return (f'<img alt="temperature map" src="data:image/png;base64,{data}" '
-            f'style="max-width:100%;border:1px solid #999;image-rendering:pixelated">')
-
-
-def _scale_bar(t_min, t_max) -> str:
-    from ..core.thermal import heat_color
-    stops = ",".join("rgb(%d,%d,%d) %d%%" % (heat_color(i / 10.0) + (i * 10,))
-                     for i in range(11))
-    return (f'<div style="display:flex;align-items:center;gap:8px;margin:6px 0 14px">'
-            f'<span>{t_min:.1f} &deg;C</span>'
-            f'<span style="flex:1;max-width:420px;height:12px;border:1px solid #999;'
-            f'background:linear-gradient(90deg,{stops})"></span>'
-            f'<span>{t_max:.1f} &deg;C</span></div>')
-
-
 def _map_figure(result, grid, display=None, lo=None, hi=None, max_px: int = 640,
                 caption: str = "") -> str:
     """One temperature map as an inline SVG figure in the classic

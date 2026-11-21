@@ -14,7 +14,6 @@ label_offset that puts it right beside pin 1, on the outside of the
 pin row.
 """
 
-import math
 import re
 
 from .library import _transform_bbox
@@ -54,26 +53,6 @@ def cell_pin1_bbox(library, cell_name, pin="1"):
                 return _transform_bbox(box, ref)
             return (ref.origin[0], ref.origin[1], ref.origin[0], ref.origin[1])
     return None
-
-
-def cell_pin1(library, cell_name, pin="1"):
-    """Local (x, y) DBU centre of pin `pin` in `cell_name`, or None."""
-    b = cell_pin1_bbox(library, cell_name, pin)
-    return None if b is None else _bbox_centre(b)
-
-
-def _to_parent(ref, pt):
-    """Map a point in ref's cell into the parent (GDSII SREF order:
-    mirror, scale, rotate, translate)."""
-    x, y = pt
-    if ref.x_reflection:
-        y = -y
-    x *= ref.magnification
-    y *= ref.magnification
-    t = math.radians(ref.rotation)
-    xr = x * math.cos(t) - y * math.sin(t)
-    yr = x * math.sin(t) + y * math.cos(t)
-    return (xr + ref.origin[0], yr + ref.origin[1])
 
 
 def refdes_pin1_offset(library, ref, gap=DEFAULT_PIN1_GAP):

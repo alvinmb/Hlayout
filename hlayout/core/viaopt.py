@@ -63,24 +63,6 @@ def _geom(sh):
     return None
 
 
-def _via_shapes(cell, x, y, layers, dielectric_layer):
-    """The via's own pads (both conductors) and its dielectric window."""
-    out = []
-    lays = set(layers) | ({dielectric_layer} if dielectric_layer is not None else set())
-    for s in cell.shapes:
-        if s.layer not in lays or getattr(s, "pin", "") or not isinstance(s, (Rectangle, Polygon)):
-            continue
-        if getattr(s, "datatype", 0) != 0:
-            continue
-        x0, y0, x1, y1 = s.bbox()
-        w, h = x1 - x0, y1 - y0
-        if w <= 0 or w > 5000 or abs(w - h) > max(2, 0.02 * w):
-            continue
-        if abs((x0 + x1) / 2 - x) <= 1 and abs((y0 + y1) / 2 - y) <= 1:
-            out.append(s)
-    return out
-
-
 def _connected(geoms) -> bool:
     u = unary_union([g.buffer(0.5) for g in geoms])
     return u.geom_type == "Polygon"
