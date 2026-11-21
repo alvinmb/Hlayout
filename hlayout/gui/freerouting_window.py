@@ -26,6 +26,7 @@ from ..core.errors import LayoutError
 from ..io import app_settings
 from ..io.specctra import (EXCLUDED_CLASS, find_freerouting, find_java, freerouting_command,
                            run_freerouting)
+from .window_mixins import NetNamesImportMixin
 
 #: the run-length settings, in their own "Passes" box by the Route button
 _PASS_FIELDS = (
@@ -61,7 +62,7 @@ _FINGER_LAYERS = (("1st conductor", "first"),
                   ("2nd conductor (top, no dielectric window; routes both layers)", "second"))
 
 
-class FreeroutingWindow(tk.Toplevel):
+class FreeroutingWindow(NetNamesImportMixin, tk.Toplevel):
     def __init__(self, master, app):
         super().__init__(master)
         self.app = app
@@ -445,18 +446,6 @@ class FreeroutingWindow(tk.Toplevel):
         if p:
             self.vars["java"].set(p)
             self._update_router_status()
-
-    def _import_names(self):
-        p = filedialog.askopenfilename(parent=self, title="Net names CSV",
-                                       filetypes=[("CSV", "*.csv"), ("All", "*.*")])
-        if not p:
-            return
-        try:
-            n = self.session.import_net_names(p)
-            self._say(f"{n} named pad(s) imported from {p}")
-        except Exception as e:
-            self._say(f"Net names: {e}")
-        self.reload()
 
     def _work_dir(self):
         base = getattr(self.app, "current_path", None)

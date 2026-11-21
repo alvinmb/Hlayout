@@ -31,6 +31,7 @@ import tkinter as tk
 from tkinter import filedialog, ttk
 
 from . import dialogs
+from .window_mixins import JobListMixin
 from .fonts import section_header_font
 from ..core.errors import LayoutError
 from ..io import toolsets
@@ -152,7 +153,7 @@ class JobDialog(tk.Toplevel):
         self.destroy()
 
 
-class GerberBatchWindow(tk.Toplevel):
+class GerberBatchWindow(JobListMixin, tk.Toplevel):
     """Tools > Gerber Export Sets... . `library` is the current
     design's Library; jobs are loaded from it on open and persisted
     back into it immediately on every add/edit/delete. `app` is the
@@ -276,10 +277,6 @@ class GerberBatchWindow(tk.Toplevel):
             self.library, [GERBER_JOBS_KEY, GERBER_OUTPUT_DIR_KEY, GERBER_SCALE_KEY],
             app=self.app, last_used_keys=[GERBER_JOBS_KEY])
 
-    def _current_job_row(self):
-        sel = self.job_table.selection()
-        return int(sel[0]) if sel else -1
-
     # -- output folder -----------------------------------------------------
     def _default_out_dir(self):
         """<current dir>/Gerber -- beside the open design file, or under
@@ -350,34 +347,8 @@ class GerberBatchWindow(tk.Toplevel):
             self._remember()
         return True
 
-    def _add_job(self):
-        dlg = JobDialog(self, self.library, initial_dir=self._default_dir())
-        self.wait_window(dlg)
-        if dlg.result is not None:
-            self.jobs.append(dlg.result)
-            self._persist()
-            self._refresh_jobs()
-
-    def _edit_job(self):
-        row = self._current_job_row()
-        if row < 0:
-            dialogs.show_info("Edit Job", "Select a job first.", parent=self)
-            return
-        dlg = JobDialog(self, self.library, job=self.jobs[row], initial_dir=self._default_dir())
-        self.wait_window(dlg)
-        if dlg.result is not None:
-            self.jobs[row] = dlg.result
-            self._persist()
-            self._refresh_jobs()
-
-    def _delete_job(self):
-        row = self._current_job_row()
-        if row < 0:
-            dialogs.show_info("Delete Job", "Select a job first.", parent=self)
-            return
-        del self.jobs[row]
-        self._persist()
-        self._refresh_jobs()
+    def _job_dialog(self, job=None):
+        return JobDialog(self, self.library, job=job, initial_dir=self._default_dir())
 
     # -- run -----------------------------------------------------------------
     def _run_batch(self):

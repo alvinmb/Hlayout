@@ -17,10 +17,11 @@ the name is historical) plus the router's own settings
 
 import threading
 import tkinter as tk
-from tkinter import filedialog, ttk
+from tkinter import ttk
 
 from ..core.errors import LayoutError
 from . import dialogs
+from .window_mixins import NetNamesImportMixin
 
 _NUM_FIELDS = (
     ("Signal width (um)", "signal_width"),
@@ -63,7 +64,7 @@ _ENGINES = (("Auto -- picks the engine for the board (recommended)", "auto"),
             ("Hybrid grid router -- Java (HybridRouterCli)", "java"))
 
 
-class AutorouteWindow(tk.Toplevel):
+class AutorouteWindow(NetNamesImportMixin, tk.Toplevel):
     def __init__(self, app):
         super().__init__(app)
         self.app = app
@@ -295,18 +296,6 @@ class AutorouteWindow(tk.Toplevel):
     def _say(self, text):
         self.log.insert("end", text + "\n")
         self.log.see("end")
-
-    def _import_names(self):
-        p = filedialog.askopenfilename(parent=self, title="Net names CSV",
-                                       filetypes=[("CSV", "*.csv"), ("All", "*.*")])
-        if not p:
-            return
-        try:
-            n = self.session.import_net_names(p)
-            self._say(f"{n} named pad(s) imported from {p}")
-        except Exception as e:
-            self._say(f"Net names: {e}")
-        self.reload()
 
     # ------------------------------------------------------------------ run
     def run(self):
