@@ -33,7 +33,58 @@ import os
 import subprocess
 from typing import List, Optional, Tuple
 
-_GEOMETRY_FUNCTIONS_3D = '''\
+#: FreeCAD-macro source for the lead builders every package macro needs
+#: (gull-wing rows, flat leads + exposed tab) -- shared with
+#: hlayout.io.component_library's own macro so both build leads the same way.
+SHARED_LEAD_FUNCTIONS = '''\
+def _gullwing_side(y_wall, y_dir, leads, lead_out, lead_t, lead_mid_z, lead_foot):
+    """leads: list of (x, lead_w). One stub/drop/foot triple per lead."""
+    shapes = []
+    for x, lead_w in leads:
+        y_outer = y_wall + y_dir * lead_out
+        stub_y0 = min(y_wall, y_outer)
+        stub_y1 = max(y_wall, y_outer)
+        shapes.append(Part.makeBox(lead_w, stub_y1 - stub_y0, lead_t,
+                                    V(x - lead_w / 2.0, stub_y0, lead_mid_z - lead_t / 2.0)))
+        drop_y0 = min(y_outer, y_outer + y_dir * lead_t)
+        drop_y1 = max(y_outer, y_outer + y_dir * lead_t)
+        shapes.append(Part.makeBox(lead_w, drop_y1 - drop_y0, lead_mid_z + lead_t / 2.0,
+                                    V(x - lead_w / 2.0, drop_y0, 0)))
+        y_tip = y_outer + y_dir * lead_foot
+        foot_y0 = min(y_outer, y_tip)
+        foot_y1 = max(y_outer, y_tip)
+        shapes.append(Part.makeBox(lead_w, foot_y1 - foot_y0, lead_t,
+                                    V(x - lead_w / 2.0, foot_y0, 0)))
+    return shapes
+
+
+def make_power_flat(L, W, H, leads, lead_l, lead_t, tab_w, tab_out, tab_back):
+    """A power package with FLAT leads and an exposed tab (SOT-89): a
+    body L x W x H; leads (list of (x, lead_w)) run straight out of the
+    -Y wall along the seating plane for lead_l; the tab (tab_w wide)
+    stands tab_out proud of the +Y wall and runs tab_back back under
+    the body from its tip, joined by a neck to the lead beneath it.
+    Origin at the BOTTOM-LEFT corner in X/Y (body spans (0, 0) to
+    (L, W)), sitting on Z=0."""
+    shapes = [Part.makeBox(L, W, H, V(-L / 2.0, -W / 2.0, 0))]
+    y_wall = -W / 2.0
+    tab_tip = W / 2.0 + tab_out
+    tab_y0 = tab_tip - tab_back
+    for x, lead_w in leads:
+        y1 = y_wall
+        if abs(x) <= tab_w / 2.0:
+            y1 = max(y_wall, tab_y0)   # neck under the body, up to the tab
+        shapes.append(Part.makeBox(lead_w, y1 - (y_wall - lead_l), lead_t,
+                                    V(x - lead_w / 2.0, y_wall - lead_l, 0)))
+    shapes.append(Part.makeBox(tab_w, tab_back, lead_t, V(-tab_w / 2.0, tab_y0, 0)))
+    shape = Part.makeCompound(shapes)
+    shape.translate(V(L / 2.0, W / 2.0, 0))
+    return shape
+
+
+'''
+
+_GEOMETRY_FUNCTIONS_3D = SHARED_LEAD_FUNCTIONS + '''\
 def make_end_cap(L, W, H, term_len, overhang=0.0, over=0.02):
     """A rectangular body with two metallised end terminations, each
     extending `overhang` past the body's own end -- the real
@@ -110,27 +161,6 @@ def make_substrate_pins(L, W, H, per_side, pitch, pad_dia, pin_length):
     return shape
 
 
-def _gullwing_side(y_wall, y_dir, leads, lead_out, lead_t, lead_mid_z, lead_foot):
-    """leads: list of (x, lead_w). One stub/drop/foot triple per lead."""
-    shapes = []
-    for x, lead_w in leads:
-        y_outer = y_wall + y_dir * lead_out
-        stub_y0 = min(y_wall, y_outer)
-        stub_y1 = max(y_wall, y_outer)
-        shapes.append(Part.makeBox(lead_w, stub_y1 - stub_y0, lead_t,
-                                    V(x - lead_w / 2.0, stub_y0, lead_mid_z - lead_t / 2.0)))
-        drop_y0 = min(y_outer, y_outer + y_dir * lead_t)
-        drop_y1 = max(y_outer, y_outer + y_dir * lead_t)
-        shapes.append(Part.makeBox(lead_w, drop_y1 - drop_y0, lead_mid_z + lead_t / 2.0,
-                                    V(x - lead_w / 2.0, drop_y0, 0)))
-        y_tip = y_outer + y_dir * lead_foot
-        foot_y0 = min(y_outer, y_tip)
-        foot_y1 = max(y_outer, y_tip)
-        shapes.append(Part.makeBox(lead_w, foot_y1 - foot_y0, lead_t,
-                                    V(x - lead_w / 2.0, foot_y0, 0)))
-    return shapes
-
-
 def make_dip(L, W, H, leads_neg_y, leads_pos_y, lead_t, lead_out, lead_foot, lid=None):
     """A dual-row gull-wing package with its two rows along Y (at
     Y=0 and Y=W) and pins spread along X within each row -- covers a
@@ -184,30 +214,6 @@ def make_dip_x(L, W, H, leads_neg_x, leads_pos_x, lead_t, lead_out, lead_foot):
     lead_mid_z = H * 0.5
     shapes.extend(_gullwing_side_x(-L / 2.0, -1, leads_neg_x, lead_out, lead_t, lead_mid_z, lead_foot))
     shapes.extend(_gullwing_side_x(L / 2.0, 1, leads_pos_x, lead_out, lead_t, lead_mid_z, lead_foot))
-    shape = Part.makeCompound(shapes)
-    shape.translate(V(L / 2.0, W / 2.0, 0))
-    return shape
-
-
-def make_power_flat(L, W, H, leads, lead_l, lead_t, tab_w, tab_out, tab_back):
-    """A power package with FLAT leads and an exposed tab (SOT-89): a
-    body L x W x H; leads (list of (x, lead_w)) run straight out of the
-    -Y wall along the seating plane for lead_l; the tab (tab_w wide)
-    stands tab_out proud of the +Y wall and runs tab_back back under
-    the body from its tip, joined by a neck to the lead beneath it.
-    Origin at the BOTTOM-LEFT corner in X/Y (body spans (0, 0) to
-    (L, W)), sitting on Z=0."""
-    shapes = [Part.makeBox(L, W, H, V(-L / 2.0, -W / 2.0, 0))]
-    y_wall = -W / 2.0
-    tab_tip = W / 2.0 + tab_out
-    tab_y0 = tab_tip - tab_back
-    for x, lead_w in leads:
-        y1 = y_wall
-        if abs(x) <= tab_w / 2.0:
-            y1 = max(y_wall, tab_y0)   # neck under the body, up to the tab
-        shapes.append(Part.makeBox(lead_w, y1 - (y_wall - lead_l), lead_t,
-                                    V(x - lead_w / 2.0, y_wall - lead_l, 0)))
-    shapes.append(Part.makeBox(tab_w, tab_back, lead_t, V(-tab_w / 2.0, tab_y0, 0)))
     shape = Part.makeCompound(shapes)
     shape.translate(V(L / 2.0, W / 2.0, 0))
     return shape

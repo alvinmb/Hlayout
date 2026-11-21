@@ -191,7 +191,7 @@ def _has_wide_tab_lead(entry: dict) -> bool:
     entirely rather than risk a confidently wrong substitution --
     still perfectly buildable/usable via a manual component_models
     entry, just not auto-matched by footprint."""
-    if entry.get("heat_tab"):
+    if entry.get("heat_tab") or entry.get("builder") == "make_power_flat":
         return True
     widths = [w for _x, w in _lead_widths(entry)]
     return bool(widths) and max(widths) > 2 * min(widths)

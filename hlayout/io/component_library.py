@@ -65,6 +65,8 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
 from ..core.smdlib import CHIP_SIZES_MM, TERMINAL_LENGTH_FRACTION, TERMINAL_LENGTH_MAX_MM
+from ..core.sot_packages import library_sot_packages
+from .example_step3d import SHARED_LEAD_FUNCTIONS
 
 #: Real MLCC (multilayer ceramic chip capacitor) thickness does NOT keep
 #: growing with body length/width the way EIA case codes do -- it
@@ -143,30 +145,22 @@ def _soic_leads(n_per_side, pitch, lead_w=0.4):
 #:   narrow-body isn't a real standardized size, so its body length is
 #:   extrapolated from the same lead-span-plus-margin the 14/16-pin
 #:   sizes follow.
+#: SOT_23 / SOT_89 / SOT_223 / SOT_16 / SOT_18 come from the shared
+#: package table (hlayout.core.sot_packages -- the same numbers the 2D
+#: footprint generator draws from); SOT_323 and SOT_14 exist only here.
+#: Each entry carries "builder": make_sot (gull-wing) or make_power_flat.
+_SHARED_SOT = library_sot_packages()
 DEFAULT_SOT_PACKAGES = {
-    # SOT-23 (TO-236) to the datasheet drawing: body 2.8 x 1.3, pins 1/2
-    # 1.9 apart, pin 3 centred opposite, lead span 2.3 (lead_out +
-    # lead_foot = 0.5 per side), lead width 0.43, thickness 0.12,
-    # seated height 0.9.
-    "SOT_23": dict(L=2.8, W=1.3, H=0.9, lead_t=0.12, lead_out=0.15, lead_foot=0.35,
-                   leads_neg_y=[(-0.95, 0.43), (0.95, 0.43)],
-                   leads_pos_y=[(0.0, 0.43)]),
-    "SOT_323": dict(L=2.0, W=1.25, H=0.95, lead_t=0.1, lead_out=0.3, lead_foot=0.3,
+    "SOT_23": _SHARED_SOT["SOT_23"],
+    "SOT_323": dict(builder="make_sot", L=2.0, W=1.25, H=0.95, lead_t=0.1, lead_out=0.3, lead_foot=0.3,
                     leads_neg_y=[(-0.65, 0.25), (0.65, 0.25)],
                     leads_pos_y=[(0.0, 0.25)]),
-    "SOT_89": dict(L=4.5, W=2.5, H=1.5, lead_t=0.2, lead_out=0.6, lead_foot=0.8,
-                   leads_neg_y=[(-1.5, 0.6), (0.0, 0.6), (1.5, 0.6)],
-                   leads_pos_y=[],
-                   heat_tab=(1, 2.0, 0.3, 1.0)),
-    "SOT_223": dict(L=6.5, W=3.5, H=1.6, lead_t=0.25, lead_out=0.8, lead_foot=1.0,
-                    leads_neg_y=[(-2.3, 0.5), (0.0, 0.5), (2.3, 0.5)],
-                    leads_pos_y=[(0.0, 3.0)]),
-    "SOT_14": dict(L=8.65, W=3.90, H=1.75, lead_t=0.2, lead_out=0.4, lead_foot=0.6,
+    "SOT_89": _SHARED_SOT["SOT_89"],
+    "SOT_223": _SHARED_SOT["SOT_223"],
+    "SOT_14": dict(builder="make_sot", L=8.65, W=3.90, H=1.75, lead_t=0.2, lead_out=0.4, lead_foot=0.6,
                    leads_neg_y=_soic_leads(7, 1.27), leads_pos_y=_soic_leads(7, 1.27)),
-    "SOT_16": dict(L=9.90, W=3.90, H=1.75, lead_t=0.2, lead_out=0.4, lead_foot=0.6,
-                   leads_neg_y=_soic_leads(8, 1.27), leads_pos_y=_soic_leads(8, 1.27)),
-    "SOT_18": dict(L=11.16, W=3.90, H=1.75, lead_t=0.2, lead_out=0.4, lead_foot=0.6,
-                   leads_neg_y=_soic_leads(9, 1.27), leads_pos_y=_soic_leads(9, 1.27)),
+    "SOT_16": _SHARED_SOT["SOT_16"],
+    "SOT_18": _SHARED_SOT["SOT_18"],
 }
 
 #: JEDEC pin pitch shared by every LCC/PLCC below (0.050" BSC).
@@ -222,7 +216,7 @@ DEFAULT_PLCC_PACKAGES = {
 }
 
 
-_GEOMETRY_FUNCTIONS = '''\
+_GEOMETRY_FUNCTIONS = SHARED_LEAD_FUNCTIONS + '''\
 def make_ceramic_cap(L, W, H, term_len, over=0.02):
     """A rectangular ceramic chip capacitor body with two metallised end
     terminations. Origin at the bottom-left corner in X/Y (body spans
@@ -279,31 +273,6 @@ def make_pkg20(L, W, H_body, H_lid, lid_margin, n_per_side, pitch,
     shape = Part.makeCompound(shapes)
     shape.translate(V(L / 2.0, W / 2.0, 0))
     return shape
-
-
-def _gullwing_side(y_wall, y_dir, leads, lead_out, lead_t, lead_mid_z, lead_foot):
-    """leads: list of (x, lead_w). One stub/drop/foot triple per lead
-    -- the same 3-box gull-wing shape make_pkg20 uses, factored out so
-    a package can put a different, independent set of leads on each
-    side (needed for e.g. SOT-23's 2-leads/1-lead split and SOT-223's
-    3 leads + 1 wide tab lead)."""
-    shapes = []
-    for x, lead_w in leads:
-        y_outer = y_wall + y_dir * lead_out
-        stub_y0 = min(y_wall, y_outer)
-        stub_y1 = max(y_wall, y_outer)
-        shapes.append(Part.makeBox(lead_w, stub_y1 - stub_y0, lead_t,
-                                    V(x - lead_w / 2.0, stub_y0, lead_mid_z - lead_t / 2.0)))
-        drop_y0 = min(y_outer, y_outer + y_dir * lead_t)
-        drop_y1 = max(y_outer, y_outer + y_dir * lead_t)
-        shapes.append(Part.makeBox(lead_w, drop_y1 - drop_y0, lead_mid_z + lead_t / 2.0,
-                                    V(x - lead_w / 2.0, drop_y0, 0)))
-        y_tip = y_outer + y_dir * lead_foot
-        foot_y0 = min(y_outer, y_tip)
-        foot_y1 = max(y_outer, y_tip)
-        shapes.append(Part.makeBox(lead_w, foot_y1 - foot_y0, lead_t,
-                                    V(x - lead_w / 2.0, foot_y0, 0)))
-    return shapes
 
 
 def make_sot(L, W, H, lead_t, lead_out, lead_foot,
@@ -537,8 +506,10 @@ def write_component_library_macro(
         )
 
     for name, kwargs in sots.items():
+        kwargs = dict(kwargs)
+        builder = kwargs.pop("builder", "make_sot")
         args = ", ".join(f"{k}={v!r}" for k, v in kwargs.items())
-        lines.append(f"export(make_sot({args}), {name!r}, OUT_DIR)")
+        lines.append(f"export({builder}({args}), {name!r}, OUT_DIR)")
 
     for name, kwargs in lccs.items():
         args = ", ".join(f"{k}={v!r}" for k, v in kwargs.items())

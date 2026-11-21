@@ -142,7 +142,13 @@ def test_macro_emits_one_export_call_per_default_sot_package(tmp_path):
     for name in DEFAULT_SOT_PACKAGES:
         assert repr(name) in text
     assert "make_sot(" in text
-    assert text.count("make_sot(") == 1 + len(DEFAULT_SOT_PACKAGES)  # def + one call per part
+    by_builder = {}
+    for name, kw in DEFAULT_SOT_PACKAGES.items():
+        by_builder.setdefault(kw.get("builder", "make_sot"), []).append(name)
+    # def + one call per part, each through its own builder
+    assert text.count("make_sot(") == 1 + len(by_builder["make_sot"])
+    assert text.count("make_power_flat(") == 1 + len(by_builder.get("make_power_flat", []))
+    assert "builder=" not in text
 
 
 def test_custom_sot_packages_dict_replaces_the_default(tmp_path):
@@ -171,7 +177,8 @@ def test_default_sot_packages_include_the_soic_style_ic_variants():
         assert len(pkg["leads_neg_y"]) == n_leads_per_side
         assert len(pkg["leads_pos_y"]) == n_leads_per_side
         # symmetric both sides, unlike the 3-lead transistor outlines
-        assert [x for x, _ in pkg["leads_neg_y"]] == [x for x, _ in pkg["leads_pos_y"]]
+        # (row 2 may be listed in pin order, i.e. reversed)
+        assert sorted(x for x, _ in pkg["leads_neg_y"]) == sorted(x for x, _ in pkg["leads_pos_y"])
 
 
 def test_macro_emits_sot_14_16_18_by_default(tmp_path):

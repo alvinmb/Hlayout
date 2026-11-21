@@ -86,7 +86,7 @@ def test_gullwing_package_table_derives_pkg20_from_soic_leads():
 
 def test_gullwing_package_table_excludes_tab_style_packages():
     table = gullwing_package_table()
-    # SOT_89 (heat_tab) and SOT_223 (a lead far wider than the rest) are
+    # SOT_89 (flat leads + exposed tab) and SOT_223 (a lead far wider than the rest) are
     # deliberately excluded -- see _has_wide_tab_lead()'s docstring for
     # the confirmed false-positive this avoids.
     assert "SOT_89" not in table
