@@ -287,25 +287,27 @@ class LayoutCanvas(tk.Canvas):
         # full redraw per Tk idle cycle -- see _schedule_redraw().
         self._redraw_scheduled = False
 
+        # Handlers go through lambdas so they are looked up at event time:
+        # a method patched on the class (hot reload) takes effect at once.
         self.bind("<Configure>", lambda e: self.redraw())
-        self.bind("<ButtonPress-2>", self._pan_start_evt)
-        self.bind("<B2-Motion>", self._pan_move_evt)
-        self.bind("<ButtonRelease-2>", self._pan_end_evt)
-        self.bind("<ButtonPress-3>", self._pan_start_evt)
-        self.bind("<B3-Motion>", self._pan_move_evt)
-        self.bind("<ButtonRelease-3>", self._pan_end_evt)
-        self.bind("<MouseWheel>", self._on_wheel)      # Windows / macOS
+        self.bind("<ButtonPress-2>", lambda e: self._pan_start_evt(e))
+        self.bind("<B2-Motion>", lambda e: self._pan_move_evt(e))
+        self.bind("<ButtonRelease-2>", lambda e: self._pan_end_evt(e))
+        self.bind("<ButtonPress-3>", lambda e: self._pan_start_evt(e))
+        self.bind("<B3-Motion>", lambda e: self._pan_move_evt(e))
+        self.bind("<ButtonRelease-3>", lambda e: self._pan_end_evt(e))
+        self.bind("<MouseWheel>", lambda e: self._on_wheel(e))      # Windows / macOS
         self.bind("<Button-4>", lambda e: self.zoom(1.1, e.x, e.y))   # Linux
         self.bind("<Button-5>", lambda e: self.zoom(1 / 1.1, e.x, e.y))
-        self.bind("<Motion>", self._on_motion)
-        self.bind("<Button-1>", self._on_click)
-        self.bind("<B1-Motion>", self._on_drag_motion)
-        self.bind("<ButtonRelease-1>", self._on_release)
-        self.bind("<Double-Button-1>", self._on_double_click)
+        self.bind("<Motion>", lambda e: self._on_motion(e))
+        self.bind("<Button-1>", lambda e: self._on_click(e))
+        self.bind("<B1-Motion>", lambda e: self._on_drag_motion(e))
+        self.bind("<ButtonRelease-1>", lambda e: self._on_release(e))
+        self.bind("<Double-Button-1>", lambda e: self._on_double_click(e))
         self.bind("<Escape>", lambda e: self.cancel_draw())
         self.bind("<Return>", lambda e: self.finish_draw())
         self.bind("<BackSpace>", lambda e: self._undo_point())
-        self.bind("<space>", self._route_drop_via)
+        self.bind("<space>", lambda e: self._route_drop_via(e))
         self.bind("<Delete>", lambda e: self.delete_selected())
         # R: rotate the selection 90 deg CCW, repeatable -- the quick
         # equivalent of Edit > Rotate 90 deg (no dialog). Bound on the
