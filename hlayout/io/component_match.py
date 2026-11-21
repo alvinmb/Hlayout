@@ -260,18 +260,25 @@ def footprint_pin_stats(cell) -> Optional[dict]:
         if not pin:
             continue
         x0, y0, x1, y1 = sh.bbox()
-        centroids.setdefault(pin, []).append(((x0 + x1) / 2.0, (y0 + y1) / 2.0))
+        centroids.setdefault(pin, []).append(((x0 + x1) / 2.0, (y0 + y1) / 2.0,
+                                              abs(x1 - x0) * abs(y1 - y0)))
     for ref in cell.srefs:
         pin = getattr(ref, "pin", "")
         if not pin:
             continue
-        centroids.setdefault(pin, []).append((float(ref.origin[0]), float(ref.origin[1])))
+        centroids.setdefault(pin, []).append((float(ref.origin[0]), float(ref.origin[1]), 0.0))
 
     if len(centroids) < 2:
         return None
 
     pts = []
     for group in centroids.values():
+        areas = [p[2] for p in group]
+        if len(group) > 1 and min(areas) > 0 and max(areas) > 2 * min(areas):
+            # a lead's land plus a much bigger tab on the same pin (SOT-89 /
+            # SOT-223 "tab is lead 2"): the lead land is where the pin is in
+            # its row -- averaging in the tab would drag it off the row
+            group = [min(group, key=lambda p: p[2])]
         cx = sum(p[0] for p in group) / len(group)
         cy = sum(p[1] for p in group) / len(group)
         pts.append((cx, cy))

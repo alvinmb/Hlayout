@@ -109,25 +109,50 @@ def test_gullwing_ic_body_outline_is_not_rotated_90_degrees_from_the_pins():
         assert (oy1 - oy0) < (ox1 - ox0), name
 
 
+def test_power_packages_are_three_leads_plus_a_tab_on_lead_2():
+    # SOT-89 / SOT-223: leads 1-2-3 in one row at the datasheet pitch,
+    # the tab alone on the opposite side, centred on lead 2 and
+    # numbered 2 (it is lead 2's metal)
+    lib = load_gds(OUT_GDS)
+    for name, pitch_mm in (("SOT-89", 1.5), ("SOT-223", 2.3)):
+        pads = _pin_pads(lib.cells[name])
+        centre = {}
+        for p in pads:
+            x0, y0, x1, y1 = p.bbox()
+            centre.setdefault(p.pin, []).append(((x0 + x1) / 2.0, (y0 + y1) / 2.0, x1 - x0))
+        assert sorted(centre) == ["1", "2", "3"], name
+        row = [centre[k][0] for k in ("1", "2", "3")]
+        assert len({round(y) for _x, y, _w in row}) == 1, name          # one row
+        xs = [x for x, _y, _w in row]
+        assert [round(b - a) for a, b in zip(xs, xs[1:])] == [round(pitch_mm * 1000)] * 2, name
+        assert len(centre["2"]) == 2, name                               # lead 2 + tab
+        tab = max(centre["2"], key=lambda t: t[2])
+        assert round(tab[0]) == round(xs[1]), name                       # centred on lead 2
+        assert (tab[1] > row[0][1]) and all(t[1] < tab[1] for t in row), name   # opposite side
+
+
 def test_step_parts_covers_every_package_and_writes_a_valid_macro(tmp_path):
     import generate_sot_packages as gen
     from hlayout.io.example_step3d import write_step_macro
 
     parts = gen.step_parts()
     assert {p[0] for p in parts} == set(EXPECTED_PACKAGES)
-    # the 3D builder follows each package's row axis: "tb" -> make_dip
+    # the 3D builder follows each package's leads: flat -> make_power_flat,
+    # else by row axis ("tb" -> make_dip)
     for name, func, _kwargs in parts:
-        rows = gen.PACKAGES[name].get("rows")
-        assert func == ("make_dip" if rows == "tb" else "make_dip_x"), name
+        spec = gen.PACKAGES[name]
+        want = ("make_power_flat" if spec.get("flat")
+                else "make_dip" if spec.get("rows") == "tb" else "make_dip_x")
+        assert func == want, name
     # a tab_pin package's tab lead width made it into the 3D lead list too
     for name, spec in gen.PACKAGES.items():
-        if spec.get("tab_pin"):
+        if spec.get("tab_pin") and not spec.get("flat"):
             kwargs = next(k for n, _f, k in parts if n == name)
             axis = "y" if spec.get("rows") == "tb" else "x"
             all_leads = kwargs[f"leads_neg_{axis}"] + kwargs[f"leads_pos_{axis}"]
             widths = sorted({w for _pos, w in all_leads})
             along_row = 0 if spec.get("rows") == "tb" else 1   # tb specs are (along, across)
-            assert spec["tab"][along_row] in widths, name
+            assert spec.get("tab_lead_w", spec["tab"][along_row]) in widths, name
 
     path = write_step_macro(parts, str(tmp_path / "step_out"))
     text = open(path).read()

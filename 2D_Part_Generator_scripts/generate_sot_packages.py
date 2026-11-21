@@ -26,9 +26,10 @@ Each package cell has:
   * a body-outline Path on LAYER 61 (0.1 mm) round the nominal body;
   * a reference-designator placeholder Text "U" on LAYER 62.
 
-Pads sit in two rows (left/right of the body) on a regular pitch, the
-generic gull-wing arrangement. SOT-89 and SOT-223 carry an oversized
-tab pad in place of one ordinary pad. Component origin is the
+Pads sit in two rows on a regular pitch, the generic gull-wing
+arrangement. SOT-89 and SOT-223 are 3 leads in one row with an
+oversized tab pad opposite, centred on lead 2 and numbered 2 (the tab
+is lead 2's metal). Component origin is the
 BOTTOM-LEFT corner of the body (matching hlayout.core.smdlib's /
 hlayout.io.component_library's convention), not its centre -- the
 body spans (0, 0) to (body[0], body[1]).
@@ -90,6 +91,17 @@ LABEL_HEIGHT_MM = 0.6
 #:              (row 1 = bottom, left-to-right; row 2 = top,
 #:              right-to-left, continuing the same winding direction)
 #:              -- see build_package() and _spec_step_leads().
+#:   row1       pins in row 1 (default: half, rounded up) -- 3 for the
+#:              "3 leads + tab" power packages (SOT-89, SOT-223)
+#:   row_y      ("tb") (row 1, row 2) pad-centre Y from the body centre,
+#:              for packages whose rows aren't symmetric (SOT-89's tab)
+#:   tab_label  pin number written on the tab pad (default: tab_pin) --
+#:              "2" where the tab IS lead 2's metal (KiCad's TabPin2)
+#:   lead_reach / tab_reach   real lead / tab reach from the body wall
+#:              for the layer-61 outline, when not derivable from span
+#:   tab_lead_w the tab's real metal width for the 3D model
+#:   flat       3D only: flat leads + exposed underside tab
+#:              (make_power_flat kwargs, less body/positions)
 PACKAGES = {
     # 2026-09-23: SOT-23/23-5/23-6/143/363 switched "lr" -> "tb". Real
     # parts in this family have leads exiting the TOP/BOTTOM long
@@ -98,10 +110,7 @@ PACKAGES = {
     # gull-wing family below. `pad`/`tab` tuples are swapped to match
     # "tb"'s (along-row, across-row) axis convention -- see PACKAGES's
     # own docstring above -- otherwise the along-row pad width would
-    # exceed `pitch` and adjacent pads would overlap. SOT-89 and
-    # SOT-223 stay "lr": their row_gap sits close to body_l (their
-    # long axis), not body_w, confirming their tab/leads really do
-    # exit the SHORT ends, unlike this family.
+    # exceed `pitch` and adjacent pads would overlap.
     # 2026-11-19: SOT-23 (TO-236) to the datasheet drawing -- body
     # 2.8 x 1.3 (1.2-1.4), pins 1 and 2 are 1.9 apart on the bottom
     # row with pin 3 centred on the top row (pitch=1.9 with 2+1 pins
@@ -123,12 +132,31 @@ PACKAGES = {
     # 0.4 (0.3-0.5), foot 0.45 (0.3-0.6).
     "SOT-23-6": dict(pins=6, body=(2.9, 1.6), pitch=0.95, row_gap=2.6, pad=(0.55, 1.1), rows="tb",
                      span=2.8, lead_w=0.4, lead_t=0.12, lead_out=0.15, lead_foot=0.45),
-    "SOT-89":   dict(pins=4, body=(4.5, 2.5), pitch=1.5, row_gap=4.6, pad=(1.2, 0.6),
-                     tab_pin=4, tab=(1.8, 2.0)),
+    # 2026-11-21: SOT-89 and SOT-223 are 3 leads in a row plus a tab
+    # opposite (the tab is lead 2's metal), not 2 + 2 as drawn before.
+    # SOT-89 to the datasheet drawing: body D 4.5 x E1 2.5, height A
+    # 1.5, FLAT leads (not gull-wing) e 1.5 pitch, b 0.42 (middle b1
+    # 0.47), L 1.05 out of the wall, c 0.40 thick; tab D1 1.6 wide,
+    # standing 0.5 proud of the far wall (E 4.05 - E1 2.5 - L 1.05),
+    # V 2.6 of metal from its tip back under the body. Land: 0.7 x 1.3
+    # lead pads (0.1 under the body, 0.15 past the toe); the tab pad
+    # covers D1 + 0.15 a side and the whole V run + 0.15.
+    "SOT-89":   dict(pins=4, body=(4.5, 2.5), pitch=1.5, row_gap=2.325, pad=(0.7, 1.3), rows="tb",
+                     row1=3, row_y=(-1.8, 0.525), tab_pin=4, tab_label="2", tab=(1.9, 2.75),
+                     lead_w=0.42, lead_reach=1.05, tab_reach=0.5,
+                     flat=dict(lead_ws=(0.42, 0.47, 0.42), lead_l=1.05, lead_t=0.40,
+                               tab_w=1.6, tab_out=0.5, tab_back=2.6)),
     "SOT-143":  dict(pins=4, body=(2.9, 1.3), pitch=0.95, row_gap=2.3, pad=(0.55, 1.0),
                      tab_pin=4, tab=(1.1, 1.0), rows="tb"),
-    "SOT-223":  dict(pins=4, body=(6.5, 3.5), pitch=2.3, row_gap=6.3, pad=(1.6, 0.9),
-                     tab_pin=4, tab=(3.8, 2.0)),
+    # SOT-223 to the datasheet drawing: body D 6.50 x E 3.50, A 1.60,
+    # gull-wing leads b 0.70 at e1 2.30, tab lead b1 3.00, overall span
+    # E1 7.00, lead C 0.25 thick, foot L 0.95 -- reach per side is
+    # stub + foot (the foot starts where the stub ends), so the stub is
+    # (7.00 - 3.50) / 2 - 0.95 = 0.80. Land pads as KiCad's
+    # SOT-223-3_TabPin2 (1.5 x 2.0 leads, 3.8 x 2.0 tab, rows 6.3 apart).
+    "SOT-223":  dict(pins=4, body=(6.5, 3.5), pitch=2.3, row_gap=6.3, pad=(1.5, 2.0), rows="tb",
+                     row1=3, tab_pin=4, tab_label="2", tab=(3.8, 2.0),
+                     span=7.0, lead_w=0.7, tab_lead_w=3.0, lead_t=0.25, lead_out=0.80, lead_foot=0.95),
     "SOT-363":  dict(pins=6, body=(2.0, 1.25), pitch=0.65, row_gap=2.0, pad=(0.4, 0.7), rows="tb"),
     # Gull-wing multi-lead ICs at the standard 1.27 mm (0.05") SOIC pitch --
     # see the "NOTE ON NAMING" in the module docstring. These are "tb"
@@ -305,7 +333,11 @@ def build_package(cell, spec):
     # docstring on why the cell's own origin is bottom-left.
     ox, oy = body_l / 2.0, body_w / 2.0
 
-    per_row = (pins + 1) // 2          # row 1 is pins 1..per_row
+    per_row = spec.get("row1", (pins + 1) // 2)   # row 1 is pins 1..per_row
+    tab_reach = spec.get("tab_reach")
+
+    def _label(n):
+        return spec.get("tab_label", n) if (tab_pin == n and tab) else n
 
     def _row_positions(count, offset):
         span = (count - 1) * pitch
@@ -327,7 +359,9 @@ def build_package(cell, spec):
     # overall lead span (tip to tip across the rows).
     span = spec.get("span")
     body_across = body_w if rows == "tb" else body_l
-    reach = (span - body_across) / 2.0 if span else None
+    reach = (span - body_across) / 2.0 if span else spec.get("lead_reach")
+    if tab_reach is None:
+        tab_reach = reach if span else None
 
     n = 1
     if rows == "tb":
@@ -338,31 +372,33 @@ def build_package(cell, spec):
         # at the bottom-left corner and the last pin at the top-left.
         bottom_y = -row_gap / 2.0 + oy
         top_y = row_gap / 2.0 + oy
+        if spec.get("row_y"):
+            bottom_y, top_y = spec["row_y"][0] + oy, spec["row_y"][1] + oy
         bottom_xs = _row_positions(per_row, ox)
         top_xs = list(reversed(_row_positions(pins - per_row, ox)))
         if spec.get("row2"):
             top_xs = [ox + p for p in spec["row2"]]
         for x in bottom_xs:
             if tab_pin == n and tab:
-                _pad(cell, x, bottom_y, tab[0], tab[1], n)
+                _pad(cell, x, bottom_y, tab[0], tab[1], _label(n))
                 _oversized_pad(cell, x, bottom_y, tab[0], tab[1])
-                _lead_bend(cell, rows, x, 0.0, -1.0, bottom_y, tab[1], tab[0], stub_cap)
+                _lead_bend(cell, rows, x, 0.0, -1.0, bottom_y, tab[1], tab[0], stub_cap, tab_reach)
             else:
                 _pad(cell, x, bottom_y, pad_l, pad_w, n)
                 _oversized_pad(cell, x, bottom_y, pad_l, pad_w)
                 _lead_bend(cell, rows, x, 0.0, -1.0, bottom_y, pad_w, lead_l, stub_cap, reach)
-            _pin_label(cell, x, bottom_y, n)
+            _pin_label(cell, x, bottom_y, _label(n))
             n += 1
         for x in top_xs:
             if tab_pin == n and tab:
-                _pad(cell, x, top_y, tab[0], tab[1], n)
+                _pad(cell, x, top_y, tab[0], tab[1], _label(n))
                 _oversized_pad(cell, x, top_y, tab[0], tab[1])
-                _lead_bend(cell, rows, x, body_w, 1.0, top_y, tab[1], tab[0], stub_cap)
+                _lead_bend(cell, rows, x, body_w, 1.0, top_y, tab[1], tab[0], stub_cap, tab_reach)
             else:
                 _pad(cell, x, top_y, pad_l, pad_w, n)
                 _oversized_pad(cell, x, top_y, pad_l, pad_w)
                 _lead_bend(cell, rows, x, body_w, 1.0, top_y, pad_w, lead_l, stub_cap, reach)
-            _pin_label(cell, x, top_y, n)
+            _pin_label(cell, x, top_y, _label(n))
             n += 1
     else:
         # Rows on the LEFT/RIGHT walls, pins spread along Y. Row 1
@@ -442,7 +478,8 @@ def _spec_step_leads(spec, lead_w=None):
     pad_w = lead_w if lead_w is not None else spec["pad"][along_row_idx]
     tab_pin = spec.get("tab_pin")
     tab = spec.get("tab")
-    per_row = (pins + 1) // 2
+    per_row = spec.get("row1", (pins + 1) // 2)
+    tab_w = spec.get("tab_lead_w", tab[along_row_idx] if tab else None)
 
     def _positions(count):
         span = (count - 1) * pitch
@@ -452,7 +489,7 @@ def _spec_step_leads(spec, lead_w=None):
         out = []
         for i, p in enumerate(positions):
             n = first_pin + i
-            w = tab[along_row_idx] if tab_pin == n and tab else pad_w
+            w = tab_w if tab_pin == n and tab else pad_w
             out.append((round(p, 4), w))
         return out
 
@@ -486,6 +523,16 @@ def step_parts():
         body_l, body_w = spec["body"]
         rows = spec.get("rows", "lr")
         row_gap = spec["row_gap"]
+        if spec.get("flat"):
+            # flat leads + exposed underside tab (SOT-89): row 1's
+            # positions, each with its own real lead width
+            flat = dict(spec["flat"])
+            widths = flat.pop("lead_ws")
+            row1, _row2 = _spec_step_leads(spec)
+            leads = [(x, w) for (x, _w), w in zip(row1, widths)]
+            parts.append((name, "make_power_flat", dict(
+                L=body_l, W=body_w, H=HEIGHT_MM[name], leads=leads, **flat)))
+            continue
         # The across-row (protrusion) pad dimension, and the body
         # dimension the leads protrude from, both depend on `rows` --
         # see PACKAGES's own docstring on the axis transpose for "tb".
