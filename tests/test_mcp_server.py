@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 
 import pytest
 
@@ -100,6 +101,46 @@ def test_stdio_server_end_to_end():
                           "params": {"name": "hlayout_python", "arguments": {"code": "1/0"}}})
         assert bad["result"]["isError"] is True
         assert _rpc(proc, {"jsonrpc": "2.0", "id": 5, "method": "nope"})["error"]["code"] == -32601
+    finally:
+        proc.stdin.close()
+        proc.wait(timeout=10)
+        proc.stdout.close()
+        proc.stderr.close()
+
+
+def test_children_of_the_server_never_get_the_protocol_pipes(tmp_path):
+    """A process the server launches (FreeCAD, Freerouting, a test run)
+    must start straight away while the server sits waiting on its stdin
+    pipe -- on Windows a child that inherits that pipe used to hang at
+    startup until the next MCP message arrived -- and anything it prints
+    must not land in the JSON-RPC stream."""
+    marks = [str(tmp_path / "a"), str(tmp_path / "b")]
+    child = ("import sys; print('stray output'); sys.stdout.flush(); "
+             "open(sys.argv[1], 'w').write('ok')")
+    code = (
+        "import subprocess, sys\n"
+        f"subprocess.Popen([sys.executable, '-c', {child!r}, {marks[0]!r}])\n"
+        f"subprocess.Popen([sys.executable, '-c', {child!r}, {marks[1]!r}],"
+        " stdout=subprocess.DEVNULL)\n"
+    )
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "hlayout.mcpserver", "--headless"],
+        cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        _rpc(proc, {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                    "params": {"protocolVersion": "2025-03-26", "capabilities": {},
+                               "clientInfo": {"name": "t", "version": "0"}}})
+        r = _rpc(proc, {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                        "params": {"name": "hlayout_python", "arguments": {"code": code}}})
+        assert r["result"]["isError"] is False, r
+        # send nothing now: the server is blocked reading its stdin pipe
+        deadline = time.time() + 30
+        while time.time() < deadline and not all(os.path.exists(m) for m in marks):
+            time.sleep(0.2)
+        assert all(os.path.exists(m) for m in marks), "child stalled on the server's stdin"
+        # the children's "stray output" went to stderr, not the protocol
+        ping = _rpc(proc, {"jsonrpc": "2.0", "id": 3, "method": "ping"})
+        assert ping == {"jsonrpc": "2.0", "id": 3, "result": {}}
     finally:
         proc.stdin.close()
         proc.wait(timeout=10)

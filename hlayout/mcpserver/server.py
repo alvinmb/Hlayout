@@ -15,6 +15,7 @@ in this process (see ops.py).
 
 import argparse
 import json
+import os
 import socket
 import sys
 
@@ -229,6 +230,45 @@ def serve(stdin, stdout, backend):
             send(reply)
 
 
+def private_stdio():
+    """Take the protocol pipes off the process's standard handles.
+
+    Returns (stdin, stdout) binary files on private, non-inheritable
+    copies of the JSON-RPC pipes, and repoints the standard handles: stdin
+    at the null device, stdout at stderr. Anything this process launches
+    (FreeCAD, Freerouting, a test run from hlayout_python, ...) then never
+    gets the protocol pipes:
+
+    - On Windows a child that inherits a pipe handle this process is
+      blocked reading (serve()'s readline) hangs at startup until the
+      next MCP message arrives -- subprocess.Popen with stdin=None, or
+      with only stdout given (it fills the rest from GetStdHandle),
+      hands it exactly that.
+    - A child writing to an inherited stdout would put stray text into
+      the JSON-RPC stream and break the client's parser.
+    """
+    for f in (sys.stdin, sys.stdout):
+        try:
+            f.flush()
+        except (AttributeError, OSError, ValueError):
+            pass
+    proto_in = os.dup(0)    # os.dup: non-inheritable (PEP 446)
+    proto_out = os.dup(1)
+    null = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(null, 0)
+    os.close(null)
+    os.dup2(2, 1)
+    if sys.platform == "win32":
+        # Popen (and CreateProcess) read the Win32 std handles, not fds
+        import ctypes
+        import msvcrt
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.SetStdHandle(-10, msvcrt.get_osfhandle(0))   # STD_INPUT_HANDLE
+        k32.SetStdHandle(-11, msvcrt.get_osfhandle(1))   # STD_OUTPUT_HANDLE
+    sys.stdin = open(os.devnull, "r")
+    return os.fdopen(proto_in, "rb"), os.fdopen(proto_out, "wb")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="python -m hlayout.mcpserver",
                                      description="HLayout MCP server (stdio)")
@@ -238,9 +278,9 @@ def main(argv=None):
                         help="GDSII file to open in the headless session")
     opts = parser.parse_args(argv)
 
-    stdin, stdout = sys.stdin.buffer, sys.stdout.buffer
-    # stdout carries the protocol and nothing else: anything a script or
-    # library prints must go to stderr instead.
+    # stdout carries the protocol and nothing else: anything a script, a
+    # library or a child process prints goes to stderr instead.
+    stdin, stdout = private_stdio()
     sys.stdout = sys.stderr
     serve(stdin, stdout, Backend(headless=opts.headless, design_path=opts.design))
 
