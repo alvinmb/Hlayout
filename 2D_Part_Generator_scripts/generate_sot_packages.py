@@ -243,6 +243,8 @@ def build_package(cell, spec):
         if spec.get("row_y"):
             bottom_y, top_y = spec["row_y"][0] + oy, spec["row_y"][1] + oy
         bottom_xs = _row_positions(per_row, ox)
+        if spec.get("row1_pos"):
+            bottom_xs = [ox + p for p in spec["row1_pos"]]
         top_xs = list(reversed(_row_positions(pins - per_row, ox)))
         if spec.get("row2"):
             top_xs = [ox + p for p in spec["row2"]]

@@ -36,6 +36,8 @@ All dimensions in mm. Datasheet sources are noted per entry.
 #:              (row 1 = bottom, left-to-right; row 2 = top,
 #:              right-to-left, continuing the same winding direction)
 #:              -- see build_package() and _spec_step_leads().
+#:   row1_pos   ("tb") row 1's pin centres from the body centre, in pin
+#:              order, when not evenly spaced (SOT-143's wide pin 1)
 #:   row1       pins in row 1 (default: half, rounded up) -- 3 for the
 #:              "3 leads + tab" power packages (SOT-89, SOT-223)
 #:   row_y      ("tb") (row 1, row 2) pad-centre Y from the body centre,
@@ -91,8 +93,19 @@ PACKAGES = {
                      lead_w=0.42, lead_reach=1.05, tab_reach=0.5,
                      flat=dict(lead_ws=(0.42, 0.47, 0.42), lead_l=1.05, lead_t=0.40,
                                tab_w=1.6, tab_out=0.5, tab_back=2.6)),
-    "SOT-143":  dict(pins=4, body=(2.9, 1.3), pitch=0.95, row_gap=2.3, pad=(0.55, 1.0),
-                     tab_pin=4, tab=(1.1, 1.0), rows="tb"),
+    # 2026-11-21: SOT-143 (TO-253) to the datasheet drawing (Vishay
+    # 96 12240): body 2.9 x 1.3 (2.8-3.0 x 1.2-1.4), height 1.0
+    # (0.9-1.1), span 2.5 (2.35-2.6), leads 0.12 thick (0.08-0.15),
+    # three 0.42 wide (0.35-0.5) and pin 1 0.82 wide (0.75-0.9). Pin 1
+    # (wide) is bottom-left, 1.7 from pin 2; pins 3 and 4 opposite are
+    # 1.9 apart; the wide lead's outer edge lines up with pin 4's, so
+    # pin 1's centre is at -0.75 and the others at +/-0.95. Land pads as
+    # the datasheet's footprint recommendation: 0.8 x 0.9 (pin 1:
+    # 1.2 x 0.9), rows 2.0 apart.
+    "SOT-143":  dict(pins=4, body=(2.9, 1.3), pitch=1.7, row_gap=2.0, pad=(0.8, 0.9), rows="tb",
+                     row1_pos=(-0.75, 0.95), row2=(0.95, -0.95),
+                     tab_pin=1, tab=(1.2, 0.9), tab_lead_w=0.82,
+                     span=2.5, lead_w=0.42, lead_t=0.12, lead_out=0.2, lead_foot=0.4),
     # SOT-223 to the datasheet drawing: body D 6.50 x E 3.50, A 1.60,
     # gull-wing leads b 0.70 at e1 2.30, tab lead b1 3.00, overall span
     # E1 7.00, lead C 0.25 thick, foot L 0.95 -- reach per side is
@@ -134,7 +147,7 @@ PACKAGES = {
 #: SOT-18/20/24/28 are wide-body (SOIC-W, A 2.35-2.65).
 HEIGHT_MM = {
     "SOT-23": 0.9, "SOT-23-5": 1.1, "SOT-23-6": 1.1,
-    "SOT-89": 1.5, "SOT-143": 1.1, "SOT-223": 1.6, "SOT-363": 0.95,
+    "SOT-89": 1.5, "SOT-143": 1.0, "SOT-223": 1.6, "SOT-363": 0.95,
     "SOT-8": 1.75, "SOT-16": 1.75, "SOT-18": 2.5,
     "SOT-20": 2.5, "SOT-24": 2.5, "SOT-28": 2.5,
 }
@@ -185,7 +198,7 @@ def _spec_step_leads(spec, lead_w=None):
             out.append((round(p, 4), w))
         return out
 
-    row1 = _leads(_positions(per_row), 1)
+    row1 = _leads(list(spec["row1_pos"]) if spec.get("row1_pos") else _positions(per_row), 1)
     if spec.get("row2"):
         row2 = _leads(list(spec["row2"]), per_row + 1)
     else:

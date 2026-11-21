@@ -131,6 +131,23 @@ def test_power_packages_are_three_leads_plus_a_tab_on_lead_2():
         assert (tab[1] > row[0][1]) and all(t[1] < tab[1] for t in row), name   # opposite side
 
 
+def test_sot143_pin1_is_the_wide_lead_bottom_left():
+    # TO-253: pin 1 wide, bottom-left, 1.7 from pin 2; pins 3 / 4 opposite
+    # 1.9 apart; pin 1's outer (left) edge lines up with pin 4's
+    lib = load_gds(OUT_GDS)
+    pads = {p.pin: p.bbox() for p in _pin_pads(lib.cells["SOT-143"])}
+    assert sorted(pads) == ["1", "2", "3", "4"]
+    cx = {k: (b[0] + b[2]) / 2.0 for k, b in pads.items()}
+    cy = {k: (b[1] + b[3]) / 2.0 for k, b in pads.items()}
+    width = {k: b[2] - b[0] for k, b in pads.items()}
+    assert width["1"] == max(width.values()) and width["1"] > width["2"]
+    assert cy["1"] == cy["2"] < cy["3"] == cy["4"]                  # 1-2 bottom, 3-4 top
+    assert cx["1"] < cx["2"] and cx["4"] < cx["3"]                  # 1 left, 4 above it
+    assert round(cx["2"] - cx["1"]) == 1700 and round(cx["3"] - cx["4"]) == 1900
+    assert round(pads["1"][0]) == round(pads["4"][0])               # outer edges line up
+    assert round(cy["3"] - cy["1"]) == 2000                         # rows 2.0 apart
+
+
 def test_step_parts_covers_every_package_and_writes_a_valid_macro(tmp_path):
     import generate_sot_packages as gen
     from hlayout.io.example_step3d import write_step_macro
