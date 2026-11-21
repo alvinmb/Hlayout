@@ -37,6 +37,26 @@ def test_rerun_updates_its_own_cells_without_duplicating_the_index(tmp_path):
     assert sorted(load_gds(out).cells) == ["C1", "INDEX", "INDEX_SOT", "SOT-23"]
 
 
+def test_rerun_finds_its_index_under_any_index_name(tmp_path):
+    # a library whose SOT index ended up called "INDEX_3" (an older merge
+    # or a hand edit): a re-run must replace that one, not add another
+    out = str(tmp_path / "STD.gds")
+    save_gds_merged(_lib("CAPS", ["C1"]), out)
+    lib = load_gds(out)
+    sot = _lib("SOT", ["SOT-23", "SOT-89"])
+    for name in ("SOT-23", "SOT-89"):
+        lib.cells[name] = sot.cells[name]
+    idx = sot.cells["INDEX"]
+    idx.name = "INDEX_3"
+    lib.cells["INDEX_3"] = idx
+    from hlayout.io.gdsio import save_gds
+    save_gds(lib, out)
+
+    res = save_gds_merged(_lib("SOT", ["SOT-23", "SOT-89"]), out)
+    assert "INDEX_3" in res["replaced"]
+    assert sorted(load_gds(out).cells) == ["C1", "INDEX", "INDEX_3", "SOT-23", "SOT-89"]
+
+
 def test_overwrite_starts_a_fresh_file(tmp_path):
     out = str(tmp_path / "SOLDER.gds")
     save_gds_merged(_lib("CAPS", ["C1"]), out)

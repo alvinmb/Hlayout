@@ -414,10 +414,11 @@ def save_gds_merged(library: Library, path: str, overwrite: bool = False) -> dic
 
     If ``path`` exists (and ``overwrite`` is False) its cells are kept:
     ``library``'s cells are added, a cell of the same name is replaced by
-    the new one, and ``library``'s "INDEX" cell is stored as
-    "INDEX_<library name>" (unless the file's own "INDEX" is this
-    library's, from an earlier run) so several generators can share one
-    file.
+    the new one, and ``library``'s "INDEX" cell replaces this library's
+    own index from an earlier run -- any "INDEX" / "INDEX_*" cell that
+    places only this library's cells, whatever it was called -- or else
+    is stored as "INDEX_<library name>", so several generators can share
+    one file and a re-run never piles up another index.
     Otherwise the file is written fresh, as save_gds() does.
 
     Returns {"path", "mode": "new"|"merged", "added", "replaced", "kept"}.
@@ -429,14 +430,19 @@ def save_gds_merged(library: Library, path: str, overwrite: bool = False) -> dic
     target = load_gds(path)
     before = set(target.cells)
     added, replaced = [], []
-    # This generator's own index: the file's "INDEX" if it only places
-    # this library's cells (a re-run), else "INDEX_<library name>".
-    own_index = "INDEX"
-    if "INDEX" in target.cells:
-        old = target.cells["INDEX"]
-        placed = {r.cell_name for r in old.srefs} | {r.cell_name for r in old.arefs}
-        if not placed <= set(library.cells):
-            own_index = f"INDEX_{library.name}"
+    # This generator's own index from an earlier run: an index cell that
+    # places only this library's cells (the file's "INDEX", or one a
+    # merge -- or a hand rename -- called "INDEX_<something>").
+    def _places_only_ours(cell):
+        placed = {r.cell_name for r in cell.srefs} | {r.cell_name for r in cell.arefs}
+        return bool(placed) and placed <= set(library.cells)
+
+    candidates = ["INDEX", f"INDEX_{library.name}"] + sorted(
+        n for n in target.cells if n.startswith("INDEX_"))
+    own_index = next((n for n in candidates
+                      if n in target.cells and _places_only_ours(target.cells[n])), None)
+    if own_index is None:
+        own_index = "INDEX" if "INDEX" not in target.cells else f"INDEX_{library.name}"
     for name, cell in library.cells.items():
         out = own_index if name == "INDEX" else name
         if out != name:
