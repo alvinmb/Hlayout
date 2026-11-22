@@ -4,7 +4,7 @@
 
 """Example 4 -- ALU16 MCM as a chip-and-wire hybrid.
 
-Starts from example2/alu16_MCM.gds (LCC packaged parts) and replaces every
+Starts from LAYOUT_EXAMPLES/example_16bit_alu_solder/alu16_MCM.gds (LCC packaged parts) and replaces every
 LCC20/LCC28 carrier with a BARE DIE (pads on layer 58, epoxy on layer 20,
 outline on layer 61) placed at the same spot/rotation.  Each used die pad
 gets a WIRE BOND (layer 59) out to a substrate landing; the old routing is
@@ -33,7 +33,7 @@ from hlayout.io import techfile as T
 import hlayout.scripting.api as A
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SRC = os.path.join(HERE, "..", "example2", "alu16_MCM.gds")
+SRC = os.path.join(HERE, "..", "LAYOUT_EXAMPLES", "example_16bit_alu_solder", "alu16_MCM.gds")
 OUT = os.path.join(HERE, "alu16_chipwire.gds")
 if "--out" in sys.argv:                      # --out <file.gds>
     OUT = os.path.abspath(sys.argv[sys.argv.index("--out") + 1])
@@ -65,7 +65,7 @@ ROUTE_RULES = {"power_width": 400, "bond_finger": 500, "passes": 200,
 
 
 def lcc_map(dip_pins):
-    """DIP / die pad -> LCC pin (same table as example2/gen_alu16_lcc.py)."""
+    """DIP / die pad -> LCC pin (same table as LAYOUT_EXAMPLES/example_16bit_alu_solder/gen_alu16_lcc.py)."""
     if dip_pins == 14:
         return {1:2,2:3,3:4,4:6,5:8,6:9,7:10,8:12,9:13,10:14,11:16,12:18,13:19,14:20}
     if dip_pins == 16:
@@ -177,7 +177,7 @@ def build(route=True):
 
     # --- 4. net names keyed by die pad -----------------------------------
     names = {"%s.%s" % k: v for k, v in used.items()}
-    old = os.path.join(HERE, "..", "example2", "alu16_net_names.csv")
+    old = os.path.join(HERE, "..", "LAYOUT_EXAMPLES", "example_16bit_alu_solder", "alu16_net_names.csv")
     for row in csv.DictReader(open(old, newline="")):
         if not row["pad"].startswith("U"):
             names[row["pad"]] = row["net"]

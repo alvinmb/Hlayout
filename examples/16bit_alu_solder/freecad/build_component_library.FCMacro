@@ -18,7 +18,7 @@ import FreeCAD as App
 import Part
 
 V = App.Vector
-OUT_DIR = 'C:/dev/HLayout/example2/freecad'
+OUT_DIR = 'C:/dev/HLayout/step_models'
 os.makedirs(OUT_DIR, exist_ok=True)
 
 

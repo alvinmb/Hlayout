@@ -466,52 +466,52 @@ _s.append(Part.Face([_poly([V(-37.00000,-37.00000,-0.63500),V(37.00000,-37.00000
 _add('Substrate', _fuse(_s), (0.97, 0.97, 0.95), surface=True)
 # --- component CAP_0805 (model) ---
 try:
-    _place_model('C:\\dev\\HLayout\\example2\\freecad\\CAP_0805.step', 'C1_CAP_0805', 32.66200, -24.81200, 0.05400, 270.0000, False)
+    _place_model('C:\\dev\\HLayout\\step_models\\CAP_0805.step', 'C1_CAP_0805', 32.66200, -24.81200, 0.05400, 270.0000, False)
 except Exception as _e:
     App.Console.PrintWarning('HLayout: could not read CAP_0805.step for CAP_0805: %s\n' % _e)
 # --- component CAP_0805 (model) ---
 try:
-    _place_model('C:\\dev\\HLayout\\example2\\freecad\\CAP_0805.step', 'C2_CAP_0805', 24.81200, 28.83900, 0.05400, 0.0000, False)
+    _place_model('C:\\dev\\HLayout\\step_models\\CAP_0805.step', 'C2_CAP_0805', 24.81200, 28.83900, 0.05400, 0.0000, False)
 except Exception as _e:
     App.Console.PrintWarning('HLayout: could not read CAP_0805.step for CAP_0805: %s\n' % _e)
 # --- component CAP_0805 (model) ---
 try:
-    _place_model('C:\\dev\\HLayout\\example2\\freecad\\CAP_0805.step', 'C3_CAP_0805', -8.77000, 24.81200, 0.05400, 90.0000, False)
+    _place_model('C:\\dev\\HLayout\\step_models\\CAP_0805.step', 'C3_CAP_0805', -8.77000, 24.81200, 0.05400, 90.0000, False)
 except Exception as _e:
     App.Console.PrintWarning('HLayout: could not read CAP_0805.step for CAP_0805: %s\n' % _e)
 # --- component CAP_0805 (model) ---
 try:
-    _place_model('C:\\dev\\HLayout\\example2\\freecad\\CAP_0805.step', 'C4_CAP_0805', -7.61000, -27.88400, 0.05400, 180.0000, False)
+    _place_model('C:\\dev\\HLayout\\step_models\\CAP_0805.step', 'C4_CAP_0805', -7.61000, -27.88400, 0.05400, 180.0000, False)
 except Exception as _e:
     App.Console.PrintWarning('HLayout: could not read CAP_0805.step for CAP_0805: %s\n' % _e)
 # --- component CAP_0805 (model) ---
 try:
-    _place_model('C:\\dev\\HLayout\\example2\\freecad\\CAP_0805.step', 'C5_CAP_0805', 18.30300, -3.85800, 0.05400, 90.0000, False)
+    _place_model('C:\\dev\\HLayout\\step_models\\CAP_0805.step', 'C5_CAP_0805', 18.30300, -3.85800, 0.05400, 90.0000, False)
 except Exception as _e:
     App.Console.PrintWarning('HLayout: could not read CAP_0805.step for CAP_0805: %s\n' % _e)
 # --- component CAP_0805 (model) ---
 try:
-    _place_model('C:\\dev\\HLayout\\example2\\freecad\\CAP_0805.step', 'C6_CAP_0805', 8.06000, -7.50000, 0.05400, 180.0000, False)
+    _place_model('C:\\dev\\HLayout\\step_models\\CAP_0805.step', 'C6_CAP_0805', 8.06000, -7.50000, 0.05400, 180.0000, False)
 except Exception as _e:
     App.Console.PrintWarning('HLayout: could not read CAP_0805.step for CAP_0805: %s\n' % _e)
 # --- component CAP_0805 (model) ---
 try:
-    _place_model('C:\\dev\\HLayout\\example2\\freecad\\CAP_0805.step', 'C7_CAP_0805', -23.92800, 17.05700, 0.05400, 0.0000, False)
+    _place_model('C:\\dev\\HLayout\\step_models\\CAP_0805.step', 'C7_CAP_0805', -23.92800, 17.05700, 0.05400, 0.0000, False)
 except Exception as _e:
     App.Console.PrintWarning('HLayout: could not read CAP_0805.step for CAP_0805: %s\n' % _e)
 # --- component CAP_0805 (model) ---
 try:
-    _place_model('C:\\dev\\HLayout\\example2\\freecad\\CAP_0805.step', 'C8_CAP_0805', -0.33500, -0.92000, 0.05400, 270.0000, False)
+    _place_model('C:\\dev\\HLayout\\step_models\\CAP_0805.step', 'C8_CAP_0805', -0.33500, -0.92000, 0.05400, 270.0000, False)
 except Exception as _e:
     App.Console.PrintWarning('HLayout: could not read CAP_0805.step for CAP_0805: %s\n' % _e)
 # --- component CAP_0805 (model) ---
 try:
-    _place_model('C:\\dev\\HLayout\\example2\\freecad\\CAP_0805.step', 'C9_CAP_0805', -24.88300, -1.10100, 0.05400, 0.0000, False)
+    _place_model('C:\\dev\\HLayout\\step_models\\CAP_0805.step', 'C9_CAP_0805', -24.88300, -1.10100, 0.05400, 0.0000, False)
 except Exception as _e:
     App.Console.PrintWarning('HLayout: could not read CAP_0805.step for CAP_0805: %s\n' % _e)
 # --- component CAP_0805 (model) ---
 try:
-    _place_model('C:\\dev\\HLayout\\example2\\freecad\\CAP_0805.step', 'C10_CAP_0805', -24.88300, -18.30300, 0.05400, 0.0000, False)
+    _place_model('C:\\dev\\HLayout\\step_models\\CAP_0805.step', 'C10_CAP_0805', -24.88300, -18.30300, 0.05400, 0.0000, False)
 except Exception as _e:
     App.Console.PrintWarning('HLayout: could not read CAP_0805.step for CAP_0805: %s\n' % _e)
 # --- component DIE_54AS181 (extrude 1.0000 mm) ---
