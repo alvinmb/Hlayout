@@ -2,7 +2,7 @@
 	(version "E")
 	(design
 		(source "C:\\dev\\HLayout\\LAYOUT_EXAMPLES\\example_op_amp\\op_amp.kicad_sch")
-		(date "2026-11-16T18:00:09")
+		(date "2026-11-20T12:33:13")
 		(tool "Eeschema 10.0.5")
 		(sheet
 			(number "1")
@@ -2666,7 +2666,24 @@
 			)
 		)
 		(net
-			(code "5")
+			(code "3")
+			(name "INV")
+			(class "Default")
+			(node
+				(ref "J4")
+				(pin "1")
+				(pinfunction "Pin_1_1")
+				(pintype "passive")
+			)
+			(node
+				(ref "Q20")
+				(pin "2")
+				(pinfunction "B_2")
+				(pintype "input")
+			)
+		)
+		(net
+			(code "4")
 			(name "Net-(Q1-C)")
 			(class "Default")
 			(node
@@ -2701,7 +2718,7 @@
 			)
 		)
 		(net
-			(code "6")
+			(code "5")
 			(name "Net-(Q1-E)")
 			(class "Default")
 			(node
@@ -2718,7 +2735,7 @@
 			)
 		)
 		(net
-			(code "7")
+			(code "6")
 			(name "Net-(Q3-B)")
 			(class "Default")
 			(node
@@ -2740,7 +2757,7 @@
 			)
 		)
 		(net
-			(code "8")
+			(code "7")
 			(name "Net-(Q3-E)")
 			(class "Default")
 			(node
@@ -2756,7 +2773,7 @@
 			)
 		)
 		(net
-			(code "9")
+			(code "8")
 			(name "Net-(Q5-B)")
 			(class "Default")
 			(node
@@ -2784,7 +2801,7 @@
 			)
 		)
 		(net
-			(code "10")
+			(code "9")
 			(name "Net-(Q6-E)")
 			(class "Default")
 			(node
@@ -2800,7 +2817,7 @@
 			)
 		)
 		(net
-			(code "11")
+			(code "10")
 			(name "Net-(Q10-B)")
 			(class "Default")
 			(node
@@ -2828,7 +2845,7 @@
 			)
 		)
 		(net
-			(code "12")
+			(code "11")
 			(name "Net-(Q10-C)")
 			(class "Default")
 			(node
@@ -2867,7 +2884,7 @@
 			)
 		)
 		(net
-			(code "13")
+			(code "12")
 			(name "Net-(Q10-E)")
 			(class "Default")
 			(node
@@ -2902,7 +2919,7 @@
 			)
 		)
 		(net
-			(code "14")
+			(code "13")
 			(name "Net-(Q11-B)")
 			(class "Default")
 			(node
@@ -2924,7 +2941,7 @@
 			)
 		)
 		(net
-			(code "15")
+			(code "14")
 			(name "Net-(Q11-C)")
 			(class "Default")
 			(node
@@ -2946,7 +2963,7 @@
 			)
 		)
 		(net
-			(code "16")
+			(code "15")
 			(name "Net-(Q12-C)")
 			(class "Default")
 			(node
@@ -2980,7 +2997,7 @@
 			)
 		)
 		(net
-			(code "17")
+			(code "16")
 			(name "Net-(Q12-E)")
 			(class "Default")
 			(node
@@ -3002,7 +3019,7 @@
 			)
 		)
 		(net
-			(code "18")
+			(code "17")
 			(name "Net-(Q14-B)")
 			(class "Default")
 			(node
@@ -3023,7 +3040,7 @@
 			)
 		)
 		(net
-			(code "19")
+			(code "18")
 			(name "Net-(Q15-E)")
 			(class "Default")
 			(node
@@ -3045,7 +3062,7 @@
 			)
 		)
 		(net
-			(code "20")
+			(code "19")
 			(name "Net-(Q17-E)")
 			(class "Default")
 			(node
@@ -3061,7 +3078,7 @@
 			)
 		)
 		(net
-			(code "21")
+			(code "20")
 			(name "Net-(Q18-B)")
 			(class "Default")
 			(node
@@ -3090,7 +3107,7 @@
 			)
 		)
 		(net
-			(code "22")
+			(code "21")
 			(name "Net-(Q18-E)")
 			(class "Default")
 			(node
@@ -3107,7 +3124,7 @@
 			)
 		)
 		(net
-			(code "23")
+			(code "22")
 			(name "Net-(Q19-B)")
 			(class "Default")
 			(node
@@ -3130,7 +3147,7 @@
 			)
 		)
 		(net
-			(code "24")
+			(code "23")
 			(name "Net-(Q19-E)")
 			(class "Default")
 			(node
@@ -3147,7 +3164,7 @@
 			)
 		)
 		(net
-			(code "25")
+			(code "24")
 			(name "Non_INVERT")
 			(class "Default")
 			(node
@@ -3164,7 +3181,7 @@
 			)
 		)
 		(net
-			(code "26")
+			(code "25")
 			(name "OFFSET_NULL")
 			(class "Default")
 			(node
@@ -3186,7 +3203,7 @@
 			)
 		)
 		(net
-			(code "27")
+			(code "26")
 			(name "OUTPUT")
 			(class "Default")
 			(node
@@ -3213,18 +3230,7 @@
 			)
 		)
 		(net
-			(code "28")
-			(name "unconnected-(J4-Pin_1-Pad1)")
-			(class "Default")
-			(node
-				(ref "J4")
-				(pin "1")
-				(pinfunction "Pin_1_1")
-				(pintype "passive")
-			)
-		)
-		(net
-			(code "29")
+			(code "27")
 			(name "unconnected-(Q18-C-Pad3)")
 			(class "Default")
 			(node
@@ -3232,17 +3238,6 @@
 				(pin "3")
 				(pinfunction "C_3")
 				(pintype "passive")
-			)
-		)
-		(net
-			(code "30")
-			(name "unconnected-(Q20-B-Pad2)")
-			(class "Default")
-			(node
-				(ref "Q20")
-				(pin "2")
-				(pinfunction "B_2")
-				(pintype "input")
 			)
 		)
 	)
