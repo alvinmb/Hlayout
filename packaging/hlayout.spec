@@ -56,7 +56,19 @@ binaries = []
 # autoroute_window and Tools > Autoroute... failed with
 # ModuleNotFoundError on every installed copy. hlayout.examples are
 # stand-alone scripts, not part of the app.
+# collect_submodules imports the package in a separate Python that
+# inherits this sys.path, and the repo root isn't on it in CI (pathex
+# only applies to the Analysis below) -- without this it found nothing
+# and the 1.0.2 build shipped without the windows all the same.
+sys.path.insert(0, str(ROOT))
 hiddenimports = collect_submodules("hlayout", filter=lambda m: not m.startswith("hlayout.examples"))
+# fail the build, not the user: these are imported only by name
+_by_name = ["hlayout.gui.autoroute_window", "hlayout.gui.autoplace_window",
+            "hlayout.gui.header_pinout_window", "hlayout.gui.iopad_wizard",
+            "hlayout.gui.solidcraft_window"]
+_missing = [m for m in _by_name if m not in hiddenimports]
+if _missing:
+    raise SystemExit(f"hlayout.spec: collect_submodules missed {_missing}")
 
 # gdstk and shapely both ship compiled extensions / bundled shared libs
 # that PyInstaller's default import scan can miss -- pull in everything
