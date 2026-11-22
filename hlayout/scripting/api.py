@@ -1264,9 +1264,9 @@ class Session(
                 raise LayoutError("no current cell; call new_cell()/use_cell() first")
             cell_names = [self.current_cell_name]
 
-        self._checkpoint()
         violations = run_drc(self.library, parsed, cell_names=cell_names)
         if error_layer is not None:
+            self._checkpoint()              # a dry run adds no undo step
             e_layer = self.library.layers.resolve(error_layer)
             by_cell = {}
             for v in violations:
