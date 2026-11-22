@@ -99,3 +99,26 @@ def _isolated_app_settings(tmp_path, monkeypatch):
     monkeypatch.setattr(app_settings, "SETTINGS_PATH",
                         str(tmp_path / "hlayout_test_settings.json"))
     yield
+
+
+# ---- slow tests ------------------------------------------------------------
+# A test marked @pytest.mark.slow (minutes, not seconds -- e.g. placing the
+# whole 16-bit ALU) is skipped unless asked for: pytest --runslow, or
+# HLAYOUT_RUNSLOW=1.
+
+def pytest_addoption(parser):
+    parser.addoption("--runslow", action="store_true", default=False,
+                     help="also run the tests marked slow")
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "slow: takes minutes; run with --runslow")
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--runslow") or os.environ.get("HLAYOUT_RUNSLOW") == "1":
+        return
+    skip = pytest.mark.skip(reason="slow: run with --runslow")
+    for item in items:
+        if "slow" in item.keywords:
+            item.add_marker(skip)

@@ -151,6 +151,7 @@ def test_improve_never_makes_it_worse(tmp_path):
 ALU = os.path.join(os.path.dirname(__file__), "..", "LAYOUT_EXAMPLES", "example_16bit_alu_solder", "alu16_MCM.gds")
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(not os.path.exists(ALU), reason="the 16-bit ALU example is not present")
 def test_alu16_scrambled_places_within_ten_percent_of_hand_placement():
     from hlayout.io.sidecar import load_design
