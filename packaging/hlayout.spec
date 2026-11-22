@@ -15,7 +15,7 @@ import os
 import sys
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 # Set by CI from the git tag (see .github/workflows/build-installers.yml);
 # defaults to a placeholder for local/manual builds.
@@ -40,12 +40,23 @@ datas = [
     # the hlayout package (App.user_manual_path()) -- in a frozen build
     # that's _internal/, so the PDF lands at _internal/docs/.
     (str(ROOT / "docs" / "HLayout_User_Manual.pdf"), "docs"),
+    # Help > Command Reference opens docs/help.html the same way
+    # (app_help.show_command_reference); without it the frozen build
+    # only ever showed the plain-text fallback.
+    (str(ROOT / "docs" / "help.html"), "docs"),
     # The GPL asks that everyone who receives the program also gets a
     # copy of the licence, so every installer carries LICENSE.
     (str(ROOT / "LICENSE"), "."),
 ]
 binaries = []
-hiddenimports = []
+# Every hlayout module, not just the ones PyInstaller can trace: some
+# windows are imported by name at the moment their menu item is clicked
+# (__import__("hlayout.gui.autoroute_window", ...) in app_menubars.py),
+# which static analysis can't see -- 1.0.1 shipped without
+# autoroute_window and Tools > Autoroute... failed with
+# ModuleNotFoundError on every installed copy. hlayout.examples are
+# stand-alone scripts, not part of the app.
+hiddenimports = collect_submodules("hlayout", filter=lambda m: not m.startswith("hlayout.examples"))
 
 # gdstk and shapely both ship compiled extensions / bundled shared libs
 # that PyInstaller's default import scan can miss -- pull in everything
