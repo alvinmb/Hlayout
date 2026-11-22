@@ -84,8 +84,13 @@ class AutoPlaceMixin:
         thermal, effort, seed, weights, ...). The netlist's pad nets are
         merged into the design's net names.
         Returns {"placed", "fixed", "generated", "skipped", "unmapped",
-        "missing_pins", "length_before", "length_after", "overlaps",
-        "outside", "legal", "report"} -- ``report`` the full text report
+        "missing_pins", "length_before", "length_after", "cost_before",
+        "cost_after", "overlaps", "outside", "legal", "report"} -- the
+        lengths are the weighted SLI length; the cost is what the placer
+        minimises: that length plus the SLI-crossing, congestion, spacing
+        and thermal terms, so the length can rise where the crossings
+        fall (``*_before`` None when not every part started placed).
+        ``report`` the full text report
         (problems with a suggested move each, SLI crossings, longest nets). ``legal`` False: the parts did not fit --
         overlapping footprints (their pads touching: shorts) or parts off
         the substrate; the placement is applied so it can be fixed by hand.
@@ -94,7 +99,9 @@ class AutoPlaceMixin:
         from .autoplace_session import apply, build_job
         placer, info = build_job(self, netlist, cell_name=cell_name, overrides=overrides,
                                  settings=settings, only=set(only) if only else None)
-        before = placer.wirelength() if all(p.placed for p in placer.parts) else None
+        started = all(p.placed for p in placer.parts)
+        before = placer.wirelength() if started else None
+        cost_before = placer.cost() if started else None
         placer.run(effort=float(info["settings"]["effort"]), improve=improve,
                    on_progress=on_progress, cancel=cancel)
         bad, out = placer.overlaps()
@@ -111,6 +118,7 @@ class AutoPlaceMixin:
                 "generated": info["generated"], "skipped": info["skipped"],
                 "unmapped": info["unmapped"], "missing_pins": info["missing_pins"],
                 "length_before": before, "length_after": placer.wirelength(),
+                "cost_before": cost_before, "cost_after": placer.cost(),
                 "overlaps": bad, "outside": out,
                 # overlapping footprints include their pads: a short circuit
                 "legal": not bad and not out,

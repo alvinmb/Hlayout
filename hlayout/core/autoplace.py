@@ -730,7 +730,10 @@ class Placer:
                     p.x, p.y = spot
                 else:
                     stuck.add(i)                     # nowhere legal: don't search again
-        self.stuck = [self.parts[i].ref for i in stuck]
+        # a part stuck in an early pass can end up legal once its neighbours
+        # have moved off it: only the ones still illegal are stuck
+        self.stuck = [self.parts[i].ref for i in sorted(stuck)
+                      if not self._legal(i, self.parts[i].x, self.parts[i].y)]
         self._refresh()
 
     def orient(self, sweeps=3):
