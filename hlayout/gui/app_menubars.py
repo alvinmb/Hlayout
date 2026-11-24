@@ -272,6 +272,7 @@ class MenuBarsMixin:
         toolsm.add_command(label="Remove Unused Bonds...", command=self.remove_unused_bonds)
         toolsm.add_command(label="Bond Header Pins...", command=self.bond_header)
         toolsm.add_command(label="Fan Out Die Bonds...", command=self.fan_out_die_bonds)
+        toolsm.add_command(label="Fit Bonds to Nets", command=self.fit_bonds)
         toolsm.add_command(label="Assign I/O Pads...", command=self.assign_io_pads)
         toolsm.add_command(label="Header Pinout...",
                           command=lambda: __import__("hlayout.gui.header_pinout_window",

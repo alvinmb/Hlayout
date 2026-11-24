@@ -249,9 +249,10 @@ class HybridCommandsMixin:
                 "Fan Out Die Bonds",
                 "Draw a bond finger and a wire bond for every die pad with a net:\n\n"
                 + "\n".join(lines)
-                + "\n\nFingers 250 x 400 um, 150 um apart, 250 um clear of the die; a die's "
+                + "\n\nFingers 250 x 400 um, 150 um apart, 250 um clear of the die, then each "
+                "moved within the bond length and angle rules towards its net; a die's "
                 "earlier fan-out is replaced. One undo step. (FANOUT sets other sizes; "
-                "FANOUT all=1 bonds every pad.)", parent=self):
+                "FANOUT all=1 bonds every pad; FANOUT fit=0 keeps neat rows.)", parent=self):
             return
         try:
             r = self.session.fan_out_die_bonds(cell_name=self.canvas.cell_name)
@@ -260,6 +261,10 @@ class HybridCommandsMixin:
             return
         msg = (f"Fanned out: {r['fingers']} fingers + bonds ("
                + ", ".join(f"{d} {len(p)}" for d, p in r["dies"].items()) + ")")
+        fb = r.get("fitted") or {}
+        if fb.get("fingers"):
+            msg += (f"; {fb['fingers']} fitted towards their nets, "
+                    f"{fb['saved_um'] / 1000:.1f} mm of net length saved")
         warn = []
         if r["skipped"]:
             warn.append("Not bonded:\n" + "\n".join(f"  {p}: {w}" for p, w in r["skipped"].items()))
@@ -271,6 +276,23 @@ class HybridCommandsMixin:
         if warn:
             dialogs.show_warning("Fan Out Die Bonds", msg + "\n\n" + "\n\n".join(warn),
                                  parent=self)
+
+    def fit_bonds(self):
+        """Tools > Fit Bonds to Nets: move the bond fingers within the bond
+        length and angle rules towards their nets (Session.fit_bonds /
+        FITBONDS). One undo step."""
+        try:
+            r = self.session.fit_bonds(cell_name=self.canvas.cell_name)
+        except LayoutError as e:
+            dialogs.show_error("Fit Bonds to Nets", str(e), parent=self)
+            return
+        self.refresh_all()
+        if r["fingers"]:
+            self.status.set(f"{r['fingers']} of {r['checked']} bond finger(s) moved towards their "
+                            f"nets, {r['saved_um'] / 1000:.1f} mm of net length saved")
+        else:
+            self.status.set(f"{r['checked']} bond finger(s) checked: none could move closer "
+                            "to its net")
 
     def assign_io_pads(self):
         """Tools > Assign I/O Pads...: optimise the module pinout -- each

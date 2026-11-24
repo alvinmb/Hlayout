@@ -203,6 +203,13 @@ def build_report(session, placer, info, secs=None):
         prob.append({"sev": INFO, "item": "Wire bonds",
                      "detail": f"{cb['bonds']} wire bond(s) and {cb.get('fingers', 0)} bond finger(s) "
                                "moved with their dies", "refs": [], "box": None, "fix": None})
+    fb = info.get("fitted") or {}
+    if fb.get("fingers"):
+        prob.append({"sev": INFO, "item": "Bond fingers fitted",
+                     "detail": f"{fb['fingers']} finger(s) moved within the bond length and angle "
+                               f"rules towards their nets, {fb.get('saved_um', 0) / 1000:.1f} mm "
+                               "of net length saved", "refs": sorted(fb.get("dies") or {}),
+                     "box": None, "fix": None})
 
     # ---- nets: the longest, and who crosses whom
     geo = []

@@ -71,6 +71,9 @@ DEFAULTS = {
     #: False (the flow): printed resistors must be designed in the Resistor
     #: Designer first; True: Auto Place sizes undesigned ones itself
     "auto_size_resistors": False,
+    #: after placing, move each bonded die's fingers within the bond length
+    #: and departure-angle rules towards their nets (hlayout.scripting.bondfit)
+    "fit_bonds": True,
     "weights": {},             # net name -> weight
     "class_weights": {"signal": 1.0, "power": 1.0, "ground": 1.0, "clock": 1.0, "analog": 1.0},
     "two_pin_weight": 1.2,
@@ -876,6 +879,17 @@ def apply(session, placer, info):
     # a bonded die's wire bonds and bond fingers move with it
     from .fanout import carry_bonds
     info["carried"] = carry_bonds(session, info["cell"], moved)
+    # ... and then their fingers slide and swing, within the bond rules,
+    # towards the nets they serve where the dies now are
+    S = info.get("settings") or {}
+    if S.get("fit_bonds", True) and info["carried"].get("bonds"):
+        from .bondfit import fit_bonds
+        try:
+            info["fitted"] = fit_bonds(session, info["cell"],
+                                       refs=[p.ref for p in placer.parts
+                                             if not getattr(p, "fixed", False)])
+        except LayoutError as e:
+            info["fitted"] = {"fingers": 0, "error": str(e)}
     refs = {p.ref for p in placer.parts}
     pads = {k: v for k, v in info["netlist"].pad_nets().items() if k.split(".")[0] in refs}
     # the netlist is the truth for the parts it places: their old pad names

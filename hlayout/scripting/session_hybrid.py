@@ -666,17 +666,34 @@ class HybridMixin:
         self._notify()
         return r
 
+    def fit_bonds(self, cell_name: Optional[str] = None, refs=None, passes: int = 4,
+                  length_step: float = 50.0, angle_step: float = 5.0) -> dict:
+        """Move each bonded die's bond fingers -- the bond longer or
+        shorter between the Wire Bonds tab's minimum and maximum, swung
+        within the departure angle -- to where their nets are shortest,
+        clear of the die, other fingers, pads and parts, no bond crossing
+        another. Auto Place and Fan Out Die Bonds run it themselves.
+        ``refs``: just these dies. One undo step. Returns {"fingers",
+        "dies": {ref: moved}, "saved_um", "checked"}. See
+        hlayout.scripting.bondfit."""
+        from .bondfit import fit_bonds
+        return fit_bonds(self, cell_name=cell_name, refs=refs, passes=passes,
+                         length_step=length_step, angle_step=angle_step)
+
     def fan_out_die_bonds(self, cell_name: Optional[str] = None, refs=None,
                           all_pads: bool = False, finger_w: Optional[float] = None,
                           finger_l: Optional[float] = None, spacing: Optional[float] = None,
-                          gap: Optional[float] = None, layer=None) -> dict:
+                          gap: Optional[float] = None, layer=None, fit: bool = True) -> dict:
         """Fan out the placed bare dies: a bond finger on the substrate and
         a wire bond to it for every die pad with a design net (all_pads:
         every pad), in the pads' order round the die so no bonds cross,
         within the bond length and departure-angle rules. ``refs``: just
         these dies. Re-running replaces a die's fan-out. Run it after Auto
-        Place, before routing. One undo step. Returns {"dies": {ref:
-        [pins]}, "fingers", "skipped": {pad: why}, "overlaps", "layer"}.
+        Place, before routing. ``fit`` (default): then move the fingers
+        within the bond length and angle rules towards their nets
+        (fit_bonds); fit=False keeps them in neat rows. One undo step.
+        Returns {"dies": {ref: [pins]}, "fingers", "skipped": {pad: why},
+        "overlaps", "layer", "fitted"}.
         The dielectric fill is redone if there is one. See
         hlayout.scripting.fanout."""
         from . import fanout
@@ -684,6 +701,9 @@ class HybridMixin:
             r = fanout.fan_out(self, cell_name=cell_name, refs=refs, all_pads=all_pads,
                                finger_w=finger_w, finger_l=finger_l, spacing=spacing,
                                gap=gap, layer=layer)
+            if fit and r["fingers"]:
+                from .bondfit import fit_bonds
+                r["fitted"] = fit_bonds(self, cell_name=r["cell"], refs=list(r["dies"]))
             diel = dielectric_layer_number(self.library)
             cell = self.library.get_cell(r["cell"])
             if r["fingers"] and diel >= 0 and self._has_full_dielectric(cell, diel):

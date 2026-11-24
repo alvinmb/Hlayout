@@ -189,11 +189,12 @@ def test_a_finger_whose_bond_was_moved_off_it_still_moves_and_rebonds():
 
 def test_moving_a_bonded_die_takes_its_bonds_and_fingers_with_it():
     """Auto Place's apply(): a die that has been fanned out keeps its wire
-    bonds and bond fingers -- they move and turn with it."""
+    bonds and bond fingers -- they move and turn with it (fitting them to
+    their nets afterwards is test_bondfit's)."""
     from types import SimpleNamespace
     from hlayout.scripting.autoplace_session import apply
     s = _die_board(0)
-    s.fan_out_die_bonds()
+    s.fan_out_die_bonds(fit=False)
     rel = lambda pt, o, rot: (lambda x, y: (round(x), round(y)))(
         *({0: (pt[0] - o[0], pt[1] - o[1]),
            90: (pt[1] - o[1], -(pt[0] - o[0]))}[rot]))
@@ -201,7 +202,8 @@ def test_moving_a_bonded_die_takes_its_bonds_and_fingers_with_it():
     fb = sorted(tuple(sorted(rel(p, (0, 0), 0) for p in f.points)) for f in _fingers(s))
     ballc = len([sh for sh in s.cell.shapes if sh.layer == 59])
     placer = SimpleNamespace(parts=[SimpleNamespace(ref="U1", cell="DIE", x=5000, y=-3000, rot=90)])
-    info = {"cell": "TOP", "netlist": SimpleNamespace(pad_nets=lambda: {})}
+    info = {"cell": "TOP", "netlist": SimpleNamespace(pad_nets=lambda: {}),
+            "settings": {"fit_bonds": False}}
     with s._batch():
         apply(s, placer, info)
     assert info["carried"] == {"bonds": 7, "fingers": 7}

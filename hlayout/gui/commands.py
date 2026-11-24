@@ -2856,10 +2856,28 @@ class CommandInterpreter:
             out += "; skipped " + "; ".join(f"pin {p}: {w}" for p, w in r["skipped"].items())
         return out
 
+    def _cmd_fitbonds(self, args):
+        """FITBONDS [refs=U1,U2] -- move the bond fingers within the bond
+        length and angle rules towards their nets."""
+        usage = "usage: FITBONDS [refs=U1,U2]"
+        kw = {}
+        for a in args:
+            k, eq, v = a.partition("=")
+            if not eq or k.lower() != "refs":
+                raise CommandError(usage)
+            kw["refs"] = [t.strip() for t in v.replace(";", ",").split(",") if t.strip()]
+        r = self.session.fit_bonds(**kw)
+        self.on_change()
+        if not r["fingers"]:
+            return f"FITBONDS: {r['checked']} finger(s) checked, none could move closer to its net"
+        return (f"FITBONDS: {r['fingers']} of {r['checked']} finger(s) moved ("
+                + ", ".join(f"{d} {n}" for d, n in sorted(r["dies"].items()))
+                + f"), {r['saved_um'] / 1000:.1f} mm of net length saved")
+
     def _cmd_fanout(self, args):
         """FANOUT -- bond fingers and wire bonds round the placed bare dies."""
         usage = ("usage: FANOUT [refs=U1,U2] [all=1] [w=<um>] [l=<um>] [spacing=<um>] "
-                 "[gap=<um>] [layer=<n>]")
+                 "[gap=<um>] [layer=<n>] [fit=0|1]")
         kw = {}
         for a in args:
             k, eq, v = a.partition("=")
@@ -2871,6 +2889,8 @@ class CommandInterpreter:
                     kw["refs"] = [t.strip() for t in v.replace(";", ",").split(",") if t.strip()]
                 elif k == "all":
                     kw["all_pads"] = v.lower() not in ("0", "false", "no")
+                elif k == "fit":
+                    kw["fit"] = v.lower() not in ("0", "false", "no")
                 elif k in ("w", "l", "spacing", "gap"):
                     kw[{"w": "finger_w", "l": "finger_l"}.get(k, k)] = float(v)
                 elif k == "layer":
@@ -2886,6 +2906,10 @@ class CommandInterpreter:
             out += "; skipped " + "; ".join(f"{p}: {w}" for p, w in r["skipped"].items())
         if r["overlaps"]:
             out += "; fingers over other parts (move them): " + ", ".join(r["overlaps"])
+        fb = r.get("fitted") or {}
+        if fb.get("fingers"):
+            out += (f"; {fb['fingers']} finger(s) fitted towards their nets, "
+                    f"{fb['saved_um'] / 1000:.1f} mm saved")
         return out
 
     def _cmd_rescross(self, args):
