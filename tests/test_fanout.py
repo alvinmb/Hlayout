@@ -219,3 +219,70 @@ def test_moving_a_bonded_die_takes_its_bonds_and_fingers_with_it():
         assert any(abs(b.points[0][0] - x) <= 1 and abs(b.points[0][1] - y) <= 1 for x, y in pads) or \
             any(abs(b.points[1][0] - x) <= 1 and abs(b.points[1][1] - y) <= 1 for x, y in pads)
 
+
+def test_die_fanout_is_what_a_drag_moves_with_the_die():
+    """die_fanout(): the bonds, end balls and fingers of a fanned-out die --
+    what the canvas drags along live with it -- and nothing else."""
+    from hlayout.scripting.fanout import die_fanout
+    s = _die_board(0)
+    s.fan_out_die_bonds()
+    s.rect(3, 15000, 15000, 15400, 15400)             # an unrelated pad: not taken
+    got = die_fanout(s, "TOP", ["U1"])
+    bonds = [g for g in got if isinstance(g, Path)]
+    fingers = [g for g in got if isinstance(g, Rectangle)]
+    balls = [g for g in got if not isinstance(g, (Path, Rectangle))]
+    assert len(bonds) == 7 and len(fingers) == 7
+    assert len(balls) == len([sh for sh in s.cell.shapes if sh.layer == 59
+                              and not isinstance(sh, Path)])
+    assert all(f.bbox()[0] < 15000 for f in fingers)
+    assert die_fanout(s, "TOP", ["NOPE"]) == []
+
+
+def test_dragging_a_die_on_the_canvas_takes_its_fan_out_along_live():
+    """The canvas drag: the die's bonds and fingers follow it while it is
+    dragged, land on its pads after the release, and carry_bonds() doesn't
+    move them a second time."""
+    tk = pytest.importorskip("tkinter")
+    import types
+    from hlayout.gui.canvas import LayoutCanvas
+    from hlayout.scripting.fanout import die_fanout, die_pads
+    from hlayout.scripting.autoplace_session import _xf
+    s = _die_board(0)
+    s.fan_out_die_bonds()
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pytest.skip("no display")
+    root.withdraw()
+    try:
+        cv = LayoutCanvas(root, s.library)
+        cv.set_cell("TOP")
+        cv.checkpoint = s.checkpoint
+        cv.die_attachments = lambda refs: die_fanout(s, "TOP", [r.label for r in refs])
+        r = next(x for x in s.cell.srefs if x.label == "U1")
+        att = die_fanout(s, "TOP", ["U1"])
+        before = [list(a.points) for a in att]
+        pos = {"v": (0, 0)}
+        cv.to_dbu = lambda x, y: pos["v"]
+        cv.draw_mode, cv.snap_enabled = "select", False
+        cv.selected, cv.selected_multi, cv._group_drag = ("sref", r), [], False
+        cv._marquee_start_mouse, cv._drag_checkpointed = None, False
+        cv._drag_start_mouse, cv._drag_snapshot = (0, 0), ("origin", r.origin)
+        cv._die_attached = cv._fanout_of([r])
+        ev = types.SimpleNamespace(x=0, y=0)
+        pos["v"] = (600, 0)
+        cv._on_drag_motion(ev)
+        assert {(a.points[0][0] - b[0][0]) for a, b in zip(att, before)} == {600}
+        pos["v"] = (2000, -1000)
+        cv._on_drag_motion(ev)
+        cv._on_release(ev)
+        assert r.origin == (2000, -1000)
+        assert {(a.points[0][0] - b[0][0], a.points[0][1] - b[0][1])
+                for a, b in zip(att, before)} == {(2000, -1000)}
+        pads = [_xf(r)(v) for v in die_pads(s.library, "DIE", [58]).values()]
+        for b in (a for a in att if isinstance(a, Path)):
+            assert any(abs(b.points[k][0] - x) <= 1 and abs(b.points[k][1] - y) <= 1
+                       for k in (0, 1) for x, y in pads)
+    finally:
+        root.destroy()
+

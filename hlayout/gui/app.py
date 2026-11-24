@@ -157,6 +157,7 @@ class App(
 
         self.canvas.on_commit = self._on_canvas_commit
         self.canvas.on_edit = self._after_canvas_edit
+        self.canvas.die_attachments = self._die_attachments
         self.canvas.on_mode_status = self.status.set
         self.canvas.on_list_cells = self._placeable_cell_names
         self.canvas.checkpoint = self._canvas_checkpoint
@@ -1490,6 +1491,23 @@ class App(
         self._refresh_layer_choices()
         self._update_properties_panel()
 
+
+    def _die_attachments(self, refs):
+        """canvas.die_attachments: the wire bonds, balls and bond fingers
+        of the dragged bare dies, so they move with the die as it is
+        dragged rather than jumping after the release. A locked part
+        doesn't move (_after_canvas_edit puts it back), so nothing of its
+        is taken along."""
+        name = self.session.current_cell_name
+        try:
+            locked = self.session.locked_parts(name)
+        except Exception:
+            locked = set()
+        labels = [r.label for r in refs if getattr(r, "label", "") and r.label not in locked]
+        if not labels:
+            return []
+        from ..scripting.fanout import die_fanout
+        return die_fanout(self.session, name, labels)
 
     def _canvas_checkpoint(self):
         self.session.checkpoint()

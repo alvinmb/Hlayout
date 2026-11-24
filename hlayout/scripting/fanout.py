@@ -411,3 +411,75 @@ def carry_bonds(session, cell_name: str, moved: dict, tol: float = 2.0) -> dict:
             done.add(id(sh))
             out["bonds"] += 1
     return out
+
+
+def die_fanout(session, cell_name: str, refs, tol: float = 2.0) -> list:
+    """The shapes that belong to the dies ``refs`` (labels) as they sit
+    now: every wire bond (bond-layer path) with an end on one of their die
+    pads and its other end not on another die's pad, the bond's end balls,
+    and the bond finger (an unpinned rectangle on a routing conductor)
+    under its far end -- what carry_bonds() moves after the fact, found
+    before a drag so the canvas can move them live with the die. A bond
+    between two of the dies in ``refs`` is included once. [] when the bond
+    rules name no die pad layers or bond layer."""
+    from ..io.techfile import load_bond_rules
+    from ..core.shapes import Polygon
+    refs = set(refs or ())
+    lib = session.library
+    cell = lib.cells.get(cell_name)
+    br = load_bond_rules(lib)
+    pad_layers = [int(l) for l in (br.get("die_pad_layers") or []) if int(l) >= 0]
+    blay = int(br.get("layer", -1))
+    if cell is None or not refs or not pad_layers or blay < 0:
+        return []
+    try:
+        route = set(session._route_layers())
+    except LayoutError:
+        route = set()
+    pads = []                                     # (ref, point) for every die pad
+    for r in cell.srefs:
+        if r.label:
+            f = _xf(r)
+            for v in die_pads(lib, r.cell_name, pad_layers).values():
+                pads.append((r.label, f(v)))
+
+    def near(p, q):
+        return abs(p[0] - q[0]) <= tol and abs(p[1] - q[1]) <= tol
+
+    def owner(p):
+        for ref, w in pads:
+            if near(p, w):
+                return ref
+        return None
+    balls = [sh for sh in cell.shapes if isinstance(sh, Polygon) and sh.layer == blay]
+    fingers = [sh for sh in cell.shapes if isinstance(sh, Rectangle) and sh.layer in route
+               and not getattr(sh, "pin", "")]
+    out, seen = [], set()
+
+    def take(sh):
+        if id(sh) not in seen:
+            seen.add(id(sh))
+            out.append(sh)
+    for sh in cell.shapes:
+        if not (isinstance(sh, Path) and sh.layer == blay and len(sh.points) == 2):
+            continue
+        a, b = sh.points
+        oa, ob = owner(a), owner(b)
+        if oa in refs and (ob is None or ob in refs):
+            land = b
+        elif ob in refs and oa is None:
+            land = a
+        else:
+            continue                              # not one of these dies' own bonds
+        take(sh)
+        for ball in balls:
+            x0, y0, x1, y1 = ball.bbox()
+            c = ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
+            if near(c, a) or near(c, b):
+                take(ball)
+        if ob is None or oa is None:              # a finger only at a free end
+            for fg in fingers:
+                x0, y0, x1, y1 = fg.bbox()
+                if x0 - tol <= land[0] <= x1 + tol and y0 - tol <= land[1] <= y1 + tol:
+                    take(fg)
+    return out

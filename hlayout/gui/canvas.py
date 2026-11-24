@@ -228,6 +228,11 @@ class LayoutCanvas(tk.Canvas):
         # a test, with no app/session wiring it up).
         self.on_list_cells = None
         self.on_edit = None  # optional callback(), fired after a select-mode move/edit/delete
+        # optional callback([SRef]) -> [shape]: what moves with those parts
+        # when they are dragged (a bare die's wire bonds, balls and bond
+        # fingers -- App wires it to fanout.die_fanout)
+        self.die_attachments = None
+        self._die_attached = []
         # Optional callback(), fired whenever the current selection
         # itself changes (a click, a window-select drag, Delete clearing
         # it, switching cell/mode) -- wired by the app to refresh a
@@ -1383,6 +1388,7 @@ class LayoutCanvas(tk.Canvas):
         # A fresh click starts a possible new drag -- reset so the next
         # _on_drag_motion (if any) pushes exactly one undo checkpoint.
         self._drag_checkpointed = False
+        self._die_attached = []
         # Priority: a vertex under the cursor wins over an edge, which
         # wins over the whole-shape/sref pick — matches "click the edge
         # moves the edge, click the vertex moves the vertex" behaviour.
@@ -1462,6 +1468,9 @@ class LayoutCanvas(tk.Canvas):
             self._group_drag = True
             self._drag_start_mouse = self.to_dbu(e.x, e.y)
             self._group_snapshot = [(k, s, _geom_snapshot(k, s)) for k, s in self.selected_multi]
+            in_group = {id(s) for _k, s in self.selected_multi}
+            self._die_attached = [(a, snap) for a, snap in self._fanout_of(
+                [s for k, s in self.selected_multi if k == "sref"]) if id(a) not in in_group]
             self.redraw()
             return
 
@@ -1470,7 +1479,21 @@ class LayoutCanvas(tk.Canvas):
         self.selected = (kind, shape)
         self._drag_start_mouse = self.to_dbu(e.x, e.y)
         self._drag_snapshot = _geom_snapshot(kind, shape)
+        if kind == "sref":
+            # a bare die drags its wire bonds and bond fingers with it
+            self._die_attached = self._fanout_of([shape])
         self.redraw()
+
+    def _fanout_of(self, refs):
+        """[(shape, snapshot)] of what moves with the parts ``refs`` (see
+        die_attachments), or [] if nothing is wired up or nothing is
+        attached."""
+        if not refs or self.die_attachments is None:
+            return []
+        try:
+            return [(a, _geom_snapshot("shape", a)) for a in (self.die_attachments(refs) or [])]
+        except Exception:
+            return []
 
     #: App sets this: called (debounced) after a segment drag / arrow nudge
     #: has moved a via, to redo the dielectric fill round its new window
@@ -1649,6 +1672,8 @@ class LayoutCanvas(tk.Canvas):
         else:
             _, shape = self.selected
             _apply_translate(shape, self._drag_snapshot, dx, dy)
+            for a, snap in self._die_attached:
+                _apply_translate(a, snap, dx, dy)
         # The data model update above is immediate and synchronous; only
         # the (expensive) visual redraw is coalesced -- see
         # _schedule_redraw(). _on_release() below still forces one last
@@ -1682,6 +1707,8 @@ class LayoutCanvas(tk.Canvas):
             self._drag_checkpointed = True
         for kind, shape, snapshot in self._group_snapshot:
             _apply_translate(shape, snapshot, dx, dy)
+        for a, snap in self._die_attached:
+            _apply_translate(a, snap, dx, dy)
         self._schedule_redraw()
 
     def _schedule_redraw(self):
