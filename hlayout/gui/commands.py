@@ -1605,6 +1605,43 @@ class CommandInterpreter:
             self.view.fit_view()
         return f"placed {cell_name}"
 
+    def _cmd_iplace(self, args):
+        """IPLACE <cellname> [label] [source=current|0|1] [rotation=<deg>]
+        [mirror=1]: place a cell and hang it on the cursor -- it follows the
+        mouse with its straight-line interconnects; click drops it, R
+        turns it, M mirrors it, Esc cancels."""
+        usage = "usage: IPLACE <cellname> [label] [source=current|0|1] [rotation=<deg>] [mirror=1]"
+        if not args:
+            raise CommandError(usage)
+        if self.view is None or not hasattr(self.view, "start_carry"):
+            raise CommandError("IPLACE needs the layout window")
+        cell_name, label, source, rotation, mirror = args[0], "", None, 0.0, False
+        for a in args[1:]:
+            k, _, v = a.partition("=")
+            k = k.lower()
+            if not _:
+                label = a
+            elif k == "source":
+                source = "current" if v.lower() == "current" else int(v)
+            elif k in ("rotation", "rot"):
+                rotation = float(v)
+            elif k == "mirror":
+                mirror = v.lower() in ("1", "true", "yes")
+            else:
+                raise CommandError(usage)
+        ref = self.session.place_cell(cell_name, self.view._last_mouse_dbu or (0, 0), source=source,
+                                      rotation=rotation, x_reflection=mirror, label=label)
+        self.on_change()
+
+        def cancel(r):
+            self.session.undo()
+            self.view.selected = None
+            self.on_change()
+        self.view.start_carry(ref, on_done=lambda r: self.on_change(), on_cancel=cancel)
+        self.view.focus_set()
+        return (f"placing {label or cell_name}: move it into place and click to drop "
+                "(R rotates, M mirrors, Esc cancels)")
+
     def _cmd_resgen(self, args):
         args = _join_points(args, 0, 1)
         usage = ("usage: RESGEN <x,y> <body_width> <body_length> [rotation=<deg>] "

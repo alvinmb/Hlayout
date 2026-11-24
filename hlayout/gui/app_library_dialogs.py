@@ -189,6 +189,36 @@ class LibraryDialogsMixin:
         (see _library_cells_dialog)."""
         self._library_cells_dialog()
 
+    def place_interactive(self, name, source=None, rotation=0.0, mirror=False, label=""):
+        """Place ``name`` and hang it on the cursor (canvas.start_carry):
+        it follows the mouse with its straight-line interconnects until a
+        click drops it; R turns it, M mirrors it, Esc takes it out again.
+        One undo step. The label is the reference designator the net
+        names use (R3, U1), so give it one to see its connections."""
+        label = (label or "").strip()
+        cell = self.session.library.cells.get(self.session.current_cell_name)
+        if label and cell is not None and any(r.label == label for r in cell.srefs):
+            self.status.set(f"note: {label} is already placed in this cell")
+        self.canvas.set_mode("select")
+        if hasattr(self, "mode_var"):
+            self.mode_var.set("select")
+        ref = self.session.place_cell(name, self.canvas._last_mouse_dbu or (0, 0), source=source,
+                                      rotation=rotation, x_reflection=mirror, label=label)
+        self.refresh_all()
+
+        def done(r):
+            self.refresh_all()
+            self.status.set(f"placed {r.label or r.cell_name} at "
+                            f"{dbu_to_mm(r.origin[0]):.3f}, {dbu_to_mm(r.origin[1]):.3f} mm")
+
+        def cancel(r):
+            self.session.undo()
+            self.canvas.selected = None
+            self.refresh_all()
+            self.status.set(f"placement of {r.label or r.cell_name} cancelled")
+        self.canvas.start_carry(ref, on_done=done, on_cancel=cancel)
+        return ref
+
     def find_and_place_cell(self):
         """Create > Find && Place Cell...: the same Library Cells & Place
         dialog as Setup > Library Cells... (see _library_cells_dialog)."""
@@ -343,6 +373,8 @@ class LibraryDialogsMixin:
         ttk.Entry(place, textvariable=label_var, width=10).pack(side="left")
         place_btn = ttk.Button(place, text="Place")
         place_btn.pack(side="right", padx=6)
+        mouse_btn = ttk.Button(place, text="Place with Mouse")
+        mouse_btn.pack(side="right", padx=(6, 0))
 
         def do_place(event=None):
             sel = tree.selection()
@@ -373,7 +405,25 @@ class LibraryDialogsMixin:
             label_var.set("")
             refresh()     # a library part is now also a design cell
 
+        def do_place_mouse(event=None):
+            sel = tree.selection()
+            if not sel:
+                dialogs.show_error(title, "Select a cell from the list first.", parent=win)
+                return
+            src, name = state["rows"][sel[0]]
+            try:
+                rotation = float(rot_var.get() or 0)
+                self.place_interactive(name, source=src, rotation=rotation,
+                                       mirror=mirror_var.get(), label=label_var.get())
+            except (LayoutError, ValueError) as e:
+                dialogs.show_error(title, str(e), parent=win)
+                return
+            label_var.set("")
+            refresh()
+            self.canvas.focus_set()        # the canvas takes the mouse and R / M / Esc
+
         place_btn.configure(command=do_place)
+        mouse_btn.configure(command=do_place_mouse)
         tree.bind("<Double-Button-1>", do_place)
         tree.bind("<Return>", do_place)
 

@@ -233,6 +233,9 @@ class LayoutCanvas(tk.Canvas):
         # fingers -- App wires it to fanout.die_fanout)
         self.die_attachments = None
         self._die_attached = []
+        # interactive placement: a just-placed part hangs on the cursor
+        # until a click drops it (see start_carry)
+        self._carry = None
         # Optional callback(), fired whenever the current selection
         # itself changes (a click, a window-select drag, Delete clearing
         # it, switching cell/mode) -- wired by the app to refresh a
@@ -320,6 +323,9 @@ class LayoutCanvas(tk.Canvas):
         # typing in the command bar.
         self.bind("<r>", lambda e: self.rotate_selected(90))
         self.bind("<R>", lambda e: self.rotate_selected(90))
+        # M: mirror the part being placed (interactive placement only)
+        self.bind("<m>", lambda e: self.carry_mirror())
+        self.bind("<M>", lambda e: self.carry_mirror())
         # P: the Pan tool (left-drag pans); Ctrl+arrows step the view a
         # quarter of a screen. Canvas-only, like R, so typing elsewhere
         # is unaffected. Middle/right-drag still pans in any tool.
@@ -711,6 +717,8 @@ class LayoutCanvas(tk.Canvas):
                 f"(configure layers/via in Setup > Route Layers...)")
 
     def cancel_draw(self):
+        if self._carry is not None:
+            self._finish_carry(False)
         self._pending_points = []
         self._continue_target = None
         self.delete("preview")
@@ -1030,6 +1038,70 @@ class LayoutCanvas(tk.Canvas):
             self._commit_route()
 
     # --- snapping -----------------------------------------------------
+    # --- interactive placement ----------------------------------------
+    def start_carry(self, ref, on_done=None, on_cancel=None):
+        """Hang the placed part ``ref`` on the cursor: it follows the mouse
+        (centred on it, on the snap grid) with its straight-line
+        interconnects, R turns it, M mirrors it, a click drops it and Esc
+        cancels. on_done(ref) / on_cancel(ref) are called at the end;
+        nothing here adds an undo step (the caller placed the part)."""
+        self.cancel_draw()
+        self._carry = {"ref": ref, "done": on_done, "cancel": on_cancel}
+        self.selected = ("sref", ref)
+        self.selected_multi = []
+        self.focus_set()
+        if self._last_mouse_dbu is not None:
+            self._carry_to(*self._last_mouse_dbu)
+        name = ref.label or ref.cell_name
+        self.on_mode_status(f"Placing {name}: move it into place and click to drop -- "
+                            "R rotates, M mirrors, Esc cancels")
+        self.redraw()
+
+    def carry_mirror(self):
+        if self._carry is None:
+            return
+        ref = self._carry["ref"]
+        ref.x_reflection = not ref.x_reflection
+        self._carry_to(*(self._last_mouse_dbu or self._carry_centre()))
+        self.redraw()
+
+    def _carry_offset(self):
+        """Where the part's box centre sits relative to its origin, turned
+        and mirrored as the part is now."""
+        ref = self._carry["ref"]
+        b = self.library.cell_bbox(ref.cell_name)
+        if not b:
+            return (0.0, 0.0)
+        x, y = (b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0
+        if ref.x_reflection:
+            y = -y
+        m = ref.magnification or 1.0
+        th = math.radians(float(ref.rotation))
+        c, sn = math.cos(th), math.sin(th)
+        return ((x * c - y * sn) * m, (x * sn + y * c) * m)
+
+    def _carry_centre(self):
+        ox, oy = self._carry_offset()
+        return (self._carry["ref"].origin[0] + ox, self._carry["ref"].origin[1] + oy)
+
+    def _carry_to(self, x, y):
+        """Put the carried part's centre at (x, y), its origin on the grid."""
+        ox, oy = self._carry_offset()
+        self._carry["ref"].origin = self._snap(x - ox, y - oy)
+
+    def _finish_carry(self, drop):
+        c, self._carry = self._carry, None
+        # the click that dropped it is not the start of a drag
+        self._drag_start_mouse = None
+        self._drag_snapshot = None
+        self._marquee_start_mouse = None
+        self._group_drag = False
+        self.selected = ("sref", c["ref"]) if drop else None
+        self.redraw()
+        cb = c["done"] if drop else c["cancel"]
+        if cb is not None:
+            cb(c["ref"])
+
     def _snap(self, x, y):
         if not self.snap_enabled or self.snap_dbu <= 0:
             return (int(round(x)), int(round(y)))
@@ -1111,6 +1183,14 @@ class LayoutCanvas(tk.Canvas):
         self.zoom(factor, e.x, e.y)
 
     def _on_motion(self, e):
+        if self._carry is not None:
+            x, y = self.to_dbu(e.x, e.y)
+            self._last_mouse_dbu = (x, y)
+            self._carry_to(x, y)
+            o = self._carry["ref"].origin
+            self.on_status(f"x={dbu_to_mm(o[0]):.3f} mm  y={dbu_to_mm(o[1]):.3f} mm")
+            self._schedule_redraw()
+            return
         x, y = self.to_dbu(e.x, e.y)
         sx, sy = self._next_draw_point(x, y)
         self._last_mouse_dbu = (sx, sy)
@@ -1155,6 +1235,10 @@ class LayoutCanvas(tk.Canvas):
 
     def _on_click(self, e):
         self.focus_set()
+        if self._carry is not None:
+            self._carry_to(*self.to_dbu(e.x, e.y))
+            self._finish_carry(True)
+            return
         if self.draw_mode == "pan":
             self._pan_start_evt(e)
             return
@@ -2334,6 +2418,12 @@ class LayoutCanvas(tk.Canvas):
         return True
 
     def rotate_selected(self, angle_deg):
+        if self._carry is not None:
+            ref = self._carry["ref"]
+            ref.rotation = (float(ref.rotation) + angle_deg) % 360
+            self._carry_to(*(self._last_mouse_dbu or self._carry_centre()))
+            self.redraw()
+            return True
         """Rotate the current selection by angle_deg degrees (counter-
         clockwise, in DBU/world space) about its own origin/centroid.
         A "shape" selection (Polygon/Rectangle/Path) rotates its points
@@ -3042,7 +3132,7 @@ class LayoutCanvas(tk.Canvas):
         # -- if it IS slow -- not on every frame of a drag; the drag shows
         # the last lines and they're redone once on release.
         sig = self._sli_signature()
-        dragging = self._drag_start_mouse is not None or self._group_drag
+        dragging = self._drag_start_mouse is not None or self._group_drag or self._carry is not None
         if self.sli_last is not None and (
                 sig == self._sli_sig or (dragging and self._sli_cost > self.SLI_LIVE_DRAG_S)):
             data = self.sli_last

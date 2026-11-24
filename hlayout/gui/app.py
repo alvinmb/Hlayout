@@ -327,6 +327,10 @@ class App(
 
     # --- undo/redo ---------------------------------------------------------
     def _undo(self):
+        # a part hanging on the cursor: Undo takes that placement back
+        if getattr(self.canvas, "_carry", None) is not None:
+            self.canvas.cancel_draw()
+            return
         # While a path/polygon/route is being drawn, Undo backs it off
         # one point at a time (same as Backspace) rather than undoing
         # whatever was in the design before the draw started.
@@ -341,6 +345,8 @@ class App(
         self.status.set("undo")
 
     def _redo(self):
+        if getattr(self.canvas, "_carry", None) is not None:
+            self.canvas.cancel_draw()
         if not self.session.redo():
             self.status.set("nothing to redo")
             return
